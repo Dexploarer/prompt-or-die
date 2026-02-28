@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pod-core",
+    "crates/pod-physics",
+    "crates/pod-spatial",
+    "crates/pod-agents",
+    "crates/pod-scripting",
+    "crates/pod-render",
+    "crates/pod-net",
+    "crates/pod-animation",
+    "crates/pod-scene",
+    "crates/pod-stdb",
+    "apps/pod-desktop",
+    "apps/pod-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Wes"]
+
+[workspace.dependencies]
+# Core
+hecs = "0.10"
+glam = { version = "0.29", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Physics
+rapier2d = { version = "0.22", features = ["simd-stable"] }
+
+# Spatial
+rstar = "0.12"
+pathfinding = "4.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Scripting
+mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"] }
+
+# Rendering
+wgpu = "23.0"
+winit = "0.30"
+bytemuck = "1.14"
+
+# Networking
+quinn = "0.11"
+
+# SpacetimeDB
+spacetimedb = "1.0"

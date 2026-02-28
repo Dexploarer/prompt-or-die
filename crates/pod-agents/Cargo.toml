@@ -1,0 +1,13 @@
+[package]
+name = "pod-agents"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+tokio.workspace = true
+uuid.workspace = true

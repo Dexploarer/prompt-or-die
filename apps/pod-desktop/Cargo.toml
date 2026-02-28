@@ -1,0 +1,16 @@
+[package]
+name = "pod-desktop"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "prompt-or-die"
+path = "src/main.rs"
+
+[dependencies]
+pod-core = { path = "../../crates/pod-core" }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+env_logger.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "pod-animation"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+glam.workspace = true
+serde.workspace = true
+log.workspace = true
+hecs.workspace = true
