@@ -90,7 +90,7 @@ impl GameServer {
         let cert_der = cert_key.cert.der().to_vec();
 
         let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
-            rustls::pki_types::Pkcs8PrivateKeyDer::from(key_der),
+            rustls::pki_types::PrivatePkcs8KeyDer::from(key_der),
         );
 
         let cert = rustls::pki_types::CertificateDer::from(cert_der);
@@ -100,8 +100,10 @@ impl GameServer {
             .with_no_client_auth()
             .with_single_cert(vec![cert], key)?;
 
-        // Create quinn ServerConfig from rustls config
-        let server_config = quinn::ServerConfig::with_crypto(Arc::new(rustls_server_config));
+        // Create quinn ServerConfig from rustls config (quinn 0.11 + rustls 0.23)
+        let quic_server_config =
+            quinn::crypto::rustls::QuicServerConfig::try_from(rustls_server_config)?;
+        let server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server_config));
 
         // Create endpoint and bind to address
         let endpoint = Endpoint::server(server_config, addr)?;

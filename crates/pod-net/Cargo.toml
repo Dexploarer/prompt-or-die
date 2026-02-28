@@ -3,8 +3,16 @@ name = "pod-net"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+## Enable SpacetimeDB connection mode alongside direct-connect (QUIC/WebSocket).
+## Adds `SpacetimeDBClient` adapter that bridges pod-stdb::client into pod-net's
+## message/event paradigm.
+spacetimedb = ["pod-stdb"]
+
 [dependencies]
 pod-core = { path = "../pod-core" }
+pod-stdb = { path = "../pod-stdb", default-features = false, features = ["client"], optional = true }
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,5 +28,5 @@ web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "ErrorEven
 js-sys = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rustls = { version = "0.22", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = "0.13"

@@ -51,7 +51,9 @@ impl NativeClient {
             .with_custom_certificate_verifier(Arc::new(NoServerVerification))
             .with_no_client_auth();
 
-        let mut client_config = quinn::ClientConfig::new(Arc::new(tls_config));
+        let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
+            .map_err(|e| ClientError::Config(format!("QUIC client config: {}", e)))?;
+        let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(quinn::TransportConfig::default()));
 
         let mut endpoint = endpoint;
@@ -146,7 +148,6 @@ impl NativeClient {
             .map_err(|e| ClientError::Connection(e.to_string()))?;
 
         send.finish()
-            .await
             .map_err(|e| ClientError::Connection(e.to_string()))?;
 
         Ok(())
@@ -258,6 +259,7 @@ impl NativeClient {
 
 /// Stub certificate verifier that accepts any certificate
 /// (appropriate for self-signed dev certs)
+#[derive(Debug)]
 struct NoServerVerification;
 
 impl rustls::client::danger::ServerCertVerifier for NoServerVerification {

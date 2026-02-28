@@ -166,6 +166,12 @@ impl ObservationFilter {
             filtered_entities
         };
 
+        // Track original counts before moving fields
+        let original_entity_count = obs.visible_entities.len();
+        let original_event_count = obs.audible_events.len();
+        let message_count = obs.messages.len();
+        let objective_count = obs.objectives.len();
+
         // Keep top N audible events
         let audible_events: Vec<AudibleEvent> = obs
             .audible_events
@@ -173,26 +179,35 @@ impl ObservationFilter {
             .take(self.max_events)
             .collect();
 
-        // Estimate token count
-        let estimated_tokens = estimate_token_count(&obs, &visible_entities, &audible_events);
+        // Estimate token count inline (can't pass &obs since fields were moved)
+        let estimated_tokens = {
+            let mut tokens = 20usize; // header
+            tokens += 30; // self state
+            tokens += visible_entities.len() * 15;
+            tokens += audible_events.len() * 10;
+            tokens += message_count * 5;
+            tokens += objective_count * 10;
+            tokens
+        };
 
         // Build filtered observation
-        let mut filtered = FilteredObservation {
+        let was_compressed = estimated_tokens > self.token_budget as usize && self.token_budget > 0;
+        let filtered = FilteredObservation {
             observation: Observation {
                 visible_entities,
                 audible_events,
-                ..obs
+                self_state: obs.self_state,
+                tick: obs.tick,
+                elapsed_secs: obs.elapsed_secs,
+                messages: obs.messages,
+                available_actions: obs.available_actions,
+                objectives: obs.objectives,
             },
             estimated_tokens,
-            was_compressed: false,
-            original_entity_count: 0,
-            original_event_count: 0,
+            was_compressed,
+            original_entity_count,
+            original_event_count,
         };
-
-        // Track compression
-        filtered.original_entity_count = obs.visible_entities.len();
-        filtered.original_event_count = obs.audible_events.len();
-        filtered.was_compressed = filtered.estimated_tokens > self.token_budget as usize && self.token_budget > 0;
 
         filtered
     }

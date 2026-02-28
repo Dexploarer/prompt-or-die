@@ -158,7 +158,7 @@ impl AgentOrchestrator {
 
     /// Schedule agents for decision-making this tick
     /// Returns batches ready for processing
-    pub fn schedule_batches(&self, agents: &[AgentSlot], batch_size: usize) -> Vec<AgentBatch> {
+    pub fn schedule_batches(&mut self, agents: &[AgentSlot], batch_size: usize) -> Vec<AgentBatch> {
         self.decisions_made_this_tick = 0;
 
         // Build list of agents to schedule

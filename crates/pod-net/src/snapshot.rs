@@ -58,11 +58,11 @@ impl WorldSnapshot {
             .iter()
         {
             let id = entity.id();
-            let health_opt = world.ecs.get::<Health>(entity).ok();
-            let label_opt = world.ecs.get::<Label>(entity).ok();
+            let health_opt = world.ecs.get::<&Health>(entity).ok();
+            let label_opt = world.ecs.get::<&Label>(entity).ok();
 
-            let health = health_opt.map(|h| h.current);
-            let max_health = health_opt.map(|h| h.max);
+            let health = health_opt.as_ref().map(|h| h.current);
+            let max_health = health_opt.as_ref().map(|h| h.max);
             let label = label_opt.map(|l| l.name.clone());
 
             entities.push(EntitySnapshot {

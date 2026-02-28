@@ -57,6 +57,9 @@ pub mod client_native;
 #[cfg(target_arch = "wasm32")]
 pub mod client_web;
 
+#[cfg(feature = "spacetimedb")]
+pub mod client_stdb;
+
 // Re-export common types
 pub use protocol::{ClientConfig, ClientId, ClientMessage, ServerConfig, ServerMessage};
 pub use snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
@@ -69,6 +72,9 @@ pub use client_native::{ClientError, NativeClient};
 
 #[cfg(target_arch = "wasm32")]
 pub use client_web::{ClientError, WebClient};
+
+#[cfg(feature = "spacetimedb")]
+pub use client_stdb::{SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError};
 
 pub fn init() {
     log::info!("{} initialized", env!("CARGO_PKG_NAME"));
