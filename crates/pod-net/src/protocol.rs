@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_server_message_json() {
-        let config = ServerConfig::default();
+        let _config = ServerConfig::default();
         let snapshot = crate::WorldSnapshot::default();
 
         let msg = ServerMessage::Welcome {
