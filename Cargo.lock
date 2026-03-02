@@ -3781,6 +3781,7 @@ name = "pod-net"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "criterion",
  "glam",
  "js-sys",
  "log",

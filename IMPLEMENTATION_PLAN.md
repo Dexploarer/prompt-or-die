@@ -85,12 +85,12 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 6.3 Implement lobby system (SpacetimeDB tables + reducers)
 - [x] 6.4 Add matchmaking reducer
 - [x] 6.5 Remote LLM agent connection via SpacetimeDB
-- [ ] 6.6 Spectator mode (full world subscription, read-only)
-- [ ] 6.7 World partitioning for large worlds
-- [ ] 6.8 Performance benchmarks (target: 1000 agents at 60 TPS)
-- [ ] 6.9 Write networking integration tests
+- [x] 6.6 Spectator mode (full world subscription, read-only)
+- [x] 6.7 World partitioning for large worlds
+- [x] 6.8 Performance benchmarks (target: 1000 agents at 60 TPS)
+- [x] 6.9 Write networking integration tests
 
 ---
 
 **Last updated**: Iteration 26
-**Current focus**: Begin Phase 6.6 Spectator mode (full world subscription, read-only)
+**Current focus**: Phase 6 complete; ready for next roadmap item

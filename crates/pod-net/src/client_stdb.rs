@@ -50,11 +50,10 @@ use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
 
 use pod_stdb::client::{
-    CachedEntity, StdbClient, StdbClientConfig, StdbError, StdbEvent, SubmittedAction,
-    Subscriptions,
+    CachedEntity, StdbClient, StdbClientConfig, StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
 use pod_stdb::types::{
-    AbilityTargetKind, ActionKind, SpeakVolume as StdbSpeakVolume, WorldEventKind,
+    AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
 };
 
 use crate::protocol::{ClientId, ServerMessage};
@@ -106,6 +105,10 @@ impl SpacetimeSubscriptionManager {
 
     fn set_custom(&mut self, queries: Vec<String>) -> bool {
         self.set_profile(SubscriptionProfile::Custom(normalize_queries(queries)))
+    }
+
+    fn is_spectator(&self) -> bool {
+        matches!(self.profile, SubscriptionProfile::Spectator)
     }
 
     fn set_profile(&mut self, profile: SubscriptionProfile) -> bool {
@@ -184,9 +187,37 @@ fn build_player_interest_queries(
     center_y: f32,
     radius: f32,
 ) -> Result<Vec<String>, StdbClientError> {
-    if !radius.is_finite() || radius < 0.0 {
+    build_player_partitioned_interest_queries(entity_id, center_x, center_y, radius, radius)
+}
+
+fn chunk_bounds(min: f32, max: f32, chunk_size: f32) -> impl Iterator<Item = (f32, f32)> {
+    let mut chunks = Vec::new();
+    let mut cursor = min;
+
+    while cursor <= max {
+        let end = (cursor + chunk_size).min(max);
+        chunks.push((cursor, end));
+
+        if end >= max {
+            break;
+        }
+
+        cursor = end;
+    }
+
+    chunks.into_iter()
+}
+
+fn build_player_partitioned_interest_queries(
+    entity_id: u64,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    partition_size: f32,
+) -> Result<Vec<String>, StdbClientError> {
+    if !radius.is_finite() || !partition_size.is_finite() || radius < 0.0 || partition_size <= 0.0 {
         return Err(StdbClientError::InvalidState(
-            "Player interest radius must be finite and non-negative".into(),
+            "Player interest radius and partition size must be finite and valid".into(),
         ));
     }
 
@@ -199,13 +230,17 @@ fn build_player_interest_queries(
         .into_iter()
         .collect::<Vec<String>>();
 
-    if let Some(transform_query) = queries
-        .iter_mut()
-        .find(|query| query.as_str() == "SELECT * FROM transform")
-    {
-        *transform_query = format!(
-            "SELECT * FROM transform WHERE entity_id = {entity_id} OR (pos_x >= {min_x} AND pos_x <= {max_x} AND pos_y >= {min_y} AND pos_y <= {max_y})"
-        );
+    queries.retain(|query| query.as_str() != "SELECT * FROM transform");
+
+    let own_entity_query = format!("SELECT * FROM transform WHERE entity_id = {entity_id}");
+    queries.push(own_entity_query);
+
+    for (chunk_min_x, chunk_max_x) in chunk_bounds(min_x, max_x, partition_size) {
+        for (chunk_min_y, chunk_max_y) in chunk_bounds(min_y, max_y, partition_size) {
+            queries.push(format!(
+                "SELECT * FROM transform WHERE pos_x >= {chunk_min_x} AND pos_x <= {chunk_max_x} AND pos_y >= {chunk_min_y} AND pos_y <= {chunk_max_y}"
+            ));
+        }
     }
 
     Ok(normalize_queries(queries))
@@ -378,7 +413,7 @@ impl SpacetimeDBClient {
     pub fn connect_llm_agent(&mut self, entity_id: u64) -> Result<(), StdbClientError> {
         let display_name = self.inner.config().player_name.clone();
         self.inner
-            .call_connect_llm_agent(entity_id, display_name)
+            .call_connect_agent(entity_id, AgentType::LlmAgent, display_name)
             .map_err(StdbClientError::from)?;
         self.subscribe_for_player(entity_id)?;
         Ok(())
@@ -394,9 +429,18 @@ impl SpacetimeDBClient {
     /// The `_tick` parameter exists for interface compatibility with
     /// `NativeClient` — SpacetimeDB determines the authoritative tick
     /// on the server side.
+    ///
+    /// Returns an error when running in spectator mode, since spectators
+    /// must remain read-only.
     pub fn send_actions(&mut self, _tick: u64) -> Result<(), StdbClientError> {
         if !self.inner.is_connected() {
             return Err(StdbClientError::NotConnected);
+        }
+
+        if self.subscriptions.is_spectator() {
+            return Err(StdbClientError::InvalidState(
+                "Spectator mode is read-only".into(),
+            ));
         }
 
         let entity_id = self.inner.controlled_entity().unwrap_or(0);
@@ -663,6 +707,25 @@ impl SpacetimeDBClient {
         radius: f32,
     ) -> Result<bool, StdbClientError> {
         let queries = build_player_interest_queries(entity_id, center_x, center_y, radius)?;
+        self.subscriptions.set_custom(queries);
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure spatially filtered subscriptions with explicit partition size.
+    ///
+    /// This lets callers balance spatial selectivity and query count for very
+    /// large worlds by splitting the radius square into smaller query windows.
+    pub fn subscribe_for_player_with_interest_partitioned(
+        &mut self,
+        entity_id: u64,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        partition_size: f32,
+    ) -> Result<bool, StdbClientError> {
+        let queries =
+            build_player_partitioned_interest_queries(entity_id, center_x, center_y, radius, partition_size)?;
         self.subscriptions.set_custom(queries);
         self.subscriptions
             .ensure_subscriptions_applied(&mut self.inner)
@@ -1220,15 +1283,26 @@ mod tests {
     #[test]
     fn test_subscriptions_player_interest_query() {
         let queries = build_player_interest_queries(7, 10.0, 20.0, 5.0).unwrap();
-        let transform_query = queries
+        let own_transform_query = queries
             .iter()
             .find(|query| query.starts_with("SELECT * FROM transform WHERE entity_id = 7"))
-            .expect("transform spatial query should exist");
+            .expect("own transform query should exist");
 
-        assert!(transform_query.contains("pos_x >= 5"));
-        assert!(transform_query.contains("pos_x <= 15"));
-        assert!(transform_query.contains("pos_y >= 15"));
-        assert!(transform_query.contains("pos_y <= 25"));
+        assert!(own_transform_query.contains("entity_id = 7"));
+
+        let chunk_transform_queries = queries
+            .iter()
+            .filter(|query| query.contains("pos_x >= ") && query.contains("pos_y >= "))
+            .collect::<Vec<_>>();
+
+        assert_eq!(chunk_transform_queries.len(), 4);
+
+        for query in chunk_transform_queries {
+            assert!(query.contains("pos_x >= "));
+            assert!(query.contains("pos_x <= "));
+            assert!(query.contains("pos_y >= "));
+            assert!(query.contains("pos_y <= "));
+        }
     }
 
     #[test]
@@ -1237,6 +1311,30 @@ mod tests {
         assert!(build_player_interest_queries(1, 0.0, 0.0, f32::INFINITY).is_err());
         assert!(build_player_interest_queries(1, 0.0, 0.0, f32::NEG_INFINITY).is_err());
         assert!(build_player_interest_queries(1, 0.0, 0.0, f32::NAN).is_err());
+    }
+
+    #[test]
+    fn test_subscriptions_player_interest_partitioned_query() {
+        let queries = build_player_partitioned_interest_queries(7, 10.0, 20.0, 10.0, 6.0).unwrap();
+        let own_transform_queries = queries
+            .iter()
+            .filter(|query| query == &"SELECT * FROM transform WHERE entity_id = 7")
+            .count();
+        let chunk_queries = queries
+            .iter()
+            .filter(|query| query.contains("pos_x >= "))
+            .count();
+
+        assert_eq!(own_transform_queries, 1);
+        assert_eq!(chunk_queries, 16);
+    }
+
+    #[test]
+    fn test_subscriptions_player_interest_partitioned_validation() {
+        assert!(build_player_partitioned_interest_queries(1, 0.0, 0.0, 5.0, 0.0).is_err());
+        assert!(build_player_partitioned_interest_queries(1, 0.0, 0.0, 5.0, -1.0).is_err());
+        assert!(build_player_partitioned_interest_queries(1, 0.0, 0.0, f32::NAN, 1.0).is_err());
+        assert!(build_player_partitioned_interest_queries(1, 0.0, 0.0, 5.0, f32::NAN).is_err());
     }
 
     #[test]
