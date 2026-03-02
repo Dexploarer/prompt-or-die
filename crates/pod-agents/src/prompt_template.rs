@@ -9,6 +9,45 @@
 
 use pod_core::observation::{Observation, Relationship, VisibleEntity};
 use std::collections::HashMap;
+use std::fmt::Write;
+
+const JSON_ACTION_INSTRUCTION: &str = r#"
+Respond with a JSON object like this:
+{
+  "actions": ["move up", "attack", "speak hello"],
+  "reasoning": "Brief explanation of your decision"
+}
+
+Valid action formats:
+- "idle" — do nothing
+- "move up|down|left|right" — move in cardinal direction
+- "move up-left|up-right|down-left|down-right" — diagonal movement
+- "stop" — halt movement
+- "rotate 45" — face an angle (degrees)
+- "look at (100, 200)" — look toward a position
+- "attack" — attack in facing direction
+- "speak message" — say something
+- "interact" — interact with nearest object
+- "drop" — drop item
+
+List multiple actions if needed. Actions are processed in order each tick.
+"#;
+
+const TOON_ACTION_INSTRUCTION: &str = r#"
+Respond with TOON blocks exactly like this (with 2-space-indented rows and explicit counts):
+actions[N]{
+  move up
+  attack
+}
+reasoning[M]{
+  Brief explanation for this tick.
+}
+
+Important:
+- Actions must be 2-space indented rows inside each block.
+- [N] and [M] must exactly match the number of rows in each block.
+- Unknown actions are ignored and will default to Idle.
+"#;
 
 // ============================================================
 // TEMPLATE TRAIT
@@ -20,9 +59,19 @@ pub trait PromptTemplate: Send + Sync {
     /// Format an observation into a prompt string
     fn format_observation(&self, obs: &Observation) -> String;
 
+    /// Compatibility shim for existing call sites that use `.render()`.
+    fn render(&self, obs: &Observation) -> String {
+        self.format_observation(obs)
+    }
+
     /// Wrap a base system prompt with template-specific instructions
     fn format_system_prompt(&self, base_prompt: &str, action_instructions: &str) -> String {
         format!("{}\n\n{}", base_prompt, action_instructions)
+    }
+
+    /// Instructions that define the expected action response format.
+    fn action_instructions(&self) -> &'static str {
+        JSON_ACTION_INSTRUCTION
     }
 
     /// Template identifier
@@ -315,6 +364,153 @@ impl PromptTemplate for JsonTemplate {
 }
 
 // ============================================================
+// TOON TEMPLATE
+// ============================================================
+
+/// TOON-formatted template for strict block/row prompts and responses.
+pub struct ToonTemplate;
+
+impl ToonTemplate {
+    fn push_section(output: &mut String, name: &str, rows: &[String]) {
+        let _ = writeln!(output, "{}[{}]{{", name, rows.len());
+        for row in rows {
+            let _ = writeln!(output, "  {}", row);
+        }
+        output.push_str("}\n");
+    }
+}
+
+impl PromptTemplate for ToonTemplate {
+    fn format_observation(&self, obs: &Observation) -> String {
+        let mut out = String::new();
+
+        let mut self_rows = Vec::new();
+        let hp = obs
+            .self_state
+            .health
+            .map_or("unknown".to_string(), |h| format!("{:.0}", h));
+        let max_hp = obs
+            .self_state
+            .max_health
+            .map_or("unknown".to_string(), |h| format!("{:.0}", h));
+        let rotation = obs.self_state.rotation.to_degrees();
+        self_rows.push(format!(
+            "tick={} elapsed={:.2} position={:.0},{:.0} rotation={:.0} health={}/{} velocity={:.1},{:.1} team={:?} entity_id={:?} agent_id={:?}",
+            obs.tick,
+            obs.elapsed_secs,
+            obs.self_state.position.x,
+            obs.self_state.position.y,
+            rotation,
+            hp,
+            max_hp,
+            obs.self_state.velocity.x,
+            obs.self_state.velocity.y,
+            obs.self_state.team,
+            obs.self_state.entity_id.0,
+            obs.self_state.agent_id
+        ));
+        self_rows.push(format!("cooldowns={}", obs.self_state.cooldowns.len()));
+        let cooldown_rows: Vec<String> = obs
+            .self_state
+            .cooldowns
+            .iter()
+            .map(|cd| {
+                format!(
+                    "{} rem={}/{}",
+                    cd.name, cd.remaining_ticks, cd.total_ticks
+                )
+            })
+            .collect();
+
+        let visible_rows: Vec<String> = obs
+            .visible_entities
+            .iter()
+            .map(|e| {
+                let hp = e
+                    .health_fraction
+                    .map(|v| format!("{:.0}%", v * 100.0))
+                    .unwrap_or_else(|| "unknown".to_string());
+                format!(
+                    "{} id={} pos={:.0},{:.0} vel={:.1},{:.1} rot={:.0} relation={:?} distance={:.0} hp={}",
+                    e.entity_type,
+                    e.entity_id.0,
+                    e.position.x,
+                    e.position.y,
+                    e.velocity.x,
+                    e.velocity.y,
+                    e.rotation,
+                    e.relationship,
+                    e.distance,
+                    hp
+                )
+            })
+            .collect();
+
+        let available_action_rows: Vec<String> = obs
+            .available_actions
+            .iter()
+            .enumerate()
+            .map(|(idx, action)| format!("{}: {}", idx, action))
+            .collect();
+
+        let message_rows: Vec<String> = obs
+            .messages
+            .iter()
+            .map(|message| {
+                format!(
+                    "from={:?} channel={:?} content={}",
+                    message.from, message.channel, message.content
+                )
+            })
+            .collect();
+
+        let objective_rows: Vec<String> = obs
+            .objectives
+            .iter()
+            .map(|obj| {
+                format!(
+                    "{} progress={:.0}% completed={} desc={}",
+                    obj.id,
+                    obj.progress * 100.0,
+                    obj.completed,
+                    obj.description
+                )
+            })
+            .collect();
+
+        let audio_rows: Vec<String> = obs
+            .audible_events
+            .iter()
+            .map(|event| format!("{} at {:.0} ({:.0})", event.event_type, event.distance, event.intensity))
+            .collect();
+
+        Self::push_section(&mut out, "self", &self_rows);
+        Self::push_section(&mut out, "cooldowns", &cooldown_rows);
+        Self::push_section(&mut out, "visible_entities", &visible_rows);
+        Self::push_section(&mut out, "available_actions", &available_action_rows);
+        Self::push_section(&mut out, "messages", &message_rows);
+        Self::push_section(&mut out, "objectives", &objective_rows);
+        Self::push_section(&mut out, "audio", &audio_rows);
+        out
+    }
+
+    fn format_system_prompt(&self, base_prompt: &str, action_instructions: &str) -> String {
+        format!(
+            "{}\n\nTOON-formatted observations are required for this model. Preserve strict section counts.\n{}",
+            base_prompt, action_instructions
+        )
+    }
+
+    fn action_instructions(&self) -> &'static str {
+        TOON_ACTION_INSTRUCTION
+    }
+
+    fn name(&self) -> &str {
+        "toon"
+    }
+}
+
+// ============================================================
 // TEMPLATE REGISTRY
 // ============================================================
 
@@ -328,12 +524,13 @@ impl TemplateRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             templates: HashMap::new(),
-            default: "compact".to_string(),
+            default: "toon".to_string(),
         };
         registry.register(Box::new(CompactTemplate::default()));
         registry.register(Box::new(DetailedTemplate));
         registry.register(Box::new(TacticalTemplate::default()));
         registry.register(Box::new(JsonTemplate));
+        registry.register(Box::new(ToonTemplate));
         registry
     }
 
@@ -360,6 +557,11 @@ impl TemplateRegistry {
 
     pub fn list(&self) -> Vec<&str> {
         self.templates.keys().map(|k| k.as_str()).collect()
+    }
+
+    /// Backward-compatible alias kept for existing callers/tests.
+    pub fn available_templates(&self) -> Vec<&str> {
+        self.list()
     }
 }
 
@@ -470,10 +672,21 @@ mod tests {
     #[test]
     fn test_registry() {
         let registry = TemplateRegistry::new();
-        assert!(registry.list().len() >= 4);
+        assert!(registry.list().len() >= 5);
         assert!(registry.get("compact").is_some());
         assert!(registry.get("tactical").is_some());
+        assert!(registry.get("toon").is_some());
         assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_toon_template() {
+        let template = ToonTemplate;
+        let obs = test_observation();
+        let result = template.format_observation(&obs);
+        assert!(result.contains("self["));
+        assert!(result.contains("visible_entities"));
+        assert!(result.contains("objectives"));
     }
 
     #[test]

@@ -23,7 +23,7 @@ use log::{debug, warn, error};
 use crate::llm_provider::{
     CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage,
 };
-use crate::prompt_template::{CompactTemplate, PromptTemplate};
+use crate::prompt_template::{CompactTemplate, PromptTemplate, ToonTemplate};
 use crate::action_parser::{ActionParser, FallbackParser};
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
 
@@ -158,7 +158,7 @@ impl LlmAgent {
             config,
             constraints: AgentConstraints::default(),
             provider: Arc::new(MockProvider::idle()),
-            template: Arc::new(CompactTemplate::default()),
+            template: Arc::new(ToonTemplate),
             parser: Arc::new(FallbackParser::default_chain()),
             memory: ConversationMemory::new(MemoryConfig::default()),
             budget: TokenBudget::unlimited(),
@@ -269,23 +269,21 @@ impl LlmAgent {
     fn spawn_llm_request(&mut self, observation: &Observation) {
         // Format observation using the pluggable template
         let obs_str = self.template.format_observation(observation);
+        let action_instructions = self.template.action_instructions();
 
         // Build memory section
         let memory_section = self.memory.to_prompt_section();
 
         // Build system prompt via template
-        let system_prompt = self.template.format_system_prompt(
-            &self.config.system_prompt,
-            ACTION_INSTRUCTION,
-        );
+        let system_prompt = self.template.format_system_prompt(&self.config.system_prompt, action_instructions);
 
         // Combine user prompt: memory + observation
         let user_prompt = if memory_section.is_empty() {
-            format!("Current observation:\n{}\n\n{}", obs_str, ACTION_INSTRUCTION)
+            format!("Current observation:\n{}\n\n{}", obs_str, action_instructions)
         } else {
             format!(
                 "{}\nCurrent observation:\n{}\n\n{}",
-                memory_section, obs_str, ACTION_INSTRUCTION
+                memory_section, obs_str, action_instructions
             )
         };
 
@@ -543,32 +541,9 @@ You have these capabilities:
 
 React to your observations with tactical decisions.
 Think about positioning, resource management, and threats.
-Respond only with valid JSON containing your action decisions."#
+Follow the action format specified by the system instructions."#
         .to_string()
 }
-
-/// Instructions for the LLM on how to format responses.
-const ACTION_INSTRUCTION: &str = r#"
-Respond with a JSON object like this:
-{
-  "actions": ["move up", "attack", "speak hello"],
-  "reasoning": "Brief explanation of your decision"
-}
-
-Valid action formats:
-- "idle" — do nothing
-- "move up|down|left|right" — move in cardinal direction
-- "move up-left|up-right|down-left|down-right" — diagonal movement
-- "stop" — halt movement
-- "rotate 45" — face an angle (degrees)
-- "look at (100, 200)" — look toward a position
-- "attack" — attack in facing direction
-- "speak message" — say something
-- "interact" — interact with nearest object
-- "drop" — drop item
-
-List multiple actions if needed. Actions are processed in order each tick.
-"#;
 
 // ============================================================
 // TESTS
@@ -579,6 +554,8 @@ mod tests {
     use super::*;
     use pod_core::observation::*;
     use glam::Vec2;
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     fn make_obs(tick: u64, hostile: bool) -> Observation {
         let mut obs = Observation {
@@ -606,6 +583,39 @@ mod tests {
         obs
     }
 
+    struct CapturingProvider {
+        captured: Arc<Mutex<Option<CompletionRequest>>>,
+        response: String,
+    }
+
+    impl CapturingProvider {
+        fn new(
+            response: String,
+            captured: Arc<Mutex<Option<CompletionRequest>>>,
+        ) -> Self {
+            Self { response, captured }
+        }
+    }
+
+    impl LlmProvider for CapturingProvider {
+        fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, LlmError> {
+            *self.captured.lock().unwrap() = Some(request.clone());
+            Ok(CompletionResponse {
+                content: self.response.clone(),
+                usage: TokenUsage {
+                    prompt_tokens: 1,
+                    completion_tokens: 1,
+                    total_tokens: 2,
+                },
+                model: "capture-test".to_string(),
+            })
+        }
+
+        fn name(&self) -> &str {
+            "capture-provider"
+        }
+    }
+
     #[test]
     fn test_new_agent_defaults() {
         let agent = LlmAgent::new(LlmAgentConfig::default());
@@ -622,6 +632,52 @@ mod tests {
         agent.observe(obs);
         assert!(agent.request_in_flight);
         assert!(agent.decision_buffer.pending.is_some());
+    }
+
+    #[test]
+    fn test_new_agent_uses_toon_template_and_parser_by_default() {
+        let captured = Arc::new(Mutex::new(None));
+        let response = r#"actions[1]{
+  stop
+}
+reasoning[1]{
+  Default smoke test
+}"#
+        .to_string();
+        let provider = Arc::new(CapturingProvider::new(response, Arc::clone(&captured)));
+
+        let mut agent = LlmAgent::new(LlmAgentConfig {
+            reaction_time_ms: 0,
+            ..Default::default()
+        });
+        agent.provider = provider;
+
+        let obs = make_obs(1, false);
+        agent.observe(obs);
+        std::thread::sleep(Duration::from_millis(50));
+
+        let request = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("provider should have captured completion request");
+
+        assert!(request.user_prompt.contains("self["));
+        assert!(request.user_prompt.contains("visible_entities["));
+        assert!(request.user_prompt.contains("available_actions["));
+        assert!(request.system_prompt.contains("TOON-formatted observations"));
+        assert!(request.system_prompt.contains("actions["));
+        assert!(request.system_prompt.contains("reasoning["));
+
+        let actions = agent.decide();
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], Action::Stop));
+
+        let trace = agent
+            .decision_traces()
+            .back()
+            .expect("a decision trace should be recorded");
+        assert_eq!(trace.reasoning, "Default smoke test");
     }
 
     #[test]

@@ -42,7 +42,8 @@ use pod_core::observation::{
 use pod_core::component::Team;
 
 use glam::Vec2;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // ============================================================
 // TEST HELPERS
@@ -93,6 +94,38 @@ fn make_observation_low_health() -> Observation {
     obs
 }
 
+// Provider that captures the exact completion request and returns a fixed response.
+struct CapturingProvider {
+    response: String,
+    captured: Arc<Mutex<Option<CompletionRequest>>>,
+}
+
+impl CapturingProvider {
+    fn new(response: String, captured: Arc<Mutex<Option<CompletionRequest>>>) -> Self {
+        Self { response, captured }
+    }
+}
+
+impl LlmProvider for CapturingProvider {
+    fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, LlmError> {
+        let mut captured = self.captured.lock().unwrap();
+        *captured = Some(request.clone());
+        Ok(CompletionResponse {
+            content: self.response.clone(),
+            usage: TokenUsage {
+                prompt_tokens: 4,
+                completion_tokens: 2,
+                total_tokens: 6,
+            },
+            model: "sdk-smoke-model".to_string(),
+        })
+    }
+
+    fn name(&self) -> &str {
+        "capturing-provider"
+    }
+}
+
 // ============================================================
 // LLM PROVIDER TESTS
 // ============================================================
@@ -103,11 +136,11 @@ fn test_mock_provider_idle_creation() {
     let req = CompletionRequest {
         model: "test".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![],
+        user_prompt: String::new(),
         temperature: 0.7,
         max_tokens: 100,
     };
-    let result = tokio::runtime::Runtime::new().unwrap().block_on(provider.complete(req));
+    let result = provider.complete(&req);
     assert!(result.is_ok());
     let resp = result.unwrap();
     assert!(resp.content.contains("Idle"));
@@ -120,14 +153,95 @@ fn test_mock_provider_responding() {
     let req = CompletionRequest {
         model: "test".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![],
+        user_prompt: String::new(),
         temperature: 0.7,
         max_tokens: 100,
     };
-    let result = tokio::runtime::Runtime::new().unwrap().block_on(provider.complete(req));
+    let result = provider.complete(&req);
     assert!(result.is_ok());
     let resp = result.unwrap();
     assert_eq!(resp.content, response_text);
+}
+
+#[test]
+fn test_llm_agent_new_uses_toon_formatted_prompt_by_default() {
+    let mut agent = LlmAgent::new(LlmAgentConfig {
+        reaction_time_ms: 0,
+        ..Default::default()
+    });
+
+    agent.observe(make_observation());
+    std::thread::sleep(Duration::from_millis(50));
+
+    let actions = agent.decide();
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(actions[0], Action::Idle));
+
+    let trace = agent
+        .decision_traces()
+        .back()
+        .expect("a decision trace should be recorded");
+    assert!(trace.llm_prompt.contains("self["));
+    assert!(trace.llm_prompt.contains("visible_entities["));
+    assert!(trace.llm_prompt.contains("available_actions["));
+    assert!(trace.llm_prompt.contains("TOON-formatted observations"));
+    assert!(trace.llm_prompt.contains("actions["));
+    assert!(trace.llm_prompt.contains("reasoning["));
+    assert!(matches!(trace.parsed_actions.first(), Some(Action::Idle)));
+}
+
+#[test]
+fn test_new_llm_agent_emits_toon_prompts_and_toon_parser_roundtrip() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingProvider::new(
+        r#"actions[1]{
+  stop
+}
+reasoning[1]{
+  SDK smoke test default alignment
+}"#
+        .to_string(),
+        Arc::clone(&captured),
+    ));
+
+    let mut agent = LlmAgent::with_components(
+        LlmAgentConfig {
+            reaction_time_ms: 0,
+            ..Default::default()
+        },
+        provider,
+        Arc::new(ToonTemplate),
+        Arc::new(FallbackParser::default_chain()),
+        MemoryConfig::default(),
+        TokenBudget::unlimited(),
+    );
+
+    agent.observe(make_observation());
+    std::thread::sleep(Duration::from_millis(50));
+
+    let request = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("capturing provider should have seen a completion request");
+
+    assert!(request.user_prompt.contains("self["));
+    assert!(request.user_prompt.contains("cooldowns["));
+    assert!(request.user_prompt.contains("visible_entities["));
+    assert!(request.user_prompt.contains("available_actions["));
+    assert!(request.system_prompt.contains("TOON-formatted observations"));
+    assert!(request.system_prompt.contains("actions["));
+    assert!(request.system_prompt.contains("reasoning["));
+
+    let actions = agent.decide();
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(actions[0], Action::Stop));
+
+    let trace = agent
+        .decision_traces()
+        .back()
+        .expect("a decision trace should be recorded");
+    assert_eq!(trace.reasoning, "SDK smoke test default alignment");
 }
 
 #[test]

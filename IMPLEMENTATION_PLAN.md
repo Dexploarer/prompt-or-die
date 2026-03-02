@@ -35,7 +35,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 2.11 Create hybrid agent framework (LLM strategy + BT execution)
 - [x] 2.12 Implement decision logging and replay
 - [x] 2.13 Add ONNX runtime integration for neural agents
-- [ ] 2.14 Write comprehensive agent SDK tests
+- [x] 2.14 Write comprehensive agent SDK tests
 
 ## Phase 3: 3D Engine Foundation
 - [ ] 3.1 Add Transform3D, Mesh, Material, Camera3D, Light components
@@ -92,5 +92,5 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 ---
 
-**Last updated**: Iteration 8 (Phase 2.8–2.10, 2.12–2.13 complete — BT node library, FSM templates, Utility AI, decision logging/replay, ONNX integration; 2.11 hybrid agent in progress)
-**Current focus**: Phase 2 — Enhanced Agent SDK (tasks 2.11, 2.14 remaining)
+**Last updated**: Iteration 9 (Phase 2.11–2.14 complete — BT node library, FSM templates, Utility AI, decision logging/replay, ONNX integration, hybrid agent framework, and agent SDK tests)
+**Current focus**: Phase 2 complete; begin Phase 3 (3D Engine Foundation)

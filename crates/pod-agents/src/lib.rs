@@ -70,11 +70,11 @@ pub use llm_provider::{
 };
 pub use prompt_template::{
     PromptTemplate, CompactTemplate, DetailedTemplate, TacticalTemplate,
-    JsonTemplate, TemplateRegistry,
+    JsonTemplate, ToonTemplate, TemplateRegistry,
 };
 pub use action_parser::{
     ActionParser, ActionParseResult, ActionParseError,
-    JsonActionParser, KeyValueParser, FallbackParser,
+    JsonActionParser, KeyValueParser, ToonActionParser, FallbackParser,
 };
 pub use conversation_memory::{
     ConversationMemory, MemoryEntry, MemoryConfig,
