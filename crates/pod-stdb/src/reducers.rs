@@ -54,6 +54,11 @@ pub fn client_disconnected(ctx: &ReducerContext) {
     } else {
         log::info!("[pod-stdb] Client disconnected: {identity:?} (no agent)");
     }
+
+    // Remove lobby membership, if any
+    for membership in ctx.db.lobby_member().iter().filter(|member| member.identity == identity) {
+        ctx.db.lobby_member().membership_id().delete(membership.membership_id);
+    }
 }
 
 // ============================================================
@@ -320,6 +325,264 @@ pub fn connect_agent(
     }
 
     log::info!("[pod-stdb] Agent '{display_name}' connected to entity {entity_id}");
+}
+
+/// Create a new lobby owned by the calling player.
+#[spacetimedb::reducer]
+pub fn create_lobby(
+    ctx: &ReducerContext,
+    name: String,
+    host_entity_id: u64,
+    max_players: u32,
+    is_private: bool,
+) {
+    let identity = ctx.sender;
+
+    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+    if max_players == 0 {
+        panic!("Lobby must allow at least 1 player");
+    }
+
+    let lobby = ctx.db.lobby().insert(LobbyRow {
+        lobby_id: 0, // auto_inc
+        name,
+        host_identity: identity,
+        host_entity_id,
+        max_players,
+        is_private,
+        created_at: ctx.timestamp,
+        started: false,
+    });
+
+    ctx.db.lobby_member().insert(LobbyMemberRow {
+        membership_id: 0, // auto_inc
+        lobby_id: lobby.lobby_id,
+        identity,
+        entity_id: host_entity_id,
+        joined_at_tick: ws.tick,
+        is_ready: true,
+    });
+
+    log::info!("[pod-stdb] Lobby {} created by {identity:?} as entity {host_entity_id}", lobby.lobby_id);
+}
+
+/// Join a lobby by ID.
+#[spacetimedb::reducer]
+pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
+    let identity = ctx.sender;
+    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+
+    let lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
+        Some(row) => row,
+        None => panic!("Lobby {lobby_id} does not exist"),
+    };
+
+    if lobby.started {
+        panic!("Lobby {lobby_id} already started");
+    }
+
+    if !ctx
+        .db
+        .lobby_member()
+        .iter()
+        .any(|member| member.identity == identity && member.lobby_id == lobby_id)
+    {
+        let current_members: Vec<LobbyMemberRow> = ctx
+            .db
+            .lobby_member()
+            .iter()
+            .filter(|member| member.lobby_id == lobby_id)
+            .collect();
+
+        if current_members.len() as u32 >= lobby.max_players {
+            panic!("Lobby {lobby_id} is full");
+        }
+
+        ctx.db.lobby_member().insert(LobbyMemberRow {
+            membership_id: 0, // auto_inc
+            lobby_id,
+            identity,
+            entity_id,
+            joined_at_tick: ws.tick,
+            is_ready: false,
+        });
+    }
+}
+
+/// Leave the calling player's current lobby.
+#[spacetimedb::reducer]
+pub fn leave_lobby(ctx: &ReducerContext) {
+    let identity = ctx.sender;
+    for membership in ctx.db.lobby_member().iter().filter(|member| member.identity == identity) {
+        ctx.db
+            .lobby_member()
+            .membership_id()
+            .delete(membership.membership_id);
+    }
+}
+
+/// Update readiness for the calling player in a lobby.
+#[spacetimedb::reducer]
+pub fn set_lobby_ready(ctx: &ReducerContext, lobby_id: u64, is_ready: bool) {
+    let identity = ctx.sender;
+    let mut updated = false;
+
+    for mut member in ctx.db.lobby_member().iter().filter(|member| {
+        member.identity == identity && member.lobby_id == lobby_id
+    }) {
+        member.is_ready = is_ready;
+        ctx.db.lobby_member().membership_id().update(member);
+        updated = true;
+        break;
+    }
+
+    if !updated {
+        panic!("Player is not a member of lobby {lobby_id}");
+    }
+}
+
+/// Start a lobby (host-only).
+#[spacetimedb::reducer]
+pub fn start_lobby(ctx: &ReducerContext, lobby_id: u64) {
+    let identity = ctx.sender;
+
+    let mut lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
+        Some(row) => row,
+        None => panic!("Lobby {lobby_id} does not exist"),
+    };
+
+    if lobby.host_identity != identity {
+        panic!("Only lobby host can start lobby {lobby_id}");
+    }
+
+    lobby.started = true;
+    ctx.db.lobby().lobby_id().update(lobby);
+}
+
+// ============================================================
+// MATCHMAKING REDUCERS
+// ============================================================
+
+/// Add an entity to the global matchmaking queue.
+#[spacetimedb::reducer]
+pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size: u32) {
+    if desired_party_size == 0 {
+        panic!("Match desired_party_size must be at least 1");
+    }
+
+    let identity = ctx.sender;
+    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+
+    // Validate entity exists and is alive.
+    let entity = ctx.db.entity().entity_id().find(entity_id)
+        .expect("Entity not found");
+    if !entity.alive {
+        panic!("Entity {entity_id} is not alive");
+    }
+
+    // Prevent duplicate queue entries for same identity/entity pair.
+    if ctx.db.match_queue().iter().any(|row| {
+        row.identity == identity && row.entity_id == entity_id
+    }) {
+        panic!("Identity {identity:?} already queued for entity {entity_id}");
+    }
+
+    ctx.db.match_queue().insert(MatchQueueRow {
+        queue_id: 0, // auto_inc
+        identity,
+        entity_id,
+        desired_party_size,
+        queued_at_tick: ws.tick,
+    });
+
+    log::info!("[pod-stdb] {identity:?} queued entity {entity_id} for party size {desired_party_size}");
+}
+
+/// Remove all queue entries for the calling identity.
+#[spacetimedb::reducer]
+pub fn leave_match_queue(ctx: &ReducerContext) {
+    let identity = ctx.sender;
+
+    let mut removed = false;
+    let queue_ids: Vec<u64> = ctx
+        .db
+        .match_queue()
+        .iter()
+        .filter(|row| row.identity == identity)
+        .map(|row| row.queue_id)
+        .collect();
+
+    for queue_id in queue_ids {
+        ctx.db.match_queue().queue_id().delete(queue_id);
+        removed = true;
+    }
+
+    if !removed {
+        panic!("No matchmaking queue entries found for {identity:?}");
+    }
+
+    log::info!("[pod-stdb] {identity:?} left matchmaking queue");
+}
+
+/// Consume queued players and create an active match.
+///
+/// This reducer creates a `game_match` row and `match_participant` rows for the
+/// first `desired_party_size` entries that requested that party size.
+#[spacetimedb::reducer]
+pub fn create_match_from_queue(ctx: &ReducerContext, desired_party_size: u32) {
+    if desired_party_size == 0 {
+        panic!("Match desired_party_size must be at least 1");
+    }
+
+    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+
+    let mut candidates: Vec<(u64, Identity, u64)> = Vec::new();
+    for row in ctx.db.match_queue().iter() {
+        if row.desired_party_size == desired_party_size {
+            candidates.push((row.queue_id, row.identity, row.entity_id));
+            if candidates.len() as u32 >= desired_party_size {
+                break;
+            }
+        }
+    }
+
+    if candidates.len() < desired_party_size as usize {
+        panic!(
+            "Not enough players in queue for party size {desired_party_size}: found {}",
+            candidates.len()
+        );
+    }
+
+    let game_match = ctx.db.game_match().insert(GameMatchRow {
+        match_id: 0, // auto_inc
+        created_tick: ws.tick,
+        max_players: desired_party_size,
+        state: MatchState::InProgress,
+        started_tick: Some(ws.tick),
+    });
+
+    for (team_id, (queue_id, identity, entity_id)) in candidates
+        .into_iter()
+        .take(desired_party_size as usize)
+        .enumerate()
+    {
+        ctx.db.match_participant().insert(MatchParticipantRow {
+            participant_id: 0, // auto_inc
+            match_id: game_match.match_id,
+            identity,
+            entity_id,
+            team_id: team_id as u8 % 2,
+            joined_at_tick: ws.tick,
+        });
+        ctx.db.match_queue().queue_id().delete(queue_id);
+    }
+
+    log::info!(
+        "[pod-stdb] Created match {} for {} players (party_size={})",
+        game_match.match_id,
+        desired_party_size,
+        desired_party_size
+    );
 }
 
 // ============================================================

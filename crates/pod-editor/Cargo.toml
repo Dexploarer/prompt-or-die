@@ -1,0 +1,14 @@
+[package]
+name = "pod-editor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+eframe = "0.29"
+egui = "0.29"
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]

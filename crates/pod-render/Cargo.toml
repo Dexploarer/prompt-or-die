@@ -10,7 +10,8 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 hecs.workspace = true
-bytemuck.workspace = true
+bytemuck = { workspace = true, features = ["derive"] }
+gltf.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu.workspace = true
@@ -20,3 +21,10 @@ pollster = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 web-sys = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "render_pipeline"
+harness = false

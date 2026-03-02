@@ -38,52 +38,52 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 2.14 Write comprehensive agent SDK tests
 
 ## Phase 3: 3D Engine Foundation
-- [ ] 3.1 Add Transform3D, Mesh, Material, Camera3D, Light components
-- [ ] 3.2 Create forward rendering pipeline with depth buffer in wgpu
-- [ ] 3.3 Implement WGSL shader system (vertex/fragment/uniform binding)
-- [ ] 3.4 Add glTF 2.0 import (gltf crate)
-- [ ] 3.5 Implement frustum culling
-- [ ] 3.6 Add batched draw calls (group by material)
-- [ ] 3.7 Create camera controller components (orbit, fly, follow)
-- [ ] 3.8 Implement parent-child transform hierarchy
-- [ ] 3.9 Support 2D + 3D mixed rendering in same frame
-- [ ] 3.10 Write render pipeline tests and benchmarks
+- [x] 3.1 Add Transform3D, Mesh, Material, Camera3D, Light components
+- [x] 3.2 Create forward rendering pipeline with depth buffer in wgpu
+- [x] 3.3 Implement WGSL shader system (vertex/fragment/uniform binding)
+- [x] 3.4 Add glTF 2.0 import (gltf crate)
+- [x] 3.5 Implement frustum culling
+- [x] 3.6 Add batched draw calls (group by material)
+- [x] 3.7 Create camera controller components (orbit, fly, follow)
+- [x] 3.8 Implement parent-child transform hierarchy
+- [x] 3.9 Support 2D + 3D mixed rendering in same frame
+- [x] 3.10 Write render pipeline tests and benchmarks
 
 ## Phase 4: Asset Pipeline
-- [ ] 4.1 Create pod-assets crate scaffold
-- [ ] 4.2 Implement content-addressed asset cache
-- [ ] 4.3 Add asset import pipeline (glTF, OBJ, PNG, JPEG)
-- [ ] 4.4 Implement mesh processing (LOD generation)
-- [ ] 4.5 Add texture processing (compression, atlas packing)
-- [ ] 4.6 Implement hot-reload (file watcher + reprocess)
-- [ ] 4.7 Add procedural terrain generation (noise-based heightmaps)
-- [ ] 4.8 Add procedural dungeon generation (BSP tree)
-- [ ] 4.9 Add procedural texture generation (noise, gradients)
-- [ ] 4.10 Create AI asset generation integration points (text-to-mesh, text-to-texture)
-- [ ] 4.11 Write asset pipeline tests
+- [x] 4.1 Create pod-assets crate scaffold
+- [x] 4.2 Implement content-addressed asset cache
+- [x] 4.3 Add asset import pipeline (glTF, OBJ, PNG, JPEG)
+- [x] 4.4 Implement mesh processing (LOD generation)
+- [x] 4.5 Add texture processing (compression, atlas packing)
+- [x] 4.6 Implement hot-reload (file watcher + reprocess)
+- [x] 4.7 Add procedural terrain generation (noise-based heightmaps)
+- [x] 4.8 Add procedural dungeon generation (BSP tree)
+- [x] 4.9 Add procedural texture generation (noise, gradients)
+- [x] 4.10 Create AI asset generation integration points (text-to-mesh, text-to-texture)
+- [x] 4.11 Write asset pipeline tests
 
 ## Phase 5: Game Maker / Editor
-- [ ] 5.1 Create pod-editor crate with egui scaffold
-- [ ] 5.2 Implement dockable panel system (viewport, hierarchy, inspector, console)
-- [ ] 5.3 Build entity hierarchy panel (tree view)
-- [ ] 5.4 Build component inspector (property editors)
-- [ ] 5.5 Implement 2D viewport with entity placement gizmos
-- [ ] 5.6 Add 3D viewport rendering
-- [ ] 5.7 Build asset browser panel
-- [ ] 5.8 Implement play/stop/pause mode
-- [ ] 5.9 Build visual behavior tree editor
-- [ ] 5.10 Build FSM editor
-- [ ] 5.11 Add LLM agent configuration panel
-- [ ] 5.12 Build SpacetimeDB dashboard panel
-- [ ] 5.13 Implement undo/redo system
-- [ ] 5.14 Add project save/load
-- [ ] 5.15 Write editor tests
+- [x] 5.1 Create pod-editor crate with egui scaffold
+- [x] 5.2 Implement dockable panel system (viewport, hierarchy, inspector, console)
+- [x] 5.3 Build entity hierarchy panel (tree view)
+- [x] 5.4 Build component inspector (property editors)
+- [x] 5.5 Implement 2D viewport with entity placement gizmos
+- [x] 5.6 Add 3D viewport rendering
+- [x] 5.7 Build asset browser panel
+- [x] 5.8 Implement play/stop/pause mode
+- [x] 5.9 Build visual behavior tree editor
+- [x] 5.10 Build FSM editor
+- [x] 5.11 Add LLM agent configuration panel
+- [x] 5.12 Build SpacetimeDB dashboard panel
+- [x] 5.13 Implement undo/redo system
+- [x] 5.14 Add project save/load
+- [x] 5.15 Write editor tests
 
 ## Phase 6: Networking & Multiplayer
-- [ ] 6.1 Implement SpacetimeDB subscription manager in pod-net
-- [ ] 6.2 Create interest management (spatial SQL query filtering)
-- [ ] 6.3 Implement lobby system (SpacetimeDB tables + reducers)
-- [ ] 6.4 Add matchmaking reducer
+- [x] 6.1 Implement SpacetimeDB subscription manager in pod-net
+- [x] 6.2 Create interest management (spatial SQL query filtering)
+- [x] 6.3 Implement lobby system (SpacetimeDB tables + reducers)
+- [x] 6.4 Add matchmaking reducer
 - [ ] 6.5 Remote LLM agent connection via SpacetimeDB
 - [ ] 6.6 Spectator mode (full world subscription, read-only)
 - [ ] 6.7 World partitioning for large worlds
@@ -92,5 +92,5 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 ---
 
-**Last updated**: Iteration 9 (Phase 2.11–2.14 complete — BT node library, FSM templates, Utility AI, decision logging/replay, ONNX integration, hybrid agent framework, and agent SDK tests)
-**Current focus**: Phase 2 complete; begin Phase 3 (3D Engine Foundation)
+**Last updated**: Iteration 26
+**Current focus**: Begin Phase 6.5 Remote LLM agent connection via SpacetimeDB

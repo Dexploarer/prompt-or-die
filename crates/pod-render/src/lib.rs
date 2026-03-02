@@ -7,6 +7,7 @@
 pub mod renderer;
 pub mod camera;
 pub mod color;
+pub mod gltf_import;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;

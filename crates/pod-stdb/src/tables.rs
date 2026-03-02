@@ -277,3 +277,83 @@ pub struct ConnectedAgentRow {
     pub display_name: String,
     pub connected_at: Timestamp,
 }
+
+// ============================================================
+// LOBBY TABLES
+// ============================================================
+
+/// Lobby metadata for pre-game grouping and matchmaking.
+#[spacetimedb::table(name = lobby, public)]
+pub struct LobbyRow {
+    #[primary_key]
+    #[auto_inc]
+    pub lobby_id: u64,
+    pub name: String,
+    pub host_identity: Identity,
+    pub host_entity_id: u64,
+    pub max_players: u32,
+    pub is_private: bool,
+    pub created_at: Timestamp,
+    pub started: bool,
+}
+
+/// Membership links between identities and lobby slots.
+#[spacetimedb::table(name = lobby_member, public)]
+pub struct LobbyMemberRow {
+    #[primary_key]
+    #[auto_inc]
+    pub membership_id: u64,
+    pub lobby_id: u64,
+    pub identity: Identity,
+    pub entity_id: u64,
+    pub joined_at_tick: u64,
+    pub is_ready: bool,
+}
+
+// ============================================================
+// MATCHMAKING TABLES
+// ============================================================
+
+/// Global matchmaking queue entries.
+///
+/// Players enqueue one or more times for a desired party size.
+/// Matchmaking reducers consume rows from this table in queue order and create
+/// active matches in `game_match`.
+#[spacetimedb::table(name = match_queue, public)]
+pub struct MatchQueueRow {
+    #[primary_key]
+    #[auto_inc]
+    pub queue_id: u64,
+    pub identity: Identity,
+    pub entity_id: u64,
+    /// Desired party size for this queue entry (e.g., 2v2, 1v1, squads).
+    pub desired_party_size: u32,
+    /// World tick when the entity was queued.
+    pub queued_at_tick: u64,
+}
+
+/// Match metadata for active/completed matches.
+#[spacetimedb::table(name = game_match, public)]
+pub struct GameMatchRow {
+    #[primary_key]
+    #[auto_inc]
+    pub match_id: u64,
+    pub created_tick: u64,
+    pub max_players: u32,
+    pub state: MatchState,
+    /// Null until the match starts; stored for compatibility.
+    pub started_tick: Option<u64>,
+}
+
+/// Participant membership in a specific match.
+#[spacetimedb::table(name = match_participant, public)]
+pub struct MatchParticipantRow {
+    #[primary_key]
+    #[auto_inc]
+    pub participant_id: u64,
+    pub match_id: u64,
+    pub identity: Identity,
+    pub entity_id: u64,
+    pub team_id: u8,
+    pub joined_at_tick: u64,
+}

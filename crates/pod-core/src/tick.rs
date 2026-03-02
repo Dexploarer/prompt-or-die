@@ -5,7 +5,7 @@ use crate::event::{Event, EventBus};
 use crate::id::EntityId;
 use crate::observation::*;
 use crate::TICK_DURATION_SECS;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 /// Result of a single tick
 #[derive(Debug)]
@@ -88,6 +88,7 @@ pub fn execute_tick(
     // ========================================
     // PHASE 4: PHYSICS / MOVEMENT
     // ========================================
+    step_camera_controllers(ecs);
     step_movement(ecs);
 
     // ========================================
@@ -421,5 +422,105 @@ fn step_movement(ecs: &mut hecs::World) {
     for (_, (transform, velocity)) in ecs.query_mut::<(&mut Transform, &Velocity)>() {
         transform.position += velocity.linear * TICK_DURATION_SECS;
         transform.rotation += velocity.angular * TICK_DURATION_SECS;
+    }
+}
+
+fn step_camera_controllers(ecs: &mut hecs::World) {
+    step_orbit_camera_controllers(ecs);
+    step_follow_camera_controllers(ecs);
+    step_fly_camera_controllers(ecs);
+}
+
+fn step_orbit_camera_controllers(ecs: &mut hecs::World) {
+    for (_, (camera, controller)) in
+        ecs.query_mut::<(&mut Camera3D, &mut OrbitCameraController)>()
+    {
+        let target = Vec3::from_array(controller.target);
+        let yaw = controller.yaw + controller.yaw_speed * TICK_DURATION_SECS;
+        let pitch_delta = controller.pitch_speed * TICK_DURATION_SECS;
+
+        controller.yaw = yaw;
+        controller.pitch = (controller.pitch + pitch_delta).clamp(-1.47, 1.47);
+        let radius = controller.radius.clamp(controller.min_radius, controller.max_radius);
+        let yaw_sin = yaw.sin();
+        let yaw_cos = yaw.cos();
+        let pitch_cos = controller.pitch.cos();
+        let pitch_sin = controller.pitch.sin();
+
+        let offset = Vec3::new(
+            radius * pitch_cos * yaw_sin,
+            -radius * pitch_sin,
+            radius * pitch_cos * yaw_cos,
+        );
+
+        camera.target = target;
+        camera.position = target + offset;
+        camera.near_plane = 0.05_f32.max(camera.near_plane);
+        camera.fov_y_radians = camera.fov_y_radians.max(0.2);
+        camera.far_plane = 10_000.0_f32.max(camera.far_plane);
+    }
+}
+
+fn step_follow_camera_controllers(ecs: &mut hecs::World) {
+    let mut target_positions = std::collections::HashMap::<u32, Vec3>::new();
+
+    for (entity, (transform,)) in ecs.query::<(&Transform3D,)>().iter() {
+        target_positions.insert(entity.id(), transform.position);
+    }
+
+    for (_, (camera, controller)) in ecs.query_mut::<(&mut Camera3D, &mut FollowCameraController)>() {
+        if controller.target == FollowCameraController::default().target {
+            continue;
+        }
+
+        let target = match target_positions.get(&(controller.target as u32)) {
+            Some(position) => *position,
+            None => continue,
+        };
+
+        let offset = Vec3::from_array(controller.offset);
+        let desired_position = target + offset;
+        let follow_t = (controller.follow_speed * TICK_DURATION_SECS).clamp(0.0, 1.0);
+        camera.position = camera.position.lerp(desired_position, follow_t);
+        camera.target = camera.target.lerp(target, follow_t);
+    }
+}
+
+fn step_fly_camera_controllers(ecs: &mut hecs::World) {
+    for (_, (camera, controller)) in
+        ecs.query_mut::<(&mut Camera3D, &mut FlyCameraController)>()
+    {
+        let move_speed = controller.move_speed.max(0.0);
+        let input = Vec3::from_array(controller.move_input);
+        if input.length_squared() <= 0.00001 && controller.yaw_delta.abs() <= 0.0001 && controller.pitch_delta.abs() <= 0.0001 {
+            continue;
+        }
+
+        let mut yaw = controller.yaw + controller.yaw_delta * TICK_DURATION_SECS;
+        let pitch = (controller.pitch + controller.pitch_delta * TICK_DURATION_SECS).clamp(-1.45, 1.45);
+        let distance = (camera.target - camera.position).length().max(0.1);
+
+        let forward = Vec3::new(
+            yaw.cos() * pitch.cos(),
+            pitch.sin(),
+            yaw.sin() * pitch.cos(),
+        );
+        let right = forward.cross(camera.up).normalize_or_zero();
+        let up = camera.up;
+
+        camera.position += (right * input.x + up * input.y + forward * input.z)
+            * (move_speed * TICK_DURATION_SECS);
+        camera.target = camera.position + forward * distance;
+        controller.yaw = yaw;
+        controller.pitch = pitch;
+
+        let damping = controller.damping.clamp(0.0, 1.0);
+        controller.move_input = [
+            input.x * (1.0 - damping * TICK_DURATION_SECS),
+            input.y * (1.0 - damping * TICK_DURATION_SECS),
+            input.z * (1.0 - damping * TICK_DURATION_SECS),
+        ];
+        controller.yaw_delta = 0.0;
+        controller.pitch_delta = 0.0;
     }
 }

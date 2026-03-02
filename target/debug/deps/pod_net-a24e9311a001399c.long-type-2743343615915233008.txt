@@ -1,0 +1,1 @@
+std::iter::Map<std::vec::IntoIter<std::string::String>, for<'a> fn(&'a _) -> std::string::String {<_ as ToString>::to_string}>

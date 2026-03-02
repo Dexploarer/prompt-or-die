@@ -1,0 +1,14 @@
+[package]
+name = "pod-assets"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+notify = "8.0"

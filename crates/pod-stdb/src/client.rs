@@ -564,6 +564,11 @@ impl Subscriptions {
             "SELECT * FROM combat_event",
             "SELECT * FROM speech_event",
             "SELECT * FROM world_event",
+            "SELECT * FROM match_queue",
+            "SELECT * FROM game_match",
+            "SELECT * FROM match_participant",
+            "SELECT * FROM lobby",
+            "SELECT * FROM lobby_member",
         ]
     }
 
@@ -625,6 +630,23 @@ impl Subscriptions {
             "SELECT * FROM rigid_body",
             "SELECT * FROM script",
             "SELECT * FROM connected_agent",
+        ]
+    }
+
+    /// Subscribe to lobby tables only.
+    pub fn lobby_system() -> Vec<&'static str> {
+        vec![
+            "SELECT * FROM lobby",
+            "SELECT * FROM lobby_member",
+        ]
+    }
+
+    /// Subscribe to matchmaking tables only.
+    pub fn matchmaking_system() -> Vec<&'static str> {
+        vec![
+            "SELECT * FROM match_queue",
+            "SELECT * FROM game_match",
+            "SELECT * FROM match_participant",
         ]
     }
 }
@@ -892,6 +914,100 @@ impl StdbClient {
         Ok(())
     }
 
+    /// Create a new lobby owned by this client identity.
+    pub fn call_create_lobby(
+        &mut self,
+        name: String,
+        host_entity_id: u64,
+        max_players: u32,
+        is_private: bool,
+    ) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!(
+            "[pod-stdb client] Calling create_lobby(name='{name}', host_entity_id={host_entity_id}, max_players={max_players}, is_private={is_private})"
+        );
+        // TODO: create_lobby_reducer::call(name, host_entity_id, max_players, is_private);
+        Ok(())
+    }
+
+    /// Join a lobby by ID.
+    pub fn call_join_lobby(&mut self, lobby_id: u64, entity_id: u64) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!(
+            "[pod-stdb client] Calling join_lobby(lobby_id={lobby_id}, entity_id={entity_id})"
+        );
+        // TODO: join_lobby_reducer::call(lobby_id, entity_id);
+        Ok(())
+    }
+
+    /// Leave the lobby the caller is currently joined to.
+    pub fn call_leave_lobby(&mut self) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!("[pod-stdb client] Calling leave_lobby");
+        // TODO: leave_lobby_reducer::call();
+        Ok(())
+    }
+
+    /// Mark this player as ready or not ready in a lobby.
+    pub fn call_set_lobby_ready(
+        &mut self,
+        lobby_id: u64,
+        is_ready: bool,
+    ) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!("[pod-stdb client] Calling set_lobby_ready(lobby_id={lobby_id}, is_ready={is_ready})");
+        // TODO: set_lobby_ready_reducer::call(lobby_id, is_ready);
+        Ok(())
+    }
+
+    /// Start a lobby (host-only action).
+    pub fn call_start_lobby(&mut self, lobby_id: u64) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!("[pod-stdb client] Calling start_lobby({lobby_id})");
+        // TODO: start_lobby_reducer::call(lobby_id);
+        Ok(())
+    }
+
+    /// Join the matchmaking queue with desired party size.
+    pub fn call_join_match_queue(
+        &mut self,
+        entity_id: u64,
+        desired_party_size: u32,
+    ) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!(
+            "[pod-stdb client] Calling join_match_queue(entity_id={entity_id}, desired_party_size={desired_party_size})"
+        );
+        // TODO: join_match_queue_reducer::call(entity_id, desired_party_size);
+        Ok(())
+    }
+
+    /// Leave the caller from matchmaking queue.
+    pub fn call_leave_match_queue(&mut self) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!("[pod-stdb client] Calling leave_match_queue()");
+        // TODO: leave_match_queue_reducer::call();
+        Ok(())
+    }
+
+    /// Create a match from the matchmaking queue.
+    pub fn call_create_match_from_queue(&mut self, desired_party_size: u32) -> Result<(), StdbError> {
+        self.require_connected()?;
+        self.reducers_called += 1;
+        log::info!(
+            "[pod-stdb client] Calling create_match_from_queue(desired_party_size={desired_party_size})"
+        );
+        // TODO: create_match_from_queue_reducer::call(desired_party_size);
+        Ok(())
+    }
+
     /// Call the `submit_action` reducer with a typed action.
     pub fn call_submit_action(&mut self, action: &SubmittedAction) -> Result<(), StdbError> {
         self.require_connected()?;
@@ -1022,7 +1138,7 @@ impl StdbClient {
     // ── Cache mutation (called from SpacetimeDB callbacks) ──
 
     /// Update the cached world state. Called from subscription callbacks.
-    pub(crate) fn update_world_state(&mut self, ws: CachedWorldState) {
+    pub fn update_world_state(&mut self, ws: CachedWorldState) {
         let old_tick = self.world_state.as_ref().map(|w| w.tick);
         let new_tick = ws.tick;
 
@@ -1047,7 +1163,7 @@ impl StdbClient {
     }
 
     /// Insert or update a cached entity. Called from subscription callbacks.
-    pub(crate) fn upsert_entity(&mut self, entity: CachedEntity) {
+    pub fn upsert_entity(&mut self, entity: CachedEntity) {
         let eid = entity.entity_id;
         let is_new = !self.entities.contains_key(&eid);
         self.entities.insert(eid, entity);
@@ -1061,7 +1177,7 @@ impl StdbClient {
     }
 
     /// Remove a cached entity. Called from subscription callbacks.
-    pub(crate) fn remove_entity(&mut self, entity_id: u64) {
+    pub fn remove_entity(&mut self, entity_id: u64) {
         self.entities.remove(&entity_id);
         self.observations.remove(&entity_id);
         self.events.push_back(StdbEvent::EntityDeleted { entity_id });
@@ -1069,7 +1185,7 @@ impl StdbClient {
     }
 
     /// Store a received observation. Called from subscription callbacks.
-    pub(crate) fn receive_observation(
+    pub fn receive_observation(
         &mut self,
         tick: u64,
         observer_entity_id: u64,
@@ -1085,7 +1201,7 @@ impl StdbClient {
     }
 
     /// Store a received combat event. Called from subscription callbacks.
-    pub(crate) fn receive_combat_event(
+    pub fn receive_combat_event(
         &mut self,
         tick: u64,
         attacker_id: u64,
@@ -1104,7 +1220,7 @@ impl StdbClient {
     }
 
     /// Store a received speech event. Called from subscription callbacks.
-    pub(crate) fn receive_speech_event(
+    pub fn receive_speech_event(
         &mut self,
         tick: u64,
         speaker_id: u64,
@@ -1121,7 +1237,7 @@ impl StdbClient {
     }
 
     /// Store a received world event. Called from subscription callbacks.
-    pub(crate) fn receive_world_event(
+    pub fn receive_world_event(
         &mut self,
         tick: u64,
         event_kind: WorldEventKind,
@@ -1316,5 +1432,15 @@ mod tests {
         assert!(client.call_set_paused(true).is_err());
         assert!(client.call_spawn_entity(0.0, 0.0, None).is_err());
         assert!(client.call_execute_tick().is_err());
+        assert!(client
+            .call_create_lobby("arena".into(), 1, 4, false)
+            .is_err());
+        assert!(client.call_join_lobby(1, 1).is_err());
+        assert!(client.call_leave_lobby().is_err());
+        assert!(client.call_set_lobby_ready(1, true).is_err());
+        assert!(client.call_start_lobby(1).is_err());
+        assert!(client.call_join_match_queue(1, 2).is_err());
+        assert!(client.call_leave_match_queue().is_err());
+        assert!(client.call_create_match_from_queue(2).is_err());
     }
 }

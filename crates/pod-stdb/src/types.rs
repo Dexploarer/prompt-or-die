@@ -138,3 +138,17 @@ pub enum WorldEventKind {
     WorldReset,
     TickAdvanced,
 }
+
+/// Match lifecycle state.
+#[cfg_attr(feature = "module", derive(SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub enum MatchState {
+    /// Match is queued and waiting for full party assignment.
+    Queued,
+    /// Match has been created and is currently running.
+    InProgress,
+    /// Match completed normally.
+    Completed,
+    /// Match was cancelled before completion.
+    Cancelled,
+}

@@ -40,6 +40,7 @@
 //! ```
 
 use std::fmt;
+use std::collections::HashSet;
 
 use glam::Vec2;
 use uuid::Uuid;
@@ -58,6 +59,157 @@ use pod_stdb::types::{
 
 use crate::protocol::{ClientId, ServerMessage};
 use crate::snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
+
+// ============================================================
+// SUBSCRIPTION MANAGEMENT
+// ============================================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SubscriptionProfile {
+    /// Read-only spectator mode. Receives all public world tables and events.
+    Spectator,
+    /// Editor/dashboards: all world state without transient events.
+    Editor,
+    /// Player mode for a single controlled entity + public events.
+    Player(u64),
+    /// Caller-supplied custom query set.
+    Custom(Vec<String>),
+}
+
+#[derive(Debug)]
+struct SpacetimeSubscriptionManager {
+    profile: SubscriptionProfile,
+    active_queries: Vec<String>,
+    pending: bool,
+}
+
+impl SpacetimeSubscriptionManager {
+    fn new() -> Self {
+        Self {
+            profile: SubscriptionProfile::Spectator,
+            active_queries: Vec::new(),
+            pending: true,
+        }
+    }
+
+    fn set_spectator(&mut self) -> bool {
+        self.set_profile(SubscriptionProfile::Spectator)
+    }
+
+    fn set_editor(&mut self) -> bool {
+        self.set_profile(SubscriptionProfile::Editor)
+    }
+
+    fn set_player(&mut self, entity_id: u64) -> bool {
+        self.set_profile(SubscriptionProfile::Player(entity_id))
+    }
+
+    fn set_custom(&mut self, queries: Vec<String>) -> bool {
+        self.set_profile(SubscriptionProfile::Custom(normalize_queries(queries)))
+    }
+
+    fn set_profile(&mut self, profile: SubscriptionProfile) -> bool {
+        if self.profile == profile {
+            return false;
+        }
+
+        self.profile = profile;
+        self.pending = true;
+        true
+    }
+
+    fn ensure_subscriptions_applied(
+        &mut self,
+        client: &mut StdbClient,
+    ) -> Result<bool, StdbClientError> {
+        if !self.pending {
+            return Ok(false);
+        }
+
+        if !client.is_connected() {
+            return Ok(false);
+        }
+
+        let queries = self.queries_for_profile();
+
+        if self.active_queries != queries {
+            client.subscribe(queries.clone()).map_err(StdbClientError::from)?;
+            self.active_queries = queries;
+        }
+
+        self.pending = false;
+        Ok(true)
+    }
+
+    fn queries_for_profile(&self) -> Vec<String> {
+        match &self.profile {
+            SubscriptionProfile::Spectator => Subscriptions::spectator()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect(),
+            SubscriptionProfile::Editor => Subscriptions::editor()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect(),
+            SubscriptionProfile::Player(entity_id) => {
+                Subscriptions::player_agent(*entity_id)
+                    .into_iter()
+                    .collect()
+            }
+            SubscriptionProfile::Custom(queries) => queries.clone(),
+        }
+    }
+
+    fn reset_connection(&mut self) {
+        self.active_queries.clear();
+        self.pending = true;
+    }
+
+    #[cfg(test)]
+    fn active_queries(&self) -> &[String] {
+        &self.active_queries
+    }
+}
+
+fn normalize_queries(mut queries: Vec<String>) -> Vec<String> {
+    let mut dedup = HashSet::<String>::new();
+    queries.retain(|query| dedup.insert(query.clone()));
+    queries.sort_unstable();
+    queries
+}
+
+fn build_player_interest_queries(
+    entity_id: u64,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+) -> Result<Vec<String>, StdbClientError> {
+    if !radius.is_finite() || radius < 0.0 {
+        return Err(StdbClientError::InvalidState(
+            "Player interest radius must be finite and non-negative".into(),
+        ));
+    }
+
+    let min_x = center_x - radius;
+    let max_x = center_x + radius;
+    let min_y = center_y - radius;
+    let max_y = center_y + radius;
+
+    let mut queries = Subscriptions::player_agent(entity_id)
+        .into_iter()
+        .collect::<Vec<String>>();
+
+    if let Some(transform_query) = queries
+        .iter_mut()
+        .find(|query| query.as_str() == "SELECT * FROM transform")
+    {
+        *transform_query = format!(
+            "SELECT * FROM transform WHERE entity_id = {entity_id} OR (pos_x >= {min_x} AND pos_x <= {max_x} AND pos_y >= {min_y} AND pos_y <= {max_y})"
+        );
+    }
+
+    Ok(normalize_queries(queries))
+}
 
 // ============================================================
 // CONFIGURATION
@@ -185,6 +337,7 @@ impl From<StdbError> for StdbClientError {
 /// | `ConnectError` | `Rejected` |
 pub struct SpacetimeDBClient {
     inner: StdbClient,
+    subscriptions: SpacetimeSubscriptionManager,
     client_id: Option<ClientId>,
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
@@ -196,6 +349,7 @@ impl SpacetimeDBClient {
     pub fn new(config: SpacetimeDBClientConfig) -> Self {
         Self {
             inner: StdbClient::new(config.into()),
+            subscriptions: SpacetimeSubscriptionManager::new(),
             client_id: None,
             pending_actions: Vec::new(),
             local_snapshot: None,
@@ -209,17 +363,9 @@ impl SpacetimeDBClient {
     /// to receive the `Welcome` message once the subscription is applied.
     pub fn connect(&mut self) -> Result<(), StdbClientError> {
         self.inner.connect().map_err(StdbClientError::from)?;
-
-        // Subscribe to spectator view (all entities + events).
-        // Once connect_agent is called server-side, RLS filters
-        // observation_event automatically per-agent.
-        let queries: Vec<String> = Subscriptions::spectator()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-        self.inner
-            .subscribe(queries)
-            .map_err(StdbClientError::from)?;
+        self.subscriptions.set_spectator();
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)?;
 
         Ok(())
     }
@@ -270,6 +416,14 @@ impl SpacetimeDBClient {
                 StdbEvent::Connected { .. } => {
                     self.client_id = Some(ClientId::new());
                     log::info!("[pod-net stdb] Connected to SpacetimeDB");
+                    if let Err(err) = self.subscriptions.ensure_subscriptions_applied(&mut self.inner) {
+                        log::error!(
+                            "[pod-net stdb] Failed to apply subscriptions after connect: {err}"
+                        );
+                        messages.push(ServerMessage::Rejected {
+                            reason: err.to_string(),
+                        });
+                    }
                 }
 
                 StdbEvent::SubscriptionApplied => {
@@ -448,6 +602,67 @@ impl SpacetimeDBClient {
         self.inner.disconnect();
         self.client_id = None;
         self.welcome_sent = false;
+        self.subscriptions.reset_connection();
+    }
+
+    /// Configure subscriptions for spectator mode (all public tables + events).
+    ///
+    /// Calling this while connected applies immediately; otherwise, it is staged and
+    /// applied once a connection is established.
+    pub fn subscribe_as_spectator(&mut self) -> Result<bool, StdbClientError> {
+        self.subscriptions.set_spectator();
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure subscriptions for editor dashboards (world-state tables, no transient events).
+    ///
+    /// Calling this while connected applies immediately; otherwise, it is staged and
+    /// applied once a connection is established.
+    pub fn subscribe_as_editor(&mut self) -> Result<bool, StdbClientError> {
+        self.subscriptions.set_editor();
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure subscriptions for a specific player entity.
+    ///
+    /// Includes shared world tables and the connected entity row + filtered observations.
+    /// Calling this while connected applies immediately; otherwise, it is staged and
+    /// applied once a connection is established.
+    pub fn subscribe_for_player(&mut self, entity_id: u64) -> Result<bool, StdbClientError> {
+        self.subscriptions.set_player(entity_id);
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure spatially filtered subscriptions around a controlled player.
+    ///
+    /// This keeps world metadata and your player row subscribed while filtering
+    /// transform updates by an axis-aligned interest box derived from
+    /// `(center_x, center_y, radius)`.
+    pub fn subscribe_for_player_with_interest(
+        &mut self,
+        entity_id: u64,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+    ) -> Result<bool, StdbClientError> {
+        let queries = build_player_interest_queries(entity_id, center_x, center_y, radius)?;
+        self.subscriptions.set_custom(queries);
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure subscriptions using custom SQL queries.
+    /// Duplicate queries are deduplicated and ordering is normalized.
+    ///
+    /// Calling this while connected applies immediately; otherwise, it is staged and
+    /// applied once a connection is established.
+    pub fn subscribe_custom(&mut self, queries: Vec<String>) -> Result<bool, StdbClientError> {
+        self.subscriptions.set_custom(queries);
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
     }
 
     /// Get the current local world snapshot (populated after `Welcome`).
@@ -956,6 +1171,58 @@ mod tests {
         client.queue_action(Action::Idle);
         client.queue_action(Action::Stop);
         assert_eq!(client.pending_actions.len(), 2);
+    }
+
+    #[test]
+    fn test_subscriptions_default_profile() {
+        let client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        let queries = client.subscriptions.queries_for_profile();
+
+        assert!(queries.iter().any(|query| query.contains("FROM world_state")));
+        assert!(queries.iter().any(|query| query.contains("FROM entity")));
+        assert!(queries.iter().any(|query| query.contains("combat_event")));
+        assert!(client.subscriptions.active_queries().is_empty());
+    }
+
+    #[test]
+    fn test_subscriptions_dedup_custom() {
+        let mut manager = SpacetimeSubscriptionManager::new();
+        let input = vec![
+            "SELECT * FROM world_state".to_string(),
+            "SELECT * FROM world_state".to_string(),
+            "SELECT * FROM entity".to_string(),
+            "SELECT * FROM entity".to_string(),
+        ];
+        manager.set_custom(input);
+        manager.pending = true;
+
+        let queries = manager
+            .queries_for_profile()
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(queries, normalize_queries(queries.clone()));
+    }
+
+    #[test]
+    fn test_subscriptions_player_interest_query() {
+        let queries = build_player_interest_queries(7, 10.0, 20.0, 5.0).unwrap();
+        let transform_query = queries
+            .iter()
+            .find(|query| query.starts_with("SELECT * FROM transform WHERE entity_id = 7"))
+            .expect("transform spatial query should exist");
+
+        assert!(transform_query.contains("pos_x >= 5"));
+        assert!(transform_query.contains("pos_x <= 15"));
+        assert!(transform_query.contains("pos_y >= 15"));
+        assert!(transform_query.contains("pos_y <= 25"));
+    }
+
+    #[test]
+    fn test_subscriptions_player_interest_radius_validation() {
+        assert!(build_player_interest_queries(1, 0.0, 0.0, -1.0).is_err());
+        assert!(build_player_interest_queries(1, 0.0, 0.0, f32::INFINITY).is_err());
+        assert!(build_player_interest_queries(1, 0.0, 0.0, f32::NEG_INFINITY).is_err());
+        assert!(build_player_interest_queries(1, 0.0, 0.0, f32::NAN).is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Integration tests for the pod-stdb client wrapper.
 //!
 //! These tests exercise the StdbClient PUBLIC API only. Cache mutation methods
-//! (upsert_entity, update_world_state, etc.) are `pub(crate)` and tested by
+//! (upsert_entity, update_world_state, etc.) are `pub` and tested by
 //! the 9 unit tests inside `client.rs`. Integration tests here validate:
 //!
 //! - Configuration and construction
@@ -218,6 +218,56 @@ fn destroy_entity_fails_when_disconnected() {
 }
 
 #[test]
+fn create_lobby_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client
+        .call_create_lobby("arena".into(), 1, 4, false)
+        .is_err());
+}
+
+#[test]
+fn join_lobby_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_join_lobby(1, 1).is_err());
+}
+
+#[test]
+fn leave_lobby_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_leave_lobby().is_err());
+}
+
+#[test]
+fn set_lobby_ready_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_set_lobby_ready(1, true).is_err());
+}
+
+#[test]
+fn start_lobby_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_start_lobby(1).is_err());
+}
+
+#[test]
+fn join_match_queue_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_join_match_queue(1, 2).is_err());
+}
+
+#[test]
+fn leave_match_queue_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_leave_match_queue().is_err());
+}
+
+#[test]
+fn create_match_from_queue_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_create_match_from_queue(2).is_err());
+}
+
+#[test]
 fn subscribe_fails_when_disconnected() {
     let mut client = StdbClient::new(StdbClientConfig::default());
     let queries: Vec<String> = Subscriptions::all_tables()
@@ -239,6 +289,16 @@ fn all_reducers_fail_when_only_connecting() {
         .call_connect_agent(1, AgentType::LlmAgent, "Bot".into())
         .is_err());
     assert!(client.call_submit_action(&SubmittedAction::idle(1)).is_err());
+    assert!(client
+        .call_create_lobby("arena".into(), 1, 4, false)
+        .is_err());
+    assert!(client.call_join_lobby(1, 1).is_err());
+    assert!(client.call_leave_lobby().is_err());
+    assert!(client.call_set_lobby_ready(1, true).is_err());
+    assert!(client.call_start_lobby(1).is_err());
+    assert!(client.call_join_match_queue(1, 2).is_err());
+    assert!(client.call_leave_match_queue().is_err());
+    assert!(client.call_create_match_from_queue(2).is_err());
     assert!(client.call_execute_tick().is_err());
     assert!(client.call_destroy_entity(1).is_err());
 }
@@ -536,9 +596,18 @@ fn action_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn subscription_all_tables_has_20_queries() {
+fn subscription_all_tables_has_25_queries() {
     let queries = Subscriptions::all_tables();
-    assert_eq!(queries.len(), 20);
+    assert_eq!(queries.len(), 25);
+}
+
+#[test]
+fn subscription_lobby_system_has_lobby_tables() {
+    let queries = Subscriptions::lobby_system();
+    assert_eq!(queries.len(), 2);
+    let all_text = queries.join(" ");
+    assert!(all_text.contains("lobby"));
+    assert!(all_text.contains("lobby_member"));
 }
 
 #[test]
@@ -578,6 +647,11 @@ fn subscription_all_tables_covers_key_tables() {
         "combat_event",
         "speech_event",
         "world_event",
+        "match_queue",
+        "game_match",
+        "match_participant",
+        "lobby",
+        "lobby_member",
     ];
 
     for table in &expected_tables {

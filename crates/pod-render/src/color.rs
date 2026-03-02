@@ -1,5 +1,6 @@
 //! Color utilities and conversions
 
+use glam::FloatExt;
 use serde::{Deserialize, Serialize};
 
 /// RGBA color representation

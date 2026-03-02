@@ -1,4 +1,4 @@
-use glam::Vec2;
+use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use crate::id::AgentId;
 
@@ -29,6 +29,263 @@ impl Transform {
         Self {
             position: Vec2::new(x, y),
             ..Default::default()
+        }
+    }
+}
+
+/// Position, rotation, and scale in 3D world space
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Transform3D {
+    pub position: Vec3,
+    /// Unit quaternion (x, y, z, w) used for mesh orientation
+    pub rotation: [f32; 4],
+    pub scale: Vec3,
+}
+
+impl Default for Transform3D {
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY.to_array(),
+            scale: Vec3::ONE,
+        }
+    }
+}
+
+impl Transform3D {
+    pub fn at(x: f32, y: f32, z: f32) -> Self {
+        Self {
+            position: Vec3::new(x, y, z),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_rotation(mut self, rotation: Quat) -> Self {
+        self.rotation = rotation.to_array();
+        self
+    }
+
+    pub fn with_scale(mut self, scale: Vec3) -> Self {
+        self.scale = scale;
+        self
+    }
+}
+
+/// Parent transform linkage for hierarchy-aware transform composition.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Parent3D {
+    /// `hecs` entity id for the parent transform.
+    /// Generation is intentionally omitted to keep the component serializable;
+    /// callers should avoid reusing entity ids in the same render frame.
+    pub parent: u64,
+}
+
+impl Default for Parent3D {
+    fn default() -> Self {
+        Self { parent: u64::MAX }
+    }
+}
+
+/// Orbit-style camera controller for 3D follow-like behavior.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct OrbitCameraController {
+    pub target: [f32; 3],
+    pub radius: f32,
+    pub min_radius: f32,
+    pub max_radius: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub yaw_speed: f32,
+    pub pitch_speed: f32,
+}
+
+impl Default for OrbitCameraController {
+    fn default() -> Self {
+        Self {
+            target: [0.0, 0.0, 0.0],
+            radius: 6.0,
+            min_radius: 1.0,
+            max_radius: 100.0,
+            yaw: 0.0,
+            pitch: -0.35,
+            yaw_speed: 0.0,
+            pitch_speed: 0.0,
+        }
+    }
+}
+
+/// Free-fly camera controller for 3D gameplay camera movement.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct FlyCameraController {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub move_speed: f32,
+    pub move_input: [f32; 3],
+    pub yaw_delta: f32,
+    pub pitch_delta: f32,
+    pub damping: f32,
+}
+
+impl Default for FlyCameraController {
+    fn default() -> Self {
+        Self {
+            yaw: 0.0,
+            pitch: 0.0,
+            move_speed: 1.0,
+            move_input: [0.0, 0.0, 0.0],
+            yaw_delta: 0.0,
+            pitch_delta: 0.0,
+            damping: 0.9,
+        }
+    }
+}
+
+/// Target-follow camera controller for 3D entities.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct FollowCameraController {
+    pub target: u64,
+    pub offset: [f32; 3],
+    pub follow_speed: f32,
+}
+
+impl Default for FollowCameraController {
+    fn default() -> Self {
+        Self {
+            target: u64::MAX,
+            offset: [0.0, 3.0, -8.0],
+            follow_speed: 8.0,
+        }
+    }
+}
+
+/// Mesh asset reference component for 3D renderables
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mesh {
+    pub asset_id: String,
+    pub visible: bool,
+    pub layer: i32,
+    pub cast_shadows: bool,
+    pub receive_shadows: bool,
+}
+
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {
+            asset_id: String::new(),
+            visible: true,
+            layer: 0,
+            cast_shadows: true,
+            receive_shadows: true,
+        }
+    }
+}
+
+/// Material description component for 3D renderables
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Material {
+    pub asset_id: String,
+    pub tint: [f32; 4],
+    pub roughness: f32,
+    pub metallic: f32,
+    pub emissive: [f32; 3],
+    pub visible: bool,
+    pub double_sided: bool,
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            asset_id: String::new(),
+            tint: [1.0, 1.0, 1.0, 1.0],
+            roughness: 0.5,
+            metallic: 0.0,
+            emissive: [0.0, 0.0, 0.0],
+            visible: true,
+            double_sided: false,
+        }
+    }
+}
+
+/// Camera component for 3D rendering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Camera3D {
+    pub position: Vec3,
+    pub target: Vec3,
+    pub up: Vec3,
+    pub fov_y_radians: f32,
+    pub aspect_ratio: f32,
+    pub near_plane: f32,
+    pub far_plane: f32,
+    pub is_active: bool,
+}
+
+impl Default for Camera3D {
+    fn default() -> Self {
+        Self {
+            position: Vec3::new(0.0, 1.5, 4.0),
+            target: Vec3::ZERO,
+            up: Vec3::Y,
+            fov_y_radians: 60.0f32.to_radians(),
+            aspect_ratio: 16.0 / 9.0,
+            near_plane: 0.1,
+            far_plane: 1_000.0,
+            is_active: true,
+        }
+    }
+}
+
+impl Camera3D {
+    pub fn new(position: Vec3, target: Vec3, aspect_ratio: f32) -> Self {
+        Self {
+            position,
+            target,
+            up: Vec3::Y,
+            fov_y_radians: 60.0f32.to_radians(),
+            aspect_ratio,
+            near_plane: 0.1,
+            far_plane: 1_000.0,
+            is_active: true,
+        }
+    }
+}
+
+/// Light source type for 3D scene lighting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LightType {
+    Directional {
+        direction: Vec3,
+    },
+    Point {
+        range: f32,
+        attenuation: f32,
+    },
+    Spot {
+        range: f32,
+        inner_cone_angle: f32,
+        outer_cone_angle: f32,
+    },
+}
+
+/// Light component for 3D scene illumination
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Light {
+    pub kind: LightType,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub enabled: bool,
+    pub cast_shadows: bool,
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Self {
+            kind: LightType::Directional {
+                direction: Vec3::new(0.0, -1.0, 0.0),
+            },
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            enabled: true,
+            cast_shadows: true,
         }
     }
 }

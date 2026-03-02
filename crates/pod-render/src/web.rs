@@ -9,7 +9,7 @@ use serde_json::json;
 /// Serializable render command for PixiJS
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderCommand {
-    pub item_type: String, // "rect" or "sprite"
+    pub item_type: String, // "rect", "sprite", "sprite3d", "mesh3d"
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -23,6 +23,12 @@ pub struct RenderCommand {
     pub texture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z: Option<f32>,
     pub layer: i32,
     pub visible: bool,
 }
@@ -114,6 +120,58 @@ impl WebRenderBridge {
                     alpha: tint[3],
                     texture: Some(texture.clone()),
                     frame: Some(*frame),
+                    mesh: None,
+                    material: None,
+                    z: None,
+                    layer: item.layer,
+                    visible: item.visible,
+                },
+                DrawType::Mesh3D {
+                    mesh,
+                    material,
+                    transform,
+                    ..
+                } => RenderCommand {
+                    item_type: "mesh3d".to_string(),
+                    x: transform.position[0],
+                    y: transform.position[1],
+                    width: 0.0,
+                    height: 0.0,
+                    rotation: 0.0,
+                    scale_x: transform.scale[0],
+                    scale_y: transform.scale[1],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    alpha: 1.0,
+                    texture: None,
+                    frame: None,
+                    mesh: Some(mesh.clone()),
+                    material: Some(material.clone()),
+                    z: Some(transform.position[2]),
+                    layer: item.layer,
+                    visible: item.visible,
+                },
+                DrawType::Sprite3D {
+                    texture,
+                    frame,
+                    tint,
+                    transform,
+                    billboard,
+                } => RenderCommand {
+                    item_type: "sprite3d".to_string(),
+                    x: transform.position[0],
+                    y: transform.position[1],
+                    width: transform.scale[0],
+                    height: transform.scale[1],
+                    rotation: if *billboard { 0.0 } else { 0.0 },
+                    scale_x: transform.scale[0].abs().max(0.0001),
+                    scale_y: transform.scale[1].abs().max(0.0001),
+                    color: *tint,
+                    alpha: tint[3],
+                    texture: Some(texture.clone()),
+                    frame: Some(*frame),
+                    mesh: None,
+                    material: None,
+                    z: Some(transform.position[2]),
                     layer: item.layer,
                     visible: item.visible,
                 },
@@ -190,6 +248,66 @@ impl WebRenderBridge {
                     },
                     "alpha": tint[3],
                     "layer": item.layer,
+                }),
+                DrawType::Mesh3D {
+                    mesh,
+                    material,
+                    transform,
+                    ..
+                } => json!({
+                    "type": "mesh3d",
+                    "x": transform.position[0],
+                    "y": transform.position[1],
+                    "z": transform.position[2],
+                    "rotation": {
+                        "x": transform.rotation[0],
+                        "y": transform.rotation[1],
+                        "z": transform.rotation[2],
+                        "w": transform.rotation[3],
+                    },
+                    "scale": {
+                        "x": transform.scale[0],
+                        "y": transform.scale[1],
+                        "z": transform.scale[2],
+                    },
+                    "mesh": mesh,
+                    "material": material,
+                    "layer": item.layer,
+                    "visible": item.visible,
+                }),
+                DrawType::Sprite3D {
+                    texture,
+                    frame,
+                    tint,
+                    transform,
+                    billboard,
+                } => json!({
+                    "type": "sprite3d",
+                    "x": transform.position[0],
+                    "y": transform.position[1],
+                    "z": transform.position[2],
+                    "rotation": {
+                        "x": transform.rotation[0],
+                        "y": transform.rotation[1],
+                        "z": transform.rotation[2],
+                        "w": transform.rotation[3],
+                    },
+                    "scale": {
+                        "x": transform.scale[0],
+                        "y": transform.scale[1],
+                        "z": transform.scale[2],
+                    },
+                    "billboard": billboard,
+                    "texture": texture,
+                    "frame": frame,
+                    "tint": {
+                        "r": (tint[0] * 255.0) as u8,
+                        "g": (tint[1] * 255.0) as u8,
+                        "b": (tint[2] * 255.0) as u8,
+                    },
+                    "alpha": tint[3],
+                    "layer": item.layer,
+                    "visible": item.visible,
                 }),
             };
             commands.push(command);
@@ -319,5 +437,35 @@ mod tests {
         assert_eq!(value["camera"]["zoom"], 1.0);
         assert_eq!(value["commands"][0]["type"], "sprite");
         assert_eq!(value["commands"][0]["texture"], "player");
+    }
+
+    #[test]
+    fn test_render_value_includes_sprite3d() {
+        let mut state = RenderState::new();
+        state.add_item(RenderItem {
+            position: Vec2::ZERO,
+            rotation: 0.0,
+            scale: Vec2::ONE,
+            layer: 2,
+            draw_type: DrawType::Sprite3D {
+                texture: "npc_sprite".to_string(),
+                frame: 1,
+                tint: [0.2, 0.4, 0.8, 0.75],
+                transform: crate::renderer::RenderTransform3D {
+                    position: [0.0, 1.0, 3.5],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [0.75, 1.5, 1.0],
+                },
+                billboard: true,
+            },
+            visible: true,
+        });
+
+        let camera = Camera::new(Vec2::ZERO, 1280.0, 720.0);
+        let value = WebRenderBridge::to_render_value(&state, &camera, [0.0, 0.0, 0.0, 1.0]);
+
+        assert_eq!(value["commands"][0]["type"], "sprite3d");
+        assert_eq!(value["commands"][0]["texture"], "npc_sprite");
+        assert!(value["commands"][0]["visible"].as_bool().unwrap_or(false));
     }
 }
