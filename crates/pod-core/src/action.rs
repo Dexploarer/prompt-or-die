@@ -119,16 +119,202 @@ pub enum ActionResult {
 
 /// Validates an action against constraints and world state
 pub fn validate_action(
-    _action: &AgentAction,
-    _constraints: &AgentConstraints,
+    agent_action: &AgentAction,
+    constraints: &AgentConstraints,
     _tick: u64,
 ) -> ActionResult {
-    if !_constraints.can_act {
+    if !constraints.can_act {
         return ActionResult::Rejected("Agent cannot act (stunned/dead)".into());
     }
 
-    // TODO: Check cooldowns, range, line of sight, etc.
-    // These checks are IDENTICAL for human and AI agents
+    if constraints.actions_per_tick == 0 {
+        return ActionResult::Rejected("Agent cannot act this tick".into());
+    }
+
+    let rejection = validate_action_payload(&agent_action.action);
+    if let Some(reason) = rejection {
+        return ActionResult::Rejected(reason);
+    }
 
     ActionResult::Valid
+}
+
+fn validate_action_payload(action: &Action) -> Option<String> {
+    match action {
+        Action::Move { direction } => {
+            if !direction.is_finite() {
+                return Some("Move direction must be finite".into());
+            }
+            if direction.length_squared() > 2.25 {
+                return Some("Move direction magnitude too large".into());
+            }
+            None
+        }
+        Action::Rotate { angle } => {
+            if !angle.is_finite() {
+                return Some("Rotation angle must be finite".into());
+            }
+            None
+        }
+        Action::LookAt { target } => {
+            if !target.is_finite() {
+                return Some("LookAt target must be finite".into());
+            }
+            None
+        }
+        Action::Speak { message, .. } => {
+            if message.len() > 512 {
+                return Some("Speak message too long".into());
+            }
+            None
+        }
+        Action::Signal { signal_type, data } => {
+            if signal_type.is_empty() {
+                return Some("Signal type cannot be empty".into());
+            }
+            if signal_type.len() > 64 || data.len() > 256 {
+                return Some("Signal payload too long".into());
+            }
+            None
+        }
+        Action::Spawn { prefab, position } => {
+            if prefab.is_empty() {
+                return Some("Spawn prefab name cannot be empty".into());
+            }
+            if prefab.len() > 128 {
+                return Some("Spawn prefab name too long".into());
+            }
+            if !position.is_finite() {
+                return Some("Spawn position must be finite".into());
+            }
+            None
+        }
+        Action::UseAbility { slot, .. } => {
+            if *slot >= 5 {
+                return Some("Ability slot out of range".into());
+            }
+            None
+        }
+        Action::Drop { slot } | Action::UseItem { slot } => {
+            if *slot >= 8 {
+                return Some("Inventory slot out of range".into());
+            }
+            None
+        }
+        Action::AttackTarget { target }
+        | Action::InteractWith { target }
+        | Action::Pickup { target } => {
+            if target.0 == 0 {
+                return Some("Target entity id must be non-zero".into());
+            }
+            None
+        }
+        Action::Stop | Action::Attack | Action::Interact | Action::Idle => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_action, AgentAction, Action, AgentConstraints};
+    use crate::id::AgentId;
+
+    fn action(agent_id: u64, action: Action) -> AgentAction {
+        AgentAction {
+            agent_id: AgentId(agent_id),
+            tick: 1,
+            action,
+        }
+    }
+
+    #[test]
+    fn validate_action_rejects_invalid_move_vector() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(
+            1,
+            Action::Move {
+                direction: glam::Vec2::new(f32::NAN, 0.0),
+            },
+        );
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_too_fast_speak() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(1, Action::Speak {
+            message: "x".repeat(1024),
+            volume: crate::action::SpeakVolume::Normal,
+        });
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_empty_signal_type() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(1, Action::Signal {
+            signal_type: String::new(),
+            data: String::from("ok"),
+        });
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_invalid_inventory_slot() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(1, Action::Drop { slot: 9 });
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_zero_entity_target() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(
+            1,
+            Action::AttackTarget {
+                target: crate::id::EntityId(0),
+            },
+        );
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_stunned_agent() {
+        let mut constraints = AgentConstraints::default();
+        constraints.can_act = false;
+        let action = action(1, Action::Attack);
+        assert!(matches!(
+            validate_action(&action, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_accepts_valid_inputs() {
+        let constraints = AgentConstraints::default();
+        let valid = action(
+            1,
+            Action::Move {
+                direction: glam::Vec2::new(0.5, 0.5),
+            },
+        );
+        assert!(matches!(
+            validate_action(&valid, &constraints, 1),
+            super::ActionResult::Valid
+        ));
+    }
 }
