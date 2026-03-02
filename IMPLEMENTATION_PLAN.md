@@ -143,5 +143,29 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [ ] 8.4 Add plugin/extension ecosystem and versioned SDK API surface
 - [ ] 8.5 Publish benchmark suite and baseline targets (latency, frame-time, memory)
 
+## Phase 9: Bevy / Unity-Class Parity Hardening
+- [ ] 9.1 Implement plugin and app lifecycle system equivalent to Bevy `App`/`Plugin` hooks
+  - Startup/first-frame ordering, plugin registration order, schedule phase hooks
+- [ ] 9.2 Implement full schedule-driven ECS world graph
+  - Deterministic system stages, resource staging, explicit change ticks
+- [ ] 9.3 Add complete input stack
+  - Keyboard/mouse/gamepad/touch abstraction, rebinding, deadzone/curve support, action maps
+- [ ] 9.4 Add first-class UI runtime
+  - 2D UI layout primitives, text rendering pipeline, focus/input routing, screen-space anchoring
+- [ ] 9.5 Complete audio and spatial sound system
+  - Bus hierarchy, effects stack, occlusion, streaming and voice channeling
+- [ ] 9.6 Complete asset and import parity
+  - Texture atlas/array support, compression profiles, import validation, dependency graph
+- [ ] 9.7 Add reflection/introspection tooling
+  - Serializable type registry, debug scene inspector, script/editor-safe field metadata
+- [ ] 9.8 Add deterministic runtime safety
+  - Rollback determinism tests, replay validation, seed audit logs, anti-rollback drift checks
+- [ ] 9.9 Build world tooling parity
+  - Scene streaming, prefab diff/merge, prefab inheritance, editor timeline + prefab overrides
+- [ ] 9.10 Add AI coauthoring pipeline
+  - Prompt-safe scene generation, behavior authoring lint rules, tool calling contracts, policy sandbox
+- [ ] 9.11 Add platform shipping parity
+  - Hot reload in editor, CI smoke for web/native, release profile reproducibility, migration docs
+
 **Last updated**: Iteration 27
-**Current focus**: Phase 7 Milestone A
+**Current focus**: Phase 9 (Hardening Parity Backlog)
