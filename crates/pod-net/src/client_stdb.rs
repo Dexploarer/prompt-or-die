@@ -370,6 +370,20 @@ impl SpacetimeDBClient {
         Ok(())
     }
 
+    /// Claim a remote LLM slot on an entity and subscribe to player-scoped
+    /// tables for that entity.
+    ///
+    /// This uses the configured `player_name` as the display name for the
+    /// `connect_agent` reducer with `AgentType::LlmAgent`.
+    pub fn connect_llm_agent(&mut self, entity_id: u64) -> Result<(), StdbClientError> {
+        let display_name = self.inner.config().player_name.clone();
+        self.inner
+            .call_connect_llm_agent(entity_id, display_name)
+            .map_err(StdbClientError::from)?;
+        self.subscribe_for_player(entity_id)?;
+        Ok(())
+    }
+
     /// Queue an action for the next [`send_actions`](Self::send_actions) call.
     pub fn queue_action(&mut self, action: Action) {
         self.pending_actions.push(action);
@@ -1230,6 +1244,14 @@ mod tests {
         let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
         client.queue_action(Action::Idle);
         let result = client.send_actions(0);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), StdbClientError::NotConnected));
+    }
+
+    #[test]
+    fn connect_llm_agent_fails_when_disconnected() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        let result = client.connect_llm_agent(1);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), StdbClientError::NotConnected));
     }

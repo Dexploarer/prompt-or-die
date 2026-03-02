@@ -84,7 +84,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 6.2 Create interest management (spatial SQL query filtering)
 - [x] 6.3 Implement lobby system (SpacetimeDB tables + reducers)
 - [x] 6.4 Add matchmaking reducer
-- [ ] 6.5 Remote LLM agent connection via SpacetimeDB
+- [x] 6.5 Remote LLM agent connection via SpacetimeDB
 - [ ] 6.6 Spectator mode (full world subscription, read-only)
 - [ ] 6.7 World partitioning for large worlds
 - [ ] 6.8 Performance benchmarks (target: 1000 agents at 60 TPS)
@@ -93,4 +93,4 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 ---
 
 **Last updated**: Iteration 26
-**Current focus**: Begin Phase 6.5 Remote LLM agent connection via SpacetimeDB
+**Current focus**: Begin Phase 6.6 Spectator mode (full world subscription, read-only)

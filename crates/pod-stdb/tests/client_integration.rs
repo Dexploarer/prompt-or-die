@@ -199,6 +199,12 @@ fn connect_agent_fails_when_disconnected() {
 }
 
 #[test]
+fn connect_llm_agent_fails_when_disconnected() {
+    let mut client = StdbClient::new(StdbClientConfig::default());
+    assert!(client.call_connect_llm_agent(1, "Bot".into()).is_err());
+}
+
+#[test]
 fn submit_action_fails_when_disconnected() {
     let mut client = StdbClient::new(StdbClientConfig::default());
     let action = SubmittedAction::idle(1);

@@ -914,6 +914,19 @@ impl StdbClient {
         Ok(())
     }
 
+    /// Call the `connect_agent` reducer as a remote LLM player.
+    ///
+    /// This is a convenience wrapper that forces `agent_type` to
+    /// [`AgentType::LlmAgent`], so callers do not need to pass the enum
+    /// value directly.
+    pub fn call_connect_llm_agent(
+        &mut self,
+        entity_id: u64,
+        display_name: String,
+    ) -> Result<(), StdbError> {
+        self.call_connect_agent(entity_id, AgentType::LlmAgent, display_name)
+    }
+
     /// Create a new lobby owned by this client identity.
     pub fn call_create_lobby(
         &mut self,
@@ -1431,6 +1444,7 @@ mod tests {
         assert!(client.call_create_world(42, 1000.0, 1000.0, 60).is_err());
         assert!(client.call_set_paused(true).is_err());
         assert!(client.call_spawn_entity(0.0, 0.0, None).is_err());
+        assert!(client.call_connect_llm_agent(1, "Bot".into()).is_err());
         assert!(client.call_execute_tick().is_err());
         assert!(client
             .call_create_lobby("arena".into(), 1, 4, false)
