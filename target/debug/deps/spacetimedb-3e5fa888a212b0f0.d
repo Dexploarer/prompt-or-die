@@ -1,0 +1,11 @@
+/Users/home/Downloads/prompt-or-die/target/debug/deps/spacetimedb-3e5fa888a212b0f0.d: /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/lib.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/log_stopwatch.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/logger.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rng.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rt.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/table.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/../README.md
+
+/Users/home/Downloads/prompt-or-die/target/debug/deps/libspacetimedb-3e5fa888a212b0f0.rmeta: /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/lib.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/log_stopwatch.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/logger.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rng.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rt.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/table.rs /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/../README.md
+
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/lib.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/log_stopwatch.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/logger.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rng.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/rt.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/table.rs:
+/Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spacetimedb-1.12.0/src/../README.md:

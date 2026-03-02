@@ -77,10 +77,12 @@ impl World {
     /// Add an agent to the world and spawn their controlled entity
     pub fn add_agent(&mut self, agent: Box<dyn Agent>) -> (usize, hecs::Entity) {
         let entity = self.spawn_agent_entity(&agent);
+        let entity_id = crate::id::EntityId(entity.id() as u64);
         let slot_index = self.agents.len();
         let mut slot = AgentSlot::new(agent);
         slot.entity_id = Some(entity);
         slot.agent.on_join();
+        slot.agent.on_spawn(entity_id);
         self.agents.push(slot);
         (slot_index, entity)
     }

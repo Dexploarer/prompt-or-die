@@ -8,7 +8,7 @@ use crate::component::Team;
 ///
 /// For humans: this drives what's rendered on screen.
 /// For AI: this is serialized to JSON and sent to the decision backend.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Observation {
     /// Current tick number
     pub tick: u64,
@@ -35,7 +35,7 @@ pub struct Observation {
 }
 
 /// What the agent knows about itself (always full info)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SelfState {
     pub agent_id: AgentId,
     pub entity_id: EntityId,

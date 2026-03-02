@@ -287,7 +287,7 @@ fn empty_observation(tick: u64, elapsed: f32, slot: &AgentSlot) -> Observation {
 /// Execute a validated action on the world
 fn execute_action(
     ecs: &mut hecs::World,
-    agents: &[AgentSlot],
+    agents: &mut [AgentSlot],
     events: &mut EventBus,
     agent_action: &AgentAction,
 ) {
@@ -337,6 +337,33 @@ fn execute_action(
             }
             // TODO: raycast/hitbox for damage
         }
+        Action::AttackTarget { target } => {
+            let damage = 10.0; // TODO: configurable damage
+
+            // Emit attack sound from attacker
+            if let Ok(transform) = ecs.get::<&Transform>(entity) {
+                events.emit(
+                    transform.position,
+                    Event::Sound {
+                        name: "attack".into(),
+                        intensity: 1.0,
+                    },
+                );
+            }
+
+            // Apply damage and call on_damage hook on target agent
+            for slot in agents.iter_mut() {
+                if let Some(e) = slot.entity_id {
+                    if EntityId(e.id() as u64) == *target {
+                        if let Ok(mut health) = ecs.get::<&mut Health>(e) {
+                            health.current = (health.current - damage).max(0.0);
+                        }
+                        slot.agent.on_damage(damage, Some(agent_action.agent_id));
+                        break;
+                    }
+                }
+            }
+        }
         Action::Speak { message, volume } => {
             if let Ok(transform) = ecs.get::<&Transform>(entity) {
                 events.emit(
@@ -347,6 +374,39 @@ fn execute_action(
                         volume: volume.range(),
                     },
                 );
+            }
+        }
+        Action::Interact => {
+            // Find nearest entity within interaction range and interact with it
+            if let Ok(transform) = ecs.get::<&Transform>(entity) {
+                let my_pos = transform.position;
+                let mut nearest: Option<(hecs::Entity, f32)> = None;
+
+                for (other, (other_t,)) in ecs.query::<(&Transform,)>().iter() {
+                    if other == entity {
+                        continue;
+                    }
+                    let dist = my_pos.distance(other_t.position);
+                    if dist < 50.0 {
+                        if nearest.is_none() || dist < nearest.unwrap().1 {
+                            nearest = Some((other, dist));
+                        }
+                    }
+                }
+
+                if let Some((target_entity, _)) = nearest {
+                    let target_id = EntityId(target_entity.id() as u64);
+                    // Call on_interact on the acting agent
+                    if let Some(slot) = agents.iter_mut().find(|s| s.agent.id() == agent_action.agent_id) {
+                        slot.agent.on_interact(target_id);
+                    }
+                }
+            }
+        }
+        Action::InteractWith { target } => {
+            // Call on_interact on the acting agent with the specified target
+            if let Some(slot) = agents.iter_mut().find(|s| s.agent.id() == agent_action.agent_id) {
+                slot.agent.on_interact(*target);
             }
         }
         Action::Idle => {} // explicit no-op

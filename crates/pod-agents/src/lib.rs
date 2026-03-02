@@ -1,6 +1,6 @@
 //! pod-agents — Production-quality advanced agent implementations for the Prompt or Die game engine.
 //!
-//! This crate provides three main agent types with cutting-edge async decision systems:
+//! This crate provides four main agent types with cutting-edge async decision systems:
 //!
 //! 1. **LlmAgent** — LLM-powered agents (Claude, GPT, etc.) with production features:
 //!    - Double-buffered async decision queue (observe → process → ready buffer)
@@ -24,12 +24,32 @@
 //!    - Experience buffer for offline training
 //!    - Both discrete and continuous control support
 //!
+//! 4. **HybridAgent** — LLM strategic planning + Behavior Tree frame-by-frame execution:
+//!    - LLM sets high-level strategy every N ticks (configurable cadence)
+//!    - BT executes reactively every tick, reads strategy from Blackboard
+//!    - Trigger system for event-driven re-planning (health drops, new threats, etc.)
+//!    - Factory functions: `aggressive_hybrid()`, `defensive_hybrid()`
+//!
 //! All agents implement the core `Agent` trait and can be mixed freely in the world.
 //! None block the game tick loop — all decision-making is non-blocking.
 
 mod llm_agent;
 mod scripted_agent;
 mod neural_agent;
+pub mod onnx_network;
+pub mod utility_ai;
+
+// Phase 2: Enhanced Agent SDK modules
+pub mod llm_provider;
+pub mod prompt_template;
+pub mod action_parser;
+pub mod conversation_memory;
+
+// Decision logging and replay
+pub mod decision_log;
+
+// Phase 2: Hybrid agent (Task 2.11)
+pub mod hybrid_agent;
 
 pub use llm_agent::{LlmAgent, LlmAgentConfig, DecisionTrace};
 pub use scripted_agent::{
@@ -41,6 +61,29 @@ pub use scripted_agent::{
 pub use neural_agent::{
     NeuralAgent, ActionSelector, PolicyNetwork, Experience,
     RandomActionSelector, GreedyActionSelector, UniformPolicyNetwork,
+};
+
+// Phase 2 re-exports
+pub use llm_provider::{
+    LlmProvider, LlmError, CompletionRequest, CompletionResponse, TokenUsage,
+    TokenBudget, OpenAiProvider, MockProvider,
+};
+pub use prompt_template::{
+    PromptTemplate, CompactTemplate, DetailedTemplate, TacticalTemplate,
+    JsonTemplate, TemplateRegistry,
+};
+pub use action_parser::{
+    ActionParser, ActionParseResult, ActionParseError,
+    JsonActionParser, KeyValueParser, FallbackParser,
+};
+pub use conversation_memory::{
+    ConversationMemory, MemoryEntry, MemoryConfig,
+};
+
+// Phase 2: Hybrid agent re-exports (Task 2.11)
+pub use hybrid_agent::{
+    HybridAgent, HybridAgentConfig, StrategyDirective, StrategyTrigger,
+    aggressive_hybrid, defensive_hybrid,
 };
 
 /// Initialize the pod-agents module

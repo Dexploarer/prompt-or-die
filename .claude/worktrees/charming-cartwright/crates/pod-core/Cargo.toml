@@ -1,0 +1,18 @@
+[package]
+name = "pod-core"
+description = "Prompt or Die — Core engine: ECS, tick loop, agent system, events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+hecs.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+log.workspace = true
+uuid.workspace = true

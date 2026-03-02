@@ -219,8 +219,9 @@ pub struct Label {
     pub team: Team,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Team {
+    #[default]
     None,
     Team(u8),
 }

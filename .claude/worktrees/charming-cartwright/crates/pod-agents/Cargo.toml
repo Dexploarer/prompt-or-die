@@ -1,0 +1,21 @@
+[package]
+name = "pod-agents"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+onnx = ["ort", "ndarray"]
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+async-trait = "0.1"
+toon-format = "0.4"
+ort = { version = "2.0.0-rc.11", optional = true, default-features = false, features = ["ndarray"] }
+ndarray = { version = "0.17", optional = true }

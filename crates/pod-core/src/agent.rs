@@ -1,11 +1,11 @@
 use crate::action::{Action, AgentConstraints};
-use crate::id::AgentId;
+use crate::id::{AgentId, EntityId};
 use crate::observation::Observation;
 use serde::{Deserialize, Serialize};
 
 /// The type of agent — used for logging/analytics only.
 /// The engine treats all agents identically regardless of type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AgentType {
     /// Human player (input from keyboard/mouse/gamepad)
     Human,
@@ -61,6 +61,36 @@ pub trait Agent: Send {
 
     /// Called when the agent's controlled entity respawns
     fn on_respawn(&mut self) {}
+
+    /// Called when the agent's controlled entity is spawned into the world
+    fn on_spawn(&mut self, _entity_id: EntityId) {}
+
+    /// Called when the agent's controlled entity takes damage
+    fn on_damage(&mut self, _amount: f32, _source: Option<AgentId>) {}
+
+    /// Called when the agent interacts with another entity
+    fn on_interact(&mut self, _target: EntityId) {}
+
+    /// Returns a snapshot of this agent's internal state for debugging.
+    /// Override to include agent-specific details in `state_description`.
+    fn introspect(&self) -> AgentIntrospection {
+        AgentIntrospection {
+            agent_id: self.id(),
+            agent_type: self.agent_type(),
+            constraints: self.constraints().clone(),
+            state_description: String::new(),
+        }
+    }
+}
+
+/// Debugging snapshot of an agent's state.
+/// Returned by `Agent::introspect()` for logging, dev tools, and tests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentIntrospection {
+    pub agent_id: AgentId,
+    pub agent_type: AgentType,
+    pub constraints: AgentConstraints,
+    pub state_description: String,
 }
 
 /// A slot in the world that an agent occupies
@@ -126,6 +156,19 @@ impl Agent for HumanAgent {
 
     fn constraints(&self) -> &AgentConstraints { &self.constraints }
     fn constraints_mut(&mut self) -> &mut AgentConstraints { &mut self.constraints }
+
+    fn introspect(&self) -> AgentIntrospection {
+        AgentIntrospection {
+            agent_id: self.id,
+            agent_type: AgentType::Human,
+            constraints: self.constraints.clone(),
+            state_description: format!(
+                "input_buffer_len={}, has_observation={}",
+                self.input_buffer.len(),
+                self.last_observation.is_some()
+            ),
+        }
+    }
 }
 
 // ============================================================
@@ -154,4 +197,13 @@ impl Agent for IdleAgent {
     fn decide(&mut self) -> Vec<Action> { vec![Action::Idle] }
     fn constraints(&self) -> &AgentConstraints { &self.constraints }
     fn constraints_mut(&mut self) -> &mut AgentConstraints { &mut self.constraints }
+
+    fn introspect(&self) -> AgentIntrospection {
+        AgentIntrospection {
+            agent_id: self.id,
+            agent_type: AgentType::ScriptedNpc,
+            constraints: self.constraints.clone(),
+            state_description: "idle".to_string(),
+        }
+    }
 }

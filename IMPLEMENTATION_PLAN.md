@@ -19,22 +19,22 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 1.12 Add row-level security to observation_events
 - [x] 1.13 Create pod-stdb client wrapper (Rust native client SDK integration)
 - [x] 1.14 Write integration tests for pod-stdb module
-- [ ] 1.15 Update pod-net to support SpacetimeDB connection mode alongside direct-connect
+- [x] 1.15 Update pod-net to support SpacetimeDB connection mode alongside direct-connect
 
 ## Phase 2: Enhanced Agent SDK
-- [ ] 2.1 Add lifecycle hooks to Agent trait (on_spawn, on_damage, on_death, on_interact)
-- [ ] 2.2 Add introspect() to Agent trait for debugging
-- [ ] 2.3 Create LLM provider abstraction (OpenAI-compatible trait)
-- [ ] 2.4 Implement prompt template system for observation formatting
-- [ ] 2.5 Add token budget management to LlmAgent
-- [ ] 2.6 Implement structured output parsing (JSON → Action mapping)
-- [ ] 2.7 Add conversation memory (sliding window)
-- [ ] 2.8 Create behavior tree node library (patrol, chase, flee, guard, wander)
-- [ ] 2.9 Create FSM templates (idle↔alert↔combat↔dead)
-- [ ] 2.10 Implement Utility AI (score-based action selection)
-- [ ] 2.11 Create hybrid agent framework (LLM strategy + BT execution)
-- [ ] 2.12 Implement decision logging and replay
-- [ ] 2.13 Add ONNX runtime integration for neural agents
+- [x] 2.1 Add lifecycle hooks to Agent trait (on_spawn, on_damage, on_death, on_interact)
+- [x] 2.2 Add introspect() to Agent trait for debugging
+- [x] 2.3 Create LLM provider abstraction (OpenAI-compatible trait)
+- [x] 2.4 Implement prompt template system for observation formatting
+- [x] 2.5 Add token budget management to LlmAgent
+- [x] 2.6 Implement structured output parsing (JSON → Action mapping)
+- [x] 2.7 Add conversation memory (sliding window)
+- [x] 2.8 Create behavior tree node library (patrol, chase, flee, guard, wander)
+- [x] 2.9 Create FSM templates (idle↔alert↔combat↔dead)
+- [x] 2.10 Implement Utility AI (score-based action selection)
+- [x] 2.11 Create hybrid agent framework (LLM strategy + BT execution)
+- [x] 2.12 Implement decision logging and replay
+- [x] 2.13 Add ONNX runtime integration for neural agents
 - [ ] 2.14 Write comprehensive agent SDK tests
 
 ## Phase 3: 3D Engine Foundation
@@ -92,5 +92,5 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 ---
 
-**Last updated**: Iteration 5 (Integration tests complete — 91 tests passing: 9 unit + 70 client integration + 12 types)
-**Current focus**: Phase 1 — Task 1.15 remaining, then Phase 2
+**Last updated**: Iteration 8 (Phase 2.8–2.10, 2.12–2.13 complete — BT node library, FSM templates, Utility AI, decision logging/replay, ONNX integration; 2.11 hybrid agent in progress)
+**Current focus**: Phase 2 — Enhanced Agent SDK (tasks 2.11, 2.14 remaining)

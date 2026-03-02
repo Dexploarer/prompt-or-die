@@ -1,0 +1,51 @@
+[package]
+name = "pod-stdb"
+description = "SpacetimeDB 2.0 integration for Prompt or Die — tables, reducers, and client bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# cdylib for SpacetimeDB WASM module compilation
+# rlib for use as a Rust library dependency within the workspace
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Default includes the SpacetimeDB WASM module (tables, reducers, events, observation).
+# Disable defaults for client-only builds: --no-default-features --features client
+default = ["module"]
+# SpacetimeDB WASM module — tables, reducers, events, observation.
+# Links against WASM host imports; cannot be used in native test binaries.
+# Use `spacetime test` for module tests instead of `cargo test`.
+module = [
+    "dep:spacetimedb",
+    "dep:glam",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:rand",
+    "dep:rand_chacha",
+]
+# Enable SpacetimeDB unstable features (client_visibility_filter for RLS).
+# Activate when the SpacetimeDB SDK supports the unstable API.
+unstable = ["module"]
+# Enable the native Rust client wrapper (StdbClient, event types, cached state).
+# Excluded from WASM module compilation — use only in native targets (pod-net, pod-server).
+client = []
+
+[dependencies]
+# Core dep for WASM module — optional, gated behind "module" feature.
+# The spacetimedb crate links against WASM host functions that cannot be resolved
+# on native arm64/x86 test binaries. Making it optional allows client-only builds
+# to compile and test without pulling in WASM symbols.
+spacetimedb = { workspace = true, optional = true }
+# Logging — used by both module and client code (no WASM symbols)
+log = { workspace = true }
+# Module-only dependencies (only needed by tables/reducers/events/observation)
+glam = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+
+[dev-dependencies]
