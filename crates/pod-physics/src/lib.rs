@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 use hecs::World;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use nalgebra::Vector2;
 use rapier2d::dynamics::{IntegrationParameters, IslandManager, RigidBodyHandle, RigidBodySet};
 use rapier2d::geometry::{
@@ -83,8 +83,6 @@ impl PhysicsWorld {
     pub fn new() -> Self {
         let mut params = IntegrationParameters::default();
         params.dt = 1.0 / 60.0; // 60 FPS fixed timestep
-        params.max_cfl = 0.6;
-        params.max_penetration_correction = 0.3;
 
         Self {
             bodies: RigidBodySet::new(),
@@ -295,8 +293,9 @@ impl PhysicsWorld {
             &mut self.impulse_joints,
             &mut self.multibody_joints,
             &mut self.ccd_solver,
-            None, // prediction - use default
-            &(),  // user data
+            &mut self.query_pipeline,
+            &(),
+            &(),
         );
 
         // Record current contacts from contact pairs
@@ -346,18 +345,20 @@ impl PhysicsWorld {
         // Apply updates by querying for matching entities in hecs
         for (target_entity_id, transform, velocity) in updates {
             // Find the hecs entity with matching ID
-            for (hecs_entity, _) in hecs_world.query::<()>().iter() {
-                if hecs_entity.id() == target_entity_id.0 {
-                    if let Ok(mut ent) = hecs_world.entity(hecs_entity) {
-                        if let Err(e) = ent.insert(transform) {
-                            warn!("Failed to update Transform for {}: {:?}", target_entity_id, e);
-                        }
-                        if let Err(e) = ent.insert(velocity) {
-                            warn!("Failed to update Velocity for {}: {:?}", target_entity_id, e);
-                        }
-                    }
-                    break;
-                }
+            let Some(hecs_entity) = hecs_world.find_entity_from_id(target_entity_id.0) else {
+                continue;
+            };
+
+            if let Ok(mut existing_transform) = hecs_world.get_mut::<Transform>(hecs_entity) {
+                *existing_transform = transform;
+            } else {
+                let _ = hecs_world.insert_one(hecs_entity, transform);
+            }
+
+            if let Ok(mut existing_velocity) = hecs_world.get_mut::<Velocity>(hecs_entity) {
+                *existing_velocity = velocity;
+            } else {
+                let _ = hecs_world.insert_one(hecs_entity, velocity);
             }
         }
 

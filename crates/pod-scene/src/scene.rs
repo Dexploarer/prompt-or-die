@@ -208,14 +208,13 @@ impl Scene {
     }
 
     /// Serialize scene to binary (bincode)
-    pub fn to_binary(&self) -> Result<Vec<u8>, Box<bincode::error::EncodeError>> {
-        bincode::encode_to_vec(self, bincode::config::standard())
+    pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
     }
 
     /// Deserialize scene from binary
-    pub fn from_binary(data: &[u8]) -> Result<Self, Box<bincode::error::DecodeError>> {
-        let (scene, _) = bincode::decode_from_slice(data, bincode::config::standard())?;
-        Ok(scene)
+    pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
+        bincode::deserialize(data)
     }
 }
 
@@ -259,9 +258,10 @@ impl SceneManager {
     /// Create a new scene
     pub fn create_scene(&mut self, name: impl Into<String>) -> &mut Scene {
         let name_str = name.into();
+        let name_for_new = name_str.clone();
         self.scenes
             .entry(name_str)
-            .or_insert_with(|| Scene::new(&name_str))
+            .or_insert_with(|| Scene::new(&name_for_new))
     }
 
     /// Activate a scene

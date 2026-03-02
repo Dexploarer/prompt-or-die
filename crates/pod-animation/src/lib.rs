@@ -25,7 +25,6 @@ pub use blending::{blend_transforms, AdditiveBlend, CrossfadeBlend, BlendNode};
 pub use tween::{Tween, TweenTarget, TweenBuilder};
 
 use hecs::World;
-use pod_core::TICK_DURATION_SECS;
 
 pub fn init() {
     log::info!("{} initialized — Animation system ready", env!("CARGO_PKG_NAME"));
@@ -73,7 +72,7 @@ fn update_animation_players(world: &mut World, dt: f32) {
 
     // Apply sampled values to components
     for (entity, samples) in updates {
-        if let Ok(mut transform) = world.get_mut::<pod_core::Transform>(entity) {
+        if let Ok(transform) = world.query_one_mut::<&mut pod_core::Transform>(entity) {
             if let Some(pos) = samples.position {
                 transform.position = pos;
             }
@@ -85,7 +84,7 @@ fn update_animation_players(world: &mut World, dt: f32) {
             }
         }
 
-        if let Ok(mut sprite) = world.get_mut::<pod_core::Sprite>(entity) {
+        if let Ok(sprite) = world.query_one_mut::<&mut pod_core::Sprite>(entity) {
             if let Some(color) = samples.color {
                 sprite.color = color;
             }
@@ -94,7 +93,7 @@ fn update_animation_players(world: &mut World, dt: f32) {
             }
         }
 
-        if let Ok(mut rect) = world.get_mut::<pod_core::ColorRect>(entity) {
+        if let Ok(rect) = world.query_one_mut::<&mut pod_core::ColorRect>(entity) {
             if let Some(color) = samples.color {
                 rect.color = color;
             }
@@ -113,9 +112,9 @@ fn update_state_machines(world: &mut World, dt: f32) {
 
     // Apply state machine results to animation players
     for (entity, state_player) in state_updates {
-        if let Ok(mut anim_player) = world.get_mut::<AnimationPlayer>(entity) {
+        if let Ok(anim_player) = world.query_one_mut::<&mut AnimationPlayer>(entity) {
             if let Some(clip) = state_player.get_current_clip() {
-                anim_player.play(clip.clone());
+                anim_player.play(clip);
             }
         }
     }
@@ -145,15 +144,15 @@ fn update_tweens(world: &mut World, dt: f32) {
 
     // Remove completed tweens
     for entity in completed {
-        let _ = world.remove::<Tween>(entity);
+        let _ = world.remove_one::<Tween>(entity);
     }
 }
 
 /// Apply a tween's interpolated value to the target entity
-fn apply_tween(world: &World, entity: hecs::Entity, tween: &Tween, t: f32) {
+fn apply_tween(world: &mut World, entity: hecs::Entity, tween: &Tween, t: f32) {
     match &tween.target {
         TweenTarget::Position => {
-            if let Ok(mut transform) = world.get_mut::<pod_core::Transform>(entity) {
+            if let Ok(transform) = world.query_one_mut::<&mut pod_core::Transform>(entity) {
                 let start = tween.start_value;
                 let end = tween.end_value;
                 transform.position = glam::Vec2::new(
@@ -163,18 +162,18 @@ fn apply_tween(world: &World, entity: hecs::Entity, tween: &Tween, t: f32) {
             }
         }
         TweenTarget::Rotation => {
-            if let Ok(mut transform) = world.get_mut::<pod_core::Transform>(entity) {
+            if let Ok(transform) = world.query_one_mut::<&mut pod_core::Transform>(entity) {
                 transform.rotation = tween.start_value + (tween.end_value - tween.start_value) * t;
             }
         }
         TweenTarget::Scale => {
-            if let Ok(mut transform) = world.get_mut::<pod_core::Transform>(entity) {
+            if let Ok(transform) = world.query_one_mut::<&mut pod_core::Transform>(entity) {
                 let factor = tween.start_value + (tween.end_value - tween.start_value) * t;
                 transform.scale = glam::Vec2::splat(factor);
             }
         }
         TweenTarget::Color => {
-            if let Ok(mut sprite) = world.get_mut::<pod_core::Sprite>(entity) {
+            if let Ok(sprite) = world.query_one_mut::<&mut pod_core::Sprite>(entity) {
                 let start = tween.start_value;
                 let end = tween.end_value;
                 let val = start + (end - start) * t;
@@ -182,12 +181,12 @@ fn apply_tween(world: &World, entity: hecs::Entity, tween: &Tween, t: f32) {
             }
         }
         TweenTarget::Alpha => {
-            if let Ok(mut sprite) = world.get_mut::<pod_core::Sprite>(entity) {
+            if let Ok(sprite) = world.query_one_mut::<&mut pod_core::Sprite>(entity) {
                 sprite.color[3] = tween.start_value + (tween.end_value - tween.start_value) * t;
             }
         }
         TweenTarget::SpriteFrame => {
-            if let Ok(mut sprite) = world.get_mut::<pod_core::Sprite>(entity) {
+            if let Ok(sprite) = world.query_one_mut::<&mut pod_core::Sprite>(entity) {
                 let frame = (tween.start_value + (tween.end_value - tween.start_value) * t) as u32;
                 sprite.frame = frame;
             }

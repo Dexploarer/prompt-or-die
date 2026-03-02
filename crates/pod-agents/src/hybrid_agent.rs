@@ -50,8 +50,6 @@
 //! | `"reasoning"`      | String  | LLM's reasoning (for logging/debug)         |
 
 use std::sync::{mpsc, Arc};
-use std::time::Instant;
-
 use glam::Vec2;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
@@ -65,7 +63,8 @@ use crate::conversation_memory::{ConversationMemory, MemoryConfig};
 use crate::llm_provider::{CompletionRequest, LlmProvider, MockProvider, TokenBudget};
 use crate::scripted_agent::{
     Blackboard, BehaviorNode, BehaviorStatus, BehaviorTree,
-    attack_nearest, chase_nearest_hostile, flee_from, guard, patrol, wander,
+    attack_nearest as _attack_nearest, chase_nearest_hostile as _chase_nearest_hostile,
+    flee_from as _flee_from, guard as _guard, patrol as _patrol, wander as _wander,
 };
 
 // ============================================================

@@ -36,7 +36,7 @@
 //! agent.add_scorer(Box::new(AttackNearestHostileScorer::default()));
 //! ```
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::VecDeque;
 use glam::Vec2;
 use pod_core::{
     Action, AgentConstraints, AgentId, AgentIntrospection, AgentType, EntityId,

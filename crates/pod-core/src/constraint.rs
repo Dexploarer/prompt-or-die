@@ -9,7 +9,6 @@
 //! - Three-stage validation pipeline for clarity and extensibility
 
 use crate::action::{Action, AgentConstraints};
-use crate::id::AgentId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

@@ -25,11 +25,11 @@ pub struct NativeClient {
     config: ProtoClientConfig,
     client_id: Option<ClientId>,
     connection: Option<quinn::Connection>,
-    endpoint: Endpoint,
+    _endpoint: Endpoint,
     /// Channel for receiving server messages
     rx: mpsc::Receiver<ServerMessage>,
     /// Channel for sending server messages (internal)
-    tx: mpsc::Sender<ServerMessage>,
+    _tx: mpsc::Sender<ServerMessage>,
     /// Buffered server updates
     pending_updates: Vec<ServerMessage>,
     /// Local prediction world state
@@ -81,9 +81,9 @@ impl NativeClient {
             config,
             client_id: None,
             connection: Some(connection),
-            endpoint,
+            _endpoint: endpoint,
             rx,
-            tx,
+            _tx: tx,
             pending_updates: Vec::new(),
             local_snapshot: None,
             pending_actions: Vec::new(),

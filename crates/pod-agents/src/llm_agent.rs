@@ -23,7 +23,9 @@ use log::{debug, warn, error};
 use crate::llm_provider::{
     CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage,
 };
-use crate::prompt_template::{CompactTemplate, PromptTemplate, ToonTemplate};
+use crate::prompt_template::{PromptTemplate, ToonTemplate};
+#[cfg(test)]
+use crate::prompt_template::CompactTemplate;
 use crate::action_parser::{ActionParser, FallbackParser};
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
 
@@ -83,6 +85,7 @@ pub struct DecisionTrace {
 struct LlmResult {
     actions: Vec<Action>,
     reasoning: String,
+    #[allow(dead_code)]
     raw_response: String,
     usage: Option<TokenUsage>,
     trace: Option<DecisionTrace>,

@@ -90,7 +90,58 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 6.8 Performance benchmarks (target: 1000 agents at 60 TPS)
 - [x] 6.9 Write networking integration tests
 
----
+## Phase 7: Full Engine Parity Platform (2D/2.5D/3D + AI Tooling)
+- [ ] 7.1 Define and implement browser-first runtime contract for native and web renderer backends
+  - Stable frame loop, fixed timestep simulation, input abstraction (keyboard/mouse/touch/gamepad), deterministic world stepping
+  - Determinism tests across desktop + browser CI
+- [ ] 7.2 Build first-class 2D framework beyond sprite/text primitives
+  - Tilemap + Tiled JSON importer
+  - Camera systems (follow, lerp, dead-zone, parallax)
+  - Animation playback for sprites (single frame + atlased + timelines)
+  - Font/text rendering and canvas-independent UI primitives
+- [ ] 7.3 Complete 2.5D projection system
+  - Depth-layer policy for mixed 2D/3D sprites
+  - Occlusion and ordering rules across 2D, 3D, and 2.5D
+  - Billboard/oriented sprites in full transform graph
+- [ ] 7.4 Complete 3D runtime baseline
+  - Material/pbr basics (PBR texture channels + uniform blocks)
+- [ ] 7.5 Build platform-grade scene system
+  - Scene graph + prefab + inheritance
+  - Addressable entity references, prefab overrides, prefab diff/merge
+  - Scene streaming for large worlds
+- [ ] 7.6 Add game-dev-grade audio and FX stack
+  - SFX/ambient/voice channels, mixer bus routing, positional audio, cue-based playback
+  - Post-processing presets for camera and color correction
+- [ ] 7.7 Add complete animation + state machinery
+  - Animator state graph, timelines, events, blend trees
+  - Root-motion support and state transitions with blend duration
+- [ ] 7.8 Add physics + navigation parity
+  - 2D and 3D colliders, dynamic/static rigid bodies, raycasts
+  - Simple navmesh generation + obstacle updates + movement agent integration
+- [ ] 7.9 Deliver browser-first editor and debug tooling
+  - World scene graph inspector, component editor, transform gizmos, profiler overlay
+  - Replay/recording and AI observation tape player
+- [ ] 7.10 AI-native game-dev toolchain
+  - Behavior authoring templates for agents (combat, exploration, utility use)
+  - Observation schema/versioned prompts, deterministic tool calling, action schema validation
+  - Guardrails and sandboxed tool policies
+- [ ] 7.11 Build deployment and distribution layer
+  - One-command browser build (WASM + assets), PWA/offline cache manifests
+  - Multiplayer host profile presets (single-player, small coop, scale host)
 
-**Last updated**: Iteration 26
-**Current focus**: Phase 6 complete; ready for next roadmap item
+### Phase 7 Milestone A (Immediate next iteration)
+- [x] 7.12 Resolve 2.5D edge-case matrix (cycle-safe parenting, mixed-layer ordering, parented projection fallback)
+- [x] 7.13 Finalize mixed-mode API contract (`RenderItem`, `DrawType`, depth key rules) and add docs
+- [x] 7.14 Add scene-level transform provenance metadata for editor debugging
+- [ ] 7.15 Add browser render compatibility checks in CI (headless wgpu + feature checks)
+- [ ] 7.16 Draft public platform docs: architecture, plugin model, agent integration contract
+
+## Phase 8: Shipping Parity
+- [ ] 8.1 Create importers and authoring workflows for major Unity/Godot style assets
+- [ ] 8.2 Add gameplay sample suite (2D, 2.5D, 3D, isometric, FPS, top-down, RPG)
+- [ ] 8.3 Add multiplayer reliability toolkit (interpolation, rewind, rollback, catch-up recovery)
+- [ ] 8.4 Add plugin/extension ecosystem and versioned SDK API surface
+- [ ] 8.5 Publish benchmark suite and baseline targets (latency, frame-time, memory)
+
+**Last updated**: Iteration 27
+**Current focus**: Phase 7 Milestone A

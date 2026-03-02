@@ -21,7 +21,7 @@ pub use pod_core::{Collider, ColliderShape, Transform};
 // ============================================================
 
 /// A 2D point in the R-tree spatial index
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RTreePoint {
     pub entity_id: u64,
     pub x: f32,
@@ -33,7 +33,7 @@ impl rstar::Point for RTreePoint {
     type Scalar = f32;
     const DIMENSIONS: usize = 2;
 
-    fn generate(dimension: usize, generator: impl Fn(usize) -> Self::Scalar) -> Self {
+    fn generate(mut generator: impl FnMut(usize) -> Self::Scalar) -> Self {
         let x = generator(0);
         let y = generator(1);
         Self {
@@ -56,7 +56,7 @@ impl rstar::Point for RTreePoint {
         match index {
             0 => &mut self.x,
             1 => &mut self.y,
-            _ => &mut self.radius, // fallback, shouldn't happen
+            _ => unreachable!("RTreePoint supports only 2 dimensions"),
         }
     }
 }
@@ -73,7 +73,7 @@ pub struct SpatialQueryResult {
 #[derive(Clone, Debug)]
 pub struct SpatialIndex {
     tree: rstar::RTree<RTreePoint>,
-    entity_positions: HashMap<u64, Vec2>,
+    entity_positions: HashMap<u64, RTreePoint>,
 }
 
 impl Default for SpatialIndex {
@@ -93,14 +93,15 @@ impl SpatialIndex {
 
     /// Insert or update an entity in the index
     pub fn insert(&mut self, entity_id: u64, position: Vec2, radius: f32) {
-        self.entity_positions.insert(entity_id, position);
-
         let point = RTreePoint {
             entity_id,
             x: position.x,
             y: position.y,
             radius,
         };
+        if let Some(previous) = self.entity_positions.insert(entity_id, point) {
+            self.tree.remove(&previous);
+        }
 
         // Use rstar's insert method for O(log n) insertion
         self.tree.insert(point);
@@ -108,14 +109,8 @@ impl SpatialIndex {
 
     /// Remove an entity from the index
     pub fn remove(&mut self, entity_id: u64) -> bool {
-        if let Some(pos) = self.entity_positions.remove(&entity_id) {
+        if let Some(point) = self.entity_positions.remove(&entity_id) {
             // Remove from R-tree as well
-            let point = RTreePoint {
-                entity_id,
-                x: pos.x,
-                y: pos.y,
-                radius: 0.0,
-            };
             self.tree.remove(&point);
             true
         } else {
@@ -132,12 +127,23 @@ impl SpatialIndex {
 
         let mut results = Vec::new();
 
-        for point in self.tree.locate_in_envelope_intersecting(&[
-            (min_x, max_x),
-            (min_y, max_y),
-        ]) {
-            let pos = self.entity_positions.get(&point.entity_id).copied();
-            if let Some(pos) = pos {
+        let envelope = rstar::AABB::from_corners(
+            RTreePoint {
+                entity_id: 0,
+                x: min_x,
+                y: min_y,
+                radius: 0.0,
+            },
+            RTreePoint {
+                entity_id: 0,
+                x: max_x,
+                y: max_y,
+                radius: 0.0,
+            },
+        );
+        for point in self.tree.locate_in_envelope_intersecting(&envelope) {
+            if let Some(stored) = self.entity_positions.get(&point.entity_id).copied() {
+                let pos = Vec2::new(stored.x, stored.y);
                 let dist = center.distance(pos);
                 if dist <= radius {
                     results.push(SpatialQueryResult {
@@ -155,11 +161,22 @@ impl SpatialIndex {
 
     /// Query all entities in a rectangular region
     pub fn query_rect(&self, min: Vec2, max: Vec2) -> Vec<u64> {
+        let envelope = rstar::AABB::from_corners(
+            RTreePoint {
+                entity_id: 0,
+                x: min.x,
+                y: min.y,
+                radius: 0.0,
+            },
+            RTreePoint {
+                entity_id: 0,
+                x: max.x,
+                y: max.y,
+                radius: 0.0,
+            },
+        );
         self.tree
-            .locate_in_envelope_intersecting(&[
-                (min.x, max.x),
-                (min.y, max.y),
-            ])
+            .locate_in_envelope_intersecting(&envelope)
             .map(|p| p.entity_id)
             .collect()
     }
@@ -178,11 +195,11 @@ impl SpatialIndex {
             .nearest_neighbor_iter(&point)
             .take(count)
             .filter_map(|p| {
-                self.entity_positions.get(&p.entity_id).map(|&pos| {
+                self.entity_positions.get(&p.entity_id).map(|stored| {
                     SpatialQueryResult {
                         entity_id: p.entity_id,
-                        position: pos,
-                        distance: position.distance(pos),
+                        position: Vec2::new(stored.x, stored.y),
+                        distance: position.distance(Vec2::new(stored.x, stored.y)),
                     }
                 })
             })
@@ -196,13 +213,8 @@ impl SpatialIndex {
     pub fn rebuild(&mut self) {
         let points: Vec<RTreePoint> = self
             .entity_positions
-            .iter()
-            .map(|(&entity_id, &pos)| RTreePoint {
-                entity_id,
-                x: pos.x,
-                y: pos.y,
-                radius: 0.0,
-            })
+            .values()
+            .copied()
             .collect();
 
         self.tree = rstar::RTree::bulk_load(points);
@@ -214,7 +226,24 @@ impl SpatialIndex {
 
         for (id, (transform, _collider)) in world.query::<(&Transform, &Collider)>().iter() {
             let entity_id = id.id() as u64;
-            self.entity_positions.insert(entity_id, transform.position);
+            let radius = match _collider.shape {
+                ColliderShape::Circle { radius } => radius,
+                ColliderShape::Box {
+                    half_width,
+                    half_height,
+                } => (half_width * half_width + half_height * half_height).sqrt(),
+                ColliderShape::Capsule { half_height, radius } => half_height.abs() + radius,
+            };
+
+            self.entity_positions.insert(
+                entity_id,
+                RTreePoint {
+                    entity_id,
+                    x: transform.position.x,
+                    y: transform.position.y,
+                    radius,
+                },
+            );
         }
 
         self.rebuild();
@@ -222,7 +251,9 @@ impl SpatialIndex {
 
     /// Get the current position of an entity if it exists
     pub fn get_position(&self, entity_id: u64) -> Option<Vec2> {
-        self.entity_positions.get(&entity_id).copied()
+        self.entity_positions
+            .get(&entity_id)
+            .map(|point| Vec2::new(point.x, point.y))
     }
 
     /// Clear all entities from the index
@@ -411,7 +442,7 @@ pub struct NavMesh {
     /// Bounds of the walkable area
     bounds: (Vec2, Vec2),
     /// Grid resolution for walkability queries
-    grid_resolution: f32,
+    pub grid_resolution: f32,
 }
 
 impl NavMesh {

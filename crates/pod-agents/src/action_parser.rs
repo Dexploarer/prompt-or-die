@@ -8,10 +8,10 @@
 //!
 //! All parsers are fallible — unknown or malformed responses degrade gracefully to Idle.
 
-use pod_core::action::{Action, AbilityTarget, SpeakVolume};
+use pod_core::action::{Action, SpeakVolume};
 use pod_core::id::EntityId;
 use glam::Vec2;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use log::{debug, warn};
 use std::collections::HashMap;
 

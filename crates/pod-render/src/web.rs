@@ -31,6 +31,8 @@ pub struct RenderCommand {
     pub z: Option<f32>,
     pub layer: i32,
     pub visible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_entity: Option<u32>,
 }
 
 /// Camera state for JS side
@@ -102,6 +104,7 @@ impl WebRenderBridge {
                     frame: None,
                     layer: item.layer,
                     visible: item.visible,
+                    source_entity: item.source_entity,
                 },
                 DrawType::Sprite {
                     texture,
@@ -125,6 +128,7 @@ impl WebRenderBridge {
                     z: None,
                     layer: item.layer,
                     visible: item.visible,
+                    source_entity: item.source_entity,
                 },
                 DrawType::Mesh3D {
                     mesh,
@@ -149,6 +153,7 @@ impl WebRenderBridge {
                     z: Some(transform.position[2]),
                     layer: item.layer,
                     visible: item.visible,
+                    source_entity: item.source_entity,
                 },
                 DrawType::Sprite3D {
                     texture,
@@ -174,6 +179,7 @@ impl WebRenderBridge {
                     z: Some(transform.position[2]),
                     layer: item.layer,
                     visible: item.visible,
+                    source_entity: item.source_entity,
                 },
             };
             commands.push(command);
@@ -225,6 +231,7 @@ impl WebRenderBridge {
                     },
                     "alpha": color[3],
                     "layer": item.layer,
+                    "source_entity": item.source_entity,
                 }),
                 DrawType::Sprite {
                     texture,
@@ -248,6 +255,7 @@ impl WebRenderBridge {
                     },
                     "alpha": tint[3],
                     "layer": item.layer,
+                    "source_entity": item.source_entity,
                 }),
                 DrawType::Mesh3D {
                     mesh,
@@ -274,6 +282,7 @@ impl WebRenderBridge {
                     "material": material,
                     "layer": item.layer,
                     "visible": item.visible,
+                    "source_entity": item.source_entity,
                 }),
                 DrawType::Sprite3D {
                     texture,
@@ -308,6 +317,7 @@ impl WebRenderBridge {
                     "alpha": tint[3],
                     "layer": item.layer,
                     "visible": item.visible,
+                    "source_entity": item.source_entity,
                 }),
             };
             commands.push(command);
@@ -405,6 +415,7 @@ mod tests {
                 color: [1.0, 0.0, 0.0, 1.0],
             },
             visible: true,
+            source_entity: Some(101),
         });
 
         let camera = Camera::new(Vec2::ZERO, 1280.0, 720.0);
@@ -413,6 +424,7 @@ mod tests {
         assert!(json.contains("\"type\":\"rect\""));
         assert!(json.contains("\"x\":100"));
         assert!(json.contains("\"y\":200"));
+        assert!(json.contains("\"source_entity\":101"));
     }
 
     #[test]
@@ -429,6 +441,7 @@ mod tests {
                 tint: [1.0, 1.0, 1.0, 1.0],
             },
             visible: true,
+            source_entity: Some(202),
         });
 
         let camera = Camera::new(Vec2::new(100.0, 100.0), 1280.0, 720.0);
@@ -437,6 +450,7 @@ mod tests {
         assert_eq!(value["camera"]["zoom"], 1.0);
         assert_eq!(value["commands"][0]["type"], "sprite");
         assert_eq!(value["commands"][0]["texture"], "player");
+        assert_eq!(value["commands"][0]["source_entity"], 202);
     }
 
     #[test]
@@ -459,6 +473,7 @@ mod tests {
                 billboard: true,
             },
             visible: true,
+            source_entity: Some(303),
         });
 
         let camera = Camera::new(Vec2::ZERO, 1280.0, 720.0);
@@ -467,5 +482,6 @@ mod tests {
         assert_eq!(value["commands"][0]["type"], "sprite3d");
         assert_eq!(value["commands"][0]["texture"], "npc_sprite");
         assert!(value["commands"][0]["visible"].as_bool().unwrap_or(false));
+        assert_eq!(value["commands"][0]["source_entity"], 303);
     }
 }

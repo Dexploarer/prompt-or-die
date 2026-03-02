@@ -42,7 +42,7 @@ pub trait PolicyNetwork: Send {
 pub struct UniformPolicyNetwork;
 
 impl PolicyNetwork for UniformPolicyNetwork {
-    fn forward(&self, features: &[f32]) -> Vec<f32> {
+    fn forward(&self, _features: &[f32]) -> Vec<f32> {
         vec![1.0 / ACTION_COUNT as f32; ACTION_COUNT]
     }
 }

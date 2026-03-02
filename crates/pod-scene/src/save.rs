@@ -67,14 +67,13 @@ impl SaveData {
     }
 
     /// Serialize to binary
-    pub fn to_binary(&self) -> Result<Vec<u8>, Box<bincode::error::EncodeError>> {
-        bincode::encode_to_vec(self, bincode::config::standard())
+    pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
     }
 
     /// Deserialize from binary
-    pub fn from_binary(data: &[u8]) -> Result<Self, Box<bincode::error::DecodeError>> {
-        let (save, _) = bincode::decode_from_slice(data, bincode::config::standard())?;
-        Ok(save)
+    pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
+        bincode::deserialize(data)
     }
 
     fn get_timestamp() -> String {
@@ -328,7 +327,7 @@ mod tests {
         let path = manager.save(&save).unwrap();
         assert!(path.exists());
 
-        let loaded = manager.load("TestSave_*.json").ok();
+        let _loaded = manager.load("TestSave_*.json").ok();
         // Note: filename format includes UUID, so we'd need to list to get exact name
     }
 

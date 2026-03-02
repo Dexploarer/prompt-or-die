@@ -9,7 +9,7 @@
 //!   4. Physics/Movement (velocity integration)
 //!   5. Flush Events (broadcast to listeners)
 
-use spacetimedb::{ReducerContext, Table};
+use spacetimedb::{Identity, ReducerContext, Table};
 use crate::tables::*;
 use crate::events::*;
 use crate::types::*;

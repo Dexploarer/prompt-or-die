@@ -11,10 +11,7 @@
 //! only about game logic and network I/O.
 
 use log::{error, info, warn};
-use pod_core::{
-    agent::{Agent, IdleAgent},
-    World, TICKS_PER_SECOND,
-};
+use pod_core::{IdleAgent, World};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -247,7 +244,7 @@ use stats::ServerStats;
 // ============================================================================
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize logging
     if let Err(e) = env_logger::builder()
         .target(env_logger::Target::Stdout)
@@ -315,7 +312,7 @@ async fn run_game_loop(
     config: &ServerConfig,
     stats: &mut ServerStats,
     shutdown_flag: &Arc<AtomicBool>,
-) -> anyhow::Result<()> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tick_duration = Duration::from_secs_f32(1.0 / config.tick_rate as f32);
     let mut last_stats_print = Instant::now();
 

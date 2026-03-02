@@ -133,11 +133,11 @@ impl AnimStateParameters {
         self.floats.get(name).copied()
     }
 
-    fn get_trigger(&self, name: &str) -> bool {
+    pub fn get_trigger(&self, name: &str) -> bool {
         self.bools.get(&format!("_trigger_{}", name)).copied().unwrap_or(false)
     }
 
-    fn clear_trigger(&mut self, name: &str) {
+    pub fn clear_trigger(&mut self, name: &str) {
         self.bools.remove(&format!("_trigger_{}", name));
     }
 }

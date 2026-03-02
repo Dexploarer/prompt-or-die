@@ -172,14 +172,16 @@ impl NativeRenderer {
     pub async fn new(config: WindowConfig) -> Result<(Self, EventLoop<()>), String> {
         let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {e}"))?;
 
-        let window = event_loop
-            .create_window(
+        let window = {
+            #[allow(deprecated)]
+            event_loop.create_window(
                 Window::default_attributes()
                     .with_title(&config.title)
                     .with_inner_size(PhysicalSize::new(config.width, config.height))
                     .with_resizable(config.resizable),
             )
-            .map_err(|e| format!("Failed to create window: {e}"))?;
+        }
+        .map_err(|e| format!("Failed to create window: {e}"))?;
         window.set_fullscreen(if config.fullscreen {
             Some(Fullscreen::Borderless(None))
         } else {

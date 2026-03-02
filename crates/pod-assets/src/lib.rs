@@ -376,7 +376,7 @@ type ReprocessCallback = dyn Fn(&mut AssetCache, &Path, &Path) -> Result<AssetIm
 
 /// Watches source asset paths and triggers re-import when they change on disk.
 pub struct AssetHotReloader {
-    watcher: RecommendedWatcher,
+    _watcher: RecommendedWatcher,
     events: mpsc::Receiver<AssetWatchEvent>,
     cache: Arc<Mutex<AssetCache>>,
     output_root: PathBuf,
@@ -440,7 +440,7 @@ impl AssetHotReloader {
         }
 
         Ok(Self {
-            watcher,
+            _watcher: watcher,
             events: event_rx,
             cache,
             output_root: output_root.as_ref().to_path_buf(),

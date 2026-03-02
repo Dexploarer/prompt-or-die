@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use pod_core::{Action, World};
 
-use crate::protocol::{ClientId, ClientMessage, ServerConfig as ProtoServerConfig, ServerMessage};
+use crate::protocol::{ClientId, ServerConfig as ProtoServerConfig, ServerMessage};
 use crate::snapshot::{StateDelta, WorldSnapshot};
 
 // ============================================================
@@ -23,20 +23,21 @@ use crate::snapshot::{StateDelta, WorldSnapshot};
 
 /// Tracks a connected client and their session
 struct ClientSession {
-    id: ClientId,
-    player_name: String,
-    tick_joined: u64,
-    last_snapshot_tick: u64,
+    _id: ClientId,
+    _player_name: String,
+    _tick_joined: u64,
+    _last_snapshot_tick: u64,
     pending_actions: Vec<(u64, Action)>, // (tick, action)
 }
 
 impl ClientSession {
+    #[allow(dead_code)]
     fn new(id: ClientId, player_name: String, tick: u64) -> Self {
         Self {
-            id,
-            player_name,
-            tick_joined: tick,
-            last_snapshot_tick: tick,
+            _id: id,
+            _player_name: player_name,
+            _tick_joined: tick,
+            _last_snapshot_tick: tick,
             pending_actions: Vec::new(),
         }
     }

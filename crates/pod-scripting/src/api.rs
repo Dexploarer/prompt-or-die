@@ -1,7 +1,7 @@
 //! Script API — functions exposed to Lua scripts
 
 use glam::Vec2;
-use mlua::{Function, Lua, Table, Value};
+use mlua::{Lua, Table};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -96,7 +96,7 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
     let world_table = lua.create_table()?;
 
     // world.spawn(type, x, y) -> entity_id
-    let spawn = lua.create_function(|_, (type_name, x, y): (String, f32, f32)| {
+    let spawn = lua.create_function(|_, (_type_name, x, y): (String, f32, f32)| {
         // TODO: Implement actual entity spawning in the world system
         // Returns a dummy ID — actual spawn happens outside
         Ok(0u64)
@@ -124,7 +124,7 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
     let events_table = lua.create_table()?;
 
     // events.emit(name, data)
-    let emit = lua.create_function(|_, (name, data): (String, mlua::Value)| {
+    let emit = lua.create_function(|_, (name, _data): (String, mlua::Value)| {
         // TODO: Implement actual event emission to the event system
         // Validation only
         if name.is_empty() {

@@ -496,7 +496,7 @@ fn step_fly_camera_controllers(ecs: &mut hecs::World) {
             continue;
         }
 
-        let mut yaw = controller.yaw + controller.yaw_delta * TICK_DURATION_SECS;
+        let yaw = controller.yaw + controller.yaw_delta * TICK_DURATION_SECS;
         let pitch = (controller.pitch + controller.pitch_delta * TICK_DURATION_SECS).clamp(-1.45, 1.45);
         let distance = (camera.target - camera.position).length().max(0.1);
 

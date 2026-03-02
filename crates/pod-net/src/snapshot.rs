@@ -83,7 +83,7 @@ impl WorldSnapshot {
     }
 
     /// Apply a snapshot to a world (for client-side reconciliation)
-    pub fn apply(&self, world: &mut pod_core::World) {
+    pub fn apply(&self, _world: &mut pod_core::World) {
         // For now, we'll just log this — full reconciliation
         // requires entity mapping and component management
         log::debug!(
@@ -247,5 +247,118 @@ mod tests {
 
         let snap2 = delta.apply_to(&snap1);
         assert_eq!(snap2.entities.len(), 2);
+    }
+
+    #[test]
+    fn test_delta_ignores_small_jitter_as_unchanged() {
+        let mut snap1 = WorldSnapshot::default();
+        snap1.entities.push(EntitySnapshot {
+            id: 1,
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::new(0.0, 0.0),
+            rotation: 0.0,
+            health: None,
+            max_health: None,
+            label: Some("sprite2d".into()),
+        });
+
+        let mut snap2 = WorldSnapshot::default();
+        snap2.entities.push(EntitySnapshot {
+            id: 1,
+            position: Vec2::new(0.005, -0.005),
+            velocity: Vec2::new(0.002, 0.003),
+            rotation: 0.003,
+            health: None,
+            max_health: None,
+            label: Some("sprite2d".into()),
+        });
+
+        let delta = StateDelta::diff(&snap1, &snap2);
+        assert_eq!(delta.updated.len(), 0);
+        assert_eq!(delta.destroyed.len(), 0);
+    }
+
+    #[test]
+    fn test_delta_prefers_updated_mode_like_label_change_over_destroy() {
+        let mut base = WorldSnapshot::default();
+        base.entities.push(EntitySnapshot {
+            id: 12,
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::ZERO,
+            rotation: 0.0,
+            health: Some(100.0),
+            max_health: Some(100.0),
+            label: Some("sprite2d".into()),
+        });
+
+        let mut next = WorldSnapshot::default();
+        next.entities.push(EntitySnapshot {
+            id: 12,
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::ZERO,
+            rotation: 0.0,
+            health: Some(100.0),
+            max_health: Some(100.0),
+            label: Some("sprite3d".into()),
+        });
+
+        let delta = StateDelta::diff(&base, &next);
+        assert_eq!(delta.updated.len(), 1);
+        assert_eq!(delta.updated[0].label.as_deref(), Some("sprite3d"));
+
+        let delta_with_destroy = StateDelta {
+            tick: 2,
+            updated: delta.updated.clone(),
+            destroyed: vec![12],
+        };
+
+        let applied = delta_with_destroy.apply_to(&base);
+        assert_eq!(applied.entities.len(), 1);
+        let updated = &applied.entities[0];
+        assert_eq!(updated.id, 12);
+        assert_eq!(updated.label.as_deref(), Some("sprite3d"));
+    }
+
+    #[test]
+    fn test_delta_apply_keeps_existing_updates_when_destroy_contains_extra_ids() {
+        let mut base = WorldSnapshot::default();
+        base.entities.push(EntitySnapshot {
+            id: 10,
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::new(0.0, 0.0),
+            rotation: 0.0,
+            health: Some(100.0),
+            max_health: Some(100.0),
+            label: Some("keep".into()),
+        });
+        base.entities.push(EntitySnapshot {
+            id: 11,
+            position: Vec2::new(1.0, 1.0),
+            velocity: Vec2::new(0.0, 0.0),
+            rotation: 0.0,
+            health: Some(50.0),
+            max_health: Some(50.0),
+            label: Some("to_remove".into()),
+        });
+
+        let delta = StateDelta {
+            tick: 10,
+            updated: vec![EntitySnapshot {
+                id: 10,
+                position: Vec2::new(5.0, 5.0),
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: Some(100.0),
+                max_health: Some(100.0),
+                label: Some("updated".into()),
+            }],
+            destroyed: vec![11, 99_999],
+        };
+
+        let applied = delta.apply_to(&base);
+        assert_eq!(applied.entities.len(), 1);
+        assert_eq!(applied.entities[0].id, 10);
+        assert_eq!(applied.entities.iter().find(|e| e.id == 10).unwrap().label.as_deref(), Some("updated"));
+        assert!(applied.entities.iter().all(|entity| entity.id != 99_999));
     }
 }

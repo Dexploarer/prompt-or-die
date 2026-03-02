@@ -1,6 +1,5 @@
 //! Animation blending — smooth transitions between animations
 
-use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use crate::keyframe::AnimationClip;
 

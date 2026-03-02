@@ -12,7 +12,7 @@
 //! - Debugging of specific agent behaviors
 //! - Sharing exact replay scenarios across teams
 
-use crate::id::{AgentId, EntityId};
+use crate::id::AgentId;
 use crate::observation::Observation;
 use crate::action::Action;
 use serde::{Deserialize, Serialize};

@@ -182,7 +182,7 @@ impl<T> Default for AssetStore<T> {
 /// Trait for pluggable asset loaders
 pub trait AssetLoader<T>: Send + Sync {
     fn load(&self, path: &str) -> Result<T, String>;
-    fn reload(&self, path: &str, existing: T) -> Result<T, String> {
+    fn reload(&self, path: &str, _existing: T) -> Result<T, String> {
         self.load(path)
     }
 }

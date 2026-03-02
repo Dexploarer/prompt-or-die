@@ -76,7 +76,7 @@ impl World {
 
     /// Add an agent to the world and spawn their controlled entity
     pub fn add_agent(&mut self, agent: Box<dyn Agent>) -> (usize, hecs::Entity) {
-        let entity = self.spawn_agent_entity(&agent);
+        let entity = self.spawn_agent_entity();
         let entity_id = crate::id::EntityId(entity.id() as u64);
         let slot_index = self.agents.len();
         let mut slot = AgentSlot::new(agent);
@@ -88,7 +88,7 @@ impl World {
     }
 
     /// Spawn the default entity for an agent
-    fn spawn_agent_entity(&mut self, _agent: &Box<dyn Agent>) -> hecs::Entity {
+    fn spawn_agent_entity(&mut self) -> hecs::Entity {
         self.ecs.spawn((
             Transform::at(0.0, 0.0),
             Velocity::default(),
@@ -211,6 +211,21 @@ impl<'w> EntityBuilder<'w> {
                 vision_range,
                 ..Default::default()
             }));
+        self
+    }
+
+    pub fn with_rigidbody(mut self, body: RigidBody) -> Self {
+        self.components.push(ComponentToAdd::RigidBody(body));
+        self
+    }
+
+    pub fn with_sprite(mut self, sprite: Sprite) -> Self {
+        self.components.push(ComponentToAdd::Sprite(sprite));
+        self
+    }
+
+    pub fn with_script(mut self, script: Script) -> Self {
+        self.components.push(ComponentToAdd::Script(script));
         self
     }
 

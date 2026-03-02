@@ -1,6 +1,5 @@
 //! Keyframe system for animation tracks and clips
 
-use std::collections::HashMap;
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use crate::easing::EasingFunction;

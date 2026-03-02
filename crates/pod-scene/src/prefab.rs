@@ -150,14 +150,13 @@ impl Prefab {
     }
 
     /// Serialize prefab to binary
-    pub fn to_binary(&self) -> Result<Vec<u8>, Box<bincode::error::EncodeError>> {
-        bincode::encode_to_vec(self, bincode::config::standard())
+    pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
     }
 
     /// Deserialize prefab from binary
-    pub fn from_binary(data: &[u8]) -> Result<Self, Box<bincode::error::DecodeError>> {
-        let (prefab, _) = bincode::decode_from_slice(data, bincode::config::standard())?;
-        Ok(prefab)
+    pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
+        bincode::deserialize(data)
     }
 
     /// Spawn this prefab into a world

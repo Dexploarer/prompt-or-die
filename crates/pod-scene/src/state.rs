@@ -17,13 +17,13 @@ pub enum StateTransition {
 /// Trait for game states with lifecycle hooks
 pub trait GameState: Send + Sync {
     /// Called when the state is entered
-    fn on_enter(&mut self, world: &mut World) {}
+    fn on_enter(&mut self, _world: &mut World) {}
 
     /// Called when the state is exited
-    fn on_exit(&mut self, world: &mut World) {}
+    fn on_exit(&mut self, _world: &mut World) {}
 
     /// Update the state
-    fn update(&mut self, world: &mut World) -> StateTransition {
+    fn update(&mut self, _world: &mut World) -> StateTransition {
         StateTransition::Push
     }
 

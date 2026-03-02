@@ -10,7 +10,7 @@
 //! - Tracks decision freshness to avoid stale decisions
 //! - Maintains a decision budget to keep framerate consistent
 
-use crate::agent::{Agent, AgentSlot};
+use crate::agent::AgentSlot;
 use crate::id::AgentId;
 use crate::observation::Observation;
 use std::collections::HashMap;
@@ -107,8 +107,6 @@ pub struct AgentBatch {
 pub struct AgentOrchestrator {
     /// Per-agent decision tracking
     agent_state: HashMap<AgentId, AgentDecisionState>,
-    /// Slots we're managing (reference from world)
-    slot_count: usize,
     /// Decision budget for this tick (max API calls)
     pub decision_budget: u32,
     /// How many decisions we've made this tick
@@ -124,10 +122,9 @@ struct AgentDecisionState {
 
 impl AgentOrchestrator {
     /// Create with a decision budget (e.g., 8 agents per tick max)
-    pub fn new(slot_count: usize, decision_budget: u32) -> Self {
+    pub fn new(decision_budget: u32) -> Self {
         Self {
             agent_state: HashMap::new(),
-            slot_count,
             decision_budget,
             decisions_made_this_tick: 0,
         }
@@ -135,7 +132,7 @@ impl AgentOrchestrator {
 
     /// Update agent state at the start of a tick
     pub fn update_tick(&mut self, agents: &[AgentSlot], tick: u64) {
-        for (slot_idx, slot) in agents.iter().enumerate() {
+        for (_slot_idx, slot) in agents.iter().enumerate() {
             if !slot.connected {
                 continue;
             }
@@ -264,7 +261,7 @@ impl AgentOrchestrator {
 
 impl Default for AgentOrchestrator {
     fn default() -> Self {
-        Self::new(32, 8)
+        Self::new(8)
     }
 }
 
@@ -318,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_orchestrator_batching() {
-        let orchestrator = AgentOrchestrator::new(4, 8);
+        let orchestrator = AgentOrchestrator::new(8);
         assert_eq!(orchestrator.decisions_remaining(), 8);
     }
 }

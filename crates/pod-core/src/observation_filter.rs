@@ -171,7 +171,6 @@ impl ObservationFilter {
         let original_event_count = obs.audible_events.len();
         let message_count = obs.messages.len();
         let objective_count = obs.objectives.len();
-
         // Keep top N audible events
         let audible_events: Vec<AudibleEvent> = obs
             .audible_events
@@ -179,16 +178,8 @@ impl ObservationFilter {
             .take(self.max_events)
             .collect();
 
-        // Estimate token count inline (can't pass &obs since fields were moved)
-        let estimated_tokens = {
-            let mut tokens = 20usize; // header
-            tokens += 30; // self state
-            tokens += visible_entities.len() * 15;
-            tokens += audible_events.len() * 10;
-            tokens += message_count * 5;
-            tokens += objective_count * 10;
-            tokens
-        };
+        let estimated_tokens =
+            estimate_token_count(message_count, objective_count, &visible_entities, &audible_events);
 
         // Build filtered observation
         let was_compressed = estimated_tokens > self.token_budget as usize && self.token_budget > 0;
@@ -251,7 +242,8 @@ impl FilteredObservation {
 
 /// Rough estimation of tokens an observation will use
 fn estimate_token_count(
-    obs: &Observation,
+    message_count: usize,
+    objective_count: usize,
     entities: &[VisibleEntity],
     events: &[AudibleEvent],
 ) -> usize {
@@ -270,10 +262,10 @@ fn estimate_token_count(
     tokens += events.len() * 10;
 
     // Messages: ~5 tokens each
-    tokens += obs.messages.len() * 5;
+    tokens += message_count * 5;
 
     // Objectives: ~10 tokens each
-    tokens += obs.objectives.len() * 10;
+    tokens += objective_count * 10;
 
     tokens
 }
