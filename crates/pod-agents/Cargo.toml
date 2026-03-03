@@ -5,6 +5,7 @@ edition.workspace = true
 
 [features]
 onnx = ["dep:ort"]
+agent_sdk_integration_tests = []
 
 [dependencies]
 pod-core = { path = "../pod-core" }

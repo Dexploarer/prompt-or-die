@@ -915,7 +915,7 @@ mod tests {
             triggers: vec![StrategyTrigger::HealthBelow(0.3)],
             ..Default::default()
         };
-        let mut agent = HybridAgent::new(config);
+        let agent = HybridAgent::new(config);
         // Initially health is 1.0 (from last_health_fraction init)
         let obs = make_obs_with_hostile(0.25, None); // 25% health — below threshold
         // Should trigger because 0.25 < 0.3 and last was >= 0.3
@@ -957,8 +957,8 @@ mod tests {
             reasoning: "hold the line".to_string(),
         };
         agent.apply_directive_to_blackboard(&directive);
-        assert_eq!(agent.blackboard.get_string("strategy").as_deref(), Some("guard"));
-        assert!((agent.blackboard.get_f32("urgency").unwrap() - 0.7).abs() < 0.01);
+        assert_eq!(agent.blackboard().get_string("strategy").as_deref(), Some("guard"));
+        assert!((agent.blackboard().get_f32("urgency").unwrap() - 0.7).abs() < 0.01);
     }
 
     #[test]

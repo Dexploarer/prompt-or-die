@@ -11,9 +11,30 @@
 
 use spacetimedb::{Identity, ReducerContext, Table};
 use std::collections::HashMap;
+use serde_json::json;
 use crate::tables::*;
 use crate::events::*;
 use crate::types::*;
+
+fn reject_reducer(ctx: &ReducerContext, reason: impl Into<String>) {
+    let reason_text = reason.into();
+    log::warn!("[pod-stdb][reject] {reason_text}");
+
+    if let Some(ws) = ctx.db.world_state().id().find(0) {
+        ctx.db.world_event().insert(WorldEventRow {
+            event_id: 0,
+            tick: ws.tick,
+            event_kind: WorldEventKind::TickAdvanced,
+            entity_id: 0,
+            secondary_entity_id: None,
+            data_json: json!({
+                "type": "reducer_reject",
+                "reason": reason_text,
+            })
+            .to_string(),
+        });
+    }
+}
 
 // ============================================================
 // LIFECYCLE REDUCERS
@@ -307,7 +328,8 @@ pub fn connect_agent(
     let entity = ctx.db.entity().entity_id().find(entity_id)
         .expect("Entity not found");
     if !entity.alive {
-        panic!("Cannot connect to dead entity {entity_id}");
+        reject_reducer(ctx, format!("connect_agent rejected: entity {entity_id} is dead"));
+        return;
     }
 
     // Register connection
@@ -341,7 +363,8 @@ pub fn create_lobby(
 
     let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
     if max_players == 0 {
-        panic!("Lobby must allow at least 1 player");
+        reject_reducer(ctx, "create_lobby rejected: max_players must be at least 1");
+        return;
     }
 
     let lobby = ctx.db.lobby().insert(LobbyRow {
@@ -375,11 +398,15 @@ pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
 
     let lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
         Some(row) => row,
-        None => panic!("Lobby {lobby_id} does not exist"),
+        None => {
+            reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} does not exist"));
+            return;
+        }
     };
 
     if lobby.started {
-        panic!("Lobby {lobby_id} already started");
+        reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} already started"));
+        return;
     }
 
     if !ctx
@@ -396,7 +423,8 @@ pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
             .collect();
 
         if current_members.len() as u32 >= lobby.max_players {
-            panic!("Lobby {lobby_id} is full");
+            reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} is full"));
+            return;
         }
 
         ctx.db.lobby_member().insert(LobbyMemberRow {
@@ -428,17 +456,19 @@ pub fn set_lobby_ready(ctx: &ReducerContext, lobby_id: u64, is_ready: bool) {
     let identity = ctx.sender;
     let mut updated = false;
 
-    for mut member in ctx.db.lobby_member().iter().filter(|member| {
+    if let Some(mut member) = ctx.db.lobby_member().iter().find(|member| {
         member.identity == identity && member.lobby_id == lobby_id
     }) {
         member.is_ready = is_ready;
         ctx.db.lobby_member().membership_id().update(member);
         updated = true;
-        break;
     }
 
     if !updated {
-        panic!("Player is not a member of lobby {lobby_id}");
+        reject_reducer(
+            ctx,
+            format!("set_lobby_ready rejected: caller is not a member of lobby {lobby_id}"),
+        );
     }
 }
 
@@ -449,11 +479,18 @@ pub fn start_lobby(ctx: &ReducerContext, lobby_id: u64) {
 
     let mut lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
         Some(row) => row,
-        None => panic!("Lobby {lobby_id} does not exist"),
+        None => {
+            reject_reducer(ctx, format!("start_lobby rejected: lobby {lobby_id} does not exist"));
+            return;
+        }
     };
 
     if lobby.host_identity != identity {
-        panic!("Only lobby host can start lobby {lobby_id}");
+        reject_reducer(
+            ctx,
+            format!("start_lobby rejected: caller is not host for lobby {lobby_id}"),
+        );
+        return;
     }
 
     lobby.started = true;
@@ -468,7 +505,11 @@ pub fn start_lobby(ctx: &ReducerContext, lobby_id: u64) {
 #[spacetimedb::reducer]
 pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size: u32) {
     if desired_party_size == 0 {
-        panic!("Match desired_party_size must be at least 1");
+        reject_reducer(
+            ctx,
+            "join_match_queue rejected: desired_party_size must be at least 1",
+        );
+        return;
     }
 
     let identity = ctx.sender;
@@ -478,14 +519,24 @@ pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size
     let entity = ctx.db.entity().entity_id().find(entity_id)
         .expect("Entity not found");
     if !entity.alive {
-        panic!("Entity {entity_id} is not alive");
+        reject_reducer(
+            ctx,
+            format!("join_match_queue rejected: entity {entity_id} is not alive"),
+        );
+        return;
     }
 
     // Prevent duplicate queue entries for same identity/entity pair.
     if ctx.db.match_queue().iter().any(|row| {
         row.identity == identity && row.entity_id == entity_id
     }) {
-        panic!("Identity {identity:?} already queued for entity {entity_id}");
+        reject_reducer(
+            ctx,
+            format!(
+                "join_match_queue rejected: identity {identity:?} already queued for entity {entity_id}"
+            ),
+        );
+        return;
     }
 
     ctx.db.match_queue().insert(MatchQueueRow {
@@ -519,7 +570,11 @@ pub fn leave_match_queue(ctx: &ReducerContext) {
     }
 
     if !removed {
-        panic!("No matchmaking queue entries found for {identity:?}");
+        reject_reducer(
+            ctx,
+            format!("leave_match_queue rejected: no queue entries for {identity:?}"),
+        );
+        return;
     }
 
     log::info!("[pod-stdb] {identity:?} left matchmaking queue");
@@ -532,7 +587,11 @@ pub fn leave_match_queue(ctx: &ReducerContext) {
 #[spacetimedb::reducer]
 pub fn create_match_from_queue(ctx: &ReducerContext, desired_party_size: u32) {
     if desired_party_size == 0 {
-        panic!("Match desired_party_size must be at least 1");
+        reject_reducer(
+            ctx,
+            "create_match_from_queue rejected: desired_party_size must be at least 1",
+        );
+        return;
     }
 
     let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
@@ -548,10 +607,14 @@ pub fn create_match_from_queue(ctx: &ReducerContext, desired_party_size: u32) {
     }
 
     if candidates.len() < desired_party_size as usize {
-        panic!(
-            "Not enough players in queue for party size {desired_party_size}: found {}",
-            candidates.len()
+        reject_reducer(
+            ctx,
+            format!(
+                "create_match_from_queue rejected: insufficient players for party size {desired_party_size} (found {})",
+                candidates.len()
+            ),
         );
+        return;
     }
 
     let game_match = ctx.db.game_match().insert(GameMatchRow {

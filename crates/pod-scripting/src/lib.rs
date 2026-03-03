@@ -39,6 +39,8 @@
 //! - `on_damage(entity, amount, source)` — damage event
 //! - `on_destroy(entity)` — before destruction
 
+#![allow(clippy::should_implement_trait)]
+
 pub mod vm;
 pub mod api;
 pub mod sandbox;

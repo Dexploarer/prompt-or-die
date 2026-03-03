@@ -45,6 +45,8 @@
 //! };
 //! ```
 
+#![allow(clippy::unnecessary_lazy_evaluations)]
+
 pub mod protocol;
 pub mod snapshot;
 

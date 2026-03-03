@@ -12,9 +12,9 @@ authors.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Default includes the SpacetimeDB WASM module (tables, reducers, events, observation).
-# Disable defaults for client-only builds: --no-default-features --features client
-default = ["module"]
+# Default targets native workspace builds (client wrapper only).
+# Enable `module` explicitly when building the SpacetimeDB WASM reducer module.
+default = ["client"]
 # SpacetimeDB WASM module — tables, reducers, events, observation.
 # Links against WASM host imports; cannot be used in native test binaries.
 # Use `spacetime test` for module tests instead of `cargo test`.

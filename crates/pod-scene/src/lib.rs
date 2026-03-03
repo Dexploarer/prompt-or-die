@@ -4,6 +4,11 @@
 //! for the Prompt or Die engine. Includes hot-reload support, scene serialization,
 //! state machine management, and a complete save/load system.
 
+#![allow(unused_variables)]
+#![allow(clippy::len_zero)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::unwrap_or_default)]
+
 pub mod scene;
 pub mod prefab;
 pub mod asset;

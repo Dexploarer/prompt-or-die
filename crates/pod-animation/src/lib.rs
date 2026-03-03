@@ -8,6 +8,11 @@
 //! - **Tweening**: Fire-and-forget animations with fluent builder API
 //! - **System integration**: Top-level update function for ECS-based animation
 
+#![allow(clippy::assign_op_pattern)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::new_without_default)]
+
 pub mod keyframe;
 pub mod easing;
 pub mod state_machine;

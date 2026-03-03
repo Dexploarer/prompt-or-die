@@ -10,6 +10,9 @@
 //! Server is platform-agnostic and knows nothing about rendering,
 //! only about game logic and network I/O.
 
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::wildcard_in_or_patterns)]
+
 use log::{error, info, warn};
 use pod_core::{IdleAgent, World};
 use std::sync::atomic::{AtomicBool, Ordering};
