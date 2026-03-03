@@ -23,6 +23,22 @@ impl Default for ClientId {
     }
 }
 
+/// Stable reconnect token for resuming a prior client session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReconnectToken(pub Uuid);
+
+impl ReconnectToken {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for ReconnectToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ============================================================
 // CLIENT -> SERVER MESSAGES
 // ============================================================
@@ -33,6 +49,7 @@ pub enum ClientMessage {
     /// Request to connect to the game server
     Connect {
         player_name: String,
+        reconnect_token: Option<ReconnectToken>,
     },
 
     /// Request to disconnect from the server
@@ -74,6 +91,7 @@ pub enum ServerMessage {
     /// Initial welcome packet — sent on successful connection
     Welcome {
         client_id: ClientId,
+        reconnect_token: ReconnectToken,
         tick: u64,
         snapshot: super::snapshot::WorldSnapshot,
     },
@@ -195,15 +213,22 @@ mod tests {
 
     #[test]
     fn test_client_message_roundtrip() {
+        let reconnect_token = ReconnectToken::new();
         let msg = ClientMessage::Connect {
             player_name: "TestPlayer".into(),
+            reconnect_token: Some(reconnect_token),
         };
 
         let encoded = msg.encode().unwrap();
         let decoded = ClientMessage::decode(&encoded).unwrap();
 
-        if let ClientMessage::Connect { player_name } = decoded {
+        if let ClientMessage::Connect {
+            player_name,
+            reconnect_token: decoded_token,
+        } = decoded
+        {
             assert_eq!(player_name, "TestPlayer");
+            assert_eq!(decoded_token, Some(reconnect_token));
         } else {
             panic!("Wrong message type");
         }
@@ -216,6 +241,7 @@ mod tests {
 
         let msg = ServerMessage::Welcome {
             client_id: ClientId::new(),
+            reconnect_token: ReconnectToken::new(),
             tick: 100,
             snapshot,
         };

@@ -13,7 +13,7 @@ use web_sys::WebSocket;
 
 use pod_core::Action;
 
-use crate::protocol::{ClientConfig, ClientId, ClientMessage, ServerMessage};
+use crate::protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage};
 use crate::snapshot::WorldSnapshot;
 
 #[derive(Debug, Default)]
@@ -37,6 +37,10 @@ pub struct WebClient {
     pending_actions: Vec<Action>,
     /// Highest server tick applied locally.
     last_server_tick: u64,
+    /// Highest event tick accepted from server.
+    last_event_tick: u64,
+    /// Reconnect token issued by server and reused across reconnects.
+    reconnect_token: Option<ReconnectToken>,
     reconnect_attempts: u32,
     next_reconnect_at_ms: f64,
 }
@@ -56,6 +60,8 @@ impl WebClient {
             local_snapshot: None,
             pending_actions: Vec::new(),
             last_server_tick: 0,
+            last_event_tick: 0,
+            reconnect_token: None,
             reconnect_attempts: 0,
             next_reconnect_at_ms: 0.0,
         };
@@ -68,23 +74,44 @@ impl WebClient {
         let websocket = WebSocket::new(&ws_url)
             .map_err(|_| ClientError::Connection("Failed to create WebSocket".into()))?;
         websocket.set_binary_type(web_sys::BinaryType::Arraybuffer);
-        self.setup_handlers(&websocket)?;
+        let connect_payload = serde_json::to_string(&ClientMessage::Connect {
+            player_name: self.config.player_name.clone(),
+            reconnect_token: self.reconnect_token,
+        })
+        .ok();
+        self.setup_handlers(&websocket, connect_payload)?;
         self.websocket = Some(websocket);
         self.connected = false;
         Ok(())
     }
 
     /// Set up WebSocket event handlers
-    fn setup_handlers(&self, websocket: &WebSocket) -> Result<(), ClientError> {
+    fn setup_handlers(
+        &self,
+        websocket: &WebSocket,
+        connect_payload: Option<String>,
+    ) -> Result<(), ClientError> {
         let pending_updates = self.pending_updates.clone();
         let runtime_state = self.runtime_state.clone();
 
         let onopen = {
             let runtime = runtime_state.clone();
-            Closure::wrap(Box::new(move |_: web_sys::Event| {
+            let connect_payload = connect_payload.clone();
+            Closure::wrap(Box::new(move |event: web_sys::Event| {
                 if let Ok(mut state) = runtime.lock() {
                     state.closed = false;
                     state.last_error = None;
+                }
+                if let Some(payload) = connect_payload.as_ref() {
+                    if let Some(target) = event.target() {
+                        if let Ok(ws) = target.dyn_into::<WebSocket>() {
+                            if let Err(err) = ws.send_with_str(payload) {
+                                web_sys::console::error_1(
+                                    &format!("Failed to send connect payload: {:?}", err).into(),
+                                );
+                            }
+                        }
+                    }
                 }
                 web_sys::console::log_1(&"WebSocket connected".into());
             }) as Box<dyn FnMut(web_sys::Event)>)
@@ -163,6 +190,7 @@ impl WebClient {
     pub fn send_connect(&self) -> Result<(), ClientError> {
         let msg = ClientMessage::Connect {
             player_name: self.config.player_name.clone(),
+            reconnect_token: self.reconnect_token,
         };
         self.send_message(msg)
     }
@@ -211,13 +239,16 @@ impl WebClient {
         match message {
             ServerMessage::Welcome {
                 client_id,
+                reconnect_token,
                 tick,
                 snapshot,
             } => {
                 self.client_id = Some(*client_id);
+                self.reconnect_token = Some(*reconnect_token);
                 self.local_snapshot = Some(snapshot.clone());
                 self.connected = true;
                 self.last_server_tick = *tick;
+                self.last_event_tick = *tick;
                 self.reconnect_attempts = 0;
                 true
             }
@@ -242,7 +273,14 @@ impl WebClient {
                 self.last_server_tick = *tick;
                 true
             }
-            ServerMessage::Pong { .. } | ServerMessage::EventBatch { .. } => true,
+            ServerMessage::EventBatch { tick, .. } => {
+                if *tick < self.last_event_tick {
+                    return false;
+                }
+                self.last_event_tick = *tick;
+                true
+            }
+            ServerMessage::Pong { .. } => true,
             ServerMessage::Rejected { reason } => {
                 web_sys::console::error_1(&format!("Server rejected request: {reason}").into());
                 true

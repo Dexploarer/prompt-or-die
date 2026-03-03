@@ -56,7 +56,7 @@ use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
 };
 
-use crate::protocol::{ClientId, ServerMessage};
+use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
 
 // ============================================================
@@ -374,6 +374,7 @@ pub struct SpacetimeDBClient {
     inner: StdbClient,
     subscriptions: SpacetimeSubscriptionManager,
     client_id: Option<ClientId>,
+    reconnect_token: ReconnectToken,
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
     welcome_sent: bool,
@@ -387,6 +388,7 @@ impl SpacetimeDBClient {
             inner: StdbClient::new(config.into()),
             subscriptions: SpacetimeSubscriptionManager::new(),
             client_id: None,
+            reconnect_token: ReconnectToken::new(),
             pending_actions: Vec::new(),
             local_snapshot: None,
             welcome_sent: false,
@@ -496,6 +498,7 @@ impl SpacetimeDBClient {
                         if let Some(client_id) = self.client_id {
                             messages.push(ServerMessage::Welcome {
                                 client_id,
+                                reconnect_token: self.reconnect_token,
                                 tick,
                                 snapshot,
                             });
