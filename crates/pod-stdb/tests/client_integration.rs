@@ -36,6 +36,10 @@ fn default_config_has_expected_values() {
     assert_eq!(config.db_name, "prompt-or-die");
     assert!(config.auth_token.is_none());
     assert_eq!(config.player_name, "Player");
+    #[cfg(debug_assertions)]
+    assert!(matches!(config.connection_mode, StdbConnectionMode::Emulated));
+    #[cfg(not(debug_assertions))]
+    assert!(matches!(config.connection_mode, StdbConnectionMode::Generated));
 }
 
 #[test]
@@ -45,6 +49,7 @@ fn custom_config_fields() {
         db_name: "my-game".into(),
         auth_token: Some("secret-token-123".into()),
         player_name: "Hero".into(),
+        connection_mode: StdbConnectionMode::Emulated,
     };
     assert_eq!(config.host, "http://my-server:5000");
     assert_eq!(config.db_name, "my-game");
@@ -116,6 +121,7 @@ fn config_accessor_returns_original_config() {
         db_name: "test-db".into(),
         auth_token: Some("tok".into()),
         player_name: "Tester".into(),
+        connection_mode: StdbConnectionMode::Emulated,
     };
     let client = StdbClient::new(config);
     assert_eq!(client.config().host, "http://test:1234");
@@ -130,7 +136,10 @@ fn config_accessor_returns_original_config() {
 
 #[test]
 fn connect_transitions_to_connecting() {
-    let mut client = StdbClient::new(StdbClientConfig::default());
+    let mut client = StdbClient::new(StdbClientConfig {
+        connection_mode: StdbConnectionMode::Emulated,
+        ..StdbClientConfig::default()
+    });
     assert!(client.connect().is_ok());
     assert!(matches!(
         client.connection_state(),
@@ -141,10 +150,23 @@ fn connect_transitions_to_connecting() {
 
 #[test]
 fn connect_while_connecting_returns_error() {
-    let mut client = StdbClient::new(StdbClientConfig::default());
+    let mut client = StdbClient::new(StdbClientConfig {
+        connection_mode: StdbConnectionMode::Emulated,
+        ..StdbClientConfig::default()
+    });
     client.connect().unwrap();
     let result = client.connect();
     assert!(result.is_err());
+}
+
+#[test]
+fn connect_generated_mode_requires_runtime_bindings() {
+    let mut client = StdbClient::new(StdbClientConfig {
+        connection_mode: StdbConnectionMode::Generated,
+        ..StdbClientConfig::default()
+    });
+    let err = client.connect().expect_err("generated mode should require runtime");
+    assert!(matches!(err, StdbError::ConnectionFailed(_)));
 }
 
 #[test]
