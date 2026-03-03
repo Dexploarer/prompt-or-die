@@ -6,6 +6,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use std::sync::{Arc, Mutex};
+
 use wasm_bindgen::prelude::*;
 use web_sys::WebSocket;
 
@@ -14,64 +16,79 @@ use pod_core::Action;
 use crate::protocol::{ClientConfig, ClientId, ClientMessage, ServerMessage};
 use crate::snapshot::WorldSnapshot;
 
-// ============================================================
-// WEB CLIENT
-// ============================================================
+#[derive(Debug, Default)]
+struct WebRuntimeState {
+    closed: bool,
+    last_error: Option<String>,
+}
 
 /// WebSocket-based client for web browsers
 pub struct WebClient {
     config: ClientConfig,
     client_id: Option<ClientId>,
-    websocket: WebSocket,
+    websocket: Option<WebSocket>,
     connected: bool,
     /// Buffered server updates
-    pending_updates: std::sync::Arc<std::sync::Mutex<Vec<ServerMessage>>>,
+    pending_updates: Arc<Mutex<Vec<ServerMessage>>>,
+    runtime_state: Arc<Mutex<WebRuntimeState>>,
     /// Local prediction world state
     local_snapshot: Option<WorldSnapshot>,
     /// Actions pending transmission
     pending_actions: Vec<Action>,
+    /// Highest server tick applied locally.
+    last_server_tick: u64,
+    reconnect_attempts: u32,
+    next_reconnect_at_ms: f64,
 }
 
 impl WebClient {
     /// Connect to a game server via WebSocket
     pub fn connect(config: ClientConfig) -> Result<Self, ClientError> {
-        let ws_url = format!(
-            "ws://{}:{}",
-            config.server_addr,
-            config.server_port  // In production, use different port for ws
-        );
-
-        let websocket = WebSocket::new(&ws_url)
-            .map_err(|_| ClientError::Connection("Failed to create WebSocket".into()))?;
-
-        // Set binary type for better performance
-        websocket.set_binary_type(web_sys::BinaryType::Arraybuffer);
-
-        let pending_updates = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-
+        let pending_updates = Arc::new(Mutex::new(Vec::new()));
+        let runtime_state = Arc::new(Mutex::new(WebRuntimeState::default()));
         let mut client = Self {
             config,
             client_id: None,
-            websocket,
+            websocket: None,
             connected: false,
             pending_updates,
+            runtime_state,
             local_snapshot: None,
             pending_actions: Vec::new(),
+            last_server_tick: 0,
+            reconnect_attempts: 0,
+            next_reconnect_at_ms: 0.0,
         };
-
-        // Set up event handlers
-        client.setup_handlers()?;
-
+        client.open_socket()?;
         Ok(client)
     }
 
-    /// Set up WebSocket event handlers
-    fn setup_handlers(&mut self) -> Result<(), ClientError> {
-        let pending_updates = self.pending_updates.clone();
+    fn open_socket(&mut self) -> Result<(), ClientError> {
+        let ws_url = build_ws_url(&self.config);
+        let websocket = WebSocket::new(&ws_url)
+            .map_err(|_| ClientError::Connection("Failed to create WebSocket".into()))?;
+        websocket.set_binary_type(web_sys::BinaryType::Arraybuffer);
+        self.setup_handlers(&websocket)?;
+        self.websocket = Some(websocket);
+        self.connected = false;
+        Ok(())
+    }
 
-        let onopen = Closure::wrap(Box::new(move |_: web_sys::Event| {
-            web_sys::console::log_1(&"WebSocket connected".into());
-        }) as Box<dyn FnMut(web_sys::Event)>);
+    /// Set up WebSocket event handlers
+    fn setup_handlers(&self, websocket: &WebSocket) -> Result<(), ClientError> {
+        let pending_updates = self.pending_updates.clone();
+        let runtime_state = self.runtime_state.clone();
+
+        let onopen = {
+            let runtime = runtime_state.clone();
+            Closure::wrap(Box::new(move |_: web_sys::Event| {
+                if let Ok(mut state) = runtime.lock() {
+                    state.closed = false;
+                    state.last_error = None;
+                }
+                web_sys::console::log_1(&"WebSocket connected".into());
+            }) as Box<dyn FnMut(web_sys::Event)>)
+        };
 
         let onmessage = {
             let pending = pending_updates.clone();
@@ -87,24 +104,32 @@ impl WebClient {
             }) as Box<dyn FnMut(web_sys::MessageEvent)>)
         };
 
-        let onerror = Closure::wrap(Box::new(move |event: web_sys::Event| {
-            web_sys::console::error_1(&format!("WebSocket error: {:?}", event).into());
-        }) as Box<dyn FnMut(web_sys::Event)>);
+        let onerror = {
+            let runtime = runtime_state.clone();
+            Closure::wrap(Box::new(move |event: web_sys::Event| {
+                if let Ok(mut state) = runtime.lock() {
+                    state.closed = true;
+                    state.last_error = Some("websocket error".to_string());
+                }
+                web_sys::console::error_1(&format!("WebSocket error: {:?}", event).into());
+            }) as Box<dyn FnMut(web_sys::Event)>)
+        };
 
-        let onclose = Closure::wrap(Box::new(move |_: web_sys::CloseEvent| {
-            web_sys::console::log_1(&"WebSocket closed".into());
-        }) as Box<dyn FnMut(web_sys::CloseEvent)>);
+        let onclose = {
+            let runtime = runtime_state.clone();
+            Closure::wrap(Box::new(move |_: web_sys::CloseEvent| {
+                if let Ok(mut state) = runtime.lock() {
+                    state.closed = true;
+                }
+                web_sys::console::log_1(&"WebSocket closed".into());
+            }) as Box<dyn FnMut(web_sys::CloseEvent)>)
+        };
 
-        self.websocket
-            .set_onopen(Some(onopen.as_ref().unchecked_ref()));
-        self.websocket
-            .set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-        self.websocket
-            .set_onerror(Some(onerror.as_ref().unchecked_ref()));
-        self.websocket
-            .set_onclose(Some(onclose.as_ref().unchecked_ref()));
+        websocket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+        websocket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+        websocket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+        websocket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
 
-        // Leak the closures so they stay alive
         onopen.forget();
         onmessage.forget();
         onerror.forget();
@@ -115,14 +140,19 @@ impl WebClient {
 
     /// Send a raw message to the server
     fn send_message(&self, msg: ClientMessage) -> Result<(), ClientError> {
-        if self.websocket.ready_state() != WebSocket::OPEN {
+        let websocket = self
+            .websocket
+            .as_ref()
+            .ok_or_else(|| ClientError::NotConnected)?;
+
+        if websocket.ready_state() != WebSocket::OPEN {
             return Err(ClientError::NotConnected);
         }
 
         let json = serde_json::to_string(&msg)
             .map_err(|e| ClientError::Serialization(e.to_string()))?;
 
-        self.websocket
+        websocket
             .send_with_str(&json)
             .map_err(|_| ClientError::Connection("Failed to send message".into()))?;
 
@@ -134,13 +164,7 @@ impl WebClient {
         let msg = ClientMessage::Connect {
             player_name: self.config.player_name.clone(),
         };
-
-        self.send_message(msg)?;
-
-        // Note: In actual use, you'd wait for the Welcome response
-        // via poll_updates() since WebSocket is async
-
-        Ok(())
+        self.send_message(msg)
     }
 
     /// Queue an action to be sent to the server
@@ -164,19 +188,95 @@ impl WebClient {
 
     /// Check for updates from the server (non-blocking)
     pub fn poll_updates(&mut self) -> Vec<ServerMessage> {
-        if let Ok(mut updates) = self.pending_updates.lock() {
-            let mut result = Vec::new();
-            std::mem::swap(&mut result, &mut updates);
-            result
+        self.maybe_reconnect();
+
+        let incoming = if let Ok(mut updates) = self.pending_updates.lock() {
+            let mut drained = Vec::new();
+            std::mem::swap(&mut drained, &mut updates);
+            drained
         } else {
             Vec::new()
+        };
+
+        let mut outgoing = Vec::new();
+        for message in incoming {
+            if self.apply_server_message(&message) {
+                outgoing.push(message);
+            }
+        }
+        outgoing
+    }
+
+    fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
+        match message {
+            ServerMessage::Welcome {
+                client_id,
+                tick,
+                snapshot,
+            } => {
+                self.client_id = Some(*client_id);
+                self.local_snapshot = Some(snapshot.clone());
+                self.connected = true;
+                self.last_server_tick = *tick;
+                self.reconnect_attempts = 0;
+                true
+            }
+            ServerMessage::StateDelta { tick, delta } => {
+                if *tick < self.last_server_tick {
+                    return false;
+                }
+
+                if self.last_server_tick > 0 && *tick > self.last_server_tick + 1 {
+                    // Gap detected; invalidate local prediction and rebuild from incoming stream.
+                    self.local_snapshot = None;
+                }
+
+                self.local_snapshot = Some(match self.local_snapshot.take() {
+                    Some(snapshot) => delta.apply_to(&snapshot),
+                    None => WorldSnapshot {
+                        tick: *tick,
+                        entities: delta.updated.clone(),
+                    },
+                });
+
+                self.last_server_tick = *tick;
+                true
+            }
+            ServerMessage::Pong { .. } | ServerMessage::EventBatch { .. } => true,
+            ServerMessage::Rejected { reason } => {
+                web_sys::console::error_1(&format!("Server rejected request: {reason}").into());
+                true
+            }
+        }
+    }
+
+    fn maybe_reconnect(&mut self) {
+        let should_reconnect = if let Ok(state) = self.runtime_state.lock() {
+            state.closed
+        } else {
+            false
+        };
+
+        if !should_reconnect {
+            return;
+        }
+
+        let now = js_sys::Date::now();
+        if now < self.next_reconnect_at_ms {
+            return;
+        }
+
+        if self.open_socket().is_ok() {
+            self.reconnect_attempts = self.reconnect_attempts.saturating_add(1);
+            let exp = 2u32.pow(self.reconnect_attempts.min(6));
+            let delay = (250.0 * exp as f64).min(10_000.0);
+            self.next_reconnect_at_ms = now + delay;
         }
     }
 
     /// Send a ping to measure latency
     pub fn ping(&self) -> Result<(), ClientError> {
         let timestamp = js_sys::Date::now() as u64;
-
         self.send_message(ClientMessage::Ping { timestamp })
     }
 
@@ -185,13 +285,15 @@ impl WebClient {
         let msg = ClientMessage::Disconnect {
             reason: reason.map(|s| s.to_string()),
         };
+        let _ = self.send_message(msg);
 
-        self.send_message(msg)?;
+        if let Some(websocket) = self.websocket.as_ref() {
+            websocket
+                .close()
+                .map_err(|_| ClientError::Connection("Failed to close WebSocket".into()))?;
+        }
 
-        self.websocket
-            .close()
-            .map_err(|_| ClientError::Connection("Failed to close WebSocket".into()))?;
-
+        self.websocket = None;
         self.connected = false;
         Ok(())
     }
@@ -208,7 +310,12 @@ impl WebClient {
 
     /// Check if connected
     pub fn is_connected(&self) -> bool {
-        self.connected && self.websocket.ready_state() == WebSocket::OPEN
+        let ws_open = self
+            .websocket
+            .as_ref()
+            .map(|ws| ws.ready_state() == WebSocket::OPEN)
+            .unwrap_or(false);
+        self.connected && ws_open
     }
 
     /// Update connection state (typically called after receiving Welcome)
@@ -217,6 +324,14 @@ impl WebClient {
         self.local_snapshot = Some(snapshot);
         self.connected = true;
     }
+}
+
+fn build_ws_url(config: &ClientConfig) -> String {
+    let protocol = web_sys::window()
+        .and_then(|window| window.location().protocol().ok())
+        .unwrap_or_else(|| "http:".to_string());
+    let scheme = if protocol == "https:" { "wss" } else { "ws" };
+    format!("{scheme}://{}:{}", config.server_addr, config.server_port)
 }
 
 // ============================================================

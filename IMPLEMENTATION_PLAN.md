@@ -4,6 +4,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 ---
 
+## Iteration 28: Deterministic Core + Network + Persistence Completion
+- [x] Core action semantics implemented in `pod-core` for `Attack`, `AttackTarget`, `Interact`, `InteractWith` with cooldown gating, range checks, and combat/interaction events.
+- [x] Observation fields populated in `pod-core` (`cooldowns`, `messages`, `objectives`) from authoritative runtime state/events.
+- [x] SpacetimeDB reducer action coverage expanded (`LookAt`, `Attack`, `AttackTarget`, `Interact`, `InteractWith`, `Pickup`, `Drop`, `UseItem`, `UseAbility`, `Signal`, `Spawn`) with deterministic ordering and cooldown handling.
+- [x] Authoritative `pod-net` server path wired for real QUIC ingress, action queue limits, per-tick bounded action intake, and delta/full snapshot broadcasting.
+- [x] `pod-stdb` client placeholders replaced with concrete typed behavior for connection lifecycle, subscriptions, reducer wrappers, and local cache mutation.
+- [x] Scripting mutating APIs (`world.spawn`, `world.destroy`, `world.find_nearest`, `events.emit`) implemented with validation, bounds checks, and per-tick event rate limiting.
+- [x] Native and web transport behavior hardened (secure-by-default TLS for native, dev-only insecure escape hatch, web reconnect + out-of-order delta reconciliation).
+- [x] `apps/pod-server` runtime mode wiring updated to support either local loop mode or `pod-net` network mode with explicit configuration.
+
+---
+
 ## Phase 1: SpacetimeDB Foundation
 - [x] 1.1 Add spacetimedb dependency to workspace Cargo.toml
 - [x] 1.2 Create pod-stdb crate with module scaffold (tables, reducers, events, types)
@@ -167,5 +179,22 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [ ] 9.11 Add platform shipping parity
   - Hot reload in editor, CI smoke for web/native, release profile reproducibility, migration docs
 
-**Last updated**: Iteration 27
+### Iteration 29 — Deterministic Core + Runtime Integration Follow-through
+
+- [x] Fixed `pod-scripting` VM/sandbox compilation against current `mlua` API (`Table::get`, `Function::call`, chunk environment wiring).
+- [x] Added deterministic `pod-core` tick tests for:
+  - `AttackTarget` damage + cooldown,
+  - self-target rejection,
+  - invulnerability no-op behavior,
+  - observation population of `cooldowns`, `messages`, and `objectives`.
+- [x] Fixed stale `AgentId` test construction in `pod-core/src/action.rs` (UUID-backed ids).
+- [x] Updated legacy `pod-core` test expectations in `constraint` and `orchestrator` to align with implemented budget/reaction/priority formulas.
+- [x] Hardened `apps/pod-server` network-mode error conversion to `Send + Sync` compatible errors.
+- [x] Validated touched crates:
+  - `cargo check -p pod-core -p pod-stdb -p pod-net -p pod-scripting --offline`
+  - `cargo test -p pod-core --offline`
+  - `cargo test -p pod-scripting --offline`
+  - `cargo test -p pod-net --offline`
+
+**Last updated**: Iteration 29
 **Current focus**: Phase 9 (Hardening Parity Backlog)

@@ -10,6 +10,7 @@
 //!   5. Flush Events (broadcast to listeners)
 
 use spacetimedb::{Identity, ReducerContext, Table};
+use std::collections::HashMap;
 use crate::tables::*;
 use crate::events::*;
 use crate::types::*;
@@ -667,19 +668,45 @@ pub fn execute_tick(ctx: &ReducerContext) {
     crate::observation::build_observations(ctx, current_tick);
 
     // ── Phase 3: Process submitted actions ──
-    // Collect actions for this tick
-    for submission in ctx.db.action_submission().iter() {
-        if submission.tick != current_tick {
+    let constraints_rows: Vec<AgentConstraintsRow> = ctx.db.agent_constraints().iter().collect();
+    for mut constraints in constraints_rows {
+        if constraints.attack_cooldown_remaining > 0 {
+            constraints.attack_cooldown_remaining -= 1;
+            ctx.db.agent_constraints().entity_id().update(constraints);
+        }
+    }
+
+    let mut submissions: Vec<ActionSubmissionRow> = ctx
+        .db
+        .action_submission()
+        .iter()
+        .filter(|submission| submission.tick == current_tick)
+        .collect();
+    submissions.sort_by_key(|submission| submission.submission_id);
+
+    let mut action_counts: HashMap<u64, u8> = HashMap::new();
+
+    for submission in submissions {
+        let eid = submission.entity_id;
+
+        let Some(entity) = ctx.db.entity().entity_id().find(eid) else {
+            continue;
+        };
+        if !entity.alive {
             continue;
         }
 
-        let eid = submission.entity_id;
-
-        // Check constraints
-        if let Some(constraints) = ctx.db.agent_constraints().entity_id().find(eid) {
-            if !constraints.can_act {
-                continue; // Skip stunned/dead agents
+        let mut constraints = ctx.db.agent_constraints().entity_id().find(eid);
+        if let Some(ref c) = constraints {
+            if !c.can_act {
+                continue;
             }
+
+            let actions_this_tick = action_counts.entry(eid).or_insert(0);
+            if *actions_this_tick >= c.actions_per_tick {
+                continue;
+            }
+            *actions_this_tick += 1;
         }
 
         // Execute action based on kind
@@ -688,9 +715,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                 if let (Some(dx), Some(dy)) = (submission.direction_x, submission.direction_y) {
                     if let Some(mvmt) = ctx.db.movement().entity_id().find(eid) {
                         if let Some(mut vel) = ctx.db.velocity().entity_id().find(eid) {
-                            // Set velocity in direction, clamped to max_speed
-                            let sum: f32 = dx * dx + dy * dy;
-                            let len = sum.sqrt();
+                            let len = (dx * dx + dy * dy).sqrt();
                             if len > 0.001 {
                                 let nx = dx / len;
                                 let ny = dy / len;
@@ -718,14 +743,136 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     }
                 }
             }
+            ActionKind::LookAt => {
+                if let (Some(tx), Some(ty)) = (submission.target_x, submission.target_y) {
+                    if let Some(mut tf) = ctx.db.transform().entity_id().find(eid) {
+                        let dx = tx - tf.pos_x;
+                        let dy = ty - tf.pos_y;
+                        if (dx * dx + dy * dy) > 0.0001 {
+                            tf.rotation = dy.atan2(dx);
+                            ctx.db.transform().entity_id().update(tf);
+                        }
+                    }
+                }
+            }
+            ActionKind::Attack => {
+                let cooling_down = constraints
+                    .as_ref()
+                    .map(|c| c.attack_cooldown_remaining > 0)
+                    .unwrap_or(false);
+                if cooling_down {
+                    continue;
+                }
+
+                if let Some(target_id) = find_attack_target(ctx, eid) {
+                    if apply_attack(ctx, current_tick, eid, target_id) {
+                        if let Some(mut c) = constraints.take() {
+                            c.attack_cooldown_remaining = c.attack_cooldown;
+                            ctx.db.agent_constraints().entity_id().update(c);
+                        }
+                    }
+                }
+            }
+            ActionKind::AttackTarget => {
+                let cooling_down = constraints
+                    .as_ref()
+                    .map(|c| c.attack_cooldown_remaining > 0)
+                    .unwrap_or(false);
+                if cooling_down {
+                    continue;
+                }
+
+                let Some(target_id) = submission.target_entity_id else {
+                    continue;
+                };
+                if target_id == eid {
+                    continue;
+                }
+
+                if apply_attack(ctx, current_tick, eid, target_id) {
+                    if let Some(mut c) = constraints.take() {
+                        c.attack_cooldown_remaining = c.attack_cooldown;
+                        ctx.db.agent_constraints().entity_id().update(c);
+                    }
+                }
+            }
+            ActionKind::Interact => {
+                if let Some(target_id) = find_interaction_target(ctx, eid) {
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::InteractionTriggered,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: "{}".to_string(),
+                    });
+                }
+            }
+            ActionKind::InteractWith => {
+                let Some(target_id) = submission.target_entity_id else {
+                    continue;
+                };
+                if in_range(ctx, eid, target_id, INTERACT_RANGE) {
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::InteractionTriggered,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: "{}".to_string(),
+                    });
+                }
+            }
+            ActionKind::Pickup => {
+                if let Some(target_id) = submission.target_entity_id {
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::ItemPickedUp,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: "{}".to_string(),
+                    });
+                }
+            }
+            ActionKind::Drop => {
+                let slot = submission.ability_slot.unwrap_or(0);
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::ItemDropped,
+                    entity_id: eid,
+                    secondary_entity_id: None,
+                    data_json: format!(r#"{{"slot":{slot}}}"#),
+                });
+            }
+            ActionKind::UseItem => {
+                let slot = submission.ability_slot.unwrap_or(0);
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: None,
+                    data_json: format!(r#"{{"item_slot":{slot}}}"#),
+                });
+            }
+            ActionKind::UseAbility => {
+                let slot = submission.ability_slot.unwrap_or(0);
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: submission.target_entity_id,
+                    data_json: format!(r#"{{"slot":{slot}}}"#),
+                });
+            }
             ActionKind::Speak => {
-                let has_msg = submission.message.is_some() && submission.volume.is_some();
-                if has_msg {
-                    let msg: String = submission.message.clone().unwrap();
-                    let vol: SpeakVolume = submission.volume.clone().unwrap();
+                if let (Some(msg), Some(vol)) = (submission.message.clone(), submission.volume.clone()) {
                     if let Some(tf) = ctx.db.transform().entity_id().find(eid) {
                         ctx.db.speech_event().insert(SpeechEventRow {
-                            event_id: 0, // auto_inc
+                            event_id: 0,
                             tick: current_tick,
                             speaker_entity_id: eid,
                             message: msg,
@@ -736,12 +883,61 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     }
                 }
             }
+            ActionKind::Signal => {
+                let signal_type = submission.signal_type.unwrap_or_else(|| "signal".to_string());
+                let signal_data = submission.signal_data.unwrap_or_default();
+                let escaped_type = signal_type.replace('"', "\\\"");
+                let escaped_data = signal_data.replace('"', "\\\"");
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: None,
+                    data_json: format!(
+                        r#"{{"signal_type":"{}","signal_data":"{}"}}"#,
+                        escaped_type,
+                        escaped_data
+                    ),
+                });
+            }
+            ActionKind::Spawn => {
+                if let (Some(prefab), Some(x), Some(y)) =
+                    (submission.prefab.clone(), submission.target_x, submission.target_y)
+                {
+                    let created = ctx.db.entity().insert(EntityRow {
+                        entity_id: 0,
+                        agent_type: None,
+                        owner_identity: None,
+                        alive: true,
+                        created_tick: current_tick,
+                    });
+                    ctx.db.transform().insert(TransformRow {
+                        entity_id: created.entity_id,
+                        pos_x: x,
+                        pos_y: y,
+                        rotation: 0.0,
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                    });
+                    ctx.db.velocity().insert(VelocityRow {
+                        entity_id: created.entity_id,
+                        linear_x: 0.0,
+                        linear_y: 0.0,
+                        angular: 0.0,
+                    });
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::EntitySpawned,
+                        entity_id: created.entity_id,
+                        secondary_entity_id: None,
+                        data_json: prefab,
+                    });
+                }
+            }
             ActionKind::Idle => {
                 // Explicit no-op
-            }
-            // TODO: Implement remaining action kinds
-            _ => {
-                log::debug!("[pod-stdb] Unhandled action kind {:?} for entity {eid}", submission.action_kind);
             }
         }
     }
@@ -768,4 +964,140 @@ pub fn execute_tick(ctx: &ReducerContext) {
     ctx.db.world_state().id().update(ws);
 
     log::debug!("[pod-stdb] Tick {current_tick} → {}", current_tick + 1);
+}
+
+const ATTACK_RANGE: f32 = 80.0;
+const INTERACT_RANGE: f32 = 50.0;
+const BASE_ATTACK_DAMAGE: f32 = 10.0;
+
+fn in_range(ctx: &ReducerContext, source: u64, target: u64, range: f32) -> bool {
+    let Some(source_tf) = ctx.db.transform().entity_id().find(source) else {
+        return false;
+    };
+    let Some(target_tf) = ctx.db.transform().entity_id().find(target) else {
+        return false;
+    };
+    let dx = source_tf.pos_x - target_tf.pos_x;
+    let dy = source_tf.pos_y - target_tf.pos_y;
+    (dx * dx + dy * dy).sqrt() <= range
+}
+
+fn is_hostile(ctx: &ReducerContext, source: u64, target: u64) -> bool {
+    let source_team = ctx
+        .db
+        .label()
+        .entity_id()
+        .find(source)
+        .map(|label| label.team_id)
+        .unwrap_or(0);
+    let target_team = ctx
+        .db
+        .label()
+        .entity_id()
+        .find(target)
+        .map(|label| label.team_id)
+        .unwrap_or(0);
+    source_team == 0 || target_team == 0 || source_team != target_team
+}
+
+fn find_attack_target(ctx: &ReducerContext, attacker_id: u64) -> Option<u64> {
+    let attacker_tf = ctx.db.transform().entity_id().find(attacker_id)?;
+    let mut candidates: Vec<(u64, f32)> = ctx
+        .db
+        .entity()
+        .iter()
+        .filter(|entity| entity.alive && entity.entity_id != attacker_id)
+        .filter_map(|entity| {
+            let target_id = entity.entity_id;
+            let target_tf = ctx.db.transform().entity_id().find(target_id)?;
+            let dx = attacker_tf.pos_x - target_tf.pos_x;
+            let dy = attacker_tf.pos_y - target_tf.pos_y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > ATTACK_RANGE || !is_hostile(ctx, attacker_id, target_id) {
+                return None;
+            }
+            Some((target_id, dist))
+        })
+        .collect();
+    candidates.sort_by(|(a_id, a_dist), (b_id, b_dist)| {
+        a_dist
+            .partial_cmp(b_dist)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a_id.cmp(b_id))
+    });
+    candidates.first().map(|(target_id, _)| *target_id)
+}
+
+fn find_interaction_target(ctx: &ReducerContext, entity_id: u64) -> Option<u64> {
+    let source_tf = ctx.db.transform().entity_id().find(entity_id)?;
+    let mut candidates: Vec<(u64, f32)> = ctx
+        .db
+        .entity()
+        .iter()
+        .filter(|entity| entity.alive && entity.entity_id != entity_id)
+        .filter_map(|entity| {
+            let target_tf = ctx.db.transform().entity_id().find(entity.entity_id)?;
+            let dx = source_tf.pos_x - target_tf.pos_x;
+            let dy = source_tf.pos_y - target_tf.pos_y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            (dist <= INTERACT_RANGE).then_some((entity.entity_id, dist))
+        })
+        .collect();
+    candidates.sort_by(|(a_id, a_dist), (b_id, b_dist)| {
+        a_dist
+            .partial_cmp(b_dist)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a_id.cmp(b_id))
+    });
+    candidates.first().map(|(target_id, _)| *target_id)
+}
+
+fn apply_attack(ctx: &ReducerContext, tick: u64, attacker_id: u64, defender_id: u64) -> bool {
+    if attacker_id == defender_id || !in_range(ctx, attacker_id, defender_id, ATTACK_RANGE) {
+        return false;
+    }
+    if !is_hostile(ctx, attacker_id, defender_id) {
+        return false;
+    }
+
+    let Some(mut defender_health) = ctx.db.health().entity_id().find(defender_id) else {
+        return false;
+    };
+
+    if defender_health.invulnerable {
+        return false;
+    }
+
+    let damage = (BASE_ATTACK_DAMAGE - defender_health.armor).max(0.0);
+    if damage <= 0.0 {
+        return false;
+    }
+
+    defender_health.current = (defender_health.current - damage).max(0.0);
+    let remaining = defender_health.current;
+    let killed = remaining <= 0.0;
+    ctx.db.health().entity_id().update(defender_health);
+
+    ctx.db.combat_event().insert(CombatEventRow {
+        event_id: 0,
+        tick,
+        attacker_entity_id: attacker_id,
+        defender_entity_id: defender_id,
+        damage_dealt: damage,
+        defender_health_remaining: remaining,
+        killed,
+    });
+
+    if killed {
+        ctx.db.world_event().insert(WorldEventRow {
+            event_id: 0,
+            tick,
+            event_kind: WorldEventKind::EntityDied,
+            entity_id: defender_id,
+            secondary_entity_id: Some(attacker_id),
+            data_json: "{}".to_string(),
+        });
+    }
+
+    true
 }

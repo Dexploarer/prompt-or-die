@@ -3867,6 +3867,7 @@ dependencies = [
  "glam",
  "log",
  "pod-core",
+ "pod-net",
  "serde",
  "serde_json",
  "tokio",

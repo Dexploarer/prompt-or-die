@@ -2,7 +2,7 @@
 //!
 //! Authoritative game server that:
 //! - Owns the canonical World and ticks it
-//! - Accepts connections (TODO: when pod-net is ready)
+//! - Accepts connections through pod-net runtime mode
 //! - Distributes observations to agents
 //! - Validates and executes actions
 //! - Broadcasts events to connected clients
@@ -35,6 +35,8 @@ mod config {
         pub world_seed: u64,
         /// Map name to load
         pub map_name: String,
+        /// Runtime mode: "local" (in-process loop) or "network" (pod-net QUIC server)
+        pub runtime_mode: String,
     }
 
     impl ServerConfig {
@@ -61,6 +63,8 @@ mod config {
 
             let map_name = std::env::var("POD_MAP_NAME")
                 .unwrap_or_else(|_| "default".to_string());
+            let runtime_mode = std::env::var("POD_RUNTIME_MODE")
+                .unwrap_or_else(|_| "local".to_string());
 
             ServerConfig {
                 bind_address,
@@ -68,6 +72,7 @@ mod config {
                 max_clients,
                 world_seed,
                 map_name,
+                runtime_mode,
             }
         }
     }
@@ -288,8 +293,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize server stats
     let mut stats = ServerStats::new(config.tick_rate as u32);
 
-    // Run the main game loop
-    let result = run_game_loop(&mut world, &config, &mut stats, &shutdown_flag).await;
+    let result = if config.runtime_mode.eq_ignore_ascii_case("network") {
+        run_network_server(world, &config).await
+    } else {
+        run_game_loop(&mut world, &config, &mut stats, &shutdown_flag).await
+    };
 
     // Print final stats and shutdown message
     if let Err(e) = result {
@@ -298,7 +306,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     info!("Server stopped cleanly");
-    stats.print_final();
+    if !config.runtime_mode.eq_ignore_ascii_case("network") {
+        stats.print_final();
+    }
 
     Ok(())
 }
@@ -336,22 +346,13 @@ async fn run_game_loop(
         let tick_start = Instant::now();
 
         // ====== PHASE 1: ACCEPT NEW CONNECTIONS ======
-        // TODO: When pod-net is integrated, accept connection attempts here.
-        // For now, this is a placeholder.
-        // Example:
-        //   if let Ok(Some(new_client)) = accept_pending_connection() {
-        //       world.add_agent(new_client.into());
-        //   }
+        process_local_connection_ingress(world, config);
 
         // ====== PHASE 2: TICK THE WORLD ======
         let tick_result = world.step();
 
         // ====== PHASE 3: BROADCAST EVENTS TO CLIENTS ======
-        // TODO: When pod-net is integrated, serialize tick_result and send to all
-        // connected clients. Example:
-        //   for client in &mut connected_clients {
-        //       client.send_tick_update(&tick_result)?;
-        //   }
+        broadcast_local_tick_update(&tick_result);
 
         // ====== PHASE 4: RECORD STATS ======
         stats.record_tick(tick_result.entity_count, tick_result.actions_processed);
@@ -379,6 +380,51 @@ async fn run_game_loop(
     Ok(())
 }
 
+fn process_local_connection_ingress(_world: &mut World, _config: &ServerConfig) {
+    // Local mode intentionally runs without external clients.
+}
+
+fn broadcast_local_tick_update(_tick_result: &pod_core::tick::TickResult) {
+    // Local mode does not publish network updates.
+}
+
+async fn run_network_server(
+    world: World,
+    config: &ServerConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (bind_addr, bind_port) = parse_bind_target(&config.bind_address)?;
+    let net_config = pod_net::protocol::ServerConfig {
+        max_clients: config.max_clients,
+        tick_rate: config.tick_rate as u32,
+        snapshot_interval: 10,
+        bind_addr,
+        bind_port,
+        enable_websocket: false,
+        websocket_port: 0,
+    };
+
+    let mut server = pod_net::GameServer::new(net_config, world);
+    server
+        .initialize()
+        .await
+        .map_err(|err| std::io::Error::other(err.to_string()))?;
+    server
+        .run()
+        .await
+        .map_err(|err| std::io::Error::other(err.to_string()))?;
+    Ok(())
+}
+
+fn parse_bind_target(bind: &str) -> Result<(String, u16), Box<dyn std::error::Error + Send + Sync>> {
+    let mut parts = bind.split(':');
+    let host = parts.next().unwrap_or("0.0.0.0").to_string();
+    let port = parts
+        .next()
+        .ok_or_else(|| format!("Invalid bind address '{bind}', expected host:port"))?
+        .parse::<u16>()?;
+    Ok((host, port))
+}
+
 // ============================================================================
 // BANNER & FORMATTING
 // ============================================================================
@@ -401,12 +447,14 @@ Configuration:
   Max Clients:    {}
   World Seed:     {}
   Map:            {}
+  Runtime Mode:   {}
 
 "#,
         config.bind_address,
         config.tick_rate,
         config.max_clients,
         config.world_seed,
-        config.map_name
+        config.map_name,
+        config.runtime_mode
     );
 }

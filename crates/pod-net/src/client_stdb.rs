@@ -377,6 +377,7 @@ pub struct SpacetimeDBClient {
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
     welcome_sent: bool,
+    last_emitted_tick: u64,
 }
 
 impl SpacetimeDBClient {
@@ -389,6 +390,7 @@ impl SpacetimeDBClient {
             pending_actions: Vec::new(),
             local_snapshot: None,
             welcome_sent: false,
+            last_emitted_tick: 0,
         }
     }
 
@@ -518,6 +520,9 @@ impl SpacetimeDBClient {
                     if let Some(cached) = self.inner.entity(entity_id) {
                         let snap = entity_to_snapshot(cached);
                         let tick = self.current_tick_or_zero();
+                        if tick < self.last_emitted_tick {
+                            continue;
+                        }
                         self.upsert_local_snapshot(tick, &snap);
 
                         messages.push(ServerMessage::StateDelta {
@@ -533,6 +538,9 @@ impl SpacetimeDBClient {
 
                 StdbEvent::EntityDeleted { entity_id } => {
                     let tick = self.current_tick_or_zero();
+                    if tick < self.last_emitted_tick {
+                        continue;
+                    }
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = tick;
                         local.entities.retain(|e| e.id != entity_id);
@@ -634,12 +642,14 @@ impl SpacetimeDBClient {
 
                 // ── Tick advancement ──
                 StdbEvent::TickAdvanced { new_tick, .. } => {
+                    self.last_emitted_tick = self.last_emitted_tick.max(new_tick);
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = new_tick;
                     }
                 }
 
                 StdbEvent::WorldStateUpdated { tick, .. } => {
+                    self.last_emitted_tick = self.last_emitted_tick.max(tick);
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = tick;
                     }
@@ -660,6 +670,7 @@ impl SpacetimeDBClient {
         self.inner.disconnect();
         self.client_id = None;
         self.welcome_sent = false;
+        self.last_emitted_tick = 0;
         self.subscriptions.reset_connection();
     }
 

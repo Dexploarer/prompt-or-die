@@ -220,7 +220,7 @@ mod tests {
 
     fn action(agent_id: u64, action: Action) -> AgentAction {
         AgentAction {
-            agent_id: AgentId(agent_id),
+            agent_id: AgentId(uuid::Uuid::from_u128(agent_id as u128)),
             tick: 1,
             action,
         }

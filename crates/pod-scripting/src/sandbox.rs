@@ -34,7 +34,7 @@ pub fn apply_sandbox(lua: &Lua) -> mlua::Result<()> {
     globals.set("package", mlua::Value::Nil)?;
 
     // Remove unsafe table functions
-    if let mlua::Value::Table(table) = globals.get::<_, mlua::Value>("table")? {
+    if let mlua::Value::Table(table) = globals.get::<mlua::Value>("table")? {
         table.set("load", mlua::Value::Nil)?;
         table.set("loadstring", mlua::Value::Nil)?;
     }

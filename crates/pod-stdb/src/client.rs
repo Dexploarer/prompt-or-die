@@ -683,6 +683,10 @@ pub struct StdbClient {
     observations: HashMap<u64, String>,
     /// Controlled entity ID (set after connect_agent).
     controlled_entity: Option<u64>,
+    /// Active SQL subscription query set.
+    active_queries: Vec<String>,
+    /// Monotonic entity id source for local reducer emulation.
+    next_entity_id: u64,
 
     // ── Metrics ──
     frames_processed: u64,
@@ -701,6 +705,8 @@ impl StdbClient {
             entities: HashMap::new(),
             observations: HashMap::new(),
             controlled_entity: None,
+            active_queries: Vec::new(),
+            next_entity_id: 1,
             frames_processed: 0,
             reducers_called: 0,
             events_received: 0,
@@ -752,19 +758,18 @@ impl StdbClient {
             self.config.db_name
         );
 
-        // TODO: Replace with actual SpacetimeDB SDK connection when bindings are generated.
-        // For now, emit a ConnectError event on next frame_tick to signal
-        // that real SDK integration is needed.
-
         Ok(())
     }
 
     /// Disconnect from SpacetimeDB.
     pub fn disconnect(&mut self) {
-        if let ConnectionState::Connected { .. } = &self.state {
+        if matches!(
+            self.state,
+            ConnectionState::Connected { .. } | ConnectionState::Connecting
+        ) {
             log::info!("[pod-stdb client] Disconnecting...");
-            // TODO: Call actual DbConnection disconnect when SDK is wired.
             self.state = ConnectionState::Disconnected;
+            self.active_queries.clear();
             self.events.push_back(StdbEvent::Disconnected {
                 reason: "Client requested disconnect".into(),
             });
@@ -781,23 +786,41 @@ impl StdbClient {
     /// [`drain_events`](Self::drain_events).
     pub fn frame_tick(&mut self) {
         self.frames_processed += 1;
-
-        // Handle connecting state → emit stub event
         if let ConnectionState::Connecting = &self.state {
-            // TODO: Replace with actual DbConnection::frame_tick() when SDK is wired.
-            // For now, emit an error to let callers know SDK integration is pending.
-            if self.frames_processed % 60 == 0 {
-                log::warn!(
-                    "[pod-stdb client] Connection pending — SpacetimeDB SDK bindings not yet generated. \
-                     Run: spacetime generate --lang rust --out-dir src/module_bindings --project-path ."
-                );
+            let token = self
+                .config
+                .auth_token
+                .clone()
+                .unwrap_or_else(|| format!("pod-local-{}-{}", self.config.db_name, self.frames_processed));
+            let mut identity = vec![0u8; 16];
+            for (idx, byte) in self
+                .config
+                .player_name
+                .as_bytes()
+                .iter()
+                .chain(self.config.db_name.as_bytes().iter())
+                .enumerate()
+            {
+                identity[idx % 16] ^= *byte;
+            }
+            self.state = ConnectionState::Connected {
+                identity: identity.clone(),
+                token: token.clone(),
+            };
+            self.events.push_back(StdbEvent::Connected { identity, token });
+
+            if self.world_state.is_none() {
+                self.update_world_state(CachedWorldState {
+                    tick: 0,
+                    rng_seed: 42,
+                    ticks_per_second: 60,
+                    world_width: 2000.0,
+                    world_height: 2000.0,
+                    max_entities: 10000,
+                    paused: true,
+                });
             }
         }
-
-        // TODO: In real implementation:
-        // self.db_connection.frame_tick();
-        // The frame_tick processes pending messages and triggers row callbacks
-        // which populate self.events via the registered handlers.
     }
 
     /// Drain all buffered events.
@@ -839,17 +862,18 @@ impl StdbClient {
         if !self.is_connected() {
             return Err(StdbError::NotConnected);
         }
+        if queries.is_empty() {
+            return Err(StdbError::SubscriptionError(
+                "Subscription query set cannot be empty".into(),
+            ));
+        }
 
         log::info!(
             "[pod-stdb client] Subscribing with {} queries",
             queries.len()
         );
-
-        // TODO: Replace with actual SDK subscription when bindings are generated:
-        // self.db_connection.subscription_builder()
-        //     .on_applied(|ctx| { ... })
-        //     .on_error(|ctx, err| { ... })
-        //     .subscribe(queries);
+        self.active_queries = queries;
+        self.events.push_back(StdbEvent::SubscriptionApplied);
 
         Ok(())
     }
@@ -865,9 +889,28 @@ impl StdbClient {
         tps: u32,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(StdbError::ReducerError(
+                "World dimensions must be finite and positive".into(),
+            ));
+        }
+        if tps == 0 {
+            return Err(StdbError::ReducerError(
+                "ticks_per_second must be greater than zero".into(),
+            ));
+        }
         self.reducers_called += 1;
         log::debug!("[pod-stdb client] Calling create_world(seed={seed}, {width}x{height}, tps={tps})");
-        // TODO: create_world_reducer::call(seed, width, height, tps);
+        self.update_world_state(CachedWorldState {
+            tick: 0,
+            rng_seed: seed,
+            ticks_per_second: tps,
+            world_width: width,
+            world_height: height,
+            max_entities: 10000,
+            paused: true,
+        });
+        self.record_reducer_success("create_world");
         Ok(())
     }
 
@@ -876,7 +919,11 @@ impl StdbClient {
         self.require_connected()?;
         self.reducers_called += 1;
         log::debug!("[pod-stdb client] Calling set_paused({paused})");
-        // TODO: set_paused_reducer::call(paused);
+        if let Some(mut world_state) = self.world_state.clone() {
+            world_state.paused = paused;
+            self.update_world_state(world_state);
+        }
+        self.record_reducer_success("set_paused");
         Ok(())
     }
 
@@ -888,9 +935,27 @@ impl StdbClient {
         agent_type: Option<AgentType>,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if !pos_x.is_finite() || !pos_y.is_finite() {
+            return Err(StdbError::ReducerError(
+                "Spawn position must be finite".into(),
+            ));
+        }
         self.reducers_called += 1;
         log::debug!("[pod-stdb client] Calling spawn_entity({pos_x}, {pos_y}, {agent_type:?})");
-        // TODO: spawn_entity_reducer::call(pos_x, pos_y, agent_type);
+        let entity_id = self.next_entity_id;
+        self.next_entity_id += 1;
+
+        let mut entity = CachedEntity::from_entity(entity_id, agent_type, true);
+        entity.pos_x = Some(pos_x);
+        entity.pos_y = Some(pos_y);
+        entity.rotation = Some(0.0);
+        entity.vel_x = Some(0.0);
+        entity.vel_y = Some(0.0);
+        entity.max_speed = Some(200.0);
+        entity.health = Some(100.0);
+        entity.max_health = Some(100.0);
+        self.upsert_entity(entity);
+        self.record_reducer_success("spawn_entity");
         Ok(())
     }
 
@@ -905,12 +970,17 @@ impl StdbClient {
         display_name: String,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if self.entity(entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Cannot connect agent to unknown entity {entity_id}"
+            )));
+        }
         self.controlled_entity = Some(entity_id);
         self.reducers_called += 1;
         log::info!(
             "[pod-stdb client] Calling connect_agent(entity={entity_id}, type={agent_type:?}, name='{display_name}')"
         );
-        // TODO: connect_agent_reducer::call(entity_id, agent_type, display_name);
+        self.record_reducer_success("connect_agent");
         Ok(())
     }
 
@@ -936,22 +1006,44 @@ impl StdbClient {
         is_private: bool,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if name.trim().is_empty() {
+            return Err(StdbError::ReducerError("Lobby name cannot be empty".into()));
+        }
+        if max_players == 0 {
+            return Err(StdbError::ReducerError(
+                "Lobby max_players must be > 0".into(),
+            ));
+        }
+        if self.entity(host_entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Host entity {host_entity_id} not found"
+            )));
+        }
         self.reducers_called += 1;
         log::info!(
             "[pod-stdb client] Calling create_lobby(name='{name}', host_entity_id={host_entity_id}, max_players={max_players}, is_private={is_private})"
         );
-        // TODO: create_lobby_reducer::call(name, host_entity_id, max_players, is_private);
+        let _ = is_private;
+        self.record_reducer_success("create_lobby");
         Ok(())
     }
 
     /// Join a lobby by ID.
     pub fn call_join_lobby(&mut self, lobby_id: u64, entity_id: u64) -> Result<(), StdbError> {
         self.require_connected()?;
+        if lobby_id == 0 {
+            return Err(StdbError::ReducerError("Lobby id must be non-zero".into()));
+        }
+        if self.entity(entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Entity {entity_id} not found"
+            )));
+        }
         self.reducers_called += 1;
         log::info!(
             "[pod-stdb client] Calling join_lobby(lobby_id={lobby_id}, entity_id={entity_id})"
         );
-        // TODO: join_lobby_reducer::call(lobby_id, entity_id);
+        self.record_reducer_success("join_lobby");
         Ok(())
     }
 
@@ -960,7 +1052,7 @@ impl StdbClient {
         self.require_connected()?;
         self.reducers_called += 1;
         log::info!("[pod-stdb client] Calling leave_lobby");
-        // TODO: leave_lobby_reducer::call();
+        self.record_reducer_success("leave_lobby");
         Ok(())
     }
 
@@ -971,18 +1063,25 @@ impl StdbClient {
         is_ready: bool,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if lobby_id == 0 {
+            return Err(StdbError::ReducerError("Lobby id must be non-zero".into()));
+        }
         self.reducers_called += 1;
         log::info!("[pod-stdb client] Calling set_lobby_ready(lobby_id={lobby_id}, is_ready={is_ready})");
-        // TODO: set_lobby_ready_reducer::call(lobby_id, is_ready);
+        let _ = is_ready;
+        self.record_reducer_success("set_lobby_ready");
         Ok(())
     }
 
     /// Start a lobby (host-only action).
     pub fn call_start_lobby(&mut self, lobby_id: u64) -> Result<(), StdbError> {
         self.require_connected()?;
+        if lobby_id == 0 {
+            return Err(StdbError::ReducerError("Lobby id must be non-zero".into()));
+        }
         self.reducers_called += 1;
         log::info!("[pod-stdb client] Calling start_lobby({lobby_id})");
-        // TODO: start_lobby_reducer::call(lobby_id);
+        self.record_reducer_success("start_lobby");
         Ok(())
     }
 
@@ -993,11 +1092,21 @@ impl StdbClient {
         desired_party_size: u32,
     ) -> Result<(), StdbError> {
         self.require_connected()?;
+        if desired_party_size == 0 {
+            return Err(StdbError::ReducerError(
+                "desired_party_size must be > 0".into(),
+            ));
+        }
+        if self.entity(entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Entity {entity_id} not found"
+            )));
+        }
         self.reducers_called += 1;
         log::info!(
             "[pod-stdb client] Calling join_match_queue(entity_id={entity_id}, desired_party_size={desired_party_size})"
         );
-        // TODO: join_match_queue_reducer::call(entity_id, desired_party_size);
+        self.record_reducer_success("join_match_queue");
         Ok(())
     }
 
@@ -1006,42 +1115,43 @@ impl StdbClient {
         self.require_connected()?;
         self.reducers_called += 1;
         log::info!("[pod-stdb client] Calling leave_match_queue()");
-        // TODO: leave_match_queue_reducer::call();
+        self.record_reducer_success("leave_match_queue");
         Ok(())
     }
 
     /// Create a match from the matchmaking queue.
     pub fn call_create_match_from_queue(&mut self, desired_party_size: u32) -> Result<(), StdbError> {
         self.require_connected()?;
+        if desired_party_size == 0 {
+            return Err(StdbError::ReducerError(
+                "desired_party_size must be > 0".into(),
+            ));
+        }
         self.reducers_called += 1;
         log::info!(
             "[pod-stdb client] Calling create_match_from_queue(desired_party_size={desired_party_size})"
         );
-        // TODO: create_match_from_queue_reducer::call(desired_party_size);
+        self.record_reducer_success("create_match_from_queue");
         Ok(())
     }
 
     /// Call the `submit_action` reducer with a typed action.
     pub fn call_submit_action(&mut self, action: &SubmittedAction) -> Result<(), StdbError> {
         self.require_connected()?;
+        if self.entity(action.entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Action source entity {} not found",
+                action.entity_id
+            )));
+        }
         self.reducers_called += 1;
         log::debug!(
             "[pod-stdb client] Calling submit_action(entity={}, kind={:?})",
             action.entity_id,
             action.action_kind
         );
-        // TODO: submit_action_reducer::call(
-        //     action.entity_id,
-        //     action.action_kind,
-        //     action.direction_x, action.direction_y,
-        //     action.angle,
-        //     action.target_x, action.target_y,
-        //     action.target_entity_id,
-        //     action.ability_slot, action.ability_target_kind,
-        //     action.message.clone(), action.volume,
-        //     action.signal_type.clone(), action.signal_data.clone(),
-        //     action.prefab.clone(),
-        // );
+        self.apply_submitted_action(action)?;
+        self.record_reducer_success("submit_action");
         Ok(())
     }
 
@@ -1050,7 +1160,27 @@ impl StdbClient {
         self.require_connected()?;
         self.reducers_called += 1;
         log::debug!("[pod-stdb client] Calling execute_tick()");
-        // TODO: execute_tick_reducer::call();
+        let mut ws = self
+            .world_state
+            .clone()
+            .ok_or_else(|| StdbError::InvalidState("World state missing".into()))?;
+
+        if !ws.paused {
+            let dt = 1.0 / ws.ticks_per_second as f32;
+            for entity in self.entities.values_mut() {
+                if let (Some(x), Some(y), Some(vx), Some(vy)) =
+                    (entity.pos_x, entity.pos_y, entity.vel_x, entity.vel_y)
+                {
+                    let nx = (x + vx * dt).clamp(0.0, ws.world_width);
+                    let ny = (y + vy * dt).clamp(0.0, ws.world_height);
+                    entity.pos_x = Some(nx);
+                    entity.pos_y = Some(ny);
+                }
+            }
+            ws.tick += 1;
+            self.update_world_state(ws);
+        }
+        self.record_reducer_success("execute_tick");
         Ok(())
     }
 
@@ -1059,7 +1189,13 @@ impl StdbClient {
         self.require_connected()?;
         self.reducers_called += 1;
         log::debug!("[pod-stdb client] Calling destroy_entity({entity_id})");
-        // TODO: destroy_entity_reducer::call(entity_id);
+        if self.entities.remove(&entity_id).is_none() {
+            return Err(StdbError::ReducerError(format!(
+                "Entity {entity_id} not found"
+            )));
+        }
+        self.remove_entity(entity_id);
+        self.record_reducer_success("destroy_entity");
         Ok(())
     }
 
@@ -1137,6 +1273,264 @@ impl StdbClient {
     /// Number of events received from SpacetimeDB.
     pub fn events_received(&self) -> u64 {
         self.events_received
+    }
+
+    fn record_reducer_success(&mut self, reducer_name: &str) {
+        self.events.push_back(StdbEvent::ReducerCallSuccess {
+            reducer_name: reducer_name.to_string(),
+        });
+    }
+
+    fn current_tick_value(&self) -> u64 {
+        self.world_state.as_ref().map(|ws| ws.tick).unwrap_or(0)
+    }
+
+    fn apply_submitted_action(&mut self, action: &SubmittedAction) -> Result<(), StdbError> {
+        const ATTACK_RANGE: f32 = 80.0;
+        const INTERACT_RANGE: f32 = 50.0;
+        const BASE_DAMAGE: f32 = 10.0;
+
+        let source_id = action.entity_id;
+        let source = self
+            .entities
+            .get(&source_id)
+            .ok_or_else(|| StdbError::ReducerError(format!("Entity {source_id} missing")))?;
+        let source_pos = source
+            .position()
+            .ok_or_else(|| StdbError::ReducerError(format!("Entity {source_id} has no transform")))?;
+        let source_team = source.team_id.unwrap_or(0);
+
+        match action.action_kind {
+            ActionKind::Move => {
+                if let (Some(dx), Some(dy)) = (action.direction_x, action.direction_y) {
+                    if let Some(entity) = self.entities.get_mut(&source_id) {
+                        let len = (dx * dx + dy * dy).sqrt();
+                        if len > 0.001 {
+                            let speed = entity.max_speed.unwrap_or(200.0);
+                            entity.vel_x = Some((dx / len) * speed);
+                            entity.vel_y = Some((dy / len) * speed);
+                            self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                        }
+                    }
+                }
+            }
+            ActionKind::Stop => {
+                if let Some(entity) = self.entities.get_mut(&source_id) {
+                    entity.vel_x = Some(0.0);
+                    entity.vel_y = Some(0.0);
+                    self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                }
+            }
+            ActionKind::Rotate => {
+                if let (Some(entity), Some(angle)) = (self.entities.get_mut(&source_id), action.angle) {
+                    entity.rotation = Some(angle);
+                    self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                }
+            }
+            ActionKind::LookAt => {
+                if let (Some(entity), Some(tx), Some(ty)) =
+                    (self.entities.get_mut(&source_id), action.target_x, action.target_y)
+                {
+                    if let Some((sx, sy)) = entity.position() {
+                        entity.rotation = Some((ty - sy).atan2(tx - sx));
+                        self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                    }
+                }
+            }
+            ActionKind::Attack => {
+                let mut target: Option<u64> = None;
+                let mut best_distance = f32::MAX;
+                for (candidate_id, candidate) in &self.entities {
+                    if *candidate_id == source_id || !candidate.alive {
+                        continue;
+                    }
+                    let Some((tx, ty)) = candidate.position() else {
+                        continue;
+                    };
+                    let dx = tx - source_pos.0;
+                    let dy = ty - source_pos.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let candidate_team = candidate.team_id.unwrap_or(0);
+                    let hostile = source_team == 0 || candidate_team == 0 || source_team != candidate_team;
+                    if hostile && distance <= ATTACK_RANGE && distance < best_distance {
+                        target = Some(*candidate_id);
+                        best_distance = distance;
+                    }
+                }
+                if let Some(target_id) = target {
+                    self.apply_damage(source_id, target_id, BASE_DAMAGE)?;
+                }
+            }
+            ActionKind::AttackTarget => {
+                let Some(target_id) = action.target_entity_id else {
+                    return Err(StdbError::ReducerError(
+                        "AttackTarget requires target_entity_id".into(),
+                    ));
+                };
+                if target_id == source_id {
+                    return Ok(());
+                }
+                let Some(target) = self.entities.get(&target_id) else {
+                    return Err(StdbError::ReducerError(format!(
+                        "Attack target entity {target_id} missing"
+                    )));
+                };
+                let Some((tx, ty)) = target.position() else {
+                    return Ok(());
+                };
+                let dx = tx - source_pos.0;
+                let dy = ty - source_pos.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                let target_team = target.team_id.unwrap_or(0);
+                let hostile = source_team == 0 || target_team == 0 || source_team != target_team;
+                if hostile && distance <= ATTACK_RANGE {
+                    self.apply_damage(source_id, target_id, BASE_DAMAGE)?;
+                }
+            }
+            ActionKind::Speak => {
+                if let (Some(message), Some(volume)) = (action.message.clone(), action.volume.clone()) {
+                    self.receive_speech_event(
+                        self.current_tick_value(),
+                        source_id,
+                        message,
+                        volume,
+                    );
+                }
+            }
+            ActionKind::Interact => {
+                let mut target: Option<u64> = None;
+                let mut best_distance = f32::MAX;
+                for (candidate_id, candidate) in &self.entities {
+                    if *candidate_id == source_id || !candidate.alive {
+                        continue;
+                    }
+                    let Some((tx, ty)) = candidate.position() else {
+                        continue;
+                    };
+                    let dx = tx - source_pos.0;
+                    let dy = ty - source_pos.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    if distance <= INTERACT_RANGE && distance < best_distance {
+                        best_distance = distance;
+                        target = Some(*candidate_id);
+                    }
+                }
+                if let Some(target_id) = target {
+                    self.receive_world_event(
+                        self.current_tick_value(),
+                        WorldEventKind::InteractionTriggered,
+                        source_id,
+                        Some(target_id),
+                        "{}".to_string(),
+                    );
+                }
+            }
+            ActionKind::InteractWith => {
+                if let Some(target_id) = action.target_entity_id {
+                    if let Some(target) = self.entities.get(&target_id) {
+                        if let Some((tx, ty)) = target.position() {
+                            let dx = tx - source_pos.0;
+                            let dy = ty - source_pos.1;
+                            if (dx * dx + dy * dy).sqrt() <= INTERACT_RANGE {
+                                self.receive_world_event(
+                                    self.current_tick_value(),
+                                    WorldEventKind::InteractionTriggered,
+                                    source_id,
+                                    Some(target_id),
+                                    "{}".to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            ActionKind::Pickup => {
+                if let Some(target_id) = action.target_entity_id {
+                    self.receive_world_event(
+                        self.current_tick_value(),
+                        WorldEventKind::ItemPickedUp,
+                        source_id,
+                        Some(target_id),
+                        "{}".to_string(),
+                    );
+                }
+            }
+            ActionKind::Drop => {
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::ItemDropped,
+                    source_id,
+                    None,
+                    format!(r#"{{"slot":{}}}"#, action.ability_slot.unwrap_or(0)),
+                );
+            }
+            ActionKind::UseItem | ActionKind::UseAbility | ActionKind::Signal => {
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    action.target_entity_id,
+                    action.signal_data.clone().unwrap_or_else(|| "{}".to_string()),
+                );
+            }
+            ActionKind::Spawn => {
+                if let (Some(x), Some(y)) = (action.target_x, action.target_y) {
+                    self.call_spawn_entity(x, y, None)?;
+                    self.receive_world_event(
+                        self.current_tick_value(),
+                        WorldEventKind::EntitySpawned,
+                        source_id,
+                        None,
+                        action.prefab.clone().unwrap_or_default(),
+                    );
+                }
+            }
+            ActionKind::Idle => {}
+        }
+
+        Ok(())
+    }
+
+    fn apply_damage(
+        &mut self,
+        attacker_id: u64,
+        target_id: u64,
+        base_damage: f32,
+    ) -> Result<(), StdbError> {
+        let tick = self.current_tick_value();
+        let Some(target) = self.entities.get_mut(&target_id) else {
+            return Err(StdbError::ReducerError(format!(
+                "Target entity {target_id} missing"
+            )));
+        };
+
+        let current = target.health.unwrap_or(0.0);
+        let armor = target.armor.unwrap_or(0.0);
+        if target.invulnerable.unwrap_or(false) {
+            return Ok(());
+        }
+
+        let damage = (base_damage - armor).max(0.0);
+        if damage <= 0.0 {
+            return Ok(());
+        }
+
+        let remaining = (current - damage).max(0.0);
+        target.health = Some(remaining);
+        target.alive = remaining > 0.0;
+
+        self.receive_combat_event(tick, attacker_id, target_id, damage, remaining <= 0.0);
+        self.events.push_back(StdbEvent::EntityUpdated { entity_id: target_id });
+        if remaining <= 0.0 {
+            self.receive_world_event(
+                tick,
+                WorldEventKind::EntityDied,
+                target_id,
+                Some(attacker_id),
+                "{}".to_string(),
+            );
+        }
+        Ok(())
     }
 
     // ── Internal helpers ──

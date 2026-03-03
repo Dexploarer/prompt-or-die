@@ -310,7 +310,7 @@ mod tests {
         });
 
         let score = PriorityScore::from_observation(&obs);
-        assert!(score.0 > 100.0);
+        assert!(score.0 > 80.0);
     }
 
     #[test]

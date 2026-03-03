@@ -1,6 +1,8 @@
+use crate::action::{Action, AgentAction};
 use crate::agent::{Agent, AgentSlot};
 use crate::component::*;
 use crate::event::EventBus;
+use crate::id::AgentId;
 use crate::tick::{execute_tick, TickResult};
 use glam::Vec2;
 use rand::SeedableRng;
@@ -26,6 +28,8 @@ pub struct World {
     next_entity_id: u64,
     /// Whether the simulation is paused
     pub paused: bool,
+    /// Externally submitted actions (e.g., from network clients).
+    external_actions: Vec<AgentAction>,
 }
 
 impl World {
@@ -39,6 +43,7 @@ impl World {
             rng: ChaCha8Rng::seed_from_u64(seed),
             next_entity_id: 1,
             paused: false,
+            external_actions: Vec::new(),
         }
     }
 
@@ -59,6 +64,7 @@ impl World {
             &mut self.agents,
             &mut self.events,
             self.tick,
+            std::mem::take(&mut self.external_actions),
             &mut self.next_entity_id,
         );
         self.tick += 1;
@@ -137,6 +143,18 @@ impl World {
     /// Get agent count
     pub fn agent_count(&self) -> usize {
         self.agents.len()
+    }
+
+    /// Queue an externally sourced action for execution on the next world step.
+    ///
+    /// This is used by authoritative network/server paths where actions are
+    /// submitted outside the local `Agent::decide` loop.
+    pub fn submit_external_action(&mut self, agent_id: AgentId, action: Action) {
+        self.external_actions.push(AgentAction {
+            agent_id,
+            tick: self.tick,
+            action,
+        });
     }
 }
 

@@ -99,6 +99,8 @@ pub struct AgentSlot {
     pub entity_id: Option<hecs::Entity>,
     pub connected: bool,
     pub last_observation: Option<Observation>,
+    /// Remaining ticks until attack actions are available again.
+    pub attack_cooldown_remaining: u32,
 }
 
 impl AgentSlot {
@@ -108,6 +110,7 @@ impl AgentSlot {
             entity_id: None,
             connected: true,
             last_observation: None,
+            attack_cooldown_remaining: 0,
         }
     }
 }

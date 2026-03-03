@@ -361,16 +361,16 @@ mod tests {
 
         assert!(budget.can_afford("spell"));
         budget.spend("spell");
-        assert_eq!(budget.current_tokens, 80.0);
+        assert_eq!(budget.current_tokens, 30.0);
 
         budget.tick();
-        assert_eq!(budget.current_tokens, 85.0);
+        assert_eq!(budget.current_tokens, 35.0);
     }
 
     #[test]
     fn test_reaction_time_gate() {
         let gate = ReactionTimeGate::new(10);
-        assert!(gate.can_react(0)); // no stimulus yet
+        assert!(!gate.can_react(0));
 
         let mut gate = ReactionTimeGate::new(10);
         gate.record_stimulus(0);

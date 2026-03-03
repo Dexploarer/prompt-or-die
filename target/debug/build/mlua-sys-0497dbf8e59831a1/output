@@ -1,5 +1,5 @@
 cargo:rerun-if-changed=build
-cargo:rustc-link-search=native=/Users/home/Downloads/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/lib
+cargo:rustc-link-search=native=/Users/home/Desktop/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/lib
 cargo:rustc-link-lib=static=lua5.4
-cargo:include=/Users/home/Downloads/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/include
-cargo:lib=/Users/home/Downloads/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/lib
+cargo:include=/Users/home/Desktop/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/include
+cargo:lib=/Users/home/Desktop/prompt-or-die/target/debug/build/mlua-sys-0497dbf8e59831a1/out/lua-build/lib

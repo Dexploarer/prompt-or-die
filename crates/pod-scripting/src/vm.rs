@@ -12,7 +12,7 @@ pub struct ScriptVm {
     /// We store sources instead of compiled functions because Lua 5.4
     /// per-function environments must be set at load time via set_environment()
     scripts: HashMap<String, String>,
-    config: SandboxConfig,
+    _config: SandboxConfig,
 }
 
 impl ScriptVm {
@@ -23,7 +23,7 @@ impl ScriptVm {
         Ok(Self {
             lua,
             scripts: HashMap::new(),
-            config,
+            _config: config,
         })
     }
 
@@ -72,36 +72,56 @@ impl ScriptVm {
 
         // Copy safe globals from the sandboxed state
         let globals = self.lua.globals();
-        for key in ["math", "string", "table", "tonumber", "tostring", "type", "pairs", "ipairs", "next", "setmetatable", "getmetatable"].iter() {
-            if let Ok(value) = globals.get::<_, Value>(key) {
-                script_env.set(*key, value)?;
+        for key in [
+            "math",
+            "string",
+            "table",
+            "tonumber",
+            "tostring",
+            "type",
+            "pairs",
+            "ipairs",
+            "next",
+            "setmetatable",
+            "getmetatable",
+        ] {
+            if let Ok(value) = globals.get::<Value>(key) {
+                script_env.set(key, value)?;
             }
         }
 
         // Set the API context (entity, world, events, etc.)
         script_env.set("entity", context.clone())?;
-        script_env.set("world", context.get::<_, Table>("world")?)?;
-        script_env.set("events", context.get::<_, Table>("events")?)?;
-        script_env.set("time", context.get::<_, Table>("time")?)?;
-        script_env.set("math_api", context.get::<_, Table>("math_api")?)?;
-        script_env.set("log", context.get::<_, Table>("log")?)?;
+        script_env.set("world", context.get::<Table>("world")?)?;
+        script_env.set("events", context.get::<Table>("events")?)?;
+        script_env.set("time", context.get::<Table>("time")?)?;
+        script_env.set("math_api", context.get::<Table>("math_api")?)?;
+        script_env.set("log", context.get::<Table>("log")?)?;
 
         // Load the script source with the custom environment
         // In Lua 5.4, set_environment() sets the _ENV upvalue for the chunk
-        let chunk = self.lua.load(source.as_str());
-        let function = chunk.set_environment(script_env.clone())?
+        let function = self
+            .lua
+            .load(source.as_str())
+            .set_environment(script_env.clone())
             .into_function()?;
 
         // Execute the function to define its hooks in the environment
-        function.call::<_, Value>(())?;
+        function.call::<()>(())?;
 
         // Now look up the hook function in the script's environment
-        let hook_fn = script_env
-            .get::<_, mlua::Function>(hook_name)
-            .ok_or_else(|| mlua::Error::external(format!("Hook '{}' not found", hook_name)))?;
+        let hook_fn = match script_env.get::<Value>(hook_name)? {
+            Value::Function(function) => function,
+            _ => {
+                return Err(mlua::Error::external(format!(
+                    "Hook '{}' not found",
+                    hook_name
+                )));
+            }
+        };
 
         // Call the hook with the context
-        hook_fn.call::<_, Value>(context)
+        hook_fn.call::<Value>(context)
     }
 
     /// Get the Lua state (for advanced use)

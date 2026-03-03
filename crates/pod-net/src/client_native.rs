@@ -25,17 +25,20 @@ pub struct NativeClient {
     config: ProtoClientConfig,
     client_id: Option<ClientId>,
     connection: Option<quinn::Connection>,
-    _endpoint: Endpoint,
+    endpoint: Endpoint,
     /// Channel for receiving server messages
     rx: mpsc::Receiver<ServerMessage>,
     /// Channel for sending server messages (internal)
-    _tx: mpsc::Sender<ServerMessage>,
+    tx: mpsc::Sender<ServerMessage>,
+    reader_task: Option<tokio::task::JoinHandle<()>>,
     /// Buffered server updates
     pending_updates: Vec<ServerMessage>,
     /// Local prediction world state
     local_snapshot: Option<WorldSnapshot>,
     /// Actions pending transmission
     pending_actions: Vec<Action>,
+    /// Highest server tick applied locally.
+    last_server_tick: u64,
 }
 
 impl NativeClient {
@@ -45,11 +48,33 @@ impl NativeClient {
         let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
             .map_err(|e| ClientError::Connection(e.to_string()))?;
 
-        // Build rustls ClientConfig with custom certificate verifier (rustls 0.23 API)
-        let tls_config = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoServerVerification))
-            .with_no_client_auth();
+        let insecure_tls = std::env::var("POD_INSECURE_SKIP_TLS_VERIFY")
+            .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
+
+        let tls_config = if insecure_tls {
+            warn_insecure_tls_mode();
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoServerVerification))
+                .with_no_client_auth()
+        } else {
+            let mut roots = rustls::RootCertStore::empty();
+            if let Ok(path) = std::env::var("POD_TRUSTED_CERT_DER") {
+                let cert_der = std::fs::read(&path)
+                    .map_err(|e| ClientError::Config(format!("Failed reading POD_TRUSTED_CERT_DER: {e}")))?;
+                roots
+                    .add(rustls::pki_types::CertificateDer::from(cert_der))
+                    .map_err(|e| ClientError::Config(format!("Invalid trusted DER certificate: {e}")))?;
+            } else {
+                return Err(ClientError::Config(
+                    "TLS verification requires POD_TRUSTED_CERT_DER to point to a trusted server certificate (DER).".into(),
+                ));
+            }
+            rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth()
+        };
 
         let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
             .map_err(|e| ClientError::Config(format!("QUIC client config: {}", e)))?;
@@ -81,16 +106,19 @@ impl NativeClient {
             config,
             client_id: None,
             connection: Some(connection),
-            _endpoint: endpoint,
+            endpoint,
             rx,
-            _tx: tx,
+            tx,
+            reader_task: None,
             pending_updates: Vec::new(),
             local_snapshot: None,
             pending_actions: Vec::new(),
+            last_server_tick: 0,
         };
 
         // Send connect message
         client.send_connect().await?;
+        client.start_reader_loop();
 
         Ok(client)
     }
@@ -110,22 +138,65 @@ impl NativeClient {
         )
         .await
         .map_err(|_| ClientError::Timeout)?
-        .map(|msg| {
+        .and_then(|msg| {
             if let ServerMessage::Welcome {
                 client_id,
                 snapshot,
                 ..
-            } = msg
-            {
+            } = msg {
                 self.client_id = Some(client_id);
                 self.local_snapshot = Some(snapshot);
                 debug!("Received welcome from server, client_id: {}", client_id.0);
+                Ok(())
+            } else if let ServerMessage::Rejected { reason } = msg {
+                Err(ClientError::Rejected(reason))
             } else {
                 error!("Unexpected response to connect message");
+                Err(ClientError::Connection(
+                    "Unexpected response to connect message".into(),
+                ))
             }
         })?;
 
         Ok(())
+    }
+
+    fn start_reader_loop(&mut self) {
+        let Some(connection) = self.connection.as_ref().cloned() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        self.reader_task = Some(tokio::spawn(async move {
+            loop {
+                let mut recv = match connection.accept_uni().await {
+                    Ok(recv) => recv,
+                    Err(err) => {
+                        error!("Server stream accept failed: {}", err);
+                        break;
+                    }
+                };
+
+                let payload = match recv.read_to_end(64 * 1024).await {
+                    Ok(payload) => payload,
+                    Err(err) => {
+                        error!("Server stream read failed: {}", err);
+                        continue;
+                    }
+                };
+
+                let message = match ServerMessage::decode(&payload) {
+                    Ok(message) => message,
+                    Err(err) => {
+                        error!("Server message decode failed: {}", err);
+                        continue;
+                    }
+                };
+
+                if tx.send(message).await.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     /// Send a raw message to the server
@@ -202,10 +273,47 @@ impl NativeClient {
     /// Check for updates from the server (non-blocking)
     pub fn poll_updates(&mut self) -> Vec<ServerMessage> {
         while let Ok(msg) = self.rx.try_recv() {
-            self.pending_updates.push(msg);
+            if self.apply_server_message(&msg) {
+                self.pending_updates.push(msg);
+            }
         }
 
         std::mem::take(&mut self.pending_updates)
+    }
+
+    fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
+        match message {
+            ServerMessage::Welcome {
+                client_id,
+                tick,
+                snapshot,
+            } => {
+                self.client_id = Some(*client_id);
+                self.local_snapshot = Some(snapshot.clone());
+                self.last_server_tick = *tick;
+                true
+            }
+            ServerMessage::StateDelta { tick, delta } => {
+                if *tick < self.last_server_tick {
+                    return false;
+                }
+
+                self.local_snapshot = Some(match self.local_snapshot.take() {
+                    Some(snapshot) => delta.apply_to(&snapshot),
+                    None => WorldSnapshot {
+                        tick: *tick,
+                        entities: delta.updated.clone(),
+                    },
+                });
+                self.last_server_tick = *tick;
+                true
+            }
+            ServerMessage::Pong { .. } | ServerMessage::EventBatch { .. } => true,
+            ServerMessage::Rejected { reason } => {
+                error!("Server rejected request: {}", reason);
+                true
+            }
+        }
     }
 
     /// Send a ping to measure latency
@@ -232,6 +340,13 @@ impl NativeClient {
                 reason.unwrap_or("Disconnect").as_bytes(),
             );
         }
+        if let Some(reader_task) = self.reader_task.take() {
+            reader_task.abort();
+        }
+        self.endpoint.close(
+            quinn::VarInt::from_u32(0),
+            reason.unwrap_or("Disconnect").as_bytes(),
+        );
 
         info!("Disconnected from server");
         Ok(())
@@ -299,6 +414,12 @@ impl rustls::client::danger::ServerCertVerifier for NoServerVerification {
             rustls::SignatureScheme::ED25519,
         ]
     }
+}
+
+fn warn_insecure_tls_mode() {
+    error!(
+        "POD_INSECURE_SKIP_TLS_VERIFY is enabled. TLS certificate verification is disabled and this mode is unsafe for production."
+    );
 }
 
 // ============================================================
