@@ -2324,6 +2324,9 @@ mod tests {
         app.state
             .asset_browser
             .import_asset("assets/scenes/boss_room.tscn");
+        app.state
+            .asset_browser
+            .import_asset("assets/scenes/overworld.tmj");
 
         let imported = app
             .state
@@ -2333,6 +2336,16 @@ mod tests {
             .find(|asset| asset.id == "boss_room")
             .expect("scene asset should be imported");
         assert_eq!(imported.kind, AssetKind::Scene);
+        assert_eq!(
+            app.state
+                .asset_browser
+                .assets
+                .iter()
+                .find(|asset| asset.id == "overworld")
+                .expect("tiled scene asset should be imported")
+                .kind,
+            AssetKind::Scene
+        );
 
         app.state.asset_browser.filter = Some(AssetKind::Scene);
         assert!(app
@@ -2347,6 +2360,12 @@ mod tests {
             .visible_assets()
             .iter()
             .any(|asset| asset.id == "boss_room"));
+        assert!(app
+            .state
+            .asset_browser
+            .visible_assets()
+            .iter()
+            .any(|asset| asset.id == "overworld"));
     }
 
     #[test]

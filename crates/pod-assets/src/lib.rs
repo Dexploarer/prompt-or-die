@@ -90,6 +90,7 @@ pub enum AssetFormat {
     Png,
     Jpeg,
     GodotScene,
+    TiledMap,
 }
 
 impl fmt::Display for AssetFormat {
@@ -100,6 +101,7 @@ impl fmt::Display for AssetFormat {
             Self::Png => write!(f, "png"),
             Self::Jpeg => write!(f, "jpeg"),
             Self::GodotScene => write!(f, "godot_scene"),
+            Self::TiledMap => write!(f, "tiled_map"),
         }
     }
 }
@@ -113,6 +115,7 @@ impl AssetFormat {
             "png" => Some(Self::Png),
             "jpg" | "jpeg" => Some(Self::Jpeg),
             "tscn" => Some(Self::GodotScene),
+            "tmj" => Some(Self::TiledMap),
             _ => None,
         }
     }
@@ -124,6 +127,7 @@ impl AssetFormat {
             Self::Png => "png",
             Self::Jpeg => "jpeg",
             Self::GodotScene => "scene.json",
+            Self::TiledMap => "scene.json",
         }
     }
 
@@ -134,6 +138,7 @@ impl AssetFormat {
             Self::Png => "png",
             Self::Jpeg => "jpeg",
             Self::GodotScene => "scene",
+            Self::TiledMap => "scene",
         }
     }
 }
@@ -1864,11 +1869,95 @@ enum GodotSection {
     Node(usize),
 }
 
+#[derive(Debug, Deserialize)]
+struct TiledMapDocument {
+    #[serde(default)]
+    name: String,
+    width: u32,
+    height: u32,
+    tilewidth: u32,
+    tileheight: u32,
+    #[serde(default)]
+    infinite: bool,
+    #[serde(default)]
+    layers: Vec<TiledLayer>,
+    #[serde(default)]
+    tilesets: Vec<TiledTileset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TiledLayer {
+    #[serde(default)]
+    name: String,
+    #[serde(rename = "type")]
+    layer_type: String,
+    #[serde(default = "default_visible")]
+    visible: bool,
+    #[serde(default = "default_opacity")]
+    opacity: f32,
+    #[serde(default)]
+    offsetx: f32,
+    #[serde(default)]
+    offsety: f32,
+    #[serde(default)]
+    x: f32,
+    #[serde(default)]
+    y: f32,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    tintcolor: Option<String>,
+    #[serde(default)]
+    data: Vec<u32>,
+    #[serde(default)]
+    objects: Vec<TiledObject>,
+    #[serde(default)]
+    layers: Vec<TiledLayer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TiledObject {
+    #[serde(default)]
+    id: u32,
+    #[serde(default)]
+    name: String,
+    #[serde(default = "default_visible")]
+    visible: bool,
+    #[serde(default)]
+    x: f32,
+    #[serde(default)]
+    y: f32,
+    #[serde(default)]
+    width: f32,
+    #[serde(default)]
+    height: f32,
+    #[serde(default)]
+    rotation: f32,
+    #[serde(default)]
+    gid: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TiledTileset {
+    firstgid: u32,
+    #[serde(default)]
+    image: Option<String>,
+}
+
 /// Import a Godot text scene (`.tscn`) into a POD-authored `Scene`.
 pub fn import_godot_scene(source_path: impl AsRef<Path>) -> Result<Scene, AssetImportError> {
     let source_path = canonical_source_path(source_path)?;
     let document = fs::read_to_string(&source_path)?;
     parse_godot_scene_document(&document, &source_path)
+}
+
+/// Import a Tiled JSON map (`.tmj`) into a POD-authored `Scene`.
+pub fn import_tiled_scene(source_path: impl AsRef<Path>) -> Result<Scene, AssetImportError> {
+    let source_path = canonical_source_path(source_path)?;
+    let document = fs::read_to_string(&source_path)?;
+    parse_tiled_scene_document(&document, &source_path)
 }
 
 fn parse_godot_scene_document(
@@ -2013,11 +2102,287 @@ fn parse_godot_scene_document(
     Ok(scene)
 }
 
+fn parse_tiled_scene_document(
+    document: &str,
+    source_path: &Path,
+) -> Result<Scene, AssetImportError> {
+    let map: TiledMapDocument = serde_json::from_str(document)
+        .map_err(|err| scene_import_error(source_path, err.to_string()))?;
+
+    if map.infinite {
+        return Err(scene_import_error(
+            source_path,
+            "infinite Tiled maps are not supported by the current importer",
+        ));
+    }
+
+    let scene_name = if map.name.trim().is_empty() {
+        source_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("imported_scene")
+            .to_string()
+    } else {
+        map.name.clone()
+    };
+
+    let mut scene = Scene::new(scene_name);
+    scene.metadata.description = format!("Imported from Tiled map {}", source_path.display());
+    scene.metadata.tags = vec![
+        "imported".to_string(),
+        "tiled".to_string(),
+        "2d".to_string(),
+    ];
+
+    let mut layer_depth = 0i32;
+    for layer in &map.layers {
+        import_tiled_layer(&mut scene, source_path, &map, layer, None, &mut layer_depth)?;
+    }
+
+    Ok(scene)
+}
+
+fn import_tiled_layer(
+    scene: &mut Scene,
+    source_path: &Path,
+    map: &TiledMapDocument,
+    layer: &TiledLayer,
+    parent_id: Option<uuid::Uuid>,
+    layer_depth: &mut i32,
+) -> Result<uuid::Uuid, AssetImportError> {
+    let layer_name = if layer.name.trim().is_empty() {
+        format!("layer_{}", *layer_depth)
+    } else {
+        layer.name.clone()
+    };
+
+    let mut layer_entity = EntityInstance::new(layer_name);
+    let layer_transform = build_tiled_layer_transform(map, layer);
+    layer_entity
+        .add_native_component(&layer_transform)
+        .map_err(|message| scene_import_error(source_path, message))?;
+    let layer_id = scene.add_entity(layer_entity);
+    if let Some(parent_id) = parent_id {
+        scene.graph.set_parent(layer_id, parent_id);
+    }
+
+    match layer.layer_type.as_str() {
+        "tilelayer" => {
+            import_tiled_tile_layer(scene, source_path, map, layer, layer_id, *layer_depth)?;
+            *layer_depth += 1;
+        }
+        "objectgroup" => {
+            import_tiled_object_layer(scene, source_path, map, layer, layer_id, *layer_depth)?;
+            *layer_depth += 1;
+        }
+        "group" => {
+            for child in &layer.layers {
+                import_tiled_layer(scene, source_path, map, child, Some(layer_id), layer_depth)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(layer_id)
+}
+
+fn build_tiled_layer_transform(map: &TiledMapDocument, layer: &TiledLayer) -> Transform {
+    Transform::at(
+        layer.offsetx + layer.x * map.tilewidth as f32,
+        layer.offsety + layer.y * map.tileheight as f32,
+    )
+}
+
+fn import_tiled_tile_layer(
+    scene: &mut Scene,
+    source_path: &Path,
+    map: &TiledMapDocument,
+    layer: &TiledLayer,
+    parent_id: uuid::Uuid,
+    layer_depth: i32,
+) -> Result<(), AssetImportError> {
+    let layer_width = if layer.width == 0 {
+        map.width
+    } else {
+        layer.width
+    };
+    let layer_height = if layer.height == 0 {
+        map.height
+    } else {
+        layer.height
+    };
+    if layer_width == 0 || layer_height == 0 {
+        return Ok(());
+    }
+    if layer.data.len() != (layer_width as usize).saturating_mul(layer_height as usize) {
+        return Err(scene_import_error(
+            source_path,
+            format!(
+                "tile layer `{}` data length {} does not match {}x{}",
+                layer.name,
+                layer.data.len(),
+                layer_width,
+                layer_height
+            ),
+        ));
+    }
+
+    let tint = parse_tiled_hex_color(layer.tintcolor.as_deref()).unwrap_or([1.0, 1.0, 1.0, 1.0]);
+    let layer_alpha = layer.opacity.clamp(0.0, 1.0);
+
+    for (index, gid_with_flags) in layer.data.iter().enumerate() {
+        let gid = strip_tiled_gid_flags(*gid_with_flags);
+        if gid == 0 {
+            continue;
+        }
+
+        let column = (index as u32) % layer_width;
+        let row = (index as u32) / layer_width;
+        let (texture, frame) = resolve_tiled_tileset(gid, &map.tilesets).ok_or_else(|| {
+            scene_import_error(
+                source_path,
+                format!(
+                    "could not resolve tileset image for gid {gid} in `{}`",
+                    layer.name
+                ),
+            )
+        })?;
+
+        let mut tile = EntityInstance::new(format!("tile_{column}_{row}"));
+        tile.add_native_component(&Transform::at(
+            (column as f32 + 0.5) * map.tilewidth as f32,
+            (row as f32 + 0.5) * map.tileheight as f32,
+        ))
+        .map_err(|message| scene_import_error(source_path, message))?;
+        tile.add_native_component(&Sprite {
+            texture,
+            frame,
+            layer: layer_depth,
+            color: [tint[0], tint[1], tint[2], tint[3] * layer_alpha],
+            visible: layer.visible,
+        })
+        .map_err(|message| scene_import_error(source_path, message))?;
+        let tile_id = scene.add_entity(tile);
+        scene.graph.set_parent(tile_id, parent_id);
+    }
+
+    Ok(())
+}
+
+fn import_tiled_object_layer(
+    scene: &mut Scene,
+    source_path: &Path,
+    map: &TiledMapDocument,
+    layer: &TiledLayer,
+    parent_id: uuid::Uuid,
+    layer_depth: i32,
+) -> Result<(), AssetImportError> {
+    let tint = parse_tiled_hex_color(layer.tintcolor.as_deref()).unwrap_or([1.0, 1.0, 1.0, 1.0]);
+    let layer_alpha = layer.opacity.clamp(0.0, 1.0);
+
+    for object in &layer.objects {
+        let object_name = if object.name.trim().is_empty() {
+            format!("object_{}", object.id)
+        } else {
+            object.name.clone()
+        };
+
+        let mut entity = EntityInstance::new(object_name);
+        let mut object_transform = Transform::at(
+            object.x + object.width * 0.5,
+            object.y + object.height * 0.5,
+        );
+        object_transform.rotation = object.rotation.to_radians();
+        entity
+            .add_native_component(&object_transform)
+            .map_err(|message| scene_import_error(source_path, message))?;
+
+        if let Some(gid) = object.gid.map(strip_tiled_gid_flags) {
+            let (texture, frame) = resolve_tiled_tileset(gid, &map.tilesets).ok_or_else(|| {
+                scene_import_error(
+                    source_path,
+                    format!("could not resolve tileset image for object gid {gid}"),
+                )
+            })?;
+            entity
+                .add_native_component(&Sprite {
+                    texture,
+                    frame,
+                    layer: layer_depth,
+                    color: [tint[0], tint[1], tint[2], tint[3] * layer_alpha],
+                    visible: layer.visible && object.visible,
+                })
+                .map_err(|message| scene_import_error(source_path, message))?;
+        } else if object.width > 0.0 || object.height > 0.0 {
+            let mut rect = ColorRect::new(
+                object.width.max(map.tilewidth as f32),
+                object.height.max(map.tileheight as f32),
+                [tint[0], tint[1], tint[2], tint[3] * layer_alpha],
+            );
+            rect.layer = layer_depth;
+            entity
+                .add_native_component(&rect)
+                .map_err(|message| scene_import_error(source_path, message))?;
+        }
+
+        let entity_id = scene.add_entity(entity);
+        scene.graph.set_parent(entity_id, parent_id);
+    }
+
+    Ok(())
+}
+
+fn resolve_tiled_tileset(gid: u32, tilesets: &[TiledTileset]) -> Option<(String, u32)> {
+    let tileset = tilesets
+        .iter()
+        .filter(|tileset| tileset.firstgid <= gid)
+        .max_by_key(|tileset| tileset.firstgid)?;
+    let texture = normalize_tiled_resource_path(tileset.image.as_deref()?);
+    Some((texture, gid.saturating_sub(tileset.firstgid)))
+}
+
+fn normalize_tiled_resource_path(path: &str) -> String {
+    path.strip_prefix("./").unwrap_or(path).to_string()
+}
+
+fn strip_tiled_gid_flags(gid: u32) -> u32 {
+    gid & 0x1FFF_FFFF
+}
+
+fn parse_tiled_hex_color(raw_value: Option<&str>) -> Option<[f32; 4]> {
+    let hex = raw_value?.trim().strip_prefix('#')?;
+    match hex.len() {
+        6 => Some([
+            u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.0,
+            u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.0,
+            u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.0,
+            1.0,
+        ]),
+        8 => Some([
+            u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.0,
+            u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.0,
+            u8::from_str_radix(&hex[6..8], 16).ok()? as f32 / 255.0,
+            u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.0,
+        ]),
+        _ => None,
+    }
+}
+
 fn write_imported_scene_artifact(
     source_path: &Path,
     imported_path: &Path,
+    format: &AssetFormat,
 ) -> Result<(), AssetImportError> {
-    let scene = import_godot_scene(source_path)?;
+    let scene = match format {
+        AssetFormat::GodotScene => import_godot_scene(source_path)?,
+        AssetFormat::TiledMap => import_tiled_scene(source_path)?,
+        _ => {
+            return Err(scene_import_error(
+                source_path,
+                format!("scene artifact writer does not support `{format}`"),
+            ));
+        }
+    };
     let bytes = serde_json::to_vec_pretty(&scene)
         .map_err(|err| scene_import_error(source_path, err.to_string()))?;
     if let Some(parent) = imported_path.parent() {
@@ -2032,6 +2397,14 @@ fn scene_import_error(source_path: &Path, message: impl Into<String>) -> AssetIm
         path: source_path.to_path_buf(),
         message: message.into(),
     }
+}
+
+fn default_visible() -> bool {
+    true
+}
+
+fn default_opacity() -> f32 {
+    1.0
 }
 
 fn parse_godot_section_header(line: &str) -> Option<(String, HashMap<String, String>)> {
@@ -2293,8 +2666,8 @@ pub fn import_asset(
             format.asset_extension()
         ));
 
-    if format == AssetFormat::GodotScene {
-        write_imported_scene_artifact(&source_path, &imported_path)?;
+    if matches!(format, AssetFormat::GodotScene | AssetFormat::TiledMap) {
+        write_imported_scene_artifact(&source_path, &imported_path, &format)?;
     }
 
     cache.index_or_refresh(&source_path, imported_path.clone())?;
@@ -2957,6 +3330,151 @@ position = Vector2(0, 0)
         .expect("artifact should deserialize to pod_scene::Scene");
         assert!(imported_scene.metadata.name.ends_with("combat_room"));
         assert_eq!(imported_scene.entities.len(), 1);
+        assert_eq!(cache.total(), 1);
+    }
+
+    #[test]
+    fn import_tiled_scene_preserves_layer_hierarchy_and_native_components() {
+        let source = temp_file_path("dungeon_floor.tmj");
+        fs::write(
+            &source,
+            r##"
+{
+  "name": "DungeonFloor",
+  "width": 2,
+  "height": 2,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "layers": [
+    {
+      "type": "tilelayer",
+      "name": "Ground",
+      "width": 2,
+      "height": 2,
+      "visible": true,
+      "opacity": 0.5,
+      "tintcolor": "#80FF8040",
+      "data": [1, 0, 2, 0]
+    },
+    {
+      "type": "objectgroup",
+      "name": "Props",
+      "objects": [
+        { "id": 1, "name": "Chest", "x": 32, "y": 16, "width": 16, "height": 16 },
+        { "id": 2, "name": "Torch", "x": 48, "y": 16, "width": 16, "height": 16, "gid": 1, "rotation": 90 }
+      ]
+    }
+  ],
+  "tilesets": [
+    { "firstgid": 1, "image": "tiles/dungeon.png" }
+  ]
+}
+"##,
+        )
+        .unwrap();
+
+        let scene = import_tiled_scene(&source).expect("tiled scene should import");
+        assert_eq!(scene.metadata.name, "DungeonFloor");
+
+        let ground = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Ground")
+            .expect("ground layer should exist");
+        let tile_a = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "tile_0_0")
+            .expect("first tile should exist");
+        let tile_b = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "tile_0_1")
+            .expect("second tile should exist");
+        let chest = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Chest")
+            .expect("chest object should exist");
+        let torch = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Torch")
+            .expect("torch object should exist");
+
+        let tile_a_transform = tile_a
+            .get_native_component::<Transform>()
+            .expect("tile transform should deserialize")
+            .expect("tile transform should exist");
+        assert!(tile_a_transform
+            .position
+            .abs_diff_eq(Vec2::new(8.0, 8.0), 1e-6));
+
+        let tile_b_sprite = tile_b
+            .get_native_component::<Sprite>()
+            .expect("tile sprite should deserialize")
+            .expect("tile sprite should exist");
+        assert_eq!(tile_b_sprite.texture, "tiles/dungeon.png");
+        assert_eq!(tile_b_sprite.frame, 1);
+        assert!((tile_b_sprite.color[3] - (128.0 / 255.0 * 0.5)).abs() < 1e-6);
+
+        let chest_rect = chest
+            .get_native_component::<ColorRect>()
+            .expect("chest rect should deserialize")
+            .expect("chest rect should exist");
+        assert_eq!(chest_rect.width, 16.0);
+        assert_eq!(chest_rect.height, 16.0);
+
+        let torch_transform = torch
+            .get_native_component::<Transform>()
+            .expect("torch transform should deserialize")
+            .expect("torch transform should exist");
+        assert!((torch_transform.rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+
+        assert_eq!(scene.graph.get_parent(tile_a.id), Some(ground.id));
+        assert_eq!(scene.graph.get_parent(tile_b.id), Some(ground.id));
+    }
+
+    #[test]
+    fn import_asset_writes_serialized_scene_artifact_for_tiled_maps() {
+        let mut cache = AssetCache::new();
+        let source = temp_file_path("arena.tmj");
+        let output_root = temp_file_path("import-root-tiled");
+        fs::write(
+            &source,
+            r##"
+{
+  "width": 1,
+  "height": 1,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "layers": [
+    { "type": "tilelayer", "name": "Ground", "width": 1, "height": 1, "data": [1] }
+  ],
+  "tilesets": [
+    { "firstgid": 1, "image": "tiles/arena.png" }
+  ]
+}
+"##,
+        )
+        .unwrap();
+
+        assert_eq!(AssetFormat::from_path(&source), Some(AssetFormat::TiledMap));
+
+        let import =
+            import_asset(&mut cache, &source, &output_root).expect("tiled import should succeed");
+        assert_eq!(import.format, AssetFormat::TiledMap);
+        assert!(import.imported_path.exists());
+
+        let imported_scene: Scene = serde_json::from_slice(
+            &fs::read(&import.imported_path).expect("artifact should exist"),
+        )
+        .expect("artifact should deserialize to pod_scene::Scene");
+        assert!(imported_scene.metadata.name.ends_with("arena"));
+        assert!(imported_scene
+            .entities
+            .iter()
+            .any(|entity| entity.name == "tile_0_0"));
         assert_eq!(cache.total(), 1);
     }
 
