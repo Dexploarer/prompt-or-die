@@ -1,6 +1,6 @@
+use crate::id::{AgentId, EntityId};
 use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
-use crate::id::AgentId;
 
 // ============================================================
 // SPATIAL COMPONENTS
@@ -381,10 +381,10 @@ impl Collider {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sprite {
-    pub texture: String,     // asset key
-    pub frame: u32,          // for spritesheets
-    pub layer: i32,          // draw order
-    pub color: [f32; 4],     // RGBA tint
+    pub texture: String, // asset key
+    pub frame: u32,      // for spritesheets
+    pub layer: i32,      // draw order
+    pub color: [f32; 4], // RGBA tint
     pub visible: bool,
 }
 
@@ -492,6 +492,244 @@ impl Team {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CombatStyle {
+    #[default]
+    Melee,
+    Ranged,
+    Magic,
+    Summoning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CombatLoadout {
+    pub style: CombatStyle,
+    pub attack_range: f32,
+    pub attack_speed_ticks: u32,
+    pub max_hit: f32,
+    pub auto_retaliate: bool,
+    pub equipped_weapon: Option<String>,
+    pub offhand_item: Option<String>,
+    pub active_ability_bar: Vec<String>,
+}
+
+impl Default for CombatLoadout {
+    fn default() -> Self {
+        Self {
+            style: CombatStyle::Melee,
+            attack_range: 80.0,
+            attack_speed_ticks: 30,
+            max_hit: 10.0,
+            auto_retaliate: true,
+            equipped_weapon: Some("bronze-sword".to_string()),
+            offhand_item: None,
+            active_ability_bar: vec!["slash".to_string(), "kick".to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SkillKind {
+    #[default]
+    Attack,
+    Strength,
+    Defence,
+    Ranged,
+    Magic,
+    Constitution,
+    Mining,
+    Woodcutting,
+    Fishing,
+    Cooking,
+    Smithing,
+    Crafting,
+    Slayer,
+    Taming,
+    Bonding,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SkillProgress {
+    pub kind: SkillKind,
+    pub level: u16,
+    pub experience: u32,
+    pub xp_to_next_level: u32,
+}
+
+impl SkillProgress {
+    pub fn new(kind: SkillKind, level: u16, experience: u32, xp_to_next_level: u32) -> Self {
+        Self {
+            kind,
+            level,
+            experience,
+            xp_to_next_level,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillBook {
+    pub combat_level: u16,
+    pub total_level: u16,
+    pub skills: Vec<SkillProgress>,
+}
+
+impl Default for SkillBook {
+    fn default() -> Self {
+        let skills = vec![
+            SkillProgress::new(SkillKind::Attack, 1, 0, 83),
+            SkillProgress::new(SkillKind::Strength, 1, 0, 83),
+            SkillProgress::new(SkillKind::Defence, 1, 0, 83),
+            SkillProgress::new(SkillKind::Ranged, 1, 0, 83),
+            SkillProgress::new(SkillKind::Magic, 1, 0, 83),
+            SkillProgress::new(SkillKind::Constitution, 10, 1_154, 1_358),
+            SkillProgress::new(SkillKind::Taming, 1, 0, 83),
+            SkillProgress::new(SkillKind::Bonding, 1, 0, 83),
+        ];
+        Self {
+            combat_level: 3,
+            total_level: skills.iter().map(|skill| skill.level).sum(),
+            skills,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemStack {
+    pub item_id: String,
+    pub display_name: String,
+    pub quantity: u32,
+    pub stackable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Inventory {
+    pub capacity: u8,
+    pub carried_weight: f32,
+    pub coins: u64,
+    pub items: Vec<ItemStack>,
+}
+
+impl Default for Inventory {
+    fn default() -> Self {
+        Self {
+            capacity: 28,
+            carried_weight: 0.0,
+            coins: 0,
+            items: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CreatureTemperament {
+    Aggressive,
+    Timid,
+    #[default]
+    Neutral,
+    Loyal,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreatureIdentity {
+    pub species_id: String,
+    pub species_name: String,
+    pub elemental_affinity: String,
+    pub level: u16,
+    pub temperament: CreatureTemperament,
+    pub capture_difficulty: f32,
+    pub is_wild: bool,
+}
+
+impl Default for CreatureIdentity {
+    fn default() -> Self {
+        Self {
+            species_id: String::new(),
+            species_name: String::new(),
+            elemental_affinity: "neutral".to_string(),
+            level: 1,
+            temperament: CreatureTemperament::Neutral,
+            capture_difficulty: 0.5,
+            is_wild: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompanionCreature {
+    pub creature: CreatureIdentity,
+    pub nickname: Option<String>,
+    pub current_health: f32,
+    pub max_health: f32,
+    pub combat_style: CombatStyle,
+    pub mood: f32,
+}
+
+impl Default for CompanionCreature {
+    fn default() -> Self {
+        Self {
+            creature: CreatureIdentity::default(),
+            nickname: None,
+            current_health: 10.0,
+            max_health: 10.0,
+            combat_style: CombatStyle::Summoning,
+            mood: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompanionRoster {
+    pub active_slot: Option<u8>,
+    pub party_capacity: u8,
+    pub creatures: Vec<CompanionCreature>,
+}
+
+impl Default for CompanionRoster {
+    fn default() -> Self {
+        Self {
+            active_slot: None,
+            party_capacity: 6,
+            creatures: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EncounterKind {
+    #[default]
+    OpenWorld,
+    Duel,
+    WildCreature,
+    Boss,
+    Raid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncounterState {
+    pub encounter_id: u64,
+    pub kind: EncounterKind,
+    pub threat_level: f32,
+    pub primary_target: Option<EntityId>,
+    pub active_turn_owner: Option<EntityId>,
+    pub capture_allowed: bool,
+    pub in_combat: bool,
+}
+
+impl Default for EncounterState {
+    fn default() -> Self {
+        Self {
+            encounter_id: 0,
+            kind: EncounterKind::OpenWorld,
+            threat_level: 0.0,
+            primary_target: None,
+            active_turn_owner: None,
+            capture_allowed: false,
+            in_combat: false,
+        }
+    }
+}
+
 // ============================================================
 // AGENT PERCEPTION
 // ============================================================
@@ -524,7 +762,7 @@ impl Default for Perception {
 /// Attached Luau script for custom behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Script {
-    pub source: String,       // script asset key
+    pub source: String, // script asset key
     pub enabled: bool,
 }
 

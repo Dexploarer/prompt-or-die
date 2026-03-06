@@ -1,7 +1,11 @@
+use crate::component::{
+    CombatLoadout, CombatStyle, CompanionRoster, CreatureIdentity, EncounterState, Inventory,
+    SkillProgress, Team,
+};
+use crate::contract::AgentRuntimeProfile;
+use crate::id::{AgentId, EntityId};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::id::{AgentId, EntityId};
-use crate::component::Team;
 
 /// Complete observation delivered to an agent each tick.
 /// This is the SAME structure for human and AI agents.
@@ -9,6 +13,7 @@ use crate::component::Team;
 /// For humans: this drives what's rendered on screen.
 /// For AI: this is serialized to JSON and sent to the decision backend.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Observation {
     /// Current tick number
     pub tick: u64,
@@ -36,9 +41,11 @@ pub struct Observation {
 
 /// What the agent knows about itself (always full info)
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SelfState {
     pub agent_id: AgentId,
     pub entity_id: EntityId,
+    pub runtime_profile: AgentRuntimeProfile,
     pub position: Vec2,
     pub rotation: f32,
     pub velocity: Vec2,
@@ -46,6 +53,11 @@ pub struct SelfState {
     pub max_health: Option<f32>,
     pub team: Team,
     pub cooldowns: Vec<CooldownState>,
+    pub combat_loadout: Option<CombatLoadout>,
+    pub skills: Vec<SkillProgress>,
+    pub inventory: Option<Inventory>,
+    pub companion_roster: Option<CompanionRoster>,
+    pub encounter: Option<EncounterState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +69,8 @@ pub struct CooldownState {
 
 /// An entity visible to the observing agent.
 /// Information is limited by what the agent can actually see.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VisibleEntity {
     pub entity_id: EntityId,
     pub entity_type: String,
@@ -68,12 +81,15 @@ pub struct VisibleEntity {
     pub relationship: Relationship,
     /// Only visible if the entity is close enough or has visible health bar
     pub health_fraction: Option<f32>,
+    pub combat_style: Option<CombatStyle>,
+    pub creature: Option<CreatureIdentity>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub enum Relationship {
     Friendly,
     Hostile,
+    #[default]
     Neutral,
     Unknown,
 }
@@ -131,6 +147,69 @@ impl Observation {
             self.self_state.rotation.to_degrees(),
         ));
 
+        prompt.push_str(&format!(
+            "PROFILE: role={:?} type={:?} team={:?}\n",
+            self.self_state.runtime_profile.role,
+            self.self_state.runtime_profile.agent_type,
+            self.self_state.team,
+        ));
+
+        if let Some(loadout) = &self.self_state.combat_loadout {
+            prompt.push_str(&format!(
+                "COMBAT: {:?} range={:.0} speed={} max_hit={:.0} auto_retaliate={}\n",
+                loadout.style,
+                loadout.attack_range,
+                loadout.attack_speed_ticks,
+                loadout.max_hit,
+                loadout.auto_retaliate,
+            ));
+        }
+
+        if !self.self_state.skills.is_empty() {
+            let summary = self
+                .self_state
+                .skills
+                .iter()
+                .take(5)
+                .map(|skill| format!("{:?}:{}", skill.kind, skill.level))
+                .collect::<Vec<_>>()
+                .join(", ");
+            prompt.push_str(&format!("SKILLS: {summary}\n"));
+        }
+
+        if let Some(inventory) = &self.self_state.inventory {
+            prompt.push_str(&format!(
+                "INVENTORY: slots={}/{} coins={} weight={:.1}\n",
+                inventory.items.len(),
+                inventory.capacity,
+                inventory.coins,
+                inventory.carried_weight,
+            ));
+        }
+
+        if let Some(roster) = &self.self_state.companion_roster {
+            let active = roster
+                .active_slot
+                .map(|slot| slot.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            prompt.push_str(&format!(
+                "COMPANIONS: active={} party={}/{}\n",
+                active,
+                roster.creatures.len(),
+                roster.party_capacity,
+            ));
+        }
+
+        if let Some(encounter) = &self.self_state.encounter {
+            prompt.push_str(&format!(
+                "ENCOUNTER: {:?} threat={:.1} capture_allowed={} in_combat={}\n",
+                encounter.kind,
+                encounter.threat_level,
+                encounter.capture_allowed,
+                encounter.in_combat,
+            ));
+        }
+
         if !self.visible_entities.is_empty() {
             prompt.push_str("VISIBLE:\n");
             for e in &self.visible_entities {
@@ -140,6 +219,15 @@ impl Observation {
                 ));
                 if let Some(hp) = e.health_fraction {
                     prompt.push_str(&format!(" hp={:.0}%", hp * 100.0));
+                }
+                if let Some(style) = e.combat_style {
+                    prompt.push_str(&format!(" style={style:?}"));
+                }
+                if let Some(creature) = &e.creature {
+                    prompt.push_str(&format!(
+                        " creature={} lvl={}",
+                        creature.species_name, creature.level
+                    ));
                 }
                 prompt.push('\n');
             }
@@ -165,7 +253,11 @@ impl Observation {
         if !self.objectives.is_empty() {
             prompt.push_str("OBJECTIVES:\n");
             for o in &self.objectives {
-                let status = if o.completed { "✓" } else { &format!("{:.0}%", o.progress * 100.0) };
+                let status = if o.completed {
+                    "✓"
+                } else {
+                    &format!("{:.0}%", o.progress * 100.0)
+                };
                 prompt.push_str(&format!("  {} [{}]\n", o.description, status));
             }
         }

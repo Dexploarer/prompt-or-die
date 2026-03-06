@@ -1,13 +1,15 @@
 use crate::action::{Action, AgentConstraints};
+use crate::contract::AgentRuntimeProfile;
 use crate::id::{AgentId, EntityId};
 use crate::observation::Observation;
 use serde::{Deserialize, Serialize};
 
 /// The type of agent — used for logging/analytics only.
 /// The engine treats all agents identically regardless of type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AgentType {
     /// Human player (input from keyboard/mouse/gamepad)
+    #[default]
     Human,
     /// LLM-powered agent (Claude, GPT, etc.)
     LlmAgent,
@@ -32,6 +34,11 @@ pub trait Agent: Send {
 
     /// What kind of agent (for analytics, not gameplay)
     fn agent_type(&self) -> AgentType;
+
+    /// Explicit runtime profile used by networking, replay, and parity audits.
+    fn runtime_profile(&self) -> AgentRuntimeProfile {
+        AgentRuntimeProfile::for_agent_type(self.agent_type())
+    }
 
     /// Receive observation for this tick.
     /// Called once per tick before decide().
@@ -145,8 +152,12 @@ impl HumanAgent {
 }
 
 impl Agent for HumanAgent {
-    fn id(&self) -> AgentId { self.id }
-    fn agent_type(&self) -> AgentType { AgentType::Human }
+    fn id(&self) -> AgentId {
+        self.id
+    }
+    fn agent_type(&self) -> AgentType {
+        AgentType::Human
+    }
 
     fn observe(&mut self, observation: Observation) {
         self.last_observation = Some(observation);
@@ -157,8 +168,12 @@ impl Agent for HumanAgent {
         std::mem::take(&mut self.input_buffer)
     }
 
-    fn constraints(&self) -> &AgentConstraints { &self.constraints }
-    fn constraints_mut(&mut self) -> &mut AgentConstraints { &mut self.constraints }
+    fn constraints(&self) -> &AgentConstraints {
+        &self.constraints
+    }
+    fn constraints_mut(&mut self) -> &mut AgentConstraints {
+        &mut self.constraints
+    }
 
     fn introspect(&self) -> AgentIntrospection {
         AgentIntrospection {
@@ -194,12 +209,22 @@ impl IdleAgent {
 }
 
 impl Agent for IdleAgent {
-    fn id(&self) -> AgentId { self.id }
-    fn agent_type(&self) -> AgentType { AgentType::ScriptedNpc }
+    fn id(&self) -> AgentId {
+        self.id
+    }
+    fn agent_type(&self) -> AgentType {
+        AgentType::ScriptedNpc
+    }
     fn observe(&mut self, _observation: Observation) {}
-    fn decide(&mut self) -> Vec<Action> { vec![Action::Idle] }
-    fn constraints(&self) -> &AgentConstraints { &self.constraints }
-    fn constraints_mut(&mut self) -> &mut AgentConstraints { &mut self.constraints }
+    fn decide(&mut self) -> Vec<Action> {
+        vec![Action::Idle]
+    }
+    fn constraints(&self) -> &AgentConstraints {
+        &self.constraints
+    }
+    fn constraints_mut(&mut self) -> &mut AgentConstraints {
+        &mut self.constraints
+    }
 
     fn introspect(&self) -> AgentIntrospection {
         AgentIntrospection {

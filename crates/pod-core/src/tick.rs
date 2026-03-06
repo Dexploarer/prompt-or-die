@@ -1,4 +1,4 @@
-use crate::action::{validate_action, Action, AgentAction, ActionResult};
+use crate::action::{validate_action, Action, ActionResult, AgentAction};
 use crate::agent::AgentSlot;
 use crate::component::*;
 use crate::event::{Event, EventBus};
@@ -8,7 +8,7 @@ use crate::TICK_DURATION_SECS;
 use glam::{Vec2, Vec3};
 
 /// Result of a single tick
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TickResult {
     pub tick: u64,
     pub events: Vec<crate::event::GameEvent>,
@@ -71,7 +71,9 @@ pub fn execute_tick(
             .find(|s| s.agent.id() == agent_action.agent_id)
             .map(|s| s.agent.constraints().clone());
 
-        let Some(constraints) = constraints else { continue };
+        let Some(constraints) = constraints else {
+            continue;
+        };
 
         match validate_action(agent_action, &constraints, tick) {
             ActionResult::Valid => {
@@ -79,11 +81,7 @@ pub fn execute_tick(
                 actions_processed += 1;
             }
             ActionResult::Rejected(reason) => {
-                log::debug!(
-                    "Action rejected for {}: {}",
-                    agent_action.agent_id,
-                    reason
-                );
+                log::debug!("Action rejected for {}: {}", agent_action.agent_id, reason);
                 actions_rejected += 1;
             }
             ActionResult::Queued => {
@@ -155,6 +153,26 @@ fn build_observations(
             .get::<&Perception>(entity)
             .map(|p| *p)
             .unwrap_or_default();
+        let combat_loadout = ecs
+            .get::<&CombatLoadout>(entity)
+            .ok()
+            .map(|loadout| (*loadout).clone());
+        let skill_book = ecs
+            .get::<&SkillBook>(entity)
+            .ok()
+            .map(|book| (*book).clone());
+        let inventory = ecs
+            .get::<&Inventory>(entity)
+            .ok()
+            .map(|inventory| (*inventory).clone());
+        let companion_roster = ecs
+            .get::<&CompanionRoster>(entity)
+            .ok()
+            .map(|roster| (*roster).clone());
+        let encounter = ecs
+            .get::<&EncounterState>(entity)
+            .ok()
+            .map(|encounter| (*encounter).clone());
 
         let my_team = label.as_ref().map(|l| l.team).unwrap_or(Team::None);
         let my_pos = transform.position;
@@ -163,6 +181,7 @@ fn build_observations(
         let self_state = SelfState {
             agent_id: slot.agent.id(),
             entity_id: EntityId(entity.id() as u64),
+            runtime_profile: slot.agent.runtime_profile(),
             position: my_pos,
             rotation: my_rot,
             velocity,
@@ -170,6 +189,11 @@ fn build_observations(
             max_health: health.as_ref().map(|h| h.max),
             team: my_team,
             cooldowns: build_cooldowns(slot),
+            combat_loadout,
+            skills: skill_book.map(|book| book.skills).unwrap_or_default(),
+            inventory,
+            companion_roster,
+            encounter,
         };
 
         let event_source = if events.current_events().is_empty() {
@@ -237,6 +261,14 @@ fn build_observations(
                 distance,
                 relationship,
                 health_fraction: other_health,
+                combat_style: ecs
+                    .get::<&CombatLoadout>(other_entity)
+                    .ok()
+                    .map(|loadout| loadout.style),
+                creature: ecs
+                    .get::<&CreatureIdentity>(other_entity)
+                    .ok()
+                    .map(|creature| (*creature).clone()),
             });
         }
 
@@ -252,7 +284,12 @@ fn build_observations(
                 let dir = (e.origin - my_pos).normalize_or_zero();
                 let dist = e.origin.distance(my_pos);
                 AudibleEvent {
-                    event_type: format!("{:?}", e.event).split('{').next().unwrap_or("unknown").trim().to_string(),
+                    event_type: format!("{:?}", e.event)
+                        .split('{')
+                        .next()
+                        .unwrap_or("unknown")
+                        .trim()
+                        .to_string(),
                     direction: dir,
                     distance: dist,
                     intensity: 1.0 - (dist / perception.hearing_range).min(1.0),
@@ -271,7 +308,19 @@ fn build_observations(
             audible_events,
             messages,
             available_actions: vec![
-                "Move", "Stop", "Rotate", "LookAt", "Attack", "Interact", "Speak", "Idle",
+                "Move",
+                "Stop",
+                "Rotate",
+                "LookAt",
+                "Attack",
+                "UseAbility",
+                "Interact",
+                "Pickup",
+                "Drop",
+                "UseItem",
+                "Speak",
+                "Signal",
+                "Idle",
             ]
             .into_iter()
             .map(String::from)
@@ -299,15 +348,17 @@ fn build_cooldowns(slot: &AgentSlot) -> Vec<CooldownState> {
     ]
 }
 
-fn collect_messages(events: &[crate::event::GameEvent], my_pos: Vec2, hearing_range: f32) -> Vec<AgentMessage> {
+fn collect_messages(
+    events: &[crate::event::GameEvent],
+    my_pos: Vec2,
+    hearing_range: f32,
+) -> Vec<AgentMessage> {
     events
         .iter()
         .filter(|e| e.origin.distance(my_pos) <= hearing_range)
         .filter_map(|e| match &e.event {
             Event::AgentSpoke {
-                agent_id,
-                message,
-                ..
+                agent_id, message, ..
             } => Some(AgentMessage {
                 from: *agent_id,
                 content: message.clone(),
@@ -346,6 +397,7 @@ fn empty_observation(tick: u64, elapsed: f32, slot: &AgentSlot) -> Observation {
         self_state: SelfState {
             agent_id: slot.agent.id(),
             entity_id: EntityId(0),
+            runtime_profile: slot.agent.runtime_profile(),
             position: Vec2::ZERO,
             rotation: 0.0,
             velocity: Vec2::ZERO,
@@ -353,6 +405,11 @@ fn empty_observation(tick: u64, elapsed: f32, slot: &AgentSlot) -> Observation {
             max_health: None,
             team: Team::None,
             cooldowns: build_cooldowns(slot),
+            combat_loadout: None,
+            skills: vec![],
+            inventory: None,
+            companion_roster: None,
+            encounter: None,
         },
         visible_entities: vec![],
         audible_events: vec![],
@@ -384,10 +441,7 @@ fn execute_action(
     match &agent_action.action {
         Action::Move { direction } => {
             if let Ok(mut vel) = ecs.get::<&mut Velocity>(entity) {
-                let movement = ecs
-                    .get::<&Movement>(entity)
-                    .map(|m| *m)
-                    .unwrap_or_default();
+                let movement = ecs.get::<&Movement>(entity).map(|m| *m).unwrap_or_default();
                 vel.linear = direction.normalize_or_zero() * movement.max_speed;
             }
         }
@@ -523,7 +577,10 @@ fn in_range(ecs: &hecs::World, source: hecs::Entity, target: hecs::Entity, range
     let Ok(target_transform) = ecs.get::<&Transform>(target) else {
         return false;
     };
-    source_transform.position.distance(target_transform.position) <= range
+    source_transform
+        .position
+        .distance(target_transform.position)
+        <= range
 }
 
 fn is_hostile_target(ecs: &hecs::World, source: hecs::Entity, target: hecs::Entity) -> bool {
@@ -548,7 +605,9 @@ fn select_attack_target(
     explicit_target: Option<hecs::Entity>,
 ) -> Option<hecs::Entity> {
     if let Some(target) = explicit_target {
-        if target != source && in_range(ecs, source, target, ATTACK_RANGE) && is_hostile_target(ecs, source, target)
+        if target != source
+            && in_range(ecs, source, target, ATTACK_RANGE)
+            && is_hostile_target(ecs, source, target)
         {
             return Some(target);
         }
@@ -587,7 +646,8 @@ fn select_interaction_target(
     explicit_target: Option<hecs::Entity>,
 ) -> Option<hecs::Entity> {
     if let Some(target) = explicit_target {
-        return (target != source && in_range(ecs, source, target, INTERACT_RANGE)).then_some(target);
+        return (target != source && in_range(ecs, source, target, INTERACT_RANGE))
+            .then_some(target);
     }
 
     let source_pos = ecs.get::<&Transform>(source).ok()?.position;
@@ -674,7 +734,8 @@ fn apply_attack(
 
     for slot in agents.iter_mut() {
         if slot.entity_id == Some(target_entity) {
-            slot.agent.on_damage(applied_damage, Some(attacker_agent_id));
+            slot.agent
+                .on_damage(applied_damage, Some(attacker_agent_id));
             if target_dead {
                 slot.agent.on_death();
             }
@@ -700,8 +761,7 @@ fn step_camera_controllers(ecs: &mut hecs::World) {
 }
 
 fn step_orbit_camera_controllers(ecs: &mut hecs::World) {
-    for (_, (camera, controller)) in
-        ecs.query_mut::<(&mut Camera3D, &mut OrbitCameraController)>()
+    for (_, (camera, controller)) in ecs.query_mut::<(&mut Camera3D, &mut OrbitCameraController)>()
     {
         let target = Vec3::from_array(controller.target);
         let yaw = controller.yaw + controller.yaw_speed * TICK_DURATION_SECS;
@@ -709,7 +769,9 @@ fn step_orbit_camera_controllers(ecs: &mut hecs::World) {
 
         controller.yaw = yaw;
         controller.pitch = (controller.pitch + pitch_delta).clamp(-1.47, 1.47);
-        let radius = controller.radius.clamp(controller.min_radius, controller.max_radius);
+        let radius = controller
+            .radius
+            .clamp(controller.min_radius, controller.max_radius);
         let yaw_sin = yaw.sin();
         let yaw_cos = yaw.cos();
         let pitch_cos = controller.pitch.cos();
@@ -736,7 +798,8 @@ fn step_follow_camera_controllers(ecs: &mut hecs::World) {
         target_positions.insert(entity.id(), transform.position);
     }
 
-    for (_, (camera, controller)) in ecs.query_mut::<(&mut Camera3D, &mut FollowCameraController)>() {
+    for (_, (camera, controller)) in ecs.query_mut::<(&mut Camera3D, &mut FollowCameraController)>()
+    {
         if controller.target == FollowCameraController::default().target {
             continue;
         }
@@ -755,17 +818,19 @@ fn step_follow_camera_controllers(ecs: &mut hecs::World) {
 }
 
 fn step_fly_camera_controllers(ecs: &mut hecs::World) {
-    for (_, (camera, controller)) in
-        ecs.query_mut::<(&mut Camera3D, &mut FlyCameraController)>()
-    {
+    for (_, (camera, controller)) in ecs.query_mut::<(&mut Camera3D, &mut FlyCameraController)>() {
         let move_speed = controller.move_speed.max(0.0);
         let input = Vec3::from_array(controller.move_input);
-        if input.length_squared() <= 0.00001 && controller.yaw_delta.abs() <= 0.0001 && controller.pitch_delta.abs() <= 0.0001 {
+        if input.length_squared() <= 0.00001
+            && controller.yaw_delta.abs() <= 0.0001
+            && controller.pitch_delta.abs() <= 0.0001
+        {
             continue;
         }
 
         let yaw = controller.yaw + controller.yaw_delta * TICK_DURATION_SECS;
-        let pitch = (controller.pitch + controller.pitch_delta * TICK_DURATION_SECS).clamp(-1.45, 1.45);
+        let pitch =
+            (controller.pitch + controller.pitch_delta * TICK_DURATION_SECS).clamp(-1.45, 1.45);
         let distance = (camera.target - camera.position).length().max(0.1);
 
         let forward = Vec3::new(
@@ -852,12 +917,7 @@ mod tests {
         }
     }
 
-    fn spawn_actor(
-        ecs: &mut hecs::World,
-        pos: Vec2,
-        team: Team,
-        health: Health,
-    ) -> hecs::Entity {
+    fn spawn_actor(ecs: &mut hecs::World, pos: Vec2, team: Team, health: Health) -> hecs::Entity {
         ecs.spawn((
             Transform {
                 position: pos,
@@ -878,10 +938,18 @@ mod tests {
     #[test]
     fn attack_target_applies_damage_and_sets_cooldown() {
         let mut ecs = hecs::World::new();
-        let attacker_entity =
-            spawn_actor(&mut ecs, Vec2::new(0.0, 0.0), Team::Team(1), Health::new(100.0));
-        let target_entity =
-            spawn_actor(&mut ecs, Vec2::new(20.0, 0.0), Team::Team(2), Health::new(100.0));
+        let attacker_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let target_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(20.0, 0.0),
+            Team::Team(2),
+            Health::new(100.0),
+        );
         let target_id = EntityId(target_entity.id() as u64);
 
         let obs_store = Arc::new(Mutex::new(Vec::new()));
@@ -925,8 +993,12 @@ mod tests {
     #[test]
     fn attack_target_rejects_self_target_without_damage() {
         let mut ecs = hecs::World::new();
-        let attacker_entity =
-            spawn_actor(&mut ecs, Vec2::new(0.0, 0.0), Team::Team(1), Health::new(100.0));
+        let attacker_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
         let self_target_id = EntityId(attacker_entity.id() as u64);
 
         let obs_store = Arc::new(Mutex::new(Vec::new()));
@@ -955,20 +1027,22 @@ mod tests {
         let self_health = ecs.get::<&Health>(attacker_entity).unwrap();
         assert_eq!(self_health.current, 100.0);
         assert_eq!(agents[0].attack_cooldown_remaining, 0);
-        assert!(
-            events
-                .last_events()
-                .iter()
-                .chain(events.current_events().iter())
-                .all(|event| !matches!(event.event, Event::Damage { .. }))
-        );
+        assert!(events
+            .last_events()
+            .iter()
+            .chain(events.current_events().iter())
+            .all(|event| !matches!(event.event, Event::Damage { .. })));
     }
 
     #[test]
     fn attack_target_respects_invulnerability() {
         let mut ecs = hecs::World::new();
-        let attacker_entity =
-            spawn_actor(&mut ecs, Vec2::new(0.0, 0.0), Team::Team(1), Health::new(100.0));
+        let attacker_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
         let mut invulnerable_target = Health::new(100.0);
         invulnerable_target.invulnerable = true;
         let target_entity = spawn_actor(
@@ -1003,19 +1077,21 @@ mod tests {
         let target_health = ecs.get::<&Health>(target_entity).unwrap();
         assert_eq!(target_health.current, 100.0);
         assert_eq!(agents[0].attack_cooldown_remaining, 0);
-        assert!(
-            result
-                .events
-                .iter()
-                .all(|event| !matches!(event.event, Event::Damage { .. }))
-        );
+        assert!(result
+            .events
+            .iter()
+            .all(|event| !matches!(event.event, Event::Damage { .. })));
     }
 
     #[test]
     fn observations_include_cooldowns_messages_and_objectives() {
         let mut ecs = hecs::World::new();
-        let observer_entity =
-            spawn_actor(&mut ecs, Vec2::new(0.0, 0.0), Team::Team(1), Health::new(100.0));
+        let observer_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
 
         let observed_messages = Arc::new(Mutex::new(Vec::<Observation>::new()));
         let (agent, _agent_id) = RecordingAgent::new(vec![], observed_messages.clone());
@@ -1064,13 +1140,199 @@ mod tests {
             .expect("attack cooldown should be present");
         assert_eq!(attack_cd.remaining_ticks, 4);
 
-        assert!(observation.messages.iter().any(|message| {
-            message.content == "ready" && message.from == speaker_id
-        }));
+        assert!(observation
+            .messages
+            .iter()
+            .any(|message| { message.content == "ready" && message.from == speaker_id }));
         assert!(observation.objectives.iter().any(|objective| {
             objective.id == "capture-point"
                 && (objective.progress - 0.25).abs() < f32::EPSILON
                 && !objective.completed
         }));
+    }
+
+    #[test]
+    fn observations_include_runtime_profile_and_mmo_state() {
+        let mut ecs = hecs::World::new();
+        let observer_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let wild_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(16.0, 0.0),
+            Team::None,
+            Health::new(24.0),
+        );
+
+        ecs.insert(
+            observer_entity,
+            (
+                CombatLoadout {
+                    style: CombatStyle::Magic,
+                    attack_range: 240.0,
+                    attack_speed_ticks: 24,
+                    max_hit: 18.0,
+                    auto_retaliate: true,
+                    equipped_weapon: Some("oak-staff".to_string()),
+                    offhand_item: Some("capture-focus".to_string()),
+                    active_ability_bar: vec!["wind-strike".to_string(), "bind".to_string()],
+                },
+                SkillBook {
+                    combat_level: 12,
+                    total_level: 38,
+                    skills: vec![
+                        SkillProgress::new(SkillKind::Magic, 12, 1_980, 2_744),
+                        SkillProgress::new(SkillKind::Taming, 7, 650, 801),
+                    ],
+                },
+                Inventory {
+                    capacity: 28,
+                    carried_weight: 3.5,
+                    coins: 420,
+                    items: vec![ItemStack {
+                        item_id: "capture-orb".to_string(),
+                        display_name: "Capture Orb".to_string(),
+                        quantity: 3,
+                        stackable: true,
+                    }],
+                },
+                CompanionRoster {
+                    active_slot: Some(0),
+                    party_capacity: 6,
+                    creatures: vec![CompanionCreature {
+                        creature: CreatureIdentity {
+                            species_id: "ember-fox".to_string(),
+                            species_name: "Ember Fox".to_string(),
+                            elemental_affinity: "fire".to_string(),
+                            level: 9,
+                            temperament: CreatureTemperament::Loyal,
+                            capture_difficulty: 0.3,
+                            is_wild: false,
+                        },
+                        nickname: Some("Cinder".to_string()),
+                        current_health: 22.0,
+                        max_health: 24.0,
+                        combat_style: CombatStyle::Summoning,
+                        mood: 0.9,
+                    }],
+                },
+                EncounterState {
+                    encounter_id: 55,
+                    kind: EncounterKind::WildCreature,
+                    threat_level: 0.7,
+                    primary_target: Some(EntityId(wild_entity.id() as u64)),
+                    active_turn_owner: Some(EntityId(observer_entity.id() as u64)),
+                    capture_allowed: true,
+                    in_combat: true,
+                },
+            ),
+        )
+        .unwrap();
+
+        ecs.insert(
+            wild_entity,
+            (
+                CombatLoadout {
+                    style: CombatStyle::Summoning,
+                    attack_range: 64.0,
+                    attack_speed_ticks: 30,
+                    max_hit: 8.0,
+                    auto_retaliate: true,
+                    equipped_weapon: None,
+                    offhand_item: None,
+                    active_ability_bar: vec!["scratch".to_string()],
+                },
+                CreatureIdentity {
+                    species_id: "moss-turtle".to_string(),
+                    species_name: "Moss Turtle".to_string(),
+                    elemental_affinity: "nature".to_string(),
+                    level: 6,
+                    temperament: CreatureTemperament::Timid,
+                    capture_difficulty: 0.45,
+                    is_wild: true,
+                },
+            ),
+        )
+        .unwrap();
+
+        let observed_messages = Arc::new(Mutex::new(Vec::<Observation>::new()));
+        let (agent, _agent_id) = RecordingAgent::new(vec![], observed_messages.clone());
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(observer_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![],
+            &mut next_entity_id,
+        );
+
+        let snapshots = observed_messages.lock().unwrap();
+        let observation = snapshots.last().expect("expected an observation");
+        assert_eq!(
+            observation.self_state.runtime_profile.role,
+            crate::AgentRole::Npc
+        );
+        assert_eq!(
+            observation
+                .self_state
+                .combat_loadout
+                .as_ref()
+                .expect("combat loadout")
+                .style,
+            CombatStyle::Magic
+        );
+        assert_eq!(observation.self_state.skills.len(), 2);
+        assert_eq!(
+            observation
+                .self_state
+                .inventory
+                .as_ref()
+                .expect("inventory")
+                .coins,
+            420
+        );
+        assert_eq!(
+            observation
+                .self_state
+                .companion_roster
+                .as_ref()
+                .expect("roster")
+                .creatures[0]
+                .creature
+                .species_name,
+            "Ember Fox"
+        );
+        assert!(
+            observation
+                .self_state
+                .encounter
+                .as_ref()
+                .expect("encounter")
+                .capture_allowed
+        );
+
+        let visible_creature = observation
+            .visible_entities
+            .iter()
+            .find(|entity| entity.entity_id == EntityId(wild_entity.id() as u64))
+            .expect("wild creature should be visible");
+        assert_eq!(visible_creature.combat_style, Some(CombatStyle::Summoning));
+        assert_eq!(
+            visible_creature
+                .creature
+                .as_ref()
+                .expect("creature identity")
+                .species_name,
+            "Moss Turtle"
+        );
     }
 }

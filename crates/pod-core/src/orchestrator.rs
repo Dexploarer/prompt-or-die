@@ -185,13 +185,16 @@ impl AgentOrchestrator {
             .collect();
 
         // Sort by priority (fresh decisions first, then by priority score)
-        scheduled.sort_by(|a, b| {
-            match (a.freshness.is_fresh(), b.freshness.is_fresh()) {
+        scheduled.sort_by(
+            |a, b| match (a.freshness.is_fresh(), b.freshness.is_fresh()) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => b.priority.partial_cmp(&a.priority).unwrap_or(std::cmp::Ordering::Equal),
-            }
-        });
+                _ => b
+                    .priority
+                    .partial_cmp(&a.priority)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            },
+        );
 
         // Create batches
         let mut batches = Vec::new();
@@ -250,7 +253,8 @@ impl AgentOrchestrator {
 
     /// How many decisions left in budget
     pub fn decisions_remaining(&self) -> u32 {
-        self.decision_budget.saturating_sub(self.decisions_made_this_tick)
+        self.decision_budget
+            .saturating_sub(self.decisions_made_this_tick)
     }
 
     /// Reset budget for new tick
@@ -278,6 +282,7 @@ mod tests {
             self_state: SelfState {
                 agent_id: AgentId::new(),
                 entity_id: crate::id::EntityId(0),
+                runtime_profile: crate::contract::AgentRuntimeProfile::default(),
                 position: glam::Vec2::ZERO,
                 rotation: 0.0,
                 velocity: glam::Vec2::ZERO,
@@ -285,6 +290,11 @@ mod tests {
                 max_health: Some(100.0),
                 team: crate::component::Team::None,
                 cooldowns: vec![],
+                combat_loadout: None,
+                skills: vec![],
+                inventory: None,
+                companion_roster: None,
+                encounter: None,
             },
             visible_entities: vec![],
             audible_events: vec![],
@@ -307,6 +317,8 @@ mod tests {
             distance: 10.0,
             relationship: Relationship::Hostile,
             health_fraction: Some(0.5),
+            combat_style: None,
+            creature: None,
         });
 
         let score = PriorityScore::from_observation(&obs);

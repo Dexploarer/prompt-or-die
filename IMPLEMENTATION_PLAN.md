@@ -364,5 +364,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `cd apps/pod-web && bun run build`
 
-**Last updated**: Iteration 46
-**Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog
+### Iteration 47 — Runtime Kernel MMO Contract Foundation
+
+- [x] Added a first-class `App` / `Plugin` / schedule kernel in `pod-core` with deterministic startup, fixed-tick update, render-prep, broadcast phases, typed resources, and a shared type registry for core components and contracts.
+- [x] Added explicit versioned runtime contracts in `pod-core` with `RuntimeContractVersion`, `AgentRuntimeProfile`, `AgentRole`, and `AgentCapabilities` so human clients, local AI, and remote AI can share one auditable parity envelope.
+- [x] Added MMO-native POD primitives for the flagship world direction: `CombatLoadout`, `SkillBook`, `Inventory`, `CreatureIdentity`, `CompanionRoster`, and `EncounterState`, designed around RuneScape-style progression/combat with collectible creature companions.
+- [x] Extended agent observations and default world spawns so runtime profiles, combat style, skills, inventory, companions, and encounter state are visible through the same observation pipeline used by both humans and AI.
+- [x] Added deterministic `pod-core` tests covering schedule ordering, versioned contracts, and MMO-state observation delivery.
+- [x] Validated touched crate:
+  - `cargo check -p pod-core`
+  - `cargo test -p pod-core --lib`
+
+**Last updated**: Iteration 47
+**Current focus**: Phase 1 runtime kernel parity for the RuneScape-style MMO + companion-creature vertical slice
