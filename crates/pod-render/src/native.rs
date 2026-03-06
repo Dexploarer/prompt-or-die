@@ -1129,3 +1129,38 @@ impl ApplicationHandler for RenderApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn headless_wgpu_device_is_available_for_ci() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::all(),
+                ..Default::default()
+            });
+
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+                .expect("headless CI should expose a wgpu adapter");
+
+            let info = adapter.get_info();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default(), None)
+                .await
+                .expect("headless adapter should create a wgpu device");
+
+            assert!(
+                !info.name.trim().is_empty(),
+                "wgpu adapter should report a backend name"
+            );
+            drop(queue);
+            drop(device);
+        });
+    }
+}

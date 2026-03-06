@@ -9,20 +9,20 @@
 #![allow(clippy::should_implement_trait)]
 #![allow(clippy::unnecessary_cast)]
 
-pub mod renderer;
 pub mod camera;
 pub mod color;
 pub mod gltf_import;
+pub mod renderer;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub mod web;
 
 pub use camera::Camera;
 pub use color::Color;
-pub use renderer::{RenderState, RenderItem, DrawType};
+pub use renderer::{DrawType, RenderItem, RenderState};
 
 /// Configuration for window creation
 #[derive(Debug, Clone)]

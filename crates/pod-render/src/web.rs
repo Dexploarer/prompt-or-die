@@ -1,8 +1,8 @@
 //! Web renderer bridge for browser platforms
 //! Serializes render state to JSON for PixiJS consumption on JS side
 
-use crate::renderer::{RenderState, DrawType};
 use crate::camera::Camera;
+use crate::renderer::{DrawType, RenderState};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -102,6 +102,9 @@ impl WebRenderBridge {
                     alpha: color[3],
                     texture: None,
                     frame: None,
+                    mesh: None,
+                    material: None,
+                    z: None,
                     layer: item.layer,
                     visible: item.visible,
                     source_entity: item.source_entity,
@@ -343,11 +346,7 @@ impl WebRenderBridge {
     }
 
     /// Render a frame (posts to JavaScript)
-    pub fn render(
-        state: &RenderState,
-        camera: &Camera,
-        background_color: [f32; 4],
-    ) {
+    pub fn render(state: &RenderState, camera: &Camera, background_color: [f32; 4]) {
         let json_str = Self::to_render_json(state, camera, background_color);
         Self::post_to_js("render", &json_str);
     }
@@ -356,9 +355,10 @@ impl WebRenderBridge {
     fn post_to_js(method: &str, data: &str) {
         #[cfg(target_arch = "wasm32")]
         {
+            use js_sys::eval;
             use web_sys::window;
-            if let Some(window) = window() {
-                let _ = window.eval(&format!(
+            if window().is_some() {
+                let _ = eval(&format!(
                     "if (window.podRender) {{ window.podRender.{}('{}'); }}",
                     method,
                     data.replace("'", "\\'")
@@ -398,7 +398,7 @@ pub mod js_bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::renderer::{RenderItem, DrawType};
+    use crate::renderer::{DrawType, RenderItem, RenderTransform3D};
     use glam::Vec2;
 
     #[test]
@@ -421,7 +421,7 @@ mod tests {
         let camera = Camera::new(Vec2::ZERO, 1280.0, 720.0);
         let json = WebRenderBridge::to_render_json(&state, &camera, [0.1, 0.1, 0.1, 1.0]);
 
-        assert!(json.contains("\"type\":\"rect\""));
+        assert!(json.contains("\"item_type\":\"rect\""));
         assert!(json.contains("\"x\":100"));
         assert!(json.contains("\"y\":200"));
         assert!(json.contains("\"source_entity\":101"));
@@ -483,5 +483,75 @@ mod tests {
         assert_eq!(value["commands"][0]["texture"], "npc_sprite");
         assert!(value["commands"][0]["visible"].as_bool().unwrap_or(false));
         assert_eq!(value["commands"][0]["source_entity"], 303);
+    }
+
+    #[test]
+    fn test_render_frame_tracks_mixed_mode_items_for_browser_bridge() {
+        let mut state = RenderState::new();
+        state.add_item(RenderItem {
+            position: Vec2::new(8.0, 16.0),
+            rotation: 0.25,
+            scale: Vec2::new(1.0, 2.0),
+            layer: 1,
+            draw_type: DrawType::Sprite {
+                texture: "hero".to_string(),
+                frame: 2,
+                tint: [1.0, 1.0, 1.0, 0.9],
+            },
+            visible: true,
+            source_entity: Some(11),
+        });
+        state.add_item(RenderItem {
+            position: Vec2::ZERO,
+            rotation: 0.0,
+            scale: Vec2::ONE,
+            layer: 2,
+            draw_type: DrawType::Sprite3D {
+                texture: "tree_card".to_string(),
+                frame: 0,
+                tint: [0.3, 0.8, 0.2, 1.0],
+                transform: RenderTransform3D {
+                    position: [1.0, 2.0, 5.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.5, 2.5, 1.0],
+                },
+                billboard: true,
+            },
+            visible: true,
+            source_entity: Some(22),
+        });
+        state.add_item(RenderItem {
+            position: Vec2::ZERO,
+            rotation: 0.0,
+            scale: Vec2::ONE,
+            layer: 3,
+            draw_type: DrawType::Mesh3D {
+                mesh: "tower".to_string(),
+                material: "stone".to_string(),
+                transform: RenderTransform3D {
+                    position: [4.0, 0.5, 9.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [2.0, 3.0, 2.0],
+                },
+                cast_shadows: true,
+                receive_shadows: true,
+            },
+            visible: true,
+            source_entity: Some(33),
+        });
+
+        let camera = Camera::new(Vec2::new(32.0, 48.0), 1920.0, 1080.0);
+        let value = WebRenderBridge::to_render_value(&state, &camera, [0.1, 0.2, 0.3, 1.0]);
+
+        assert_eq!(value["camera"]["viewportWidth"], 1920.0);
+        assert_eq!(value["commands"][0]["type"], "sprite");
+        assert_eq!(value["commands"][0]["source_entity"], 11);
+        assert_eq!(value["commands"][1]["type"], "sprite3d");
+        assert_eq!(value["commands"][1]["z"], 5.0);
+        assert_eq!(value["commands"][1]["source_entity"], 22);
+        assert_eq!(value["commands"][2]["type"], "mesh3d");
+        assert_eq!(value["commands"][2]["mesh"], "tower");
+        assert_eq!(value["commands"][2]["material"], "stone");
+        assert_eq!(value["commands"][2]["source_entity"], 33);
     }
 }
