@@ -323,5 +323,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-render --lib`
   - `cargo check -p pod-render --target wasm32-unknown-unknown`
 
-**Last updated**: Iteration 42
+### Iteration 43 — Three.js WebGPU Phase-Aware Material Batching
+
+- [x] Extended `pod-render`'s 3D draw contract to preserve material-surface state (`tint`, `roughness`, `metallic`, `emissive`, `double_sided`) instead of dropping it during render extraction.
+- [x] Updated the Three.js/WebGPU browser bridge to classify 3D mesh and sprite batches as opaque or transparent, expose depth-write guidance, and keep incompatible material variants out of the same instanced batch.
+- [x] Added deterministic tests covering material metadata preservation, opaque vs transparent batch splitting, and the resulting WebGPU phase hints.
+- [x] Validated touched targets:
+  - `cargo test -p pod-render --lib`
+  - `cargo check -p pod-render --target wasm32-unknown-unknown`
+
+**Last updated**: Iteration 43
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

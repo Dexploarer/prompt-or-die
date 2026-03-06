@@ -2,8 +2,8 @@
 
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 /// Type of drawable entity.
 ///
@@ -37,6 +37,11 @@ pub enum DrawType {
     Mesh3D {
         mesh: String,
         material: String,
+        tint: [f32; 4],
+        roughness: f32,
+        metallic: f32,
+        emissive: [f32; 3],
+        double_sided: bool,
         transform: RenderTransform3D,
         cast_shadows: bool,
         receive_shadows: bool,
@@ -83,9 +88,7 @@ pub struct RenderState {
 impl RenderState {
     /// Create a new empty render state
     pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 
     /// Add a render item
@@ -106,7 +109,9 @@ impl RenderState {
                     // Secondary sort:
                     // 2D items use y as depth proxy,
                     // 3D items use world z for depth ordering.
-                    a.sort_key().partial_cmp(&b.sort_key()).unwrap_or(Ordering::Equal)
+                    a.sort_key()
+                        .partial_cmp(&b.sort_key())
+                        .unwrap_or(Ordering::Equal)
                 }
                 other => other,
             }
@@ -126,9 +131,7 @@ impl RenderItem {
 
 /// Extract render state from hecs ECS world
 pub fn extract_render_state(world: &hecs::World) -> RenderState {
-    use pod_core::{
-        ColorRect, Material, Mesh, Parent3D, Sprite, Transform, Transform3D,
-    };
+    use pod_core::{ColorRect, Material, Mesh, Parent3D, Sprite, Transform, Transform3D};
 
     let mut state = RenderState::new();
     let mut transform_graph = HashMap::<u32, pod_core::Transform3D>::new();
@@ -149,10 +152,7 @@ pub fn extract_render_state(world: &hecs::World) -> RenderState {
     let mut transform_color_rects = HashSet::new();
 
     // Query all entities with Transform + Sprite
-    for (entity, (transform, sprite)) in world
-        .query::<(&Transform, &Sprite)>()
-        .iter()
-    {
+    for (entity, (transform, sprite)) in world.query::<(&Transform, &Sprite)>().iter() {
         if !sprite.visible {
             continue;
         }
@@ -173,10 +173,7 @@ pub fn extract_render_state(world: &hecs::World) -> RenderState {
         state.add_item(item);
     }
 
-    for (entity, (transform, color_rect)) in world
-        .query::<(&Transform, &ColorRect)>()
-        .iter()
-    {
+    for (entity, (transform, color_rect)) in world.query::<(&Transform, &ColorRect)>().iter() {
         transform_color_rects.insert(entity.id());
         let item = RenderItem {
             position: transform.position,
@@ -215,9 +212,8 @@ pub fn extract_render_state(world: &hecs::World) -> RenderState {
         state.add_item(item);
     }
 
-    for (entity, (_transform3d, mesh, material)) in world
-        .query::<(&Transform3D, &Mesh, &Material)>()
-        .iter()
+    for (entity, (_transform3d, mesh, material)) in
+        world.query::<(&Transform3D, &Mesh, &Material)>().iter()
     {
         if !mesh.visible || !material.visible {
             continue;
@@ -238,6 +234,11 @@ pub fn extract_render_state(world: &hecs::World) -> RenderState {
             draw_type: DrawType::Mesh3D {
                 mesh: mesh.asset_id.clone(),
                 material: material.asset_id.clone(),
+                tint: material.tint,
+                roughness: material.roughness,
+                metallic: material.metallic,
+                emissive: material.emissive,
+                double_sided: material.double_sided,
                 transform: world_transform,
                 cast_shadows: mesh.cast_shadows,
                 receive_shadows: mesh.receive_shadows,
@@ -248,10 +249,7 @@ pub fn extract_render_state(world: &hecs::World) -> RenderState {
     }
 
     // Query entities with Transform3D + Sprite for 2.5D pseudo-depth rendering
-    for (entity, (_transform3d, sprite)) in world
-        .query::<(&Transform3D, &Sprite)>()
-        .iter()
-    {
+    for (entity, (_transform3d, sprite)) in world.query::<(&Transform3D, &Sprite)>().iter() {
         if !sprite.visible {
             continue;
         }
@@ -424,7 +422,9 @@ mod tests {
         let root_item = items
             .iter()
             .find_map(|item| match &item.draw_type {
-                DrawType::Mesh3D { mesh, transform, .. } if mesh == "root" => Some(transform.clone()),
+                DrawType::Mesh3D {
+                    mesh, transform, ..
+                } if mesh == "root" => Some(transform.clone()),
                 _ => None,
             })
             .expect("root mesh should be extracted");
@@ -432,7 +432,9 @@ mod tests {
         let child_item = items
             .iter()
             .find_map(|item| match &item.draw_type {
-                DrawType::Mesh3D { mesh, transform, .. } if mesh == "child" => Some(transform.clone()),
+                DrawType::Mesh3D {
+                    mesh, transform, ..
+                } if mesh == "child" => Some(transform.clone()),
                 _ => None,
             })
             .expect("child mesh should be extracted");
@@ -515,9 +517,7 @@ mod tests {
             },
         ));
 
-        world.spawn((
-            ColorRect::new(16.0, 9.0, [0.1, 0.1, 0.1, 1.0]),
-        ));
+        world.spawn((ColorRect::new(16.0, 9.0, [0.1, 0.1, 0.1, 1.0]),));
 
         let state = extract_render_state(&world);
         assert_eq!(
@@ -597,6 +597,70 @@ mod tests {
     }
 
     #[test]
+    fn extract_render_state_preserves_mesh_material_surface_metadata() {
+        let mut world = hecs::World::new();
+
+        world.spawn((
+            Transform3D {
+                position: Vec3::new(0.0, 1.0, 2.0),
+                ..Default::default()
+            },
+            Mesh {
+                asset_id: "surface_mesh".to_string(),
+                cast_shadows: false,
+                receive_shadows: true,
+                ..Default::default()
+            },
+            Material {
+                asset_id: "surface_mat".to_string(),
+                tint: [0.25, 0.5, 0.75, 0.6],
+                roughness: 0.9,
+                metallic: 0.2,
+                emissive: [0.1, 0.2, 0.3],
+                double_sided: true,
+                ..Default::default()
+            },
+        ));
+
+        let state = extract_render_state(&world);
+        let mesh = state
+            .items
+            .iter()
+            .find_map(|item| match &item.draw_type {
+                DrawType::Mesh3D {
+                    mesh,
+                    material,
+                    tint,
+                    roughness,
+                    metallic,
+                    emissive,
+                    double_sided,
+                    cast_shadows,
+                    receive_shadows,
+                    ..
+                } if mesh == "surface_mesh" && material == "surface_mat" => Some((
+                    *tint,
+                    *roughness,
+                    *metallic,
+                    *emissive,
+                    *double_sided,
+                    *cast_shadows,
+                    *receive_shadows,
+                )),
+                _ => None,
+            })
+            .expect("surface mesh should be extracted");
+
+        assert_eq!(mesh.0, [0.25, 0.5, 0.75, 0.6]);
+        assert!((mesh.1 - 0.9).abs() < 1e-6);
+        assert!((mesh.2 - 0.2).abs() < 1e-6);
+        assert_eq!(mesh.3, [0.1, 0.2, 0.3]);
+        assert!(mesh.4);
+        assert!(!mesh.5);
+        assert!(mesh.6);
+    }
+
+    #[test]
     fn extract_render_state_2d_and_3d_items_same_layer_sort_by_mode_depth_key() {
         let mut world = hecs::World::new();
 
@@ -665,12 +729,15 @@ mod tests {
             .collect();
 
         assert_eq!(ordered.len(), 4);
-        assert_eq!(ordered, vec![
-            "ui_near".to_string(),
-            "sprite3d:sprite3d_near".to_string(),
-            "mesh_far".to_string(),
-            "ui_far".to_string(),
-        ]);
+        assert_eq!(
+            ordered,
+            vec![
+                "ui_near".to_string(),
+                "sprite3d:sprite3d_near".to_string(),
+                "mesh_far".to_string(),
+                "ui_far".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -732,7 +799,11 @@ mod tests {
         ));
 
         let state = extract_render_state(&world);
-        assert_eq!(state.items.len(), 3, "root color rect + mesh + sprite3d should be extracted");
+        assert_eq!(
+            state.items.len(),
+            3,
+            "root color rect + mesh + sprite3d should be extracted"
+        );
 
         let mesh_transform = state
             .items
@@ -881,9 +952,7 @@ mod tests {
 
         let extract = state.items.iter().find_map(|item| match &item.draw_type {
             DrawType::Sprite3D {
-                transform,
-                texture,
-                ..
+                transform, texture, ..
             } if texture == "orphan_sprite3d" => Some(*transform),
             _ => None,
         });
@@ -938,23 +1007,32 @@ mod tests {
             },
         ));
 
-        world.insert_one(
-            entity_a,
-            Parent3D {
-                parent: entity_b.id() as u64,
-            },
-        )
-        .expect("update loop entity A parent to B");
+        world
+            .insert_one(
+                entity_a,
+                Parent3D {
+                    parent: entity_b.id() as u64,
+                },
+            )
+            .expect("update loop entity A parent to B");
 
         let state = extract_render_state(&world);
-        assert_eq!(state.items.len(), 2, "cycle meshes should be extracted without recursion failure");
+        assert_eq!(
+            state.items.len(),
+            2,
+            "cycle meshes should be extracted without recursion failure"
+        );
 
         let mut cycle_positions = state
             .items
             .iter()
             .filter_map(|item| match &item.draw_type {
-                DrawType::Mesh3D { mesh, transform, .. } if mesh == "cycle_a" => Some(transform.position[0]),
-                DrawType::Mesh3D { mesh, transform, .. } if mesh == "cycle_b" => Some(transform.position[0]),
+                DrawType::Mesh3D {
+                    mesh, transform, ..
+                } if mesh == "cycle_a" => Some(transform.position[0]),
+                DrawType::Mesh3D {
+                    mesh, transform, ..
+                } if mesh == "cycle_b" => Some(transform.position[0]),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -976,9 +1054,7 @@ mod tests {
                 texture: "cycle_a".to_string(),
                 ..Default::default()
             },
-            Parent3D {
-                parent: 1,
-            },
+            Parent3D { parent: 1 },
         ));
 
         let entity_b = world.spawn((
@@ -995,13 +1071,14 @@ mod tests {
             },
         ));
 
-        world.insert_one(
-            entity_a,
-            Parent3D {
-                parent: entity_b.id() as u64,
-            },
-        )
-        .expect("update loop entity A parent to B");
+        world
+            .insert_one(
+                entity_a,
+                Parent3D {
+                    parent: entity_b.id() as u64,
+                },
+            )
+            .expect("update loop entity A parent to B");
 
         let state = extract_render_state(&world);
         assert_eq!(
@@ -1014,12 +1091,12 @@ mod tests {
             .items
             .iter()
             .filter_map(|item| match &item.draw_type {
-                DrawType::Sprite3D { texture, transform, .. } if texture == "cycle_a" => {
-                    Some(transform.position[0])
-                }
-                DrawType::Sprite3D { texture, transform, .. } if texture == "cycle_b" => {
-                    Some(transform.position[0])
-                }
+                DrawType::Sprite3D {
+                    texture, transform, ..
+                } if texture == "cycle_a" => Some(transform.position[0]),
+                DrawType::Sprite3D {
+                    texture, transform, ..
+                } if texture == "cycle_b" => Some(transform.position[0]),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1033,7 +1110,10 @@ mod tests {
                 sprite3d_count += 1;
             }
         }
-        assert_eq!(sprite3d_count, 2, "all sprite3d cycle entries should be extracted");
+        assert_eq!(
+            sprite3d_count, 2,
+            "all sprite3d cycle entries should be extracted"
+        );
     }
 
     #[test]
