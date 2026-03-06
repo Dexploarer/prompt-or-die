@@ -164,6 +164,39 @@ impl PropertyOverride {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppliedPropertyOverride {
+    pub path: String,
+    pub previous_value: Option<serde_json::Value>,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IgnoredPropertyOverride {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PropertyOverrideReport {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applied: Vec<AppliedPropertyOverride>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored: Vec<IgnoredPropertyOverride>,
+}
+
+impl PropertyOverrideReport {
+    pub fn is_empty(&self) -> bool {
+        self.applied.is_empty() && self.ignored.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPrefabComponents {
+    pub components: HashMap<String, PrefabComponent>,
+    pub override_report: PropertyOverrideReport,
+}
+
 /// Serializable entity template with components
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Prefab {
@@ -276,21 +309,53 @@ impl Prefab {
         &self,
         overrides: &[PropertyOverride],
     ) -> HashMap<String, PrefabComponent> {
+        self.resolved_components_with_report(overrides).components
+    }
+
+    pub fn resolved_components_with_report(
+        &self,
+        overrides: &[PropertyOverride],
+    ) -> ResolvedPrefabComponents {
         let mut components = self.components.clone();
+        let mut override_report = PropertyOverrideReport::default();
 
         for override_ in overrides {
             let parts: Vec<&str> = override_.path.split('.').collect();
             if parts.len() < 2 {
+                override_report.ignored.push(IgnoredPropertyOverride {
+                    path: override_.path.clone(),
+                    reason: "override path must include a component name and property path"
+                        .to_string(),
+                });
                 continue;
             }
 
             let component_name = parts[0];
             if let Some(component) = components.get_mut(component_name) {
-                apply_property_override(component, &parts[1..], &override_.value);
+                let previous_value = get_component_path_value(component, &parts[1..]).cloned();
+                match set_component_path_value(component, &parts[1..], &override_.value) {
+                    Ok(()) => override_report.applied.push(AppliedPropertyOverride {
+                        path: override_.path.clone(),
+                        previous_value,
+                        value: override_.value.clone(),
+                    }),
+                    Err(reason) => override_report.ignored.push(IgnoredPropertyOverride {
+                        path: override_.path.clone(),
+                        reason,
+                    }),
+                }
+            } else {
+                override_report.ignored.push(IgnoredPropertyOverride {
+                    path: override_.path.clone(),
+                    reason: format!("component '{}' is not present on prefab", component_name),
+                });
             }
         }
 
-        components
+        ResolvedPrefabComponents {
+            components,
+            override_report,
+        }
     }
 
     pub fn diff_against(&self, base: &Prefab) -> PrefabDiff {
@@ -407,7 +472,7 @@ impl Prefab {
         world: &mut World,
         overrides: &[PropertyOverride],
     ) -> Result<hecs::Entity, String> {
-        let components = self.resolved_components(overrides);
+        let components = self.resolved_components_with_report(overrides).components;
         let entity = world.ecs.spawn(());
         let ignored = insert_bound_components(&components, &mut world.ecs, entity)?;
         for component_name in ignored {
@@ -419,15 +484,6 @@ impl Prefab {
         }
         Ok(entity)
     }
-}
-
-/// Helper to apply nested property overrides
-fn apply_property_override(
-    component: &mut PrefabComponent,
-    path: &[&str],
-    value: &serde_json::Value,
-) {
-    let _ = set_component_path_value(component, path, value);
 }
 
 pub(crate) fn set_component_path_value(
@@ -460,13 +516,38 @@ fn set_json_path_value(
     }
 
     let next_key = path[1];
-    let child = get_or_create_json_child(current, key, next_key).ok_or_else(|| {
-        format!(
-            "cannot descend through '{}' on non-container JSON value",
-            key
-        )
-    })?;
+    let child = get_or_create_json_child(current, key, next_key)?;
     set_json_path_value(child, &path[1..], value)
+}
+
+fn get_component_path_value<'a>(
+    component: &'a PrefabComponent,
+    path: &[&str],
+) -> Option<&'a serde_json::Value> {
+    match component {
+        PrefabComponent::Json(json) => get_json_path_value(json, path),
+    }
+}
+
+fn get_json_path_value<'a>(
+    current: &'a serde_json::Value,
+    path: &[&str],
+) -> Option<&'a serde_json::Value> {
+    if path.is_empty() {
+        return Some(current);
+    }
+
+    let key = path[0];
+    let next = match current {
+        serde_json::Value::Object(object) => object.get(key)?,
+        serde_json::Value::Array(array) => {
+            let index = key_to_index(key)?;
+            array.get(index)?
+        }
+        _ => return None,
+    };
+
+    get_json_path_value(next, &path[1..])
 }
 
 fn set_json_child(
@@ -497,26 +578,42 @@ fn get_or_create_json_child<'a>(
     target: &'a mut serde_json::Value,
     key: &str,
     next_key: &str,
-) -> Option<&'a mut serde_json::Value> {
+) -> Result<&'a mut serde_json::Value, String> {
     match target {
         serde_json::Value::Object(object) => {
             let entry = object
                 .entry(key.to_string())
                 .or_insert_with(|| empty_container_for(next_key));
-            if !matches_container(entry, next_key) {
+            if entry.is_null() {
                 *entry = empty_container_for(next_key);
+            } else if !matches_container(entry, next_key) {
+                return Err(format!(
+                    "cannot descend through '{}' because the existing value has incompatible shape",
+                    key
+                ));
             }
-            Some(entry)
+            Ok(entry)
         }
         serde_json::Value::Array(array) => {
-            let index = key_to_index(key)?;
+            let index = key_to_index(key)
+                .ok_or_else(|| format!("array path segment '{}' is not addressable", key))?;
             ensure_array_len(array, index + 1);
-            if !matches_container(&array[index], next_key) {
+            if array[index].is_null() {
                 array[index] = empty_container_for(next_key);
+            } else if !matches_container(&array[index], next_key) {
+                return Err(format!(
+                    "cannot descend through '{}' because the existing array element has incompatible shape",
+                    key
+                ));
             }
-            array.get_mut(index)
+            array
+                .get_mut(index)
+                .ok_or_else(|| format!("array path segment '{}' is out of bounds", key))
         }
-        _ => None,
+        _ => Err(format!(
+            "cannot descend through '{}' on non-container JSON value",
+            key
+        )),
     }
 }
 
@@ -767,6 +864,48 @@ mod tests {
     fn test_property_override() {
         let override_ = PropertyOverride::new("Transform.position.x", serde_json::json!(42.0));
         assert_eq!(override_.path, "Transform.position.x");
+    }
+
+    #[test]
+    fn test_resolved_components_with_report_tracks_applied_and_ignored_overrides() {
+        let mut prefab = Prefab::new("OverrideReportPrefab");
+        prefab
+            .add_native_component(&Transform::at(1.0, 2.0))
+            .unwrap();
+
+        let resolved = prefab.resolved_components_with_report(&[
+            PropertyOverride::new("Transform.position.x", serde_json::json!(42.0)),
+            PropertyOverride::new("Sprite.layer", serde_json::json!(3)),
+            PropertyOverride::new("Transform.position.foo", serde_json::json!(9.0)),
+        ]);
+
+        let transform = resolved.components["Transform"]
+            .get_native::<Transform>()
+            .expect("resolved transform should deserialize");
+        assert_eq!(transform.position, Vec2::new(42.0, 2.0));
+
+        assert_eq!(resolved.override_report.applied.len(), 1);
+        assert_eq!(resolved.override_report.ignored.len(), 2);
+        assert_eq!(
+            resolved.override_report.applied[0].previous_value,
+            Some(serde_json::json!(1.0))
+        );
+        let ignored_reasons = resolved
+            .override_report
+            .ignored
+            .iter()
+            .map(|entry| entry.reason.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            ignored_reasons.contains("component 'Sprite' is not present on prefab"),
+            "unexpected ignored override reasons: {ignored_reasons}"
+        );
+        assert!(
+            ignored_reasons.contains("incompatible shape")
+                || ignored_reasons.contains("cannot assign"),
+            "unexpected ignored override reasons: {ignored_reasons}"
+        );
     }
 
     #[test]

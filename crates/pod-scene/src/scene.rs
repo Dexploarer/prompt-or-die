@@ -5,7 +5,10 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
-use crate::prefab::{set_component_path_value, PrefabComponent, PrefabRegistry};
+use crate::prefab::{
+    set_component_path_value, PrefabComponent, PrefabRegistry, PropertyOverride,
+    PropertyOverrideReport,
+};
 
 /// Represents a spawn point in a scene
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,6 +278,8 @@ pub struct EntityInstance {
     pub prefab_ref: Option<String>, // Reference to a prefab, if this entity was created from one
     pub components: HashMap<String, PrefabComponent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefab_overrides: Vec<PropertyOverride>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_references: Vec<EntityReferenceBinding>,
 }
 
@@ -285,6 +290,7 @@ impl EntityInstance {
             name: name.into(),
             prefab_ref: None,
             components: HashMap::new(),
+            prefab_overrides: Vec::new(),
             entity_references: Vec::new(),
         }
     }
@@ -332,6 +338,10 @@ impl EntityInstance {
         self.components.remove(name)
     }
 
+    pub fn add_prefab_override(&mut self, override_: PropertyOverride) {
+        self.prefab_overrides.push(override_);
+    }
+
     pub fn add_entity_reference(&mut self, reference: EntityReferenceBinding) {
         self.entity_references.push(reference);
     }
@@ -359,11 +369,19 @@ impl EntityInstance {
 pub struct SceneSpawnResult {
     pub entity_map: HashMap<Uuid, Entity>,
     pub ignored_components: Vec<String>,
+    pub prefab_override_reports: HashMap<Uuid, PropertyOverrideReport>,
 }
 
 impl SceneSpawnResult {
     pub fn entity_for(&self, scene_entity_id: Uuid) -> Option<Entity> {
         self.entity_map.get(&scene_entity_id).copied()
+    }
+
+    pub fn prefab_override_report_for(
+        &self,
+        scene_entity_id: Uuid,
+    ) -> Option<&PropertyOverrideReport> {
+        self.prefab_override_reports.get(&scene_entity_id)
     }
 }
 
@@ -546,6 +564,7 @@ impl Scene {
     ) -> Result<SceneSpawnResult, String> {
         let mut entity_map = HashMap::new();
         let entity_name_lookup = self.build_entity_name_lookup();
+        let mut prefab_override_reports = HashMap::new();
 
         let scene_entities: Vec<&EntityInstance> = self
             .entities
@@ -569,13 +588,17 @@ impl Scene {
                 .copied()
                 .ok_or_else(|| format!("Scene entity '{}' was not pre-spawned", entity.name))?;
 
-            let mut resolved_components = self.resolve_entity_components(entity, prefabs)?;
+            let (mut resolved_components, override_report) =
+                self.resolve_entity_components(entity, prefabs)?;
             self.apply_entity_references(
                 entity,
                 &mut resolved_components,
                 &entity_map,
                 &entity_name_lookup,
             )?;
+            if !override_report.is_empty() {
+                prefab_override_reports.insert(entity.id, override_report);
+            }
             let ignored =
                 insert_bound_components(&resolved_components, &mut world.ecs, spawned_entity)?;
             ignored_components.extend(
@@ -592,6 +615,7 @@ impl Scene {
         Ok(SceneSpawnResult {
             entity_map,
             ignored_components,
+            prefab_override_reports,
         })
     }
 
@@ -599,8 +623,8 @@ impl Scene {
         &self,
         entity: &EntityInstance,
         prefabs: Option<&PrefabRegistry>,
-    ) -> Result<HashMap<String, PrefabComponent>, String> {
-        let mut components = match entity.prefab_ref.as_deref() {
+    ) -> Result<(HashMap<String, PrefabComponent>, PropertyOverrideReport), String> {
+        let (mut components, override_report) = match entity.prefab_ref.as_deref() {
             Some(prefab_name) => {
                 let registry = prefabs.ok_or_else(|| {
                     format!(
@@ -608,16 +632,26 @@ impl Scene {
                         self.metadata.name, prefab_name
                     )
                 })?;
-                registry.resolve_prefab(prefab_name)?.components.clone()
+                let prefab = registry.resolve_prefab(prefab_name)?;
+                let resolved = prefab.resolved_components_with_report(&entity.prefab_overrides);
+                (resolved.components, resolved.override_report)
             }
-            None => HashMap::new(),
+            None => {
+                if !entity.prefab_overrides.is_empty() {
+                    return Err(format!(
+                        "Scene entity '{}' defines prefab overrides but has no prefab reference",
+                        entity.name
+                    ));
+                }
+                (HashMap::new(), PropertyOverrideReport::default())
+            }
         };
 
         for (name, component) in &entity.components {
             components.insert(name.clone(), component.clone());
         }
 
-        Ok(components)
+        Ok((components, override_report))
     }
 
     fn build_entity_name_lookup(&self) -> HashMap<String, Vec<Uuid>> {
@@ -990,7 +1024,7 @@ mod tests {
         Transform3D,
     };
 
-    use crate::prefab::Prefab;
+    use crate::prefab::{Prefab, PropertyOverride};
 
     #[test]
     fn test_scene_graph_parent_child() {
@@ -1348,6 +1382,105 @@ mod tests {
             "scene instantiation should fail when a named entity reference is ambiguous",
         );
         assert!(err.contains("ambiguous"));
+    }
+
+    #[test]
+    fn test_scene_instantiation_applies_prefab_overrides_and_reports_them() {
+        let mut registry = PrefabRegistry::new();
+        let mut actor_prefab = Prefab::new("Actor");
+        actor_prefab
+            .add_native_component(&Sprite {
+                texture: "hero".to_string(),
+                layer: 2,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("Actor", actor_prefab);
+
+        let mut scene = Scene::new("PrefabOverrideScene");
+        let mut actor = EntityInstance::new("ActorInstance").with_prefab("Actor");
+        actor.add_prefab_override(PropertyOverride::new("Sprite.layer", serde_json::json!(9)));
+        let actor_id = scene.add_entity(actor);
+
+        let mut world = World::new(12);
+        let result = scene
+            .instantiate_with_prefabs(&mut world, Some(&registry))
+            .unwrap();
+
+        let actor_entity = result.entity_for(actor_id).expect("actor should spawn");
+        let sprite = world
+            .ecs
+            .get::<&Sprite>(actor_entity)
+            .expect("actor should keep sprite");
+        assert_eq!(sprite.layer, 9);
+
+        let report = result
+            .prefab_override_report_for(actor_id)
+            .expect("override report should be stored");
+        assert_eq!(report.applied.len(), 1);
+        assert!(report.ignored.is_empty());
+        assert_eq!(report.applied[0].path, "Sprite.layer");
+        assert_eq!(report.applied[0].previous_value, Some(serde_json::json!(2)));
+        assert_eq!(report.applied[0].value, serde_json::json!(9));
+    }
+
+    #[test]
+    fn test_scene_instantiation_prefab_override_report_coexists_with_local_component_override() {
+        let mut registry = PrefabRegistry::new();
+        let mut actor_prefab = Prefab::new("Actor");
+        actor_prefab
+            .add_native_component(&Sprite {
+                texture: "hero".to_string(),
+                layer: 2,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("Actor", actor_prefab);
+
+        let mut scene = Scene::new("PrefabOverridePriorityScene");
+        let mut actor = EntityInstance::new("ActorInstance").with_prefab("Actor");
+        actor.add_prefab_override(PropertyOverride::new("Sprite.layer", serde_json::json!(9)));
+        actor
+            .add_native_component(&Sprite {
+                texture: "hero_local".to_string(),
+                layer: 14,
+                ..Default::default()
+            })
+            .unwrap();
+        let actor_id = scene.add_entity(actor);
+
+        let mut world = World::new(13);
+        let result = scene
+            .instantiate_with_prefabs(&mut world, Some(&registry))
+            .unwrap();
+
+        let actor_entity = result.entity_for(actor_id).expect("actor should spawn");
+        let sprite = world
+            .ecs
+            .get::<&Sprite>(actor_entity)
+            .expect("local component override should still insert sprite");
+        assert_eq!(sprite.texture, "hero_local");
+        assert_eq!(sprite.layer, 14);
+
+        let report = result
+            .prefab_override_report_for(actor_id)
+            .expect("override report should still be stored");
+        assert_eq!(report.applied.len(), 1);
+        assert_eq!(report.applied[0].value, serde_json::json!(9));
+    }
+
+    #[test]
+    fn test_scene_instantiation_rejects_prefab_overrides_without_prefab() {
+        let mut scene = Scene::new("InvalidPrefabOverrideScene");
+        let mut entity = EntityInstance::new("LooseEntity");
+        entity.add_prefab_override(PropertyOverride::new("Sprite.layer", serde_json::json!(7)));
+        scene.add_entity(entity);
+
+        let mut world = World::new(14);
+        let err = scene
+            .instantiate(&mut world)
+            .expect_err("prefab overrides should require a prefab reference");
+        assert!(err.contains("defines prefab overrides but has no prefab reference"));
     }
 
     #[test]
