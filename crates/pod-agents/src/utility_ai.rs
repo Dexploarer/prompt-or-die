@@ -36,14 +36,13 @@
 //! agent.add_scorer(Box::new(AttackNearestHostileScorer::default()));
 //! ```
 
-use std::collections::VecDeque;
 use glam::Vec2;
-use pod_core::{
-    Action, AgentConstraints, AgentId, AgentIntrospection, AgentType, EntityId,
-    Observation,
-};
 use pod_core::agent::Agent;
 use pod_core::observation::Relationship;
+use pod_core::{
+    Action, AgentConstraints, AgentId, AgentIntrospection, AgentType, EntityId, Observation,
+};
+use std::collections::VecDeque;
 
 // ============================================================
 // ACTION SCORER TRAIT
@@ -85,13 +84,20 @@ fn nearest_hostile(observation: &Observation) -> Option<&pod_core::observation::
         .visible_entities
         .iter()
         .filter(|e| matches!(e.relationship, Relationship::Hostile))
-        .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 /// Returns the agent's health fraction in `[0.0, 1.0]`, defaulting to `1.0`
 /// when health information is unavailable.
 fn health_fraction(observation: &Observation) -> f32 {
-    match (observation.self_state.health, observation.self_state.max_health) {
+    match (
+        observation.self_state.health,
+        observation.self_state.max_health,
+    ) {
         (Some(hp), Some(max)) if max > 0.0 => (hp / max).clamp(0.0, 1.0),
         _ => 1.0,
     }
@@ -119,7 +125,9 @@ impl AttackNearestHostileScorer {
 
 impl Default for AttackNearestHostileScorer {
     fn default() -> Self {
-        Self { optimal_range: 80.0 }
+        Self {
+            optimal_range: 80.0,
+        }
     }
 }
 
@@ -145,12 +153,16 @@ impl ActionScorer for AttackNearestHostileScorer {
 
     fn action(&self, observation: &Observation) -> Action {
         match nearest_hostile(observation) {
-            Some(hostile) => Action::AttackTarget { target: hostile.entity_id },
+            Some(hostile) => Action::AttackTarget {
+                target: hostile.entity_id,
+            },
             None => Action::Idle,
         }
     }
 
-    fn name(&self) -> &str { "AttackNearestHostile" }
+    fn name(&self) -> &str {
+        "AttackNearestHostile"
+    }
 }
 
 // ── FleeScorer ────────────────────────────────────────────────
@@ -167,7 +179,9 @@ pub struct FleeScorer {
 
 impl Default for FleeScorer {
     fn default() -> Self {
-        Self { flee_threshold: 0.4 }
+        Self {
+            flee_threshold: 0.4,
+        }
     }
 }
 
@@ -208,7 +222,9 @@ impl ActionScorer for FleeScorer {
         Action::Move { direction: away }
     }
 
-    fn name(&self) -> &str { "Flee" }
+    fn name(&self) -> &str {
+        "Flee"
+    }
 }
 
 // ── HealScorer ────────────────────────────────────────────────
@@ -235,7 +251,9 @@ impl ActionScorer for HealScorer {
         Action::UseItem { slot: 0 }
     }
 
-    fn name(&self) -> &str { "Heal" }
+    fn name(&self) -> &str {
+        "Heal"
+    }
 }
 
 // ── ExploreScorer ─────────────────────────────────────────────
@@ -263,7 +281,9 @@ impl ActionScorer for ExploreScorer {
         Action::Move { direction }
     }
 
-    fn name(&self) -> &str { "Explore" }
+    fn name(&self) -> &str {
+        "Explore"
+    }
 }
 
 // ── IdleScorer ────────────────────────────────────────────────
@@ -284,7 +304,9 @@ impl ActionScorer for IdleScorer {
         Action::Idle
     }
 
-    fn name(&self) -> &str { "Idle" }
+    fn name(&self) -> &str {
+        "Idle"
+    }
 }
 
 // ── ChaseScorer ───────────────────────────────────────────────
@@ -302,7 +324,9 @@ pub struct ChaseScorer {
 
 impl Default for ChaseScorer {
     fn default() -> Self {
-        Self { engage_range: 120.0 }
+        Self {
+            engage_range: 120.0,
+        }
     }
 }
 
@@ -345,7 +369,9 @@ impl ActionScorer for ChaseScorer {
         }
     }
 
-    fn name(&self) -> &str { "Chase" }
+    fn name(&self) -> &str {
+        "Chase"
+    }
 }
 
 // ── GuardScorer ───────────────────────────────────────────────
@@ -387,7 +413,10 @@ impl GuardScorer {
 
 impl ActionScorer for GuardScorer {
     fn score(&self, observation: &Observation) -> f32 {
-        let dist = observation.self_state.position.distance(self.guard_position);
+        let dist = observation
+            .self_state
+            .position
+            .distance(self.guard_position);
         if dist <= self.tolerance {
             return 0.0;
         }
@@ -405,7 +434,9 @@ impl ActionScorer for GuardScorer {
         Action::Move { direction }
     }
 
-    fn name(&self) -> &str { "Guard" }
+    fn name(&self) -> &str {
+        "Guard"
+    }
 }
 
 // ============================================================
@@ -449,7 +480,10 @@ impl UtilityAgent {
     /// Panics if `scorers` is empty (at least one scorer is required to
     /// guarantee `decide()` always returns an action).
     pub fn with_scorers(scorers: Vec<Box<dyn ActionScorer>>) -> Self {
-        assert!(!scorers.is_empty(), "UtilityAgent requires at least one scorer");
+        assert!(
+            !scorers.is_empty(),
+            "UtilityAgent requires at least one scorer"
+        );
         Self {
             id: AgentId::new(),
             scorers,
@@ -576,10 +610,7 @@ impl Agent for UtilityAgent {
             "scorers={} winner={} tick={} history_len={}",
             self.scorers.len(),
             winner,
-            self.last_observation
-                .as_ref()
-                .map(|o| o.tick)
-                .unwrap_or(0),
+            self.last_observation.as_ref().map(|o| o.tick).unwrap_or(0),
             self.score_history.len(),
         );
 
@@ -673,7 +704,7 @@ impl UtilityProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::observation::{SelfState, VisibleEntity, Relationship};
+    use pod_core::observation::{Relationship, SelfState, VisibleEntity};
 
     // ── Observation builders ──────────────────────────────────
 
@@ -688,7 +719,12 @@ mod tests {
         }
     }
 
-    fn hostile_entity(entity_id: EntityId, position: Vec2, distance: f32, health_fraction: f32) -> VisibleEntity {
+    fn hostile_entity(
+        entity_id: EntityId,
+        position: Vec2,
+        distance: f32,
+        health_fraction: f32,
+    ) -> VisibleEntity {
         VisibleEntity {
             entity_id,
             entity_type: "enemy".to_string(),
@@ -698,6 +734,7 @@ mod tests {
             distance,
             relationship: Relationship::Hostile,
             health_fraction: Some(health_fraction),
+            ..Default::default()
         }
     }
 
@@ -718,12 +755,8 @@ mod tests {
         let hp = max * hp_fraction;
         let mut obs = obs_with_health(hp, max);
         obs.self_state.position = Vec2::ZERO;
-        obs.visible_entities.push(hostile_entity(
-            EntityId(1),
-            Vec2::new(50.0, 0.0),
-            50.0,
-            1.0,
-        ));
+        obs.visible_entities
+            .push(hostile_entity(EntityId(1), Vec2::new(50.0, 0.0), 50.0, 1.0));
         obs
     }
 
@@ -742,8 +775,14 @@ mod tests {
         let s2 = scorer.score(&obs_hostile);
         let s3 = scorer.score(&obs_dying);
 
-        assert_eq!(s1, 0.05, "IdleScorer must return 0.05 for empty observation");
-        assert_eq!(s2, 0.05, "IdleScorer must return 0.05 with hostiles present");
+        assert_eq!(
+            s1, 0.05,
+            "IdleScorer must return 0.05 for empty observation"
+        );
+        assert_eq!(
+            s2, 0.05,
+            "IdleScorer must return 0.05 with hostiles present"
+        );
         assert_eq!(s3, 0.05, "IdleScorer must return 0.05 even when dying");
 
         // Action is always Idle
@@ -758,7 +797,10 @@ mod tests {
         let obs = obs_with_health(100.0, 100.0); // no visible entities
 
         let score = scorer.score(&obs);
-        assert_eq!(score, 0.0, "AttackScorer must score 0.0 when no hostiles visible");
+        assert_eq!(
+            score, 0.0,
+            "AttackScorer must score 0.0 when no hostiles visible"
+        );
     }
 
     // ── Test 3: AttackScorer scores high with a nearby hostile ─
@@ -844,7 +886,11 @@ mod tests {
         agent.observe(obs.clone());
         let actions = agent.decide();
 
-        assert_eq!(actions.len(), 1, "UtilityAgent must return exactly 1 action");
+        assert_eq!(
+            actions.len(),
+            1,
+            "UtilityAgent must return exactly 1 action"
+        );
 
         match &actions[0] {
             Action::AttackTarget { target } => {
@@ -859,7 +905,10 @@ mod tests {
 
         // last_scores should be populated after decide()
         let scores = agent.last_scores();
-        assert!(!scores.is_empty(), "last_scores should be populated after decide()");
+        assert!(
+            !scores.is_empty(),
+            "last_scores should be populated after decide()"
+        );
 
         // The winning scorer should be first (highest score)
         let best_score = scores[0].1;
@@ -881,19 +930,38 @@ mod tests {
         let balanced = UtilityProfile::balanced();
 
         // Check expected scorer counts
-        assert_eq!(aggressive.len(), 3, "Aggressive profile should have 3 scorers");
-        assert_eq!(defensive.len(), 4, "Defensive profile should have 4 scorers");
+        assert_eq!(
+            aggressive.len(),
+            3,
+            "Aggressive profile should have 3 scorers"
+        );
+        assert_eq!(
+            defensive.len(),
+            4,
+            "Defensive profile should have 4 scorers"
+        );
         assert_eq!(explorer.len(), 3, "Explorer profile should have 3 scorers");
         assert_eq!(balanced.len(), 5, "Balanced profile should have 5 scorers");
 
         // Each profile must contain at least an Idle scorer as safety net
-        let has_idle = |scorers: &[Box<dyn ActionScorer>]| {
-            scorers.iter().any(|s| s.name() == "Idle")
-        };
-        assert!(has_idle(&aggressive), "Aggressive profile must include Idle scorer");
-        assert!(has_idle(&defensive), "Defensive profile must include Idle scorer");
-        assert!(has_idle(&explorer), "Explorer profile must include Idle scorer");
-        assert!(has_idle(&balanced), "Balanced profile must include Idle scorer");
+        let has_idle =
+            |scorers: &[Box<dyn ActionScorer>]| scorers.iter().any(|s| s.name() == "Idle");
+        assert!(
+            has_idle(&aggressive),
+            "Aggressive profile must include Idle scorer"
+        );
+        assert!(
+            has_idle(&defensive),
+            "Defensive profile must include Idle scorer"
+        );
+        assert!(
+            has_idle(&explorer),
+            "Explorer profile must include Idle scorer"
+        );
+        assert!(
+            has_idle(&balanced),
+            "Balanced profile must include Idle scorer"
+        );
 
         // Each profile must produce valid UtilityAgents
         let _a = UtilityAgent::with_scorers(UtilityProfile::aggressive());
@@ -929,17 +997,25 @@ mod tests {
 
         let full_hp = obs_with_health(100.0, 100.0);
         let half_hp = obs_with_health(50.0, 100.0);
-        let low_hp  = obs_with_health(10.0, 100.0);
+        let low_hp = obs_with_health(10.0, 100.0);
 
         let s_full = scorer.score(&full_hp);
         let s_half = scorer.score(&half_hp);
-        let s_low  = scorer.score(&low_hp);
+        let s_low = scorer.score(&low_hp);
 
         assert_eq!(s_full, 0.0, "HealScorer must be 0 at full health");
-        assert!(s_half > 0.0,   "HealScorer must be > 0 at half health");
-        assert!(s_low  > s_half, "HealScorer must be higher at lower health (low={:.3}, half={:.3})", s_low, s_half);
-        assert!(s_low  <= 0.85,  "HealScorer must not exceed 0.85");
+        assert!(s_half > 0.0, "HealScorer must be > 0 at half health");
+        assert!(
+            s_low > s_half,
+            "HealScorer must be higher at lower health (low={:.3}, half={:.3})",
+            s_low,
+            s_half
+        );
+        assert!(s_low <= 0.85, "HealScorer must not exceed 0.85");
 
-        assert!(matches!(scorer.action(&half_hp), Action::UseItem { slot: 0 }));
+        assert!(matches!(
+            scorer.action(&half_hp),
+            Action::UseItem { slot: 0 }
+        ));
     }
 }

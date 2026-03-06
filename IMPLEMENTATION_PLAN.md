@@ -375,5 +375,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-core`
   - `cargo test -p pod-core --lib`
 
-**Last updated**: Iteration 47
-**Current focus**: Phase 1 runtime kernel parity for the RuneScape-style MMO + companion-creature vertical slice
+### Iteration 48 — MMO Gameplay Verb and Transport Parity
+
+- [x] Added RuneScape-style MMO gameplay verbs to `pod-core` with strict validation for capture, summon, companion commands, gathering, looting, and auto-retaliate toggling under the shared human/AI action contract.
+- [x] Added supporting native runtime primitives `ResourceNode` and `LootContainer`, plus deterministic tick execution for companion capture/summon flows, skill XP gains, loot transfer, and combat cadence driven by `CombatLoadout`.
+- [x] Extended the agent parser and network/SpacetimeDB transport layers so the new MMO verbs survive parsing, serialization, authority mirroring, and local simulated reducer paths without being dropped.
+- [x] Expanded deterministic coverage in `pod-core` for loadout-driven combat range/damage/cooldowns, capture, summon, companion attack commands, gathering, looting, and auto-retaliate state changes.
+- [x] Updated agent-side observation fixtures to stay compatible with the expanded MMO observation schema (`combat_style`, `creature`, and extended `SelfState` fields).
+- [x] Validated touched crates:
+  - `cargo check -p pod-core -p pod-agents -p pod-net -p pod-stdb`
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-agents --lib`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-stdb --lib`
+
+**Last updated**: Iteration 48
+**Current focus**: Phase 1 MMO action validation and Phase 3 authority parity for the RuneScape-style MMO + companion-creature vertical slice

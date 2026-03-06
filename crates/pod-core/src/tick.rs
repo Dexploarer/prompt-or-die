@@ -1,4 +1,4 @@
-use crate::action::{validate_action, Action, ActionResult, AgentAction};
+use crate::action::{validate_action, Action, ActionResult, AgentAction, CompanionCommand};
 use crate::agent::AgentSlot;
 use crate::component::*;
 use crate::event::{Event, EventBus};
@@ -314,12 +314,18 @@ fn build_observations(
                 "LookAt",
                 "Attack",
                 "UseAbility",
+                "CaptureCreature",
+                "SummonCompanion",
+                "CommandCompanion",
                 "Interact",
                 "Pickup",
                 "Drop",
                 "UseItem",
+                "GatherResource",
+                "Loot",
                 "Speak",
                 "Signal",
+                "SetAutoRetaliate",
                 "Idle",
             ]
             .into_iter()
@@ -437,6 +443,7 @@ fn execute_action(
     };
 
     let mut set_attack_cooldown = false;
+    let attack_range = attack_range_for(ecs, entity);
 
     match &agent_action.action {
         Action::Move { direction } => {
@@ -466,7 +473,7 @@ fn execute_action(
                 return;
             }
 
-            if let Some(target_entity) = select_attack_target(ecs, entity, None) {
+            if let Some(target_entity) = select_attack_target(ecs, entity, None, attack_range) {
                 let applied = apply_attack(
                     ecs,
                     agents,
@@ -486,7 +493,7 @@ fn execute_action(
             }
 
             if let Some(target_entity) = find_entity_by_id(ecs, target.0) {
-                if target_entity != entity && in_range(ecs, entity, target_entity, ATTACK_RANGE) {
+                if target_entity != entity && in_range(ecs, entity, target_entity, attack_range) {
                     let applied = apply_attack(
                         ecs,
                         agents,
@@ -500,6 +507,37 @@ fn execute_action(
                     }
                 }
             }
+        }
+        Action::CaptureCreature { target, tool_slot } => {
+            if let Some(target_entity) = find_entity_by_id(ecs, target.0) {
+                let _ = capture_creature(
+                    ecs,
+                    events,
+                    entity,
+                    target_entity,
+                    agent_action.agent_id,
+                    *tool_slot,
+                );
+            }
+        }
+        Action::SummonCompanion { slot } => {
+            summon_companion(ecs, events, entity, agent_action.agent_id, *slot);
+        }
+        Action::CommandCompanion {
+            slot,
+            command,
+            target,
+        } => {
+            command_companion(
+                ecs,
+                agents,
+                events,
+                entity,
+                agent_action.agent_id,
+                *slot,
+                *command,
+                *target,
+            );
         }
         Action::Speak { message, volume } => {
             if let Ok(transform) = ecs.get::<&Transform>(entity) {
@@ -548,6 +586,30 @@ fn execute_action(
                 }
             }
         }
+        Action::GatherResource { target, skill } => {
+            if let Some(target_entity) = find_entity_by_id(ecs, target.0) {
+                let _ = gather_resource(ecs, events, entity, target_entity, *skill);
+            }
+        }
+        Action::Loot { target } => {
+            if let Some(target_entity) = find_entity_by_id(ecs, target.0) {
+                let _ = loot_container(ecs, events, entity, target_entity);
+            }
+        }
+        Action::SetAutoRetaliate { enabled } => {
+            if let Ok(mut loadout) = ecs.get::<&mut CombatLoadout>(entity) {
+                loadout.auto_retaliate = *enabled;
+                if let Ok(transform) = ecs.get::<&Transform>(entity) {
+                    events.emit(
+                        transform.position,
+                        Event::AutoRetaliateSet {
+                            entity: EntityId(entity.id() as u64),
+                            enabled: *enabled,
+                        },
+                    );
+                }
+            }
+        }
         Action::Idle => {}
         _ => {
             log::debug!("Unhandled action: {:?}", agent_action.action);
@@ -555,19 +617,44 @@ fn execute_action(
     }
 
     if set_attack_cooldown {
-        let duration = agents[actor_slot_index].agent.constraints().attack_cooldown;
+        let duration = attack_cooldown_for(
+            ecs,
+            entity,
+            agents[actor_slot_index].agent.constraints().attack_cooldown,
+        );
         agents[actor_slot_index].attack_cooldown_remaining = duration;
     }
 }
 
 const ATTACK_RANGE: f32 = 80.0;
 const INTERACT_RANGE: f32 = 50.0;
+const CAPTURE_RANGE: f32 = 60.0;
+const COMPANION_COMMAND_RANGE: f32 = 160.0;
+const CAPTURE_HEALTH_THRESHOLD: f32 = 0.35;
 const BASE_ATTACK_DAMAGE: f32 = 10.0;
 
 fn find_entity_by_id(ecs: &hecs::World, target_id: u64) -> Option<hecs::Entity> {
     ecs.query::<()>()
         .iter()
         .find_map(|(entity, _)| (entity.id() as u64 == target_id).then_some(entity))
+}
+
+fn attack_range_for(ecs: &hecs::World, entity: hecs::Entity) -> f32 {
+    ecs.get::<&CombatLoadout>(entity)
+        .map(|loadout| loadout.attack_range.max(1.0))
+        .unwrap_or(ATTACK_RANGE)
+}
+
+fn attack_cooldown_for(ecs: &hecs::World, entity: hecs::Entity, fallback: u32) -> u32 {
+    ecs.get::<&CombatLoadout>(entity)
+        .map(|loadout| loadout.attack_speed_ticks.max(1))
+        .unwrap_or(fallback.max(1))
+}
+
+fn attack_damage_for(ecs: &hecs::World, entity: hecs::Entity) -> f32 {
+    ecs.get::<&CombatLoadout>(entity)
+        .map(|loadout| loadout.max_hit.max(1.0))
+        .unwrap_or(BASE_ATTACK_DAMAGE)
 }
 
 fn in_range(ecs: &hecs::World, source: hecs::Entity, target: hecs::Entity, range: f32) -> bool {
@@ -603,10 +690,11 @@ fn select_attack_target(
     ecs: &hecs::World,
     source: hecs::Entity,
     explicit_target: Option<hecs::Entity>,
+    attack_range: f32,
 ) -> Option<hecs::Entity> {
     if let Some(target) = explicit_target {
         if target != source
-            && in_range(ecs, source, target, ATTACK_RANGE)
+            && in_range(ecs, source, target, attack_range)
             && is_hostile_target(ecs, source, target)
         {
             return Some(target);
@@ -623,7 +711,7 @@ fn select_attack_target(
                 return None;
             }
             let distance = source_pos.distance(transform.position);
-            if distance > ATTACK_RANGE || !is_hostile_target(ecs, source, entity) {
+            if distance > attack_range || !is_hostile_target(ecs, source, entity) {
                 return None;
             }
             Some((entity, distance))
@@ -638,6 +726,99 @@ fn select_attack_target(
     });
 
     candidates.first().map(|(entity, _)| *entity)
+}
+
+fn add_item_to_inventory(inventory: &mut Inventory, item: ItemStack) -> bool {
+    if item.stackable {
+        if let Some(existing) = inventory
+            .items
+            .iter_mut()
+            .find(|existing| existing.item_id == item.item_id)
+        {
+            existing.quantity = existing.quantity.saturating_add(item.quantity);
+            return true;
+        }
+    }
+
+    if inventory.items.len() >= inventory.capacity as usize {
+        return false;
+    }
+
+    inventory.items.push(item);
+    true
+}
+
+fn consume_inventory_slot(inventory: &mut Inventory, slot: u8) -> bool {
+    let index = slot as usize;
+    if index >= inventory.items.len() {
+        return false;
+    }
+
+    let item = &mut inventory.items[index];
+    if item.quantity == 0 {
+        return false;
+    }
+
+    if item.stackable && item.quantity > 1 {
+        item.quantity -= 1;
+    } else {
+        inventory.items.remove(index);
+    }
+
+    true
+}
+
+fn next_level_xp(level: u16) -> u32 {
+    83 + u32::from(level.saturating_sub(1)) * 97
+}
+
+fn recompute_skillbook_totals(skill_book: &mut SkillBook) {
+    skill_book.total_level = skill_book.skills.iter().map(|skill| skill.level).sum();
+
+    let combat_skills = [
+        SkillKind::Attack,
+        SkillKind::Strength,
+        SkillKind::Defence,
+        SkillKind::Ranged,
+        SkillKind::Magic,
+        SkillKind::Constitution,
+    ];
+    let combat_sum: u32 = skill_book
+        .skills
+        .iter()
+        .filter(|skill| combat_skills.contains(&skill.kind))
+        .map(|skill| u32::from(skill.level))
+        .sum();
+    skill_book.combat_level = (combat_sum / combat_skills.len() as u32).max(3) as u16;
+}
+
+fn award_skill_experience(
+    skill_book: &mut SkillBook,
+    skill: SkillKind,
+    amount: u32,
+) -> Option<u16> {
+    let progress_index = skill_book
+        .skills
+        .iter()
+        .position(|entry| entry.kind == skill)?;
+    let mut level_changed = false;
+
+    let new_level = {
+        let progress = &mut skill_book.skills[progress_index];
+        progress.experience = progress.experience.saturating_add(amount);
+
+        while progress.experience >= progress.xp_to_next_level {
+            progress.experience -= progress.xp_to_next_level;
+            progress.level = progress.level.saturating_add(1);
+            progress.xp_to_next_level = next_level_xp(progress.level);
+            level_changed = true;
+        }
+
+        level_changed.then_some(progress.level)
+    };
+
+    recompute_skillbook_totals(skill_book);
+    new_level
 }
 
 fn select_interaction_target(
@@ -671,6 +852,376 @@ fn select_interaction_target(
     candidates.first().map(|(entity, _)| *entity)
 }
 
+fn summon_companion(
+    ecs: &mut hecs::World,
+    events: &mut EventBus,
+    entity: hecs::Entity,
+    agent_id: crate::id::AgentId,
+    slot: u8,
+) -> bool {
+    let Some(companion) = ecs
+        .get::<&CompanionRoster>(entity)
+        .ok()
+        .and_then(|roster| roster.creatures.get(slot as usize).cloned())
+    else {
+        return false;
+    };
+
+    if let Ok(mut roster) = ecs.get::<&mut CompanionRoster>(entity) {
+        roster.active_slot = Some(slot);
+    } else {
+        return false;
+    }
+
+    if let Ok(transform) = ecs.get::<&Transform>(entity) {
+        events.emit(
+            transform.position,
+            Event::CompanionSummoned {
+                agent_id,
+                species_id: companion.creature.species_id,
+            },
+        );
+    }
+
+    true
+}
+
+fn command_companion(
+    ecs: &mut hecs::World,
+    agents: &mut [AgentSlot],
+    events: &mut EventBus,
+    entity: hecs::Entity,
+    agent_id: crate::id::AgentId,
+    slot: u8,
+    command: CompanionCommand,
+    target: Option<EntityId>,
+) -> bool {
+    let Some(companion) = ecs
+        .get::<&CompanionRoster>(entity)
+        .ok()
+        .and_then(|roster| roster.creatures.get(slot as usize).cloned())
+    else {
+        return false;
+    };
+
+    if let Ok(mut roster) = ecs.get::<&mut CompanionRoster>(entity) {
+        roster.active_slot = match command {
+            CompanionCommand::Recall => None,
+            _ => Some(slot),
+        };
+    } else {
+        return false;
+    }
+
+    let entity_id = EntityId(entity.id() as u64);
+    let origin = ecs
+        .get::<&Transform>(entity)
+        .map(|transform| transform.position)
+        .unwrap_or(Vec2::ZERO);
+    events.emit(
+        origin,
+        Event::CompanionCommandIssued {
+            agent_id,
+            slot,
+            command: format!("{command:?}"),
+            target,
+        },
+    );
+
+    if matches!(command, CompanionCommand::Attack) {
+        let Some(target_id) = target else {
+            return true;
+        };
+        let Some(target_entity) = find_entity_by_id(ecs, target_id.0) else {
+            return false;
+        };
+        if !in_range(ecs, entity, target_entity, COMPANION_COMMAND_RANGE) {
+            return false;
+        }
+
+        let companion_damage = f32::from(companion.creature.level).max(4.0);
+        let _ = apply_damage_from_source(
+            ecs,
+            agents,
+            events,
+            entity,
+            target_entity,
+            agent_id,
+            companion_damage,
+            "companion_attack",
+        );
+    } else if matches!(command, CompanionCommand::Recall) {
+        events.emit(
+            origin,
+            Event::EncounterEnded {
+                encounter_id: 0,
+                victory: false,
+            },
+        );
+    }
+
+    let _ = entity_id;
+    true
+}
+
+fn capture_creature(
+    ecs: &mut hecs::World,
+    events: &mut EventBus,
+    entity: hecs::Entity,
+    target_entity: hecs::Entity,
+    agent_id: crate::id::AgentId,
+    tool_slot: Option<u8>,
+) -> bool {
+    if !in_range(ecs, entity, target_entity, CAPTURE_RANGE) {
+        return false;
+    }
+
+    let Some(creature) = ecs
+        .get::<&CreatureIdentity>(target_entity)
+        .ok()
+        .map(|creature| (*creature).clone())
+    else {
+        return false;
+    };
+    if !creature.is_wild {
+        return false;
+    }
+
+    let target_health_fraction = ecs
+        .get::<&Health>(target_entity)
+        .map(|health| health.current / health.max.max(1.0))
+        .unwrap_or(1.0);
+    if target_health_fraction > CAPTURE_HEALTH_THRESHOLD {
+        return false;
+    }
+
+    let capture_allowed = ecs
+        .get::<&EncounterState>(entity)
+        .map(|encounter| encounter.capture_allowed)
+        .unwrap_or(true);
+    if !capture_allowed {
+        return false;
+    }
+
+    if let Some(slot) = tool_slot {
+        let Ok(mut inventory) = ecs.get::<&mut Inventory>(entity) else {
+            return false;
+        };
+        if !consume_inventory_slot(&mut inventory, slot) {
+            return false;
+        }
+    }
+
+    let current_max_health = ecs
+        .get::<&Health>(target_entity)
+        .map(|health| health.max)
+        .unwrap_or(10.0);
+    let current_health = ecs
+        .get::<&Health>(target_entity)
+        .map(|health| health.current.max(1.0))
+        .unwrap_or(current_max_health);
+    let combat_style = ecs
+        .get::<&CombatLoadout>(target_entity)
+        .map(|loadout| loadout.style)
+        .unwrap_or(CombatStyle::Summoning);
+    let captured = CompanionCreature {
+        creature: creature.clone(),
+        nickname: None,
+        current_health,
+        max_health: current_max_health,
+        combat_style,
+        mood: 1.0,
+    };
+
+    let next_slot = {
+        let Ok(mut roster) = ecs.get::<&mut CompanionRoster>(entity) else {
+            return false;
+        };
+        if roster.creatures.len() >= roster.party_capacity as usize {
+            return false;
+        }
+        let slot = roster.creatures.len() as u8;
+        roster.creatures.push(captured);
+        roster.active_slot.get_or_insert(slot);
+        slot
+    };
+
+    if let Ok(mut encounter) = ecs.get::<&mut EncounterState>(entity) {
+        encounter.capture_allowed = false;
+        encounter.in_combat = false;
+    }
+
+    let origin = ecs
+        .get::<&Transform>(entity)
+        .map(|transform| transform.position)
+        .unwrap_or(Vec2::ZERO);
+    let encounter_id = ecs
+        .get::<&EncounterState>(entity)
+        .map(|encounter| encounter.encounter_id)
+        .unwrap_or(0);
+    let species_id = creature.species_id.clone();
+    events.emit(
+        origin,
+        Event::CreatureCaptured {
+            agent_id,
+            species_id: species_id.clone(),
+            nickname: None,
+        },
+    );
+    events.emit(
+        origin,
+        Event::CompanionSummoned {
+            agent_id,
+            species_id: species_id.clone(),
+        },
+    );
+    if encounter_id != 0 {
+        events.emit(
+            origin,
+            Event::EncounterEnded {
+                encounter_id,
+                victory: true,
+            },
+        );
+    }
+
+    let _ = next_slot;
+    ecs.despawn(target_entity).is_ok()
+}
+
+fn gather_resource(
+    ecs: &mut hecs::World,
+    events: &mut EventBus,
+    entity: hecs::Entity,
+    target_entity: hecs::Entity,
+    skill: SkillKind,
+) -> bool {
+    if !in_range(ecs, entity, target_entity, INTERACT_RANGE) {
+        return false;
+    }
+
+    let Some(resource) = ecs
+        .get::<&ResourceNode>(target_entity)
+        .ok()
+        .map(|resource| (*resource).clone())
+    else {
+        return false;
+    };
+    if resource.skill != skill || resource.remaining_uses == 0 {
+        return false;
+    }
+
+    let Ok(mut inventory) = ecs.get::<&mut Inventory>(entity) else {
+        return false;
+    };
+    if !add_item_to_inventory(&mut inventory, resource.yield_item.clone()) {
+        return false;
+    }
+
+    if let Ok(mut node) = ecs.get::<&mut ResourceNode>(target_entity) {
+        node.remaining_uses = node.remaining_uses.saturating_sub(1);
+    }
+
+    let new_level = if let Ok(mut skill_book) = ecs.get::<&mut SkillBook>(entity) {
+        let level = award_skill_experience(&mut skill_book, skill, resource.experience)
+            .or_else(|| {
+                skill_book
+                    .skills
+                    .iter()
+                    .find(|entry| entry.kind == skill)
+                    .map(|entry| entry.level)
+            })
+            .unwrap_or(1);
+        Some(level)
+    } else {
+        None
+    };
+
+    let origin = ecs
+        .get::<&Transform>(entity)
+        .map(|transform| transform.position)
+        .unwrap_or(Vec2::ZERO);
+    events.emit(
+        origin,
+        Event::ResourceGathered {
+            entity: EntityId(entity.id() as u64),
+            resource: EntityId(target_entity.id() as u64),
+            skill: format!("{skill:?}"),
+            item_id: resource.yield_item.item_id.clone(),
+            quantity: resource.yield_item.quantity,
+        },
+    );
+    if let Some(level) = new_level {
+        events.emit(
+            origin,
+            Event::SkillXpGained {
+                entity: EntityId(entity.id() as u64),
+                skill: format!("{skill:?}"),
+                amount: resource.experience,
+                new_level: level,
+            },
+        );
+    }
+
+    true
+}
+
+fn loot_container(
+    ecs: &mut hecs::World,
+    events: &mut EventBus,
+    entity: hecs::Entity,
+    target_entity: hecs::Entity,
+) -> bool {
+    if !in_range(ecs, entity, target_entity, INTERACT_RANGE) {
+        return false;
+    }
+
+    let Some(loot) = ecs
+        .get::<&LootContainer>(target_entity)
+        .ok()
+        .map(|loot| (*loot).clone())
+    else {
+        return false;
+    };
+    if loot.claimed {
+        return false;
+    }
+
+    let Ok(mut inventory) = ecs.get::<&mut Inventory>(entity) else {
+        return false;
+    };
+    let mut preview = (*inventory).clone();
+    for item in loot.items.iter().cloned() {
+        if !add_item_to_inventory(&mut preview, item) {
+            return false;
+        }
+    }
+    preview.coins = preview.coins.saturating_add(loot.coins);
+    *inventory = preview;
+
+    if let Ok(mut loot_container) = ecs.get::<&mut LootContainer>(target_entity) {
+        loot_container.claimed = true;
+        loot_container.items.clear();
+        loot_container.coins = 0;
+    }
+
+    let origin = ecs
+        .get::<&Transform>(entity)
+        .map(|transform| transform.position)
+        .unwrap_or(Vec2::ZERO);
+    events.emit(
+        origin,
+        Event::LootClaimed {
+            entity: EntityId(entity.id() as u64),
+            source: EntityId(target_entity.id() as u64),
+            coins: loot.coins,
+            item_count: loot.items.len(),
+        },
+    );
+
+    true
+}
+
 fn apply_attack(
     ecs: &mut hecs::World,
     agents: &mut [AgentSlot],
@@ -678,6 +1229,29 @@ fn apply_attack(
     attacker_entity: hecs::Entity,
     target_entity: hecs::Entity,
     attacker_agent_id: crate::id::AgentId,
+) -> f32 {
+    let damage = attack_damage_for(ecs, attacker_entity);
+    apply_damage_from_source(
+        ecs,
+        agents,
+        events,
+        attacker_entity,
+        target_entity,
+        attacker_agent_id,
+        damage,
+        "attack",
+    )
+}
+
+fn apply_damage_from_source(
+    ecs: &mut hecs::World,
+    agents: &mut [AgentSlot],
+    events: &mut EventBus,
+    attacker_entity: hecs::Entity,
+    target_entity: hecs::Entity,
+    attacker_agent_id: crate::id::AgentId,
+    damage: f32,
+    sound_name: &str,
 ) -> f32 {
     let attacker_pos = ecs
         .get::<&Transform>(attacker_entity)
@@ -689,7 +1263,7 @@ fn apply_attack(
     events.emit(
         attacker_pos,
         Event::Sound {
-            name: "attack".into(),
+            name: sound_name.into(),
             intensity: 1.0,
         },
     );
@@ -703,7 +1277,7 @@ fn apply_attack(
     let mut target_dead = false;
 
     if let Ok(mut health) = ecs.get::<&mut Health>(target_entity) {
-        applied_damage = health.damage(BASE_ATTACK_DAMAGE);
+        applied_damage = health.damage(damage);
         target_dead = health.is_dead();
     }
 
@@ -1334,5 +1908,530 @@ mod tests {
                 .species_name,
             "Moss Turtle"
         );
+    }
+
+    #[test]
+    fn attack_target_uses_combat_loadout_damage_range_and_cooldown() {
+        let mut ecs = hecs::World::new();
+        let attacker_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let target_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(140.0, 0.0),
+            Team::Team(2),
+            Health::new(100.0),
+        );
+        ecs.insert(
+            attacker_entity,
+            (CombatLoadout {
+                style: CombatStyle::Ranged,
+                attack_range: 180.0,
+                attack_speed_ticks: 42,
+                max_hit: 17.0,
+                auto_retaliate: true,
+                equipped_weapon: Some("oak-shortbow".to_string()),
+                offhand_item: None,
+                active_ability_bar: vec!["rapid-shot".to_string()],
+            },),
+        )
+        .unwrap();
+
+        let target_id = EntityId(target_entity.id() as u64);
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(attacker_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::AttackTarget { target: target_id },
+            }],
+            &mut next_entity_id,
+        );
+
+        let target_health = ecs.get::<&Health>(target_entity).unwrap();
+        assert_eq!(target_health.current, 83.0);
+        assert_eq!(agents[0].attack_cooldown_remaining, 42);
+        assert!(result.events.iter().any(|event| matches!(
+            event.event,
+            Event::Damage {
+                target,
+                amount,
+                ..
+            } if target == target_id && (amount - 17.0).abs() < f32::EPSILON
+        )));
+    }
+
+    #[test]
+    fn capture_creature_consumes_tool_and_adds_companion() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let wild_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(12.0, 0.0),
+            Team::None,
+            Health {
+                current: 6.0,
+                max: 30.0,
+                armor: 0.0,
+                invulnerable: false,
+            },
+        );
+        ecs.insert(
+            player_entity,
+            (
+                Inventory {
+                    capacity: 28,
+                    carried_weight: 0.0,
+                    coins: 0,
+                    items: vec![ItemStack {
+                        item_id: "capture-orb".to_string(),
+                        display_name: "Capture Orb".to_string(),
+                        quantity: 2,
+                        stackable: true,
+                    }],
+                },
+                CompanionRoster::default(),
+                EncounterState {
+                    encounter_id: 7,
+                    kind: EncounterKind::WildCreature,
+                    threat_level: 0.4,
+                    primary_target: Some(EntityId(wild_entity.id() as u64)),
+                    active_turn_owner: Some(EntityId(player_entity.id() as u64)),
+                    capture_allowed: true,
+                    in_combat: true,
+                },
+            ),
+        )
+        .unwrap();
+        ecs.insert(
+            wild_entity,
+            (
+                CreatureIdentity {
+                    species_id: "spark-mouse".to_string(),
+                    species_name: "Spark Mouse".to_string(),
+                    elemental_affinity: "storm".to_string(),
+                    level: 5,
+                    temperament: CreatureTemperament::Timid,
+                    capture_difficulty: 0.25,
+                    is_wild: true,
+                },
+                CombatLoadout {
+                    style: CombatStyle::Summoning,
+                    ..CombatLoadout::default()
+                },
+            ),
+        )
+        .unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::CaptureCreature {
+                    target: EntityId(wild_entity.id() as u64),
+                    tool_slot: Some(0),
+                },
+            }],
+            &mut next_entity_id,
+        );
+
+        let roster = ecs.get::<&CompanionRoster>(player_entity).unwrap();
+        assert_eq!(roster.active_slot, Some(0));
+        assert_eq!(roster.creatures.len(), 1);
+        assert_eq!(roster.creatures[0].creature.species_id, "spark-mouse");
+        let inventory = ecs.get::<&Inventory>(player_entity).unwrap();
+        assert_eq!(inventory.items[0].quantity, 1);
+        let encounter = ecs.get::<&EncounterState>(player_entity).unwrap();
+        assert!(!encounter.capture_allowed);
+        assert!(!encounter.in_combat);
+        assert!(ecs.get::<&Transform>(wild_entity).is_err());
+        assert!(result.events.iter().any(|event| matches!(
+            &event.event,
+            Event::CreatureCaptured { species_id, .. } if species_id == "spark-mouse"
+        )));
+    }
+
+    #[test]
+    fn summon_companion_sets_active_slot_and_emits_event() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        ecs.insert(
+            player_entity,
+            (CompanionRoster {
+                active_slot: None,
+                party_capacity: 6,
+                creatures: vec![CompanionCreature {
+                    creature: CreatureIdentity {
+                        species_id: "ember-fox".to_string(),
+                        species_name: "Ember Fox".to_string(),
+                        elemental_affinity: "fire".to_string(),
+                        level: 9,
+                        temperament: CreatureTemperament::Loyal,
+                        capture_difficulty: 0.2,
+                        is_wild: false,
+                    },
+                    nickname: Some("Cinder".to_string()),
+                    current_health: 20.0,
+                    max_health: 20.0,
+                    combat_style: CombatStyle::Summoning,
+                    mood: 1.0,
+                }],
+            },),
+        )
+        .unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::SummonCompanion { slot: 0 },
+            }],
+            &mut next_entity_id,
+        );
+
+        let roster = ecs.get::<&CompanionRoster>(player_entity).unwrap();
+        assert_eq!(roster.active_slot, Some(0));
+        assert!(result.events.iter().any(|event| matches!(
+            &event.event,
+            Event::CompanionSummoned { species_id, .. } if species_id == "ember-fox"
+        )));
+    }
+
+    #[test]
+    fn command_companion_attack_damages_hostile_target() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let target_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(20.0, 0.0),
+            Team::Team(2),
+            Health::new(50.0),
+        );
+        ecs.insert(
+            player_entity,
+            (CompanionRoster {
+                active_slot: None,
+                party_capacity: 6,
+                creatures: vec![CompanionCreature {
+                    creature: CreatureIdentity {
+                        species_id: "river-drake".to_string(),
+                        species_name: "River Drake".to_string(),
+                        elemental_affinity: "water".to_string(),
+                        level: 11,
+                        temperament: CreatureTemperament::Loyal,
+                        capture_difficulty: 0.1,
+                        is_wild: false,
+                    },
+                    nickname: None,
+                    current_health: 28.0,
+                    max_health: 28.0,
+                    combat_style: CombatStyle::Summoning,
+                    mood: 1.0,
+                }],
+            },),
+        )
+        .unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::CommandCompanion {
+                    slot: 0,
+                    command: CompanionCommand::Attack,
+                    target: Some(EntityId(target_entity.id() as u64)),
+                },
+            }],
+            &mut next_entity_id,
+        );
+
+        let target_health = ecs.get::<&Health>(target_entity).unwrap();
+        assert_eq!(target_health.current, 39.0);
+        let roster = ecs.get::<&CompanionRoster>(player_entity).unwrap();
+        assert_eq!(roster.active_slot, Some(0));
+        assert!(result.events.iter().any(|event| matches!(
+            event.event,
+            Event::CompanionCommandIssued { slot, ref command, .. }
+                if slot == 0 && command == "Attack"
+        )));
+    }
+
+    #[test]
+    fn gather_resource_adds_item_and_awards_skill_xp() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let resource_entity = ecs.spawn((
+            Transform {
+                position: Vec2::new(10.0, 0.0),
+                rotation: 0.0,
+                scale: Vec2::ONE,
+            },
+            ResourceNode {
+                skill: SkillKind::Mining,
+                tier: 1,
+                remaining_uses: 1,
+                respawn_ticks: 300,
+                experience: 10,
+                yield_item: ItemStack {
+                    item_id: "copper-ore".to_string(),
+                    display_name: "Copper Ore".to_string(),
+                    quantity: 2,
+                    stackable: true,
+                },
+            },
+        ));
+        ecs.insert(
+            player_entity,
+            (
+                Inventory::default(),
+                SkillBook {
+                    combat_level: 3,
+                    total_level: 17,
+                    skills: vec![
+                        SkillProgress::new(SkillKind::Attack, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Strength, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Defence, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Ranged, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Magic, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Constitution, 10, 1_154, 1_358),
+                        SkillProgress::new(SkillKind::Mining, 1, 80, 83),
+                        SkillProgress::new(SkillKind::Taming, 1, 0, 83),
+                        SkillProgress::new(SkillKind::Bonding, 1, 0, 83),
+                    ],
+                },
+            ),
+        )
+        .unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::GatherResource {
+                    target: EntityId(resource_entity.id() as u64),
+                    skill: SkillKind::Mining,
+                },
+            }],
+            &mut next_entity_id,
+        );
+
+        let inventory = ecs.get::<&Inventory>(player_entity).unwrap();
+        assert_eq!(inventory.items.len(), 1);
+        assert_eq!(inventory.items[0].item_id, "copper-ore");
+        assert_eq!(inventory.items[0].quantity, 2);
+        let skill_book = ecs.get::<&SkillBook>(player_entity).unwrap();
+        let mining = skill_book
+            .skills
+            .iter()
+            .find(|progress| progress.kind == SkillKind::Mining)
+            .unwrap();
+        assert_eq!(mining.level, 2);
+        assert_eq!(mining.experience, 7);
+        let node = ecs.get::<&ResourceNode>(resource_entity).unwrap();
+        assert_eq!(node.remaining_uses, 0);
+        assert!(result.events.iter().any(|event| matches!(
+            &event.event,
+            Event::SkillXpGained { skill, amount, new_level, .. }
+                if skill == "Mining" && *amount == 10 && *new_level == 2
+        )));
+    }
+
+    #[test]
+    fn loot_claims_container_and_transfers_contents() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let chest_entity = ecs.spawn((
+            Transform {
+                position: Vec2::new(8.0, 0.0),
+                rotation: 0.0,
+                scale: Vec2::ONE,
+            },
+            LootContainer {
+                coins: 125,
+                items: vec![ItemStack {
+                    item_id: "salmon".to_string(),
+                    display_name: "Salmon".to_string(),
+                    quantity: 3,
+                    stackable: true,
+                }],
+                owner: None,
+                claimed: false,
+            },
+        ));
+        ecs.insert(player_entity, (Inventory::default(),)).unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::Loot {
+                    target: EntityId(chest_entity.id() as u64),
+                },
+            }],
+            &mut next_entity_id,
+        );
+
+        let inventory = ecs.get::<&Inventory>(player_entity).unwrap();
+        assert_eq!(inventory.coins, 125);
+        assert_eq!(inventory.items.len(), 1);
+        assert_eq!(inventory.items[0].item_id, "salmon");
+        let loot = ecs.get::<&LootContainer>(chest_entity).unwrap();
+        assert!(loot.claimed);
+        assert_eq!(loot.coins, 0);
+        assert!(loot.items.is_empty());
+        assert!(result.events.iter().any(|event| matches!(
+            event.event,
+            Event::LootClaimed {
+                coins,
+                item_count,
+                ..
+            } if coins == 125 && item_count == 1
+        )));
+    }
+
+    #[test]
+    fn set_auto_retaliate_updates_combat_loadout() {
+        let mut ecs = hecs::World::new();
+        let player_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        ecs.insert(
+            player_entity,
+            (CombatLoadout {
+                auto_retaliate: true,
+                ..CombatLoadout::default()
+            },),
+        )
+        .unwrap();
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(player_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::SetAutoRetaliate { enabled: false },
+            }],
+            &mut next_entity_id,
+        );
+
+        let loadout = ecs.get::<&CombatLoadout>(player_entity).unwrap();
+        assert!(!loadout.auto_retaliate);
+        assert!(result.events.iter().any(|event| matches!(
+            event.event,
+            Event::AutoRetaliateSet { enabled, .. } if !enabled
+        )));
     }
 }

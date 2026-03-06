@@ -1,6 +1,7 @@
+use crate::component::SkillKind;
+use crate::id::{AgentId, EntityId};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::id::{AgentId, EntityId};
 
 /// Every action an agent can take in the game.
 /// This is the SAME action space for human and AI agents.
@@ -30,7 +31,23 @@ pub enum Action {
     /// Attack a specific entity
     AttackTarget { target: EntityId },
     /// Use ability by slot index
-    UseAbility { slot: u8, target: Option<AbilityTarget> },
+    UseAbility {
+        slot: u8,
+        target: Option<AbilityTarget>,
+    },
+    /// Capture a weakened wild creature into the companion roster.
+    CaptureCreature {
+        target: EntityId,
+        tool_slot: Option<u8>,
+    },
+    /// Summon a companion from the roster into the active slot.
+    SummonCompanion { slot: u8 },
+    /// Issue a direct order to a companion in the roster.
+    CommandCompanion {
+        slot: u8,
+        command: CompanionCommand,
+        target: Option<EntityId>,
+    },
 
     // === INTERACTION ===
     /// Interact with nearest interactable
@@ -43,18 +60,35 @@ pub enum Action {
     Drop { slot: u8 },
     /// Use an item from inventory
     UseItem { slot: u8 },
+    /// Gather from a resource node using the specified skill.
+    GatherResource { target: EntityId, skill: SkillKind },
+    /// Claim a loot container or dropped bundle.
+    Loot { target: EntityId },
 
     // === COMMUNICATION ===
     /// Send a message (visible to agents in hearing range)
-    Speak { message: String, volume: SpeakVolume },
+    Speak {
+        message: String,
+        volume: SpeakVolume,
+    },
     /// Send a signal (game-specific, e.g. ping, emote)
     Signal { signal_type: String, data: String },
+    /// Toggle RuneScape-style auto retaliation on or off.
+    SetAutoRetaliate { enabled: bool },
 
     // === META ===
     /// Do nothing this tick (explicit no-op)
     Idle,
     /// Spawn request (only valid for system agents)
     Spawn { prefab: String, position: Vec2 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompanionCommand {
+    Attack,
+    Follow,
+    Guard,
+    Recall,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,9 +100,9 @@ pub enum AbilityTarget {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpeakVolume {
-    Whisper,  // short range
-    Normal,   // medium range
-    Shout,    // long range
+    Whisper, // short range
+    Normal,  // medium range
+    Shout,   // long range
 }
 
 impl SpeakVolume {
@@ -195,9 +229,43 @@ fn validate_action_payload(action: &Action) -> Option<String> {
             }
             None
         }
+        Action::SummonCompanion { slot } => {
+            if *slot >= 6 {
+                return Some("Companion slot out of range".into());
+            }
+            None
+        }
+        Action::CommandCompanion { slot, target, .. } => {
+            if *slot >= 6 {
+                return Some("Companion slot out of range".into());
+            }
+            if let Some(target) = target {
+                if target.0 == 0 {
+                    return Some("Companion target entity id must be non-zero".into());
+                }
+            }
+            None
+        }
         Action::Drop { slot } | Action::UseItem { slot } => {
             if *slot >= 8 {
                 return Some("Inventory slot out of range".into());
+            }
+            None
+        }
+        Action::CaptureCreature { target, tool_slot } => {
+            if target.0 == 0 {
+                return Some("Capture target entity id must be non-zero".into());
+            }
+            if let Some(slot) = tool_slot {
+                if *slot >= 28 {
+                    return Some("Capture tool slot out of range".into());
+                }
+            }
+            None
+        }
+        Action::GatherResource { target, .. } | Action::Loot { target } => {
+            if target.0 == 0 {
+                return Some("Target entity id must be non-zero".into());
             }
             None
         }
@@ -209,13 +277,17 @@ fn validate_action_payload(action: &Action) -> Option<String> {
             }
             None
         }
-        Action::Stop | Action::Attack | Action::Interact | Action::Idle => None,
+        Action::Stop
+        | Action::Attack
+        | Action::Interact
+        | Action::Idle
+        | Action::SetAutoRetaliate { .. } => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_action, AgentAction, Action, AgentConstraints};
+    use super::{validate_action, Action, AgentAction, AgentConstraints};
     use crate::id::AgentId;
 
     fn action(agent_id: u64, action: Action) -> AgentAction {
@@ -244,10 +316,13 @@ mod tests {
     #[test]
     fn validate_action_rejects_too_fast_speak() {
         let constraints = AgentConstraints::default();
-        let invalid = action(1, Action::Speak {
-            message: "x".repeat(1024),
-            volume: crate::action::SpeakVolume::Normal,
-        });
+        let invalid = action(
+            1,
+            Action::Speak {
+                message: "x".repeat(1024),
+                volume: crate::action::SpeakVolume::Normal,
+            },
+        );
         assert!(matches!(
             validate_action(&invalid, &constraints, 1),
             super::ActionResult::Rejected(_)
@@ -257,10 +332,13 @@ mod tests {
     #[test]
     fn validate_action_rejects_empty_signal_type() {
         let constraints = AgentConstraints::default();
-        let invalid = action(1, Action::Signal {
-            signal_type: String::new(),
-            data: String::from("ok"),
-        });
+        let invalid = action(
+            1,
+            Action::Signal {
+                signal_type: String::new(),
+                data: String::from("ok"),
+            },
+        );
         assert!(matches!(
             validate_action(&invalid, &constraints, 1),
             super::ActionResult::Rejected(_)
@@ -284,6 +362,32 @@ mod tests {
             1,
             Action::AttackTarget {
                 target: crate::id::EntityId(0),
+            },
+        );
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_invalid_companion_slot() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(1, Action::SummonCompanion { slot: 9 });
+        assert!(matches!(
+            validate_action(&invalid, &constraints, 1),
+            super::ActionResult::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn validate_action_rejects_invalid_capture_tool_slot() {
+        let constraints = AgentConstraints::default();
+        let invalid = action(
+            1,
+            Action::CaptureCreature {
+                target: crate::id::EntityId(4),
+                tool_slot: Some(30),
             },
         );
         assert!(matches!(

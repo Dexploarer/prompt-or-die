@@ -8,11 +8,12 @@
 //!
 //! All parsers are fallible — unknown or malformed responses degrade gracefully to Idle.
 
-use pod_core::action::{Action, SpeakVolume};
-use pod_core::id::EntityId;
 use glam::Vec2;
-use serde::Deserialize;
 use log::{debug, warn};
+use pod_core::action::{Action, CompanionCommand, SpeakVolume};
+use pod_core::component::SkillKind;
+use pod_core::id::EntityId;
+use serde::Deserialize;
 use std::collections::HashMap;
 
 // ============================================================
@@ -95,9 +96,8 @@ impl ActionParser for JsonActionParser {
         // Try to extract JSON from response (LLMs sometimes wrap in markdown)
         let json_str = extract_json(response).unwrap_or(response);
 
-        let parsed: LlmJsonResponse = serde_json::from_str(json_str).map_err(|e| {
-            ActionParseError::InvalidFormat(format!("JSON parse failed: {}", e))
-        })?;
+        let parsed: LlmJsonResponse = serde_json::from_str(json_str)
+            .map_err(|e| ActionParseError::InvalidFormat(format!("JSON parse failed: {}", e)))?;
 
         let reasoning = parsed
             .reasoning
@@ -170,14 +170,8 @@ impl ActionParser for ToonActionParser {
 
         let sections = parse_toon_sections(response)?;
 
-        let action_rows = sections
-            .get("actions")
-            .cloned()
-            .unwrap_or_else(Vec::new);
-        let reasoning_rows = sections
-            .get("reasoning")
-            .cloned()
-            .unwrap_or_else(Vec::new);
+        let action_rows = sections.get("actions").cloned().unwrap_or_else(Vec::new);
+        let reasoning_rows = sections.get("reasoning").cloned().unwrap_or_else(Vec::new);
 
         let mut actions = Vec::new();
         let mut warnings = Vec::new();
@@ -254,13 +248,17 @@ impl ActionParser for KeyValueParser {
             {
                 match parse_action_string(action_str.trim()) {
                     Ok(action) => actions.push(action),
-                    Err(e) => warnings.push(format!("Unknown action '{}': {}", action_str.trim(), e)),
+                    Err(e) => {
+                        warnings.push(format!("Unknown action '{}': {}", action_str.trim(), e))
+                    }
                 }
             } else if let Some(reason) = line
                 .strip_prefix("REASON:")
                 .or_else(|| line.strip_prefix("reason:"))
-                .or_else(|| line.strip_prefix("Reason:")
-                .or_else(|| line.strip_prefix("REASONING:")))
+                .or_else(|| {
+                    line.strip_prefix("Reason:")
+                        .or_else(|| line.strip_prefix("REASONING:"))
+                })
             {
                 reasoning = reason.trim().to_string();
             }
@@ -316,11 +314,19 @@ impl ActionParser for FallbackParser {
         for parser in &self.parsers {
             match parser.parse(response) {
                 Ok(result) if result.confidence > 0.5 => {
-                    debug!("Parser '{}' succeeded with confidence {:.2}", parser.name(), result.confidence);
+                    debug!(
+                        "Parser '{}' succeeded with confidence {:.2}",
+                        parser.name(),
+                        result.confidence
+                    );
                     return Ok(result);
                 }
                 Ok(result) => {
-                    debug!("Parser '{}' low confidence {:.2}, trying next", parser.name(), result.confidence);
+                    debug!(
+                        "Parser '{}' low confidence {:.2}, trying next",
+                        parser.name(),
+                        result.confidence
+                    );
                 }
                 Err(e) => {
                     debug!("Parser '{}' failed: {}, trying next", parser.name(), e);
@@ -397,6 +403,99 @@ pub fn parse_action_string(s: &str) -> Result<Action, String> {
         });
     }
 
+    // "capture <id>"
+    if let Some(id_str) = s.strip_prefix("capture ") {
+        let id: u64 = id_str
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid entity id: {}", id_str))?;
+        return Ok(Action::CaptureCreature {
+            target: EntityId(id),
+            tool_slot: None,
+        });
+    }
+
+    // "summon companion <slot>"
+    if let Some(slot_str) = s
+        .strip_prefix("summon companion ")
+        .or_else(|| s.strip_prefix("summon "))
+    {
+        let slot: u8 = slot_str
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid companion slot: {}", slot_str))?;
+        return Ok(Action::SummonCompanion { slot });
+    }
+
+    // "loot <id>"
+    if let Some(id_str) = s.strip_prefix("loot ") {
+        let id: u64 = id_str
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid entity id: {}", id_str))?;
+        return Ok(Action::Loot {
+            target: EntityId(id),
+        });
+    }
+
+    // "gather <skill> <id>"
+    if let Some(rest) = s.strip_prefix("gather ") {
+        let mut parts = rest.split_whitespace();
+        let skill = parts
+            .next()
+            .ok_or_else(|| "Gather action missing skill".to_string())
+            .and_then(parse_skill_kind_str)?;
+        let id_str = parts
+            .next()
+            .ok_or_else(|| "Gather action missing entity id".to_string())?;
+        let id: u64 = id_str
+            .parse()
+            .map_err(|_| format!("Invalid entity id: {}", id_str))?;
+        return Ok(Action::GatherResource {
+            target: EntityId(id),
+            skill,
+        });
+    }
+
+    // "auto retaliate on/off"
+    if let Some(rest) = s.strip_prefix("auto retaliate ") {
+        let enabled = match rest.trim() {
+            "on" | "true" | "enable" | "enabled" => true,
+            "off" | "false" | "disable" | "disabled" => false,
+            other => return Err(format!("Invalid auto retaliate state: {}", other)),
+        };
+        return Ok(Action::SetAutoRetaliate { enabled });
+    }
+
+    // "command companion <slot> <command> [target]"
+    if let Some(rest) = s.strip_prefix("command companion ") {
+        let mut parts = rest.split_whitespace();
+        let slot_str = parts
+            .next()
+            .ok_or_else(|| "Command companion missing slot".to_string())?;
+        let slot: u8 = slot_str
+            .parse()
+            .map_err(|_| format!("Invalid companion slot: {}", slot_str))?;
+        let command_str = parts
+            .next()
+            .ok_or_else(|| "Command companion missing command".to_string())?;
+        let command = parse_companion_command(command_str)?;
+        let target = if let Some(id_str) = parts.next() {
+            Some(EntityId(
+                id_str
+                    .parse()
+                    .map_err(|_| format!("Invalid entity id: {}", id_str))?,
+            ))
+        } else {
+            None
+        };
+        return Ok(Action::CommandCompanion {
+            slot,
+            command,
+            target,
+        });
+    }
+
     // "speak <message>"
     if let Some(msg) = s.strip_prefix("speak ").or_else(|| s.strip_prefix("say ")) {
         return Ok(Action::Speak {
@@ -443,7 +542,10 @@ pub fn parse_action_string(s: &str) -> Result<Action, String> {
     }
 
     // "ability <slot>"
-    if let Some(slot_str) = s.strip_prefix("ability ").or_else(|| s.strip_prefix("use ability ")) {
+    if let Some(slot_str) = s
+        .strip_prefix("ability ")
+        .or_else(|| s.strip_prefix("use ability "))
+    {
         let slot: u8 = slot_str
             .trim()
             .parse()
@@ -513,6 +615,77 @@ fn parse_action_object(obj: &serde_json::Map<String, serde_json::Value>) -> Resu
                 volume: SpeakVolume::Normal,
             })
         }
+        "capture" => {
+            let target = obj
+                .get("target")
+                .and_then(|v| v.as_u64())
+                .ok_or("Capture missing 'target'")?;
+            let tool_slot = obj
+                .get("tool_slot")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u8);
+            Ok(Action::CaptureCreature {
+                target: EntityId(target),
+                tool_slot,
+            })
+        }
+        "summon_companion" => {
+            let slot = obj
+                .get("slot")
+                .and_then(|v| v.as_u64())
+                .ok_or("SummonCompanion missing 'slot'")?;
+            Ok(Action::SummonCompanion { slot: slot as u8 })
+        }
+        "command_companion" => {
+            let slot = obj
+                .get("slot")
+                .and_then(|v| v.as_u64())
+                .ok_or("CommandCompanion missing 'slot'")?;
+            let command = obj
+                .get("command")
+                .and_then(|v| v.as_str())
+                .ok_or("CommandCompanion missing 'command'")
+                .map_err(str::to_string)
+                .and_then(parse_companion_command)?;
+            let target = obj.get("target").and_then(|v| v.as_u64()).map(EntityId);
+            Ok(Action::CommandCompanion {
+                slot: slot as u8,
+                command,
+                target,
+            })
+        }
+        "gather" => {
+            let target = obj
+                .get("target")
+                .and_then(|v| v.as_u64())
+                .ok_or("Gather missing 'target'")?;
+            let skill = obj
+                .get("skill")
+                .and_then(|v| v.as_str())
+                .ok_or("Gather missing 'skill'")
+                .map_err(str::to_string)
+                .and_then(parse_skill_kind_str)?;
+            Ok(Action::GatherResource {
+                target: EntityId(target),
+                skill,
+            })
+        }
+        "loot" => {
+            let target = obj
+                .get("target")
+                .and_then(|v| v.as_u64())
+                .ok_or("Loot missing 'target'")?;
+            Ok(Action::Loot {
+                target: EntityId(target),
+            })
+        }
+        "set_auto_retaliate" => {
+            let enabled = obj
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .ok_or("SetAutoRetaliate missing 'enabled'")?;
+            Ok(Action::SetAutoRetaliate { enabled })
+        }
         _ => Err(format!("Unknown action type: {}", action_type)),
     }
 }
@@ -537,8 +710,14 @@ pub fn parse_direction(s: &str) -> Result<Vec2, String> {
             // Try parsing as "x,y" coordinates
             let parts: Vec<&str> = s.split(',').collect();
             if parts.len() == 2 {
-                let x: f32 = parts[0].trim().parse().map_err(|_| format!("Invalid x: {}", parts[0]))?;
-                let y: f32 = parts[1].trim().parse().map_err(|_| format!("Invalid y: {}", parts[1]))?;
+                let x: f32 = parts[0]
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("Invalid x: {}", parts[0]))?;
+                let y: f32 = parts[1]
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("Invalid y: {}", parts[1]))?;
                 Ok(Vec2::new(x, y).normalize_or_zero())
             } else {
                 Err(format!("Unknown direction: {}", s))
@@ -563,6 +742,37 @@ pub fn parse_vec2(s: &str) -> Result<Vec2, String> {
         .parse()
         .map_err(|_| "Invalid y coordinate".to_string())?;
     Ok(Vec2::new(x, y))
+}
+
+fn parse_skill_kind_str(s: &str) -> Result<SkillKind, String> {
+    match s.trim().to_lowercase().as_str() {
+        "attack" => Ok(SkillKind::Attack),
+        "strength" => Ok(SkillKind::Strength),
+        "defence" | "defense" => Ok(SkillKind::Defence),
+        "ranged" | "range" => Ok(SkillKind::Ranged),
+        "magic" | "mage" => Ok(SkillKind::Magic),
+        "constitution" | "health" => Ok(SkillKind::Constitution),
+        "mining" => Ok(SkillKind::Mining),
+        "woodcutting" | "woodcut" => Ok(SkillKind::Woodcutting),
+        "fishing" => Ok(SkillKind::Fishing),
+        "cooking" => Ok(SkillKind::Cooking),
+        "smithing" => Ok(SkillKind::Smithing),
+        "crafting" => Ok(SkillKind::Crafting),
+        "slayer" => Ok(SkillKind::Slayer),
+        "taming" => Ok(SkillKind::Taming),
+        "bonding" => Ok(SkillKind::Bonding),
+        other => Err(format!("Unknown skill kind: {}", other)),
+    }
+}
+
+fn parse_companion_command(s: &str) -> Result<CompanionCommand, String> {
+    match s.trim().to_lowercase().as_str() {
+        "attack" => Ok(CompanionCommand::Attack),
+        "follow" => Ok(CompanionCommand::Follow),
+        "guard" => Ok(CompanionCommand::Guard),
+        "recall" => Ok(CompanionCommand::Recall),
+        other => Err(format!("Unknown companion command: {}", other)),
+    }
 }
 
 /// Extract JSON from a response that may include markdown code fences.
@@ -681,7 +891,9 @@ fn parse_toon_sections(raw: &str) -> Result<HashMap<String, Vec<String>>, Action
     if let Some((name, expected_rows, rows)) = current {
         return Err(ActionParseError::InvalidFormat(format!(
             "TOON section '{}' missing closing brace (expected {} rows, got {})",
-            name, expected_rows, rows.len()
+            name,
+            expected_rows,
+            rows.len()
         )));
     }
     if !saw_section {
@@ -793,19 +1005,83 @@ mod tests {
     fn test_parse_action_strings() {
         assert!(matches!(parse_action_string("idle"), Ok(Action::Idle)));
         assert!(matches!(parse_action_string("attack"), Ok(Action::Attack)));
-        assert!(matches!(parse_action_string("move north"), Ok(Action::Move { .. })));
-        assert!(matches!(parse_action_string("speak hello"), Ok(Action::Speak { .. })));
-        assert!(matches!(parse_action_string("rotate 45"), Ok(Action::Rotate { .. })));
-        assert!(matches!(parse_action_string("drop"), Ok(Action::Drop { .. })));
-        assert!(matches!(parse_action_string("ability 0"), Ok(Action::UseAbility { .. })));
+        assert!(matches!(
+            parse_action_string("move north"),
+            Ok(Action::Move { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("speak hello"),
+            Ok(Action::Speak { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("rotate 45"),
+            Ok(Action::Rotate { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("drop"),
+            Ok(Action::Drop { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("ability 0"),
+            Ok(Action::UseAbility { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("capture 42"),
+            Ok(Action::CaptureCreature { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("summon companion 2"),
+            Ok(Action::SummonCompanion { slot: 2 })
+        ));
+        assert!(matches!(
+            parse_action_string("gather mining 19"),
+            Ok(Action::GatherResource {
+                skill: SkillKind::Mining,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_action_string("loot 8"),
+            Ok(Action::Loot { .. })
+        ));
+        assert!(matches!(
+            parse_action_string("auto retaliate on"),
+            Ok(Action::SetAutoRetaliate { enabled: true })
+        ));
+    }
+
+    #[test]
+    fn test_parse_action_object_supports_mmo_verbs() {
+        let action = parse_action_object(
+            &serde_json::json!({
+                "type": "command_companion",
+                "slot": 1,
+                "command": "attack",
+                "target": 77
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            Action::CommandCompanion {
+                slot: 1,
+                command: CompanionCommand::Attack,
+                target: Some(EntityId(77))
+            }
+        ));
     }
 
     #[test]
     fn test_extract_json() {
         assert_eq!(
-            extract_json(r#"```json
+            extract_json(
+                r#"```json
 {"a": 1}
-```"#),
+```"#
+            ),
             Some(r#"{"a": 1}"#)
         );
         assert_eq!(extract_json(r#"blah {"a": 1} blah"#), Some(r#"{"a": 1}"#));
@@ -861,9 +1137,11 @@ reasoning[1]{
     fn test_fallback_parser_includes_toon() {
         let parser = FallbackParser::default_chain();
         let result = parser
-            .parse(r#"actions[1]{
+            .parse(
+                r#"actions[1]{
   stop
-}"#)
+}"#,
+            )
             .unwrap();
         assert!(matches!(result.actions[0], Action::Stop));
     }

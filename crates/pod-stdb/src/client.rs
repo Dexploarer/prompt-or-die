@@ -73,8 +73,8 @@
 //! Until bindings are generated, this module provides the typed API surface
 //! with stub implementations. See [`StdbClient::connect`] for details.
 
-use std::collections::{HashMap, VecDeque};
 use crate::types::*;
+use std::collections::{HashMap, VecDeque};
 
 // ============================================================
 // CONFIGURATION
@@ -169,18 +169,11 @@ pub enum ConnectionState {
 pub enum StdbEvent {
     // ── Connection lifecycle ──
     /// Successfully connected to SpacetimeDB.
-    Connected {
-        identity: Vec<u8>,
-        token: String,
-    },
+    Connected { identity: Vec<u8>, token: String },
     /// Disconnected from SpacetimeDB.
-    Disconnected {
-        reason: String,
-    },
+    Disconnected { reason: String },
     /// Connection attempt failed.
-    ConnectError {
-        message: String,
-    },
+    ConnectError { message: String },
     /// Initial subscription data has been received and cached.
     SubscriptionApplied,
 
@@ -193,24 +186,15 @@ pub enum StdbEvent {
         world_height: f32,
     },
     /// Tick counter advanced (extracted from world_state updates).
-    TickAdvanced {
-        old_tick: u64,
-        new_tick: u64,
-    },
+    TickAdvanced { old_tick: u64, new_tick: u64 },
 
     // ── Entity lifecycle ──
     /// A new entity appeared in the subscription.
-    EntityInserted {
-        entity_id: u64,
-    },
+    EntityInserted { entity_id: u64 },
     /// An entity was updated (any component changed).
-    EntityUpdated {
-        entity_id: u64,
-    },
+    EntityUpdated { entity_id: u64 },
     /// An entity was removed from the subscription (destroyed or out of range).
-    EntityDeleted {
-        entity_id: u64,
-    },
+    EntityDeleted { entity_id: u64 },
 
     // ── Agent-specific ──
     /// Observation data received for a controlled entity.
@@ -245,14 +229,9 @@ pub enum StdbEvent {
 
     // ── Reducer acknowledgments ──
     /// A reducer call was acknowledged by the server.
-    ReducerCallSuccess {
-        reducer_name: String,
-    },
+    ReducerCallSuccess { reducer_name: String },
     /// A reducer call failed.
-    ReducerCallError {
-        reducer_name: String,
-        error: String,
-    },
+    ReducerCallError { reducer_name: String, error: String },
 }
 
 // ============================================================
@@ -665,10 +644,7 @@ impl Subscriptions {
 
     /// Subscribe to lobby tables only.
     pub fn lobby_system() -> Vec<&'static str> {
-        vec![
-            "SELECT * FROM lobby",
-            "SELECT * FROM lobby_member",
-        ]
+        vec!["SELECT * FROM lobby", "SELECT * FROM lobby_member"]
     }
 
     /// Subscribe to matchmaking tables only.
@@ -778,7 +754,9 @@ impl StdbClient {
                 return Err(StdbError::InvalidState("Already connected".into()));
             }
             ConnectionState::Connecting => {
-                return Err(StdbError::InvalidState("Connection already in progress".into()));
+                return Err(StdbError::InvalidState(
+                    "Connection already in progress".into(),
+                ));
             }
             _ => {}
         }
@@ -828,11 +806,12 @@ impl StdbClient {
     pub fn frame_tick(&mut self) {
         self.frames_processed += 1;
         if let ConnectionState::Connecting = &self.state {
-            let token = self
-                .config
-                .auth_token
-                .clone()
-                .unwrap_or_else(|| format!("pod-local-{}-{}", self.config.db_name, self.frames_processed));
+            let token = self.config.auth_token.clone().unwrap_or_else(|| {
+                format!(
+                    "pod-local-{}-{}",
+                    self.config.db_name, self.frames_processed
+                )
+            });
             let mut identity = vec![0u8; 16];
             for (idx, byte) in self
                 .config
@@ -848,7 +827,8 @@ impl StdbClient {
                 identity: identity.clone(),
                 token: token.clone(),
             };
-            self.events.push_back(StdbEvent::Connected { identity, token });
+            self.events
+                .push_back(StdbEvent::Connected { identity, token });
 
             if self.world_state.is_none() {
                 self.update_world_state(CachedWorldState {
@@ -941,7 +921,9 @@ impl StdbClient {
             ));
         }
         self.reducers_called += 1;
-        log::debug!("[pod-stdb client] Calling create_world(seed={seed}, {width}x{height}, tps={tps})");
+        log::debug!(
+            "[pod-stdb client] Calling create_world(seed={seed}, {width}x{height}, tps={tps})"
+        );
         self.update_world_state(CachedWorldState {
             tick: 0,
             rng_seed: seed,
@@ -1098,17 +1080,15 @@ impl StdbClient {
     }
 
     /// Mark this player as ready or not ready in a lobby.
-    pub fn call_set_lobby_ready(
-        &mut self,
-        lobby_id: u64,
-        is_ready: bool,
-    ) -> Result<(), StdbError> {
+    pub fn call_set_lobby_ready(&mut self, lobby_id: u64, is_ready: bool) -> Result<(), StdbError> {
         self.require_connected()?;
         if lobby_id == 0 {
             return Err(StdbError::ReducerError("Lobby id must be non-zero".into()));
         }
         self.reducers_called += 1;
-        log::info!("[pod-stdb client] Calling set_lobby_ready(lobby_id={lobby_id}, is_ready={is_ready})");
+        log::info!(
+            "[pod-stdb client] Calling set_lobby_ready(lobby_id={lobby_id}, is_ready={is_ready})"
+        );
         let _ = is_ready;
         self.record_reducer_success("set_lobby_ready");
         Ok(())
@@ -1161,7 +1141,10 @@ impl StdbClient {
     }
 
     /// Create a match from the matchmaking queue.
-    pub fn call_create_match_from_queue(&mut self, desired_party_size: u32) -> Result<(), StdbError> {
+    pub fn call_create_match_from_queue(
+        &mut self,
+        desired_party_size: u32,
+    ) -> Result<(), StdbError> {
         self.require_connected()?;
         if desired_party_size == 0 {
             return Err(StdbError::ReducerError(
@@ -1336,9 +1319,9 @@ impl StdbClient {
             .entities
             .get(&source_id)
             .ok_or_else(|| StdbError::ReducerError(format!("Entity {source_id} missing")))?;
-        let source_pos = source
-            .position()
-            .ok_or_else(|| StdbError::ReducerError(format!("Entity {source_id} has no transform")))?;
+        let source_pos = source.position().ok_or_else(|| {
+            StdbError::ReducerError(format!("Entity {source_id} has no transform"))
+        })?;
         let source_team = source.team_id.unwrap_or(0);
 
         match action.action_kind {
@@ -1350,7 +1333,9 @@ impl StdbClient {
                             let speed = entity.max_speed.unwrap_or(200.0);
                             entity.vel_x = Some((dx / len) * speed);
                             entity.vel_y = Some((dy / len) * speed);
-                            self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                            self.events.push_back(StdbEvent::EntityUpdated {
+                                entity_id: source_id,
+                            });
                         }
                     }
                 }
@@ -1359,22 +1344,32 @@ impl StdbClient {
                 if let Some(entity) = self.entities.get_mut(&source_id) {
                     entity.vel_x = Some(0.0);
                     entity.vel_y = Some(0.0);
-                    self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                    self.events.push_back(StdbEvent::EntityUpdated {
+                        entity_id: source_id,
+                    });
                 }
             }
             ActionKind::Rotate => {
-                if let (Some(entity), Some(angle)) = (self.entities.get_mut(&source_id), action.angle) {
+                if let (Some(entity), Some(angle)) =
+                    (self.entities.get_mut(&source_id), action.angle)
+                {
                     entity.rotation = Some(angle);
-                    self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                    self.events.push_back(StdbEvent::EntityUpdated {
+                        entity_id: source_id,
+                    });
                 }
             }
             ActionKind::LookAt => {
-                if let (Some(entity), Some(tx), Some(ty)) =
-                    (self.entities.get_mut(&source_id), action.target_x, action.target_y)
-                {
+                if let (Some(entity), Some(tx), Some(ty)) = (
+                    self.entities.get_mut(&source_id),
+                    action.target_x,
+                    action.target_y,
+                ) {
                     if let Some((sx, sy)) = entity.position() {
                         entity.rotation = Some((ty - sy).atan2(tx - sx));
-                        self.events.push_back(StdbEvent::EntityUpdated { entity_id: source_id });
+                        self.events.push_back(StdbEvent::EntityUpdated {
+                            entity_id: source_id,
+                        });
                     }
                 }
             }
@@ -1392,7 +1387,8 @@ impl StdbClient {
                     let dy = ty - source_pos.1;
                     let distance = (dx * dx + dy * dy).sqrt();
                     let candidate_team = candidate.team_id.unwrap_or(0);
-                    let hostile = source_team == 0 || candidate_team == 0 || source_team != candidate_team;
+                    let hostile =
+                        source_team == 0 || candidate_team == 0 || source_team != candidate_team;
                     if hostile && distance <= ATTACK_RANGE && distance < best_distance {
                         target = Some(*candidate_id);
                         best_distance = distance;
@@ -1428,8 +1424,108 @@ impl StdbClient {
                     self.apply_damage(source_id, target_id, BASE_DAMAGE)?;
                 }
             }
+            ActionKind::CaptureCreature => {
+                let Some(target_id) = action.target_entity_id else {
+                    return Err(StdbError::ReducerError(
+                        "CaptureCreature requires target_entity_id".into(),
+                    ));
+                };
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    Some(target_id),
+                    format!(
+                        r#"{{"type":"capture_creature","tool_slot":{}}}"#,
+                        action
+                            .ability_slot
+                            .map(|slot| slot.to_string())
+                            .unwrap_or_else(|| "null".to_string())
+                    ),
+                );
+            }
+            ActionKind::SummonCompanion => {
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    None,
+                    format!(
+                        r#"{{"type":"summon_companion","slot":{}}}"#,
+                        action.ability_slot.unwrap_or(0)
+                    ),
+                );
+            }
+            ActionKind::CommandCompanion => {
+                let command = action
+                    .signal_type
+                    .clone()
+                    .unwrap_or_else(|| "follow".to_string())
+                    .replace('"', "\\\"");
+                let target_id = action
+                    .target_entity_id
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    action.target_entity_id,
+                    format!(
+                        r#"{{"type":"command_companion","slot":{},"command":"{}","target":{}}}"#,
+                        action.ability_slot.unwrap_or(0),
+                        command,
+                        target_id
+                    ),
+                );
+            }
+            ActionKind::GatherResource => {
+                let Some(target_id) = action.target_entity_id else {
+                    return Err(StdbError::ReducerError(
+                        "GatherResource requires target_entity_id".into(),
+                    ));
+                };
+                let skill = action
+                    .signal_type
+                    .clone()
+                    .unwrap_or_else(|| "gather".to_string())
+                    .replace('"', "\\\"");
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    Some(target_id),
+                    format!(r#"{{"type":"gather_resource","skill":"{}"}}"#, skill),
+                );
+            }
+            ActionKind::Loot => {
+                let Some(target_id) = action.target_entity_id else {
+                    return Err(StdbError::ReducerError(
+                        "Loot requires target_entity_id".into(),
+                    ));
+                };
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::ItemPickedUp,
+                    source_id,
+                    Some(target_id),
+                    r#"{"type":"loot"}"#.to_string(),
+                );
+            }
+            ActionKind::SetAutoRetaliate => {
+                let enabled = action.signal_data.as_deref() == Some("true");
+                self.receive_world_event(
+                    self.current_tick_value(),
+                    WorldEventKind::AbilityUsed,
+                    source_id,
+                    None,
+                    format!(r#"{{"type":"set_auto_retaliate","enabled":{enabled}}}"#),
+                );
+            }
             ActionKind::Speak => {
-                if let (Some(message), Some(volume)) = (action.message.clone(), action.volume.clone()) {
+                if let (Some(message), Some(volume)) =
+                    (action.message.clone(), action.volume.clone())
+                {
                     self.receive_speech_event(
                         self.current_tick_value(),
                         source_id,
@@ -1511,7 +1607,10 @@ impl StdbClient {
                     WorldEventKind::AbilityUsed,
                     source_id,
                     action.target_entity_id,
-                    action.signal_data.clone().unwrap_or_else(|| "{}".to_string()),
+                    action
+                        .signal_data
+                        .clone()
+                        .unwrap_or_else(|| "{}".to_string()),
                 );
             }
             ActionKind::Spawn => {
@@ -1561,7 +1660,9 @@ impl StdbClient {
         target.alive = remaining > 0.0;
 
         self.receive_combat_event(tick, attacker_id, target_id, damage, remaining <= 0.0);
-        self.events.push_back(StdbEvent::EntityUpdated { entity_id: target_id });
+        self.events.push_back(StdbEvent::EntityUpdated {
+            entity_id: target_id,
+        });
         if remaining <= 0.0 {
             self.receive_world_event(
                 tick,
@@ -1617,9 +1718,11 @@ impl StdbClient {
         self.entities.insert(eid, entity);
 
         if is_new {
-            self.events.push_back(StdbEvent::EntityInserted { entity_id: eid });
+            self.events
+                .push_back(StdbEvent::EntityInserted { entity_id: eid });
         } else {
-            self.events.push_back(StdbEvent::EntityUpdated { entity_id: eid });
+            self.events
+                .push_back(StdbEvent::EntityUpdated { entity_id: eid });
         }
         self.events_received += 1;
     }
@@ -1628,7 +1731,8 @@ impl StdbClient {
     pub fn remove_entity(&mut self, entity_id: u64) {
         self.entities.remove(&entity_id);
         self.observations.remove(&entity_id);
-        self.events.push_back(StdbEvent::EntityDeleted { entity_id });
+        self.events
+            .push_back(StdbEvent::EntityDeleted { entity_id });
         self.events_received += 1;
     }
 
@@ -1639,7 +1743,8 @@ impl StdbClient {
         observer_entity_id: u64,
         observation_json: String,
     ) {
-        self.observations.insert(observer_entity_id, observation_json.clone());
+        self.observations
+            .insert(observer_entity_id, observation_json.clone());
         self.events.push_back(StdbEvent::ObservationReceived {
             tick,
             observer_entity_id,
@@ -1741,10 +1846,16 @@ mod tests {
             connection_mode: StdbConnectionMode::Emulated,
             ..StdbClientConfig::default()
         });
-        assert!(matches!(client.connection_state(), ConnectionState::Disconnected));
+        assert!(matches!(
+            client.connection_state(),
+            ConnectionState::Disconnected
+        ));
 
         client.connect().unwrap();
-        assert!(matches!(client.connection_state(), ConnectionState::Connecting));
+        assert!(matches!(
+            client.connection_state(),
+            ConnectionState::Connecting
+        ));
 
         // Double connect should error
         assert!(client.connect().is_err());
@@ -1756,9 +1867,14 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..StdbClientConfig::default()
         });
-        let err = client.connect().expect_err("generated mode requires runtime wiring");
+        let err = client
+            .connect()
+            .expect_err("generated mode requires runtime wiring");
         assert!(matches!(err, StdbError::ConnectionFailed(_)));
-        assert!(matches!(client.connection_state(), ConnectionState::Error(_)));
+        assert!(matches!(
+            client.connection_state(),
+            ConnectionState::Error(_)
+        ));
     }
 
     #[test]
@@ -1798,10 +1914,7 @@ mod tests {
         assert!(!client.has_events());
 
         // Check observation is cached
-        assert_eq!(
-            client.latest_observation(42),
-            Some("{\"test\":true}")
-        );
+        assert_eq!(client.latest_observation(42), Some("{\"test\":true}"));
     }
 
     #[test]

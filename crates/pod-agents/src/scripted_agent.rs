@@ -7,14 +7,14 @@
 //! - Finite State Machine (FSM) as alternative to behavior trees
 //! - Full action generation and state management
 
+use glam::Vec2;
+use log::{debug, warn};
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentType};
 use pod_core::id::AgentId;
 use pod_core::observation::{Observation, Relationship};
-use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use log::{debug, warn};
 
 /// Behavior tree status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,11 +119,17 @@ impl Blackboard {
     }
 
     pub fn get_f32(&self, key: &str) -> Option<f32> {
-        self.data.get(key).and_then(|v| v.as_f64()).map(|f| f as f32)
+        self.data
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .map(|f| f as f32)
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
-        self.data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+        self.data
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 
     pub fn clear(&mut self) {
@@ -268,7 +274,10 @@ impl BehaviorTree {
         observation: &Observation,
     ) -> BehaviorStatus {
         match node {
-            BehaviorNode::Sequence { children, current_child_index } => {
+            BehaviorNode::Sequence {
+                children,
+                current_child_index,
+            } => {
                 // Sequence: run until one fails
                 for i in *current_child_index..children.len() {
                     match Self::tick_node(&mut children[i], actions, observation) {
@@ -287,7 +296,10 @@ impl BehaviorTree {
                 BehaviorStatus::Success
             }
 
-            BehaviorNode::Selector { children, current_child_index } => {
+            BehaviorNode::Selector {
+                children,
+                current_child_index,
+            } => {
                 // Selector: run until one succeeds
                 for i in *current_child_index..children.len() {
                     match Self::tick_node(&mut children[i], actions, observation) {
@@ -377,7 +389,11 @@ impl BehaviorTree {
                 }
             }
 
-            BehaviorNode::Repeat { child, count, current } => {
+            BehaviorNode::Repeat {
+                child,
+                count,
+                current,
+            } => {
                 if *current >= *count {
                     *current = 0;
                     return BehaviorStatus::Success;
@@ -406,7 +422,6 @@ impl BehaviorTree {
             BehaviorNode::Failure => BehaviorStatus::Failure,
 
             // ── Sensory / Conditional leaves (Task 2.8) ────────────────────
-
             BehaviorNode::HealthBelow { threshold } => {
                 let frac = health_fraction(observation);
                 if frac < *threshold {
@@ -473,7 +488,6 @@ impl BehaviorTree {
             }
 
             // ── Action leaves (Task 2.8) ───────────────────────────────────
-
             BehaviorNode::MoveToNearest { relationship } => {
                 let rel = *relationship;
                 if let Some(pos) = nearest_of_relationship(observation, rel) {
@@ -648,7 +662,10 @@ impl FiniteStateMachine {
                 let frac = health_fraction(obs);
                 return frac < threshold_pct / 100.0;
             }
-            warn!("FSM: could not parse threshold from condition '{}'", condition);
+            warn!(
+                "FSM: could not parse threshold from condition '{}'",
+                condition
+            );
             return false;
         }
 
@@ -658,7 +675,10 @@ impl FiniteStateMachine {
                 let frac = health_fraction(obs);
                 return frac > threshold_pct / 100.0;
             }
-            warn!("FSM: could not parse threshold from condition '{}'", condition);
+            warn!(
+                "FSM: could not parse threshold from condition '{}'",
+                condition
+            );
             return false;
         }
 
@@ -689,7 +709,11 @@ fn nearest_hostile_position(obs: &Observation) -> Option<Vec2> {
     obs.visible_entities
         .iter()
         .filter(|e| matches!(e.relationship, Relationship::Hostile))
-        .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|e| e.position)
 }
 
@@ -698,7 +722,11 @@ fn nearest_of_relationship(obs: &Observation, rel: Relationship) -> Option<Vec2>
     obs.visible_entities
         .iter()
         .filter(|e| relationship_matches(e.relationship, rel))
-        .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|e| e.position)
 }
 
@@ -848,7 +876,9 @@ pub fn chase_nearest_hostile() -> BehaviorNode {
 /// Chase a specific target position
 pub fn chase_target(target_position: Vec2) -> BehaviorNode {
     BehaviorNode::sequence(vec![
-        BehaviorNode::action(Action::LookAt { target: target_position }),
+        BehaviorNode::action(Action::LookAt {
+            target: target_position,
+        }),
         BehaviorNode::action(Action::Move {
             direction: target_position.normalize(),
         }),
@@ -867,7 +897,9 @@ pub fn attack_nearest() -> BehaviorNode {
 pub fn flee_from(danger_position: Vec2) -> BehaviorNode {
     let flee_direction = -danger_position.normalize();
     BehaviorNode::sequence(vec![
-        BehaviorNode::action(Action::Move { direction: flee_direction }),
+        BehaviorNode::action(Action::Move {
+            direction: flee_direction,
+        }),
         BehaviorNode::wait(60),
     ])
 }
@@ -1062,9 +1094,12 @@ pub fn combat_fsm() -> FiniteStateMachine {
 ///   Attacking  → Chasing   : no_enemies (enemy fled but recheck)
 ///   Chasing    → Patrolling : no_enemies + timer_120
 pub fn patrol_fsm() -> FiniteStateMachine {
-    let mut fsm = FiniteStateMachine::new(FsmState::Patrolling, Action::Move {
-        direction: Vec2::new(1.0, 0.0),
-    });
+    let mut fsm = FiniteStateMachine::new(
+        FsmState::Patrolling,
+        Action::Move {
+            direction: Vec2::new(1.0, 0.0),
+        },
+    );
 
     fsm.add_transition(FsmTransition {
         from: FsmState::Patrolling,
@@ -1087,12 +1122,18 @@ pub fn patrol_fsm() -> FiniteStateMachine {
         condition: "no_enemies".into(),
     });
 
-    fsm.set_state_action(FsmState::Patrolling, Action::Move {
-        direction: Vec2::new(1.0, 0.0),
-    });
-    fsm.set_state_action(FsmState::Chasing, Action::Move {
-        direction: Vec2::new(0.0, 1.0), // direction updated by runtime logic
-    });
+    fsm.set_state_action(
+        FsmState::Patrolling,
+        Action::Move {
+            direction: Vec2::new(1.0, 0.0),
+        },
+    );
+    fsm.set_state_action(
+        FsmState::Chasing,
+        Action::Move {
+            direction: Vec2::new(0.0, 1.0), // direction updated by runtime logic
+        },
+    );
     fsm.set_state_action(FsmState::Attacking, Action::Attack);
 
     fsm
@@ -1152,9 +1193,12 @@ pub fn coward_fsm() -> FiniteStateMachine {
     });
 
     fsm.set_state_action(FsmState::Idle, Action::Idle);
-    fsm.set_state_action(FsmState::Fleeing, Action::Move {
-        direction: Vec2::new(-1.0, 0.0), // away; runtime should override
-    });
+    fsm.set_state_action(
+        FsmState::Fleeing,
+        Action::Move {
+            direction: Vec2::new(-1.0, 0.0), // away; runtime should override
+        },
+    );
 
     fsm
 }
@@ -1166,10 +1210,7 @@ mod tests {
     #[test]
     fn test_behavior_sequence() {
         let mut tree = BehaviorTree::new(BehaviorNode::Sequence {
-            children: vec![
-                BehaviorNode::Success,
-                BehaviorNode::Success,
-            ],
+            children: vec![BehaviorNode::Success, BehaviorNode::Success],
             current_child_index: 0,
         });
 
@@ -1191,10 +1232,7 @@ mod tests {
     #[test]
     fn test_behavior_selector() {
         let mut tree = BehaviorTree::new(BehaviorNode::Selector {
-            children: vec![
-                BehaviorNode::Failure,
-                BehaviorNode::Success,
-            ],
+            children: vec![BehaviorNode::Failure, BehaviorNode::Success],
             current_child_index: 0,
         });
 
@@ -1245,9 +1283,9 @@ mod tests {
     /// Build a minimal Observation that has one hostile at `distance` and
     /// self health set to `health` (out of 100).
     fn test_observation_with_hostile(distance: f32, health: f32) -> Observation {
-        use pod_core::observation::{SelfState, VisibleEntity};
-        use pod_core::id::EntityId;
         use pod_core::component::Team;
+        use pod_core::id::EntityId;
+        use pod_core::observation::{SelfState, VisibleEntity};
 
         Observation {
             tick: 100,
@@ -1268,6 +1306,7 @@ mod tests {
                 distance,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(1.0),
+                ..Default::default()
             }],
             audible_events: vec![],
             messages: vec![],
@@ -1348,7 +1387,10 @@ mod tests {
         let obs_close = test_observation_with_hostile(50.0, 100.0);
         let mut tree = BehaviorTree::new(aggressive_combat(Vec2::ZERO, 200.0));
         let (actions, status) = tree.tick(&obs_close);
-        assert!(matches!(status, BehaviorStatus::Success | BehaviorStatus::Running));
+        assert!(matches!(
+            status,
+            BehaviorStatus::Success | BehaviorStatus::Running
+        ));
         // Should produce at least a LookAt and Attack
         assert!(
             actions.iter().any(|a| matches!(a, Action::Attack)),
@@ -1360,7 +1402,10 @@ mod tests {
         let obs_empty = test_observation_empty();
         let mut tree2 = BehaviorTree::new(aggressive_combat(Vec2::ZERO, 200.0));
         let (actions2, status2) = tree2.tick(&obs_empty);
-        assert!(matches!(status2, BehaviorStatus::Success | BehaviorStatus::Running));
+        assert!(matches!(
+            status2,
+            BehaviorStatus::Success | BehaviorStatus::Running
+        ));
         assert!(
             actions2.iter().any(|a| matches!(a, Action::Move { .. })),
             "expected Move in wander fallback: {:?}",

@@ -7,14 +7,14 @@
 //! - Experience buffer: stores transitions for potential training
 //! - Support for multi-action policies and continuous control
 
+use glam::Vec2;
+use log::debug;
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentType};
 use pod_core::id::AgentId;
 use pod_core::observation::{Observation, Relationship};
-use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use log::debug;
 
 /// Experience transition for training
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,15 +85,25 @@ impl ActionSelector for GreedyActionSelector {
 const ACTION_COUNT: usize = 10;
 const ACTION_SPACE: &[fn() -> Action] = &[
     || Action::Idle,
-    || Action::Move { direction: Vec2::new(0.0, -1.0) }, // up
-    || Action::Move { direction: Vec2::new(0.0, 1.0) },  // down
-    || Action::Move { direction: Vec2::new(-1.0, 0.0) }, // left
-    || Action::Move { direction: Vec2::new(1.0, 0.0) },  // right
+    || Action::Move {
+        direction: Vec2::new(0.0, -1.0),
+    }, // up
+    || Action::Move {
+        direction: Vec2::new(0.0, 1.0),
+    }, // down
+    || Action::Move {
+        direction: Vec2::new(-1.0, 0.0),
+    }, // left
+    || Action::Move {
+        direction: Vec2::new(1.0, 0.0),
+    }, // right
     || Action::Stop,
     || Action::Attack,
     || Action::Interact,
     || Action::Drop { slot: 0 },
-    || Action::Rotate { angle: std::f32::consts::PI / 4.0 }, // turn 45°
+    || Action::Rotate {
+        angle: std::f32::consts::PI / 4.0,
+    }, // turn 45°
 ];
 
 fn index_to_action(index: usize) -> Action {
@@ -180,7 +190,9 @@ impl NeuralAgent {
         next_observation: &Observation,
         terminal: bool,
     ) {
-        if let (Some(features), Some(action_idx)) = (self.last_features.take(), self.last_action.take()) {
+        if let (Some(features), Some(action_idx)) =
+            (self.last_features.take(), self.last_action.take())
+        {
             let next_features = Self::observation_to_features(next_observation);
 
             let exp = Experience {
@@ -208,8 +220,8 @@ impl NeuralAgent {
         // ===== SELF STATE (6 features) =====
         features.push((obs.self_state.position.x / 1000.0).clamp(-1.0, 1.0)); // position x
         features.push((obs.self_state.position.y / 1000.0).clamp(-1.0, 1.0)); // position y
-        features.push((obs.self_state.velocity.x / 500.0).clamp(-1.0, 1.0));  // velocity x
-        features.push((obs.self_state.velocity.y / 500.0).clamp(-1.0, 1.0));  // velocity y
+        features.push((obs.self_state.velocity.x / 500.0).clamp(-1.0, 1.0)); // velocity x
+        features.push((obs.self_state.velocity.y / 500.0).clamp(-1.0, 1.0)); // velocity y
         features.push((obs.self_state.rotation / std::f32::consts::PI).clamp(-1.0, 1.0)); // rotation
         let health_ratio = match (obs.self_state.health, obs.self_state.max_health) {
             (Some(h), Some(m)) if m > 0.0 => (h / m).clamp(0.0, 1.0),
@@ -407,6 +419,7 @@ mod tests {
                 max_health: Some(100.0),
                 team: Team::Team(1),
                 cooldowns: vec![],
+                ..Default::default()
             },
             visible_entities: vec![VisibleEntity {
                 entity_id: pod_core::id::EntityId(2),
@@ -417,6 +430,7 @@ mod tests {
                 distance: 100.0,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(0.5),
+                ..Default::default()
             }],
             audible_events: vec![],
             messages: vec![],

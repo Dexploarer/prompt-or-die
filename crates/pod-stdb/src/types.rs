@@ -73,15 +73,21 @@ pub enum ActionKind {
     Attack,
     AttackTarget,
     UseAbility,
+    CaptureCreature,
+    SummonCompanion,
+    CommandCompanion,
     // Interaction
     Interact,
     InteractWith,
     Pickup,
     Drop,
     UseItem,
+    GatherResource,
+    Loot,
     // Communication
     Speak,
     Signal,
+    SetAutoRetaliate,
     // Meta
     Idle,
     Spawn,
