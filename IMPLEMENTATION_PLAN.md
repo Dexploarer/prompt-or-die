@@ -276,5 +276,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Validated touched files:
   - `git diff --check`
 
-**Last updated**: Iteration 37
+### Iteration 38 — Godot Scene Importer Foundation
+
+- [x] Extended `pod-assets` with a real Godot `.tscn` import path that recognizes authored scene files, parses a focused subset of 2D node/resource syntax, and converts it into `pod_scene::Scene`.
+- [x] Serialized imported Godot scene content into content-addressed scene artifacts so the asset cache now produces a stable authored-scene output instead of metadata alone.
+- [x] Mapped common 2D Godot authoring data onto existing native POD bindings (`Transform`, `Sprite`, `ColorRect`) while preserving scene hierarchy through `SceneGraph` parent links.
+- [x] Extended `pod-editor` asset browser classification with first-class scene assets so imported Godot/Unity-style scene files no longer fall into `Other`.
+- [x] Validated touched crates:
+  - `cargo test -p pod-assets`
+  - `cargo test -p pod-editor --lib`
+
+**Last updated**: Iteration 38
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

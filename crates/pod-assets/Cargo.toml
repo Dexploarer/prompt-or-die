@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 pod-core = { path = "../pod-core" }
+pod-scene = { path = "../pod-scene" }
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
