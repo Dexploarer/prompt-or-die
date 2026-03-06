@@ -39,8 +39,8 @@
 //! }
 //! ```
 
-use std::fmt;
 use std::collections::HashSet;
+use std::fmt;
 
 use glam::Vec2;
 use uuid::Uuid;
@@ -137,7 +137,9 @@ impl SpacetimeSubscriptionManager {
         let queries = self.queries_for_profile();
 
         if self.active_queries != queries {
-            client.subscribe(queries.clone()).map_err(StdbClientError::from)?;
+            client
+                .subscribe(queries.clone())
+                .map_err(StdbClientError::from)?;
             self.active_queries = queries;
         }
 
@@ -155,11 +157,9 @@ impl SpacetimeSubscriptionManager {
                 .into_iter()
                 .map(ToString::to_string)
                 .collect(),
-            SubscriptionProfile::Player(entity_id) => {
-                Subscriptions::player_agent(*entity_id)
-                    .into_iter()
-                    .collect()
-            }
+            SubscriptionProfile::Player(entity_id) => Subscriptions::player_agent(*entity_id)
+                .into_iter()
+                .collect(),
             SubscriptionProfile::Custom(queries) => queries.clone(),
         }
     }
@@ -485,7 +485,10 @@ impl SpacetimeDBClient {
                 StdbEvent::Connected { .. } => {
                     self.client_id = Some(ClientId::new());
                     log::info!("[pod-net stdb] Connected to SpacetimeDB");
-                    if let Err(err) = self.subscriptions.ensure_subscriptions_applied(&mut self.inner) {
+                    if let Err(err) = self
+                        .subscriptions
+                        .ensure_subscriptions_applied(&mut self.inner)
+                    {
                         log::error!(
                             "[pod-net stdb] Failed to apply subscriptions after connect: {err}"
                         );
@@ -745,8 +748,13 @@ impl SpacetimeDBClient {
         radius: f32,
         partition_size: f32,
     ) -> Result<bool, StdbClientError> {
-        let queries =
-            build_player_partitioned_interest_queries(entity_id, center_x, center_y, radius, partition_size)?;
+        let queries = build_player_partitioned_interest_queries(
+            entity_id,
+            center_x,
+            center_y,
+            radius,
+            partition_size,
+        )?;
         self.subscriptions.set_custom(queries);
         self.subscriptions
             .ensure_subscriptions_applied(&mut self.inner)
@@ -839,10 +847,7 @@ fn entity_to_snapshot(cached: &CachedEntity) -> EntitySnapshot {
     EntitySnapshot {
         id: cached.entity_id,
         position: Vec2::new(px, py),
-        velocity: Vec2::new(
-            cached.vel_x.unwrap_or(0.0),
-            cached.vel_y.unwrap_or(0.0),
-        ),
+        velocity: Vec2::new(cached.vel_x.unwrap_or(0.0), cached.vel_y.unwrap_or(0.0)),
         rotation: cached.rotation.unwrap_or(0.0),
         health: cached.health,
         max_health: cached.max_health,
@@ -868,15 +873,21 @@ fn convert_action(entity_id: u64, action: &Action) -> SubmittedAction {
         Action::AttackTarget { target } => SubmittedAction::attack_target(entity_id, target.0),
         Action::UseAbility { slot, target } => {
             let (target_kind, tx, ty, te) = match target {
-                Some(AbilityTarget::Position(p)) => {
-                    (Some(AbilityTargetKind::Position), Some(p.x), Some(p.y), None)
-                }
+                Some(AbilityTarget::Position(p)) => (
+                    Some(AbilityTargetKind::Position),
+                    Some(p.x),
+                    Some(p.y),
+                    None,
+                ),
                 Some(AbilityTarget::Entity(eid)) => {
                     (Some(AbilityTargetKind::Entity), None, None, Some(eid.0))
                 }
-                Some(AbilityTarget::Direction(d)) => {
-                    (Some(AbilityTargetKind::Direction), Some(d.x), Some(d.y), None)
-                }
+                Some(AbilityTarget::Direction(d)) => (
+                    Some(AbilityTargetKind::Direction),
+                    Some(d.x),
+                    Some(d.y),
+                    None,
+                ),
                 None => (Some(AbilityTargetKind::None), None, None, None),
             };
             SubmittedAction {
@@ -889,6 +900,28 @@ fn convert_action(entity_id: u64, action: &Action) -> SubmittedAction {
                 ..default_submitted(entity_id)
             }
         }
+        Action::CaptureCreature { target, tool_slot } => SubmittedAction {
+            action_kind: ActionKind::CaptureCreature,
+            target_entity_id: Some(target.0),
+            ability_slot: *tool_slot,
+            ..default_submitted(entity_id)
+        },
+        Action::SummonCompanion { slot } => SubmittedAction {
+            action_kind: ActionKind::SummonCompanion,
+            ability_slot: Some(*slot),
+            ..default_submitted(entity_id)
+        },
+        Action::CommandCompanion {
+            slot,
+            command,
+            target,
+        } => SubmittedAction {
+            action_kind: ActionKind::CommandCompanion,
+            ability_slot: Some(*slot),
+            target_entity_id: target.map(|target| target.0),
+            signal_type: Some(format!("{command:?}")),
+            ..default_submitted(entity_id)
+        },
         Action::Interact => SubmittedAction {
             action_kind: ActionKind::Interact,
             ..default_submitted(entity_id)
@@ -913,6 +946,17 @@ fn convert_action(entity_id: u64, action: &Action) -> SubmittedAction {
             ability_slot: Some(*slot),
             ..default_submitted(entity_id)
         },
+        Action::GatherResource { target, skill } => SubmittedAction {
+            action_kind: ActionKind::GatherResource,
+            target_entity_id: Some(target.0),
+            signal_type: Some(format!("{skill:?}")),
+            ..default_submitted(entity_id)
+        },
+        Action::Loot { target } => SubmittedAction {
+            action_kind: ActionKind::Loot,
+            target_entity_id: Some(target.0),
+            ..default_submitted(entity_id)
+        },
         Action::Speak { message, volume } => {
             SubmittedAction::speak(entity_id, message.clone(), convert_speak_volume(volume))
         }
@@ -920,6 +964,11 @@ fn convert_action(entity_id: u64, action: &Action) -> SubmittedAction {
             action_kind: ActionKind::Signal,
             signal_type: Some(signal_type.clone()),
             signal_data: Some(data.clone()),
+            ..default_submitted(entity_id)
+        },
+        Action::SetAutoRetaliate { enabled } => SubmittedAction {
+            action_kind: ActionKind::SetAutoRetaliate,
+            signal_data: Some(enabled.to_string()),
             ..default_submitted(entity_id)
         },
         Action::Idle => SubmittedAction::idle(entity_id),
@@ -1025,7 +1074,11 @@ fn convert_world_event(
         }
     };
 
-    Some(GameEvent { tick, origin, event })
+    Some(GameEvent {
+        tick,
+        origin,
+        event,
+    })
 }
 
 // ============================================================
@@ -1116,6 +1169,32 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_action_capture_creature() {
+        let action = Action::CaptureCreature {
+            target: EntityId(12),
+            tool_slot: Some(3),
+        };
+        let submitted = convert_action(1, &action);
+        assert_eq!(submitted.action_kind, ActionKind::CaptureCreature);
+        assert_eq!(submitted.target_entity_id, Some(12));
+        assert_eq!(submitted.ability_slot, Some(3));
+    }
+
+    #[test]
+    fn test_convert_action_command_companion() {
+        let action = Action::CommandCompanion {
+            slot: 2,
+            command: pod_core::action::CompanionCommand::Attack,
+            target: Some(EntityId(44)),
+        };
+        let submitted = convert_action(1, &action);
+        assert_eq!(submitted.action_kind, ActionKind::CommandCompanion);
+        assert_eq!(submitted.ability_slot, Some(2));
+        assert_eq!(submitted.target_entity_id, Some(44));
+        assert_eq!(submitted.signal_type.as_deref(), Some("Attack"));
+    }
+
+    #[test]
     fn test_convert_action_idle() {
         let submitted = convert_action(1, &Action::Idle);
         assert_eq!(submitted.action_kind, ActionKind::Idle);
@@ -1169,7 +1248,10 @@ mod tests {
         let ge = event.unwrap();
         assert_eq!(ge.tick, 10);
         match ge.event {
-            Event::EntitySpawned { entity, entity_type } => {
+            Event::EntitySpawned {
+                entity,
+                entity_type,
+            } => {
                 assert_eq!(entity, EntityId(5));
                 assert_eq!(entity_type, "npc");
             }
@@ -1199,14 +1281,7 @@ mod tests {
 
     #[test]
     fn test_convert_world_event_tick_advanced_returns_none() {
-        let event = convert_world_event(
-            30,
-            Vec2::ZERO,
-            &WorldEventKind::TickAdvanced,
-            0,
-            None,
-            "",
-        );
+        let event = convert_world_event(30, Vec2::ZERO, &WorldEventKind::TickAdvanced, 0, None, "");
         assert!(event.is_none());
     }
 
@@ -1282,7 +1357,9 @@ mod tests {
         let client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
         let queries = client.subscriptions.queries_for_profile();
 
-        assert!(queries.iter().any(|query| query.contains("FROM world_state")));
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("FROM world_state")));
         assert!(queries.iter().any(|query| query.contains("FROM entity")));
         assert!(queries.iter().any(|query| query.contains("combat_event")));
         assert!(client.subscriptions.active_queries().is_empty());

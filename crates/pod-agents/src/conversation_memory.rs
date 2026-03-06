@@ -38,11 +38,7 @@ pub struct MemoryEntry {
 
 impl MemoryEntry {
     /// Create from observation and decision data
-    pub fn from_decision(
-        obs: &Observation,
-        actions: &[Action],
-        reasoning: &str,
-    ) -> Self {
+    pub fn from_decision(obs: &Observation, actions: &[Action], reasoning: &str) -> Self {
         let summary = Self::summarize_observation(obs);
         let importance = Self::compute_importance(obs, actions);
         let estimated_tokens = (summary.len() + reasoning.len() + 20) as u32 / 4;
@@ -132,9 +128,7 @@ impl MemoryEntry {
         }
 
         // Communication is somewhat important
-        let has_speech = actions
-            .iter()
-            .any(|a| matches!(a, Action::Speak { .. }));
+        let has_speech = actions.iter().any(|a| matches!(a, Action::Speak { .. }));
         if has_speech || !obs.messages.is_empty() {
             score += 0.1;
         }
@@ -219,12 +213,7 @@ impl ConversationMemory {
 
     /// Record a new memory entry from an observation and decision.
     /// Returns true if recorded, false if skipped (too soon or below threshold).
-    pub fn record(
-        &mut self,
-        obs: &Observation,
-        actions: &[Action],
-        reasoning: &str,
-    ) -> bool {
+    pub fn record(&mut self, obs: &Observation, actions: &[Action], reasoning: &str) -> bool {
         // Check record interval (skip for first entry — allow initial recording)
         if !self.entries.is_empty()
             && obs.tick < self.last_record_tick + self.config.record_interval
@@ -353,8 +342,8 @@ impl ConversationMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::observation::*;
     use glam::Vec2;
+    use pod_core::observation::*;
 
     fn make_obs(tick: u64, hostile: bool) -> Observation {
         let mut obs = Observation {
@@ -377,6 +366,7 @@ mod tests {
                 distance: 50.0,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(0.5),
+                ..Default::default()
             });
         }
         obs

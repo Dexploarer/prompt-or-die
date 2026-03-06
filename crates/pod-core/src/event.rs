@@ -52,6 +52,12 @@ pub enum Event {
         agent_id: AgentId,
         species_id: String,
     },
+    CompanionCommandIssued {
+        agent_id: AgentId,
+        slot: u8,
+        command: String,
+        target: Option<EntityId>,
+    },
     EncounterStarted {
         encounter_id: u64,
         kind: String,
@@ -59,6 +65,23 @@ pub enum Event {
     EncounterEnded {
         encounter_id: u64,
         victory: bool,
+    },
+    ResourceGathered {
+        entity: EntityId,
+        resource: EntityId,
+        skill: String,
+        item_id: String,
+        quantity: u32,
+    },
+    LootClaimed {
+        entity: EntityId,
+        source: EntityId,
+        coins: u64,
+        item_count: usize,
+    },
+    AutoRetaliateSet {
+        entity: EntityId,
+        enabled: bool,
     },
 
     // === PHYSICS ===

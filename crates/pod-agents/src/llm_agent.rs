@@ -10,6 +10,7 @@
 //! - Reaction time normalization: configurable delay (200-400ms) prevents inhuman response
 //! - Decision trace recording: every observation→prompt→response→action for replay
 
+use log::{debug, error, warn};
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentType};
 use pod_core::id::AgentId;
@@ -18,16 +19,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
-use log::{debug, warn, error};
 
-use crate::llm_provider::{
-    CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage,
-};
-use crate::prompt_template::{PromptTemplate, ToonTemplate};
-#[cfg(test)]
-use crate::prompt_template::CompactTemplate;
 use crate::action_parser::{ActionParser, FallbackParser};
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
+use crate::llm_provider::{CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage};
+#[cfg(test)]
+use crate::prompt_template::CompactTemplate;
+use crate::prompt_template::{PromptTemplate, ToonTemplate};
 
 // ============================================================
 // CONFIGURATION
@@ -278,11 +276,16 @@ impl LlmAgent {
         let memory_section = self.memory.to_prompt_section();
 
         // Build system prompt via template
-        let system_prompt = self.template.format_system_prompt(&self.config.system_prompt, action_instructions);
+        let system_prompt = self
+            .template
+            .format_system_prompt(&self.config.system_prompt, action_instructions);
 
         // Combine user prompt: memory + observation
         let user_prompt = if memory_section.is_empty() {
-            format!("Current observation:\n{}\n\n{}", obs_str, action_instructions)
+            format!(
+                "Current observation:\n{}\n\n{}",
+                obs_str, action_instructions
+            )
         } else {
             format!(
                 "{}\nCurrent observation:\n{}\n\n{}",
@@ -335,7 +338,11 @@ impl LlmAgent {
                                 "LLM agent {} parse failed ({}), falling back to Idle",
                                 agent_id, e
                             );
-                            (vec![Action::Idle], "Parse error fallback".to_string(), completion.content.clone())
+                            (
+                                vec![Action::Idle],
+                                "Parse error fallback".to_string(),
+                                completion.content.clone(),
+                            )
                         }
                     };
 
@@ -343,7 +350,10 @@ impl LlmAgent {
                         Some(DecisionTrace {
                             tick,
                             compressed_observation: obs_compressed,
-                            llm_prompt: format!("{}\n\n{}", request.system_prompt, request.user_prompt),
+                            llm_prompt: format!(
+                                "{}\n\n{}",
+                                request.system_prompt, request.user_prompt
+                            ),
                             llm_response: raw.clone(),
                             parsed_actions: actions.clone(),
                             reasoning: reasoning.clone(),
@@ -398,15 +408,17 @@ impl LlmAgent {
         match action {
             Action::Move { direction } => {
                 let decayed_dir = *direction * self.stale_action_decay;
-                Action::Move { direction: decayed_dir }
+                Action::Move {
+                    direction: decayed_dir,
+                }
             }
             Action::Attack | Action::UseAbility { .. } => {
                 // Don't repeat offensive actions while waiting
                 Action::Idle
             }
-            Action::Rotate { angle } => {
-                Action::Rotate { angle: angle * self.stale_action_decay }
-            }
+            Action::Rotate { angle } => Action::Rotate {
+                angle: angle * self.stale_action_decay,
+            },
             other => other.clone(),
         }
     }
@@ -482,11 +494,8 @@ impl Agent for LlmAgent {
                 // Record to conversation memory
                 let reasoning = self.decision_buffer.ready_reasoning.clone();
                 if let Some(pending) = &self.decision_buffer.pending {
-                    self.memory.record(
-                        &pending.observation,
-                        &ready_actions,
-                        &reasoning,
-                    );
+                    self.memory
+                        .record(&pending.observation, &ready_actions, &reasoning);
                 }
 
                 // Record trace if available
@@ -556,8 +565,8 @@ Follow the action format specified by the system instructions."#
 mod tests {
     use super::*;
     use crate::llm_provider::{CompletionResponse, LlmError};
-    use pod_core::observation::*;
     use glam::Vec2;
+    use pod_core::observation::*;
     use std::sync::Arc;
     use std::sync::Mutex;
 
@@ -582,6 +591,7 @@ mod tests {
                 distance: 50.0,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(0.5),
+                ..Default::default()
             });
         }
         obs
@@ -593,10 +603,7 @@ mod tests {
     }
 
     impl CapturingProvider {
-        fn new(
-            response: String,
-            captured: Arc<Mutex<Option<CompletionRequest>>>,
-        ) -> Self {
+        fn new(response: String, captured: Arc<Mutex<Option<CompletionRequest>>>) -> Self {
             Self { response, captured }
         }
     }
@@ -669,7 +676,9 @@ reasoning[1]{
         assert!(request.user_prompt.contains("self["));
         assert!(request.user_prompt.contains("visible_entities["));
         assert!(request.user_prompt.contains("available_actions["));
-        assert!(request.system_prompt.contains("TOON-formatted observations"));
+        assert!(request
+            .system_prompt
+            .contains("TOON-formatted observations"));
         assert!(request.system_prompt.contains("actions["));
         assert!(request.system_prompt.contains("reasoning["));
 
@@ -734,7 +743,9 @@ reasoning[1]{
     fn test_stale_action_decay() {
         let agent = LlmAgent::new(LlmAgentConfig::default());
 
-        let move_action = Action::Move { direction: Vec2::new(1.0, 0.0) };
+        let move_action = Action::Move {
+            direction: Vec2::new(1.0, 0.0),
+        };
         let decayed = agent.create_decayed_action(&move_action);
         // With decay=1.0 (initial), should be same direction
         if let Action::Move { direction } = decayed {

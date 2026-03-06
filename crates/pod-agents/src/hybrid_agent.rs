@@ -49,10 +49,10 @@
 //! | `"retreat_to_y"`   | f32     | World-Y coordinate for retreat              |
 //! | `"reasoning"`      | String  | LLM's reasoning (for logging/debug)         |
 
-use std::sync::{mpsc, Arc};
 use glam::Vec2;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use std::sync::{mpsc, Arc};
 
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentIntrospection, AgentType};
@@ -62,9 +62,9 @@ use pod_core::observation::{Observation, Relationship};
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
 use crate::llm_provider::{CompletionRequest, LlmProvider, MockProvider, TokenBudget};
 use crate::scripted_agent::{
-    Blackboard, BehaviorNode, BehaviorStatus, BehaviorTree,
     attack_nearest as _attack_nearest, chase_nearest_hostile as _chase_nearest_hostile,
-    flee_from as _flee_from, guard as _guard, patrol as _patrol, wander as _wander,
+    flee_from as _flee_from, guard as _guard, patrol as _patrol, wander as _wander, BehaviorNode,
+    BehaviorStatus, BehaviorTree, Blackboard,
 };
 
 // ============================================================
@@ -99,7 +99,9 @@ pub struct StrategyDirective {
     pub reasoning: String,
 }
 
-fn default_urgency() -> f32 { 0.5 }
+fn default_urgency() -> f32 {
+    0.5
+}
 
 impl Default for StrategyDirective {
     fn default() -> Self {
@@ -266,7 +268,8 @@ Rules:
 - "explore" when nothing notable is happening
 - "patrol" as a default fallback
 - "hold" when waiting is tactically best
-Respond ONLY with the JSON object, no other text."#.to_string()
+Respond ONLY with the JSON object, no other text."#
+        .to_string()
 }
 
 // ============================================================
@@ -375,11 +378,15 @@ impl HybridAgent {
 
     /// Returns `true` if any trigger condition fires for the current observation.
     fn triggers_fired(&self, obs: &Observation) -> bool {
-        let hostile_count = obs.visible_entities.iter()
+        let hostile_count = obs
+            .visible_entities
+            .iter()
             .filter(|e| matches!(e.relationship, Relationship::Hostile))
             .count();
 
-        let health_frac = obs.self_state.health
+        let health_frac = obs
+            .self_state
+            .health
             .zip(obs.self_state.max_health)
             .map(|(h, m)| if m > 0.0 { h / m } else { 0.0 })
             .unwrap_or(1.0);
@@ -388,14 +395,19 @@ impl HybridAgent {
             match trigger {
                 StrategyTrigger::HealthBelow(threshold) => {
                     if health_frac < *threshold && self.last_health_fraction >= *threshold {
-                        debug!("HybridAgent {}: trigger HealthBelow({})", self.id, threshold);
+                        debug!(
+                            "HybridAgent {}: trigger HealthBelow({})",
+                            self.id, threshold
+                        );
                         return true;
                     }
                 }
                 StrategyTrigger::NewHostileVisible => {
                     if hostile_count > self.last_hostile_count {
-                        debug!("HybridAgent {}: trigger NewHostileVisible ({} → {})",
-                            self.id, self.last_hostile_count, hostile_count);
+                        debug!(
+                            "HybridAgent {}: trigger NewHostileVisible ({} → {})",
+                            self.id, self.last_hostile_count, hostile_count
+                        );
                         return true;
                     }
                 }
@@ -406,10 +418,15 @@ impl HybridAgent {
                     }
                 }
                 StrategyTrigger::ObjectiveProgress(threshold) => {
-                    let any_at_threshold = obs.objectives.iter()
+                    let any_at_threshold = obs
+                        .objectives
+                        .iter()
                         .any(|o| o.progress >= *threshold && !o.completed);
                     if any_at_threshold {
-                        debug!("HybridAgent {}: trigger ObjectiveProgress({})", self.id, threshold);
+                        debug!(
+                            "HybridAgent {}: trigger ObjectiveProgress({})",
+                            self.id, threshold
+                        );
                         return true;
                     }
                 }
@@ -437,7 +454,10 @@ impl HybridAgent {
             + self.provider.estimate_tokens(&self.config.system_prompt);
 
         if !self.budget.can_request(estimated) {
-            warn!("HybridAgent {}: token budget exceeded, skipping strategy re-plan", self.id);
+            warn!(
+                "HybridAgent {}: token budget exceeded, skipping strategy re-plan",
+                self.id
+            );
             return;
         }
 
@@ -457,23 +477,27 @@ impl HybridAgent {
         self.strategy_in_flight = true;
         self.ticks_since_strategy = 0;
 
-        std::thread::spawn(move || {
-            match provider.complete(&request) {
-                Ok(completion) => {
-                    let directive = StrategyDirective::parse(&completion.content);
-                    debug!("HybridAgent {}: new strategy = {:?}", agent_id, directive.strategy);
-                    let _ = tx.send(StrategyResult { directive, tick });
-                }
-                Err(e) => {
-                    warn!("HybridAgent {}: LLM error: {}, keeping current strategy", agent_id, e);
-                    let _ = tx.send(StrategyResult {
-                        directive: StrategyDirective {
-                            reasoning: format!("LLM error: {}", e),
-                            ..Default::default()
-                        },
-                        tick,
-                    });
-                }
+        std::thread::spawn(move || match provider.complete(&request) {
+            Ok(completion) => {
+                let directive = StrategyDirective::parse(&completion.content);
+                debug!(
+                    "HybridAgent {}: new strategy = {:?}",
+                    agent_id, directive.strategy
+                );
+                let _ = tx.send(StrategyResult { directive, tick });
+            }
+            Err(e) => {
+                warn!(
+                    "HybridAgent {}: LLM error: {}, keeping current strategy",
+                    agent_id, e
+                );
+                let _ = tx.send(StrategyResult {
+                    directive: StrategyDirective {
+                        reasoning: format!("LLM error: {}", e),
+                        ..Default::default()
+                    },
+                    tick,
+                });
             }
         });
     }
@@ -488,16 +512,21 @@ impl HybridAgent {
             "strategy".to_string(),
             serde_json::Value::String(directive.strategy.clone()),
         );
-        self.tree.blackboard.set(
-            "urgency".to_string(),
-            serde_json::json!(directive.urgency),
-        );
+        self.tree
+            .blackboard
+            .set("urgency".to_string(), serde_json::json!(directive.urgency));
         if let Some(id) = directive.target_id {
-            self.tree.blackboard.set("target_id".to_string(), serde_json::json!(id));
+            self.tree
+                .blackboard
+                .set("target_id".to_string(), serde_json::json!(id));
         }
         if let Some([x, y]) = directive.retreat_position {
-            self.tree.blackboard.set("retreat_to_x".to_string(), serde_json::json!(x));
-            self.tree.blackboard.set("retreat_to_y".to_string(), serde_json::json!(y));
+            self.tree
+                .blackboard
+                .set("retreat_to_x".to_string(), serde_json::json!(x));
+            self.tree
+                .blackboard
+                .set("retreat_to_y".to_string(), serde_json::json!(y));
         }
         self.tree.blackboard.set(
             "reasoning".to_string(),
@@ -511,15 +540,23 @@ impl HybridAgent {
 // ============================================================
 
 impl Agent for HybridAgent {
-    fn id(&self) -> AgentId { self.id }
-    fn agent_type(&self) -> AgentType { AgentType::LlmAgent }
+    fn id(&self) -> AgentId {
+        self.id
+    }
+    fn agent_type(&self) -> AgentType {
+        AgentType::LlmAgent
+    }
 
     fn observe(&mut self, observation: Observation) {
         // 1. Update trigger-tracking state
-        let hostile_count = observation.visible_entities.iter()
+        let hostile_count = observation
+            .visible_entities
+            .iter()
             .filter(|e| matches!(e.relationship, Relationship::Hostile))
             .count();
-        let health_frac = observation.self_state.health
+        let health_frac = observation
+            .self_state
+            .health
             .zip(observation.self_state.max_health)
             .map(|(h, m)| if m > 0.0 { h / m } else { 0.0 })
             .unwrap_or(1.0);
@@ -539,7 +576,8 @@ impl Agent for HybridAgent {
                 if self.config.debug_logging {
                     info!(
                         "HybridAgent {} [tick {}]: strategy = {} (urgency={:.2}): {}",
-                        self.id, result.tick,
+                        self.id,
+                        result.tick,
                         result.directive.strategy,
                         result.directive.urgency,
                         result.directive.reasoning
@@ -548,7 +586,9 @@ impl Agent for HybridAgent {
                 // Log the new directive (memory.record requires obs+actions, not available here)
                 log::debug!(
                     "HybridAgent {}: new directive strategy={} urgency={:.2}",
-                    self.id, result.directive.strategy, result.directive.urgency,
+                    self.id,
+                    result.directive.strategy,
+                    result.directive.urgency,
                 );
                 let directive = result.directive.clone();
                 self.apply_directive_to_blackboard(&directive);
@@ -575,7 +615,10 @@ impl Agent for HybridAgent {
         let (actions, status) = self.tree.tick(&obs);
 
         if self.config.debug_logging {
-            let strategy = self.tree.blackboard.get_string("strategy")
+            let strategy = self
+                .tree
+                .blackboard
+                .get_string("strategy")
                 .unwrap_or_else(|| "patrol".to_string());
             debug!(
                 "HybridAgent {} [tick {}]: BT={:?} strategy={} actions={:?}",
@@ -591,11 +634,18 @@ impl Agent for HybridAgent {
         actions
     }
 
-    fn constraints(&self) -> &AgentConstraints { &self.constraints }
-    fn constraints_mut(&mut self) -> &mut AgentConstraints { &mut self.constraints }
+    fn constraints(&self) -> &AgentConstraints {
+        &self.constraints
+    }
+    fn constraints_mut(&mut self) -> &mut AgentConstraints {
+        &mut self.constraints
+    }
 
     fn introspect(&self) -> AgentIntrospection {
-        let strategy = self.tree.blackboard.get_string("strategy")
+        let strategy = self
+            .tree
+            .blackboard
+            .get_string("strategy")
             .unwrap_or_else(|| "patrol".to_string());
         let urgency = self.tree.blackboard.get_f32("urgency").unwrap_or(0.5);
         AgentIntrospection {
@@ -604,9 +654,7 @@ impl Agent for HybridAgent {
             constraints: self.constraints.clone(),
             state_description: format!(
                 "strategy={} urgency={:.2} ticks_since_plan={} in_flight={}",
-                strategy, urgency,
-                self.ticks_since_strategy,
-                self.strategy_in_flight,
+                strategy, urgency, self.ticks_since_strategy, self.strategy_in_flight,
             ),
         }
     }
@@ -624,33 +672,52 @@ fn format_observation_for_strategy(obs: &Observation) -> String {
         obs.tick,
         obs.self_state.position.x,
         obs.self_state.position.y,
-        obs.self_state.health
+        obs.self_state
+            .health
             .zip(obs.self_state.max_health)
             .map(|(h, m)| if m > 0.0 { h / m * 100.0 } else { 0.0 })
             .unwrap_or(100.0),
         obs.self_state.rotation.to_degrees(),
     ));
 
-    let hostiles: Vec<_> = obs.visible_entities.iter()
+    let hostiles: Vec<_> = obs
+        .visible_entities
+        .iter()
         .filter(|e| matches!(e.relationship, Relationship::Hostile))
         .collect();
-    let friendlies: Vec<_> = obs.visible_entities.iter()
+    let friendlies: Vec<_> = obs
+        .visible_entities
+        .iter()
         .filter(|e| matches!(e.relationship, Relationship::Friendly))
         .collect();
 
-    s.push_str(&format!("enemies={} allies={}\n", hostiles.len(), friendlies.len()));
+    s.push_str(&format!(
+        "enemies={} allies={}\n",
+        hostiles.len(),
+        friendlies.len()
+    ));
 
-    if let Some(nearest) = hostiles.iter().min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap()) {
-        s.push_str(&format!("nearest_enemy dist={:.0} hp={}\n",
+    if let Some(nearest) = hostiles
+        .iter()
+        .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap())
+    {
+        s.push_str(&format!(
+            "nearest_enemy dist={:.0} hp={}\n",
             nearest.distance,
-            nearest.health_fraction.map(|h| format!("{:.0}%", h * 100.0)).unwrap_or_else(|| "?".to_string())
+            nearest
+                .health_fraction
+                .map(|h| format!("{:.0}%", h * 100.0))
+                .unwrap_or_else(|| "?".to_string())
         ));
     }
 
     if !obs.objectives.is_empty() {
         let obj = &obs.objectives[0];
-        s.push_str(&format!("objective=\"{}\" progress={:.0}%\n",
-            obj.description, obj.progress * 100.0));
+        s.push_str(&format!(
+            "objective=\"{}\" progress={:.0}%\n",
+            obj.description,
+            obj.progress * 100.0
+        ));
     }
 
     s
@@ -662,21 +729,29 @@ fn strategy_fallback_actions(directive: &StrategyDirective, obs: &Observation) -
     match directive.strategy.as_str() {
         "attack" | "engage" => {
             // Find nearest hostile and attack it
-            if let Some(target) = obs.visible_entities.iter()
+            if let Some(target) = obs
+                .visible_entities
+                .iter()
                 .filter(|e| matches!(e.relationship, Relationship::Hostile))
                 .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap())
             {
-                vec![Action::AttackTarget { target: pod_core::id::EntityId(target.entity_id.0) }]
+                vec![Action::AttackTarget {
+                    target: pod_core::id::EntityId(target.entity_id.0),
+                }]
             } else {
                 vec![Action::Idle]
             }
         }
         "flee" | "retreat" => {
             if let Some([x, y]) = directive.retreat_position {
-                vec![Action::Move { direction: Vec2::new(x, y).normalize_or_zero() }]
+                vec![Action::Move {
+                    direction: Vec2::new(x, y).normalize_or_zero(),
+                }]
             } else {
                 // Move away from nearest hostile
-                if let Some(hostile) = obs.visible_entities.iter()
+                if let Some(hostile) = obs
+                    .visible_entities
+                    .iter()
                     .filter(|e| matches!(e.relationship, Relationship::Hostile))
                     .min_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap())
                 {
@@ -712,23 +787,26 @@ fn default_strategy_tree() -> BehaviorTree {
         BehaviorNode::sequence(vec![
             BehaviorNode::HasTarget,
             BehaviorNode::EnemyInRange { range: 200.0 },
-            BehaviorNode::ActionNode { action: Action::Idle }, // placeholder: real BT would call attack
+            BehaviorNode::ActionNode {
+                action: Action::Idle,
+            }, // placeholder: real BT would call attack
         ]),
-
         // --- chase branch: hostile visible but not in attack range ---
         BehaviorNode::sequence(vec![
             BehaviorNode::HasTarget,
-            BehaviorNode::MoveToNearest { relationship: Relationship::Hostile },
+            BehaviorNode::MoveToNearest {
+                relationship: Relationship::Hostile,
+            },
         ]),
-
         // --- flee branch: low health ---
         BehaviorNode::sequence(vec![
             BehaviorNode::HealthBelow { threshold: 0.3 },
             BehaviorNode::FleeFromNearest,
         ]),
-
         // --- default: wander/patrol ---
-        BehaviorNode::ActionNode { action: Action::Idle },
+        BehaviorNode::ActionNode {
+            action: Action::Idle,
+        },
     ]);
 
     BehaviorTree::new(root)
@@ -747,13 +825,17 @@ pub fn aggressive_hybrid(config: HybridAgentConfig) -> HybridAgent {
     let attack_root = BehaviorNode::selector(vec![
         BehaviorNode::sequence(vec![
             BehaviorNode::HasTarget,
-            BehaviorNode::MoveToNearest { relationship: Relationship::Hostile },
+            BehaviorNode::MoveToNearest {
+                relationship: Relationship::Hostile,
+            },
         ]),
         BehaviorNode::sequence(vec![
             BehaviorNode::HealthBelow { threshold: 0.25 },
             BehaviorNode::FleeFromNearest,
         ]),
-        BehaviorNode::ActionNode { action: Action::Idle },
+        BehaviorNode::ActionNode {
+            action: Action::Idle,
+        },
     ]);
 
     HybridAgent::new(config).with_tree(BehaviorTree::new(attack_root))
@@ -771,13 +853,17 @@ pub fn defensive_hybrid(mut config: HybridAgentConfig) -> HybridAgent {
     let guard_root = BehaviorNode::selector(vec![
         BehaviorNode::sequence(vec![
             BehaviorNode::EnemyInRange { range: 100.0 },
-            BehaviorNode::MoveToNearest { relationship: Relationship::Hostile },
+            BehaviorNode::MoveToNearest {
+                relationship: Relationship::Hostile,
+            },
         ]),
         BehaviorNode::sequence(vec![
             BehaviorNode::HealthBelow { threshold: 0.3 },
             BehaviorNode::FleeFromNearest,
         ]),
-        BehaviorNode::ActionNode { action: Action::Idle },
+        BehaviorNode::ActionNode {
+            action: Action::Idle,
+        },
     ]);
 
     HybridAgent::new(config).with_tree(BehaviorTree::new(guard_root))
@@ -790,8 +876,8 @@ pub fn defensive_hybrid(mut config: HybridAgentConfig) -> HybridAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::observation::{Observation, SelfState, VisibleEntity};
     use glam::Vec2;
+    use pod_core::observation::{Observation, SelfState, VisibleEntity};
 
     fn make_obs_with_hostile(health_pct: f32, hostile_distance: Option<f32>) -> Observation {
         let mut obs = Observation::default();
@@ -812,6 +898,7 @@ mod tests {
                 distance: dist,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(1.0),
+                ..Default::default()
             });
         }
         obs
@@ -819,7 +906,8 @@ mod tests {
 
     #[test]
     fn test_strategy_directive_parse_json() {
-        let json = r#"{"strategy":"attack","urgency":0.9,"target_id":42,"reasoning":"enemy close"}"#;
+        let json =
+            r#"{"strategy":"attack","urgency":0.9,"target_id":42,"reasoning":"enemy close"}"#;
         let d = StrategyDirective::parse(json);
         assert_eq!(d.strategy, "attack");
         assert!((d.urgency - 0.9).abs() < 0.01);
@@ -918,7 +1006,7 @@ mod tests {
         let agent = HybridAgent::new(config);
         // Initially health is 1.0 (from last_health_fraction init)
         let obs = make_obs_with_hostile(0.25, None); // 25% health — below threshold
-        // Should trigger because 0.25 < 0.3 and last was >= 0.3
+                                                     // Should trigger because 0.25 < 0.3 and last was >= 0.3
         assert!(agent.triggers_fired(&obs));
     }
 
@@ -957,7 +1045,10 @@ mod tests {
             reasoning: "hold the line".to_string(),
         };
         agent.apply_directive_to_blackboard(&directive);
-        assert_eq!(agent.blackboard().get_string("strategy").as_deref(), Some("guard"));
+        assert_eq!(
+            agent.blackboard().get_string("strategy").as_deref(),
+            Some("guard")
+        );
         assert!((agent.blackboard().get_f32("urgency").unwrap() - 0.7).abs() < 0.01);
     }
 

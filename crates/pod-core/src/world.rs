@@ -190,6 +190,8 @@ enum ComponentToAdd {
     CreatureIdentity(CreatureIdentity),
     CompanionRoster(CompanionRoster),
     EncounterState(EncounterState),
+    ResourceNode(ResourceNode),
+    LootContainer(LootContainer),
 }
 
 impl<'w> EntityBuilder<'w> {
@@ -290,6 +292,16 @@ impl<'w> EntityBuilder<'w> {
         self
     }
 
+    pub fn with_resource_node(mut self, resource: ResourceNode) -> Self {
+        self.components.push(ComponentToAdd::ResourceNode(resource));
+        self
+    }
+
+    pub fn with_loot_container(mut self, loot: LootContainer) -> Self {
+        self.components.push(ComponentToAdd::LootContainer(loot));
+        self
+    }
+
     /// Finalize and spawn the entity
     pub fn build(self) -> hecs::Entity {
         let entity = self.world.ecs.spawn((self.transform, Velocity::default()));
@@ -343,6 +355,12 @@ impl<'w> EntityBuilder<'w> {
                 }
                 ComponentToAdd::EncounterState(encounter) => {
                     self.world.ecs.insert_one(entity, encounter).unwrap();
+                }
+                ComponentToAdd::ResourceNode(resource) => {
+                    self.world.ecs.insert_one(entity, resource).unwrap();
+                }
+                ComponentToAdd::LootContainer(loot) => {
+                    self.world.ecs.insert_one(entity, loot).unwrap();
                 }
             }
         }

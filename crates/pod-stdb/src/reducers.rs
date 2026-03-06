@@ -9,12 +9,12 @@
 //!   4. Physics/Movement (velocity integration)
 //!   5. Flush Events (broadcast to listeners)
 
+use crate::events::*;
+use crate::tables::*;
+use crate::types::*;
+use serde_json::json;
 use spacetimedb::{Identity, ReducerContext, Table};
 use std::collections::HashMap;
-use serde_json::json;
-use crate::tables::*;
-use crate::events::*;
-use crate::types::*;
 
 fn reject_reducer(ctx: &ReducerContext, reason: impl Into<String>) {
     let reason_text = reason.into();
@@ -78,8 +78,16 @@ pub fn client_disconnected(ctx: &ReducerContext) {
     }
 
     // Remove lobby membership, if any
-    for membership in ctx.db.lobby_member().iter().filter(|member| member.identity == identity) {
-        ctx.db.lobby_member().membership_id().delete(membership.membership_id);
+    for membership in ctx
+        .db
+        .lobby_member()
+        .iter()
+        .filter(|member| member.identity == identity)
+    {
+        ctx.db
+            .lobby_member()
+            .membership_id()
+            .delete(membership.membership_id);
     }
 }
 
@@ -89,13 +97,7 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 
 /// Create or reset the game world with custom parameters.
 #[spacetimedb::reducer]
-pub fn create_world(
-    ctx: &ReducerContext,
-    seed: u64,
-    width: f32,
-    height: f32,
-    tps: u32,
-) {
+pub fn create_world(ctx: &ReducerContext, seed: u64, width: f32, height: f32, tps: u32) {
     if let Some(mut ws) = ctx.db.world_state().id().find(0) {
         ws.tick = 0;
         ws.rng_seed = seed;
@@ -137,13 +139,12 @@ pub fn set_paused(ctx: &ReducerContext, paused: bool) {
 /// Spawn a new entity with a transform at the given position.
 /// Optionally assign an agent type. Returns the entity via auto_inc.
 #[spacetimedb::reducer]
-pub fn spawn_entity(
-    ctx: &ReducerContext,
-    pos_x: f32,
-    pos_y: f32,
-    agent_type: Option<AgentType>,
-) {
-    let ws = ctx.db.world_state().id().find(0)
+pub fn spawn_entity(ctx: &ReducerContext, pos_x: f32, pos_y: f32, agent_type: Option<AgentType>) {
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
         .expect("World not initialized — call create_world first");
 
     // Insert entity row (entity_id = 0 triggers auto_inc)
@@ -200,7 +201,11 @@ pub fn spawn_entity_full(
     vision_fov: f32,
     hearing_range: f32,
 ) {
-    let ws = ctx.db.world_state().id().find(0)
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
         .expect("World not initialized");
 
     let entity = ctx.db.entity().insert(EntityRow {
@@ -325,10 +330,17 @@ pub fn connect_agent(
     let identity = ctx.sender;
 
     // Verify entity exists and is alive
-    let entity = ctx.db.entity().entity_id().find(entity_id)
+    let entity = ctx
+        .db
+        .entity()
+        .entity_id()
+        .find(entity_id)
         .expect("Entity not found");
     if !entity.alive {
-        reject_reducer(ctx, format!("connect_agent rejected: entity {entity_id} is dead"));
+        reject_reducer(
+            ctx,
+            format!("connect_agent rejected: entity {entity_id} is dead"),
+        );
         return;
     }
 
@@ -361,7 +373,12 @@ pub fn create_lobby(
 ) {
     let identity = ctx.sender;
 
-    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
+        .expect("World not initialized");
     if max_players == 0 {
         reject_reducer(ctx, "create_lobby rejected: max_players must be at least 1");
         return;
@@ -387,25 +404,39 @@ pub fn create_lobby(
         is_ready: true,
     });
 
-    log::info!("[pod-stdb] Lobby {} created by {identity:?} as entity {host_entity_id}", lobby.lobby_id);
+    log::info!(
+        "[pod-stdb] Lobby {} created by {identity:?} as entity {host_entity_id}",
+        lobby.lobby_id
+    );
 }
 
 /// Join a lobby by ID.
 #[spacetimedb::reducer]
 pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
     let identity = ctx.sender;
-    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
+        .expect("World not initialized");
 
     let lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
         Some(row) => row,
         None => {
-            reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} does not exist"));
+            reject_reducer(
+                ctx,
+                format!("join_lobby rejected: lobby {lobby_id} does not exist"),
+            );
             return;
         }
     };
 
     if lobby.started {
-        reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} already started"));
+        reject_reducer(
+            ctx,
+            format!("join_lobby rejected: lobby {lobby_id} already started"),
+        );
         return;
     }
 
@@ -423,7 +454,10 @@ pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
             .collect();
 
         if current_members.len() as u32 >= lobby.max_players {
-            reject_reducer(ctx, format!("join_lobby rejected: lobby {lobby_id} is full"));
+            reject_reducer(
+                ctx,
+                format!("join_lobby rejected: lobby {lobby_id} is full"),
+            );
             return;
         }
 
@@ -442,7 +476,12 @@ pub fn join_lobby(ctx: &ReducerContext, lobby_id: u64, entity_id: u64) {
 #[spacetimedb::reducer]
 pub fn leave_lobby(ctx: &ReducerContext) {
     let identity = ctx.sender;
-    for membership in ctx.db.lobby_member().iter().filter(|member| member.identity == identity) {
+    for membership in ctx
+        .db
+        .lobby_member()
+        .iter()
+        .filter(|member| member.identity == identity)
+    {
         ctx.db
             .lobby_member()
             .membership_id()
@@ -456,9 +495,12 @@ pub fn set_lobby_ready(ctx: &ReducerContext, lobby_id: u64, is_ready: bool) {
     let identity = ctx.sender;
     let mut updated = false;
 
-    if let Some(mut member) = ctx.db.lobby_member().iter().find(|member| {
-        member.identity == identity && member.lobby_id == lobby_id
-    }) {
+    if let Some(mut member) = ctx
+        .db
+        .lobby_member()
+        .iter()
+        .find(|member| member.identity == identity && member.lobby_id == lobby_id)
+    {
         member.is_ready = is_ready;
         ctx.db.lobby_member().membership_id().update(member);
         updated = true;
@@ -480,7 +522,10 @@ pub fn start_lobby(ctx: &ReducerContext, lobby_id: u64) {
     let mut lobby = match ctx.db.lobby().lobby_id().find(lobby_id) {
         Some(row) => row,
         None => {
-            reject_reducer(ctx, format!("start_lobby rejected: lobby {lobby_id} does not exist"));
+            reject_reducer(
+                ctx,
+                format!("start_lobby rejected: lobby {lobby_id} does not exist"),
+            );
             return;
         }
     };
@@ -513,10 +558,19 @@ pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size
     }
 
     let identity = ctx.sender;
-    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
+        .expect("World not initialized");
 
     // Validate entity exists and is alive.
-    let entity = ctx.db.entity().entity_id().find(entity_id)
+    let entity = ctx
+        .db
+        .entity()
+        .entity_id()
+        .find(entity_id)
         .expect("Entity not found");
     if !entity.alive {
         reject_reducer(
@@ -527,9 +581,12 @@ pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size
     }
 
     // Prevent duplicate queue entries for same identity/entity pair.
-    if ctx.db.match_queue().iter().any(|row| {
-        row.identity == identity && row.entity_id == entity_id
-    }) {
+    if ctx
+        .db
+        .match_queue()
+        .iter()
+        .any(|row| row.identity == identity && row.entity_id == entity_id)
+    {
         reject_reducer(
             ctx,
             format!(
@@ -547,7 +604,9 @@ pub fn join_match_queue(ctx: &ReducerContext, entity_id: u64, desired_party_size
         queued_at_tick: ws.tick,
     });
 
-    log::info!("[pod-stdb] {identity:?} queued entity {entity_id} for party size {desired_party_size}");
+    log::info!(
+        "[pod-stdb] {identity:?} queued entity {entity_id} for party size {desired_party_size}"
+    );
 }
 
 /// Remove all queue entries for the calling identity.
@@ -594,7 +653,12 @@ pub fn create_match_from_queue(ctx: &ReducerContext, desired_party_size: u32) {
         return;
     }
 
-    let ws = ctx.db.world_state().id().find(0).expect("World not initialized");
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
+        .expect("World not initialized");
 
     let mut candidates: Vec<(u64, Identity, u64)> = Vec::new();
     for row in ctx.db.match_queue().iter() {
@@ -675,7 +739,11 @@ pub fn submit_action(
     signal_data: Option<String>,
     prefab: Option<String>,
 ) {
-    let ws = ctx.db.world_state().id().find(0)
+    let ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
         .expect("World not initialized");
 
     ctx.db.action_submission().insert(ActionSubmissionRow {
@@ -714,7 +782,11 @@ pub fn submit_action(
 ///   6. Advance tick counter
 #[spacetimedb::reducer]
 pub fn execute_tick(ctx: &ReducerContext) {
-    let mut ws = ctx.db.world_state().id().find(0)
+    let mut ws = ctx
+        .db
+        .world_state()
+        .id()
+        .find(0)
         .expect("World not initialized");
 
     if ws.paused {
@@ -859,6 +931,98 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     }
                 }
             }
+            ActionKind::CaptureCreature => {
+                let Some(target_id) = submission.target_entity_id else {
+                    continue;
+                };
+                let tool_slot = submission
+                    .ability_slot
+                    .map(|slot| slot.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: Some(target_id),
+                    data_json: format!(r#"{{"type":"capture_creature","tool_slot":{tool_slot}}}"#),
+                });
+            }
+            ActionKind::SummonCompanion => {
+                let slot = submission.ability_slot.unwrap_or(0);
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: None,
+                    data_json: format!(r#"{{"type":"summon_companion","slot":{slot}}}"#),
+                });
+            }
+            ActionKind::CommandCompanion => {
+                let slot = submission.ability_slot.unwrap_or(0);
+                let command = submission
+                    .signal_type
+                    .clone()
+                    .unwrap_or_else(|| "follow".to_string())
+                    .replace('"', "\\\"");
+                let target_id = submission
+                    .target_entity_id
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: submission.target_entity_id,
+                    data_json: format!(
+                        r#"{{"type":"command_companion","slot":{slot},"command":"{command}","target":{target_id}}}"#
+                    ),
+                });
+            }
+            ActionKind::GatherResource => {
+                let Some(target_id) = submission.target_entity_id else {
+                    continue;
+                };
+                let skill = submission
+                    .signal_type
+                    .clone()
+                    .unwrap_or_else(|| "gather".to_string())
+                    .replace('"', "\\\"");
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: Some(target_id),
+                    data_json: format!(r#"{{"type":"gather_resource","skill":"{skill}"}}"#),
+                });
+            }
+            ActionKind::Loot => {
+                let Some(target_id) = submission.target_entity_id else {
+                    continue;
+                };
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::ItemPickedUp,
+                    entity_id: eid,
+                    secondary_entity_id: Some(target_id),
+                    data_json: r#"{"type":"loot"}"#.to_string(),
+                });
+            }
+            ActionKind::SetAutoRetaliate => {
+                let enabled = submission.signal_data.as_deref() == Some("true");
+                ctx.db.world_event().insert(WorldEventRow {
+                    event_id: 0,
+                    tick: current_tick,
+                    event_kind: WorldEventKind::AbilityUsed,
+                    entity_id: eid,
+                    secondary_entity_id: None,
+                    data_json: format!(r#"{{"type":"set_auto_retaliate","enabled":{enabled}}}"#),
+                });
+            }
             ActionKind::Interact => {
                 if let Some(target_id) = find_interaction_target(ctx, eid) {
                     ctx.db.world_event().insert(WorldEventRow {
@@ -932,7 +1096,9 @@ pub fn execute_tick(ctx: &ReducerContext) {
                 });
             }
             ActionKind::Speak => {
-                if let (Some(msg), Some(vol)) = (submission.message.clone(), submission.volume.clone()) {
+                if let (Some(msg), Some(vol)) =
+                    (submission.message.clone(), submission.volume.clone())
+                {
                     if let Some(tf) = ctx.db.transform().entity_id().find(eid) {
                         ctx.db.speech_event().insert(SpeechEventRow {
                             event_id: 0,
@@ -947,7 +1113,9 @@ pub fn execute_tick(ctx: &ReducerContext) {
                 }
             }
             ActionKind::Signal => {
-                let signal_type = submission.signal_type.unwrap_or_else(|| "signal".to_string());
+                let signal_type = submission
+                    .signal_type
+                    .unwrap_or_else(|| "signal".to_string());
                 let signal_data = submission.signal_data.unwrap_or_default();
                 let escaped_type = signal_type.replace('"', "\\\"");
                 let escaped_data = signal_data.replace('"', "\\\"");
@@ -959,15 +1127,16 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: None,
                     data_json: format!(
                         r#"{{"signal_type":"{}","signal_data":"{}"}}"#,
-                        escaped_type,
-                        escaped_data
+                        escaped_type, escaped_data
                     ),
                 });
             }
             ActionKind::Spawn => {
-                if let (Some(prefab), Some(x), Some(y)) =
-                    (submission.prefab.clone(), submission.target_x, submission.target_y)
-                {
+                if let (Some(prefab), Some(x), Some(y)) = (
+                    submission.prefab.clone(),
+                    submission.target_x,
+                    submission.target_y,
+                ) {
                     let created = ctx.db.entity().insert(EntityRow {
                         entity_id: 0,
                         agent_type: None,

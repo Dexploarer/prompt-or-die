@@ -230,7 +230,9 @@ pub struct TacticalTemplate {
 
 impl Default for TacticalTemplate {
     fn default() -> Self {
-        Self { threat_range: 300.0 }
+        Self {
+            threat_range: 300.0,
+        }
     }
 }
 
@@ -414,12 +416,7 @@ impl PromptTemplate for ToonTemplate {
             .self_state
             .cooldowns
             .iter()
-            .map(|cd| {
-                format!(
-                    "{} rem={}/{}",
-                    cd.name, cd.remaining_ticks, cd.total_ticks
-                )
-            })
+            .map(|cd| format!("{} rem={}/{}", cd.name, cd.remaining_ticks, cd.total_ticks))
             .collect();
 
         let visible_rows: Vec<String> = obs
@@ -481,7 +478,12 @@ impl PromptTemplate for ToonTemplate {
         let audio_rows: Vec<String> = obs
             .audible_events
             .iter()
-            .map(|event| format!("{} at {:.0} ({:.0})", event.event_type, event.distance, event.intensity))
+            .map(|event| {
+                format!(
+                    "{} at {:.0} ({:.0})",
+                    event.event_type, event.distance, event.intensity
+                )
+            })
             .collect();
 
         Self::push_section(&mut out, "self", &self_rows);
@@ -578,8 +580,8 @@ impl Default for TemplateRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::observation::*;
     use glam::Vec2;
+    use pod_core::observation::*;
 
     fn test_observation() -> Observation {
         Observation {
@@ -602,6 +604,7 @@ mod tests {
                     distance: 55.0,
                     relationship: Relationship::Hostile,
                     health_fraction: Some(0.6),
+                    ..Default::default()
                 },
                 VisibleEntity {
                     entity_id: pod_core::id::EntityId(2),
@@ -612,6 +615,7 @@ mod tests {
                     distance: 25.0,
                     relationship: Relationship::Friendly,
                     health_fraction: Some(0.9),
+                    ..Default::default()
                 },
             ],
             audible_events: vec![AudibleEvent {

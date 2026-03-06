@@ -46,9 +46,9 @@ use std::collections::{HashMap, VecDeque};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
-use pod_core::{Action, AgentId, AgentType, Observation};
 use pod_core::observation::Relationship;
 use pod_core::replay::{DecisionTrace, ReplayFile, ReplayHeader};
+use pod_core::{Action, AgentId, AgentType, Observation};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ObservationSummary
@@ -104,11 +104,7 @@ impl ObservationSummary {
             _ => None,
         };
 
-        let active_objectives = obs
-            .objectives
-            .iter()
-            .filter(|o| !o.completed)
-            .count();
+        let active_objectives = obs.objectives.iter().filter(|o| !o.completed).count();
 
         Self {
             visible_entity_count: obs.visible_entities.len(),
@@ -260,9 +256,10 @@ impl LogFilter {
             LogFilter::TickRange { start, end } => entry.tick >= *start && entry.tick <= *end,
             LogFilter::ActionType(needle) => {
                 let needle_lower = needle.to_lowercase();
-                entry.actions_produced.iter().any(|a| {
-                    format!("{:?}", a).to_lowercase().contains(&needle_lower)
-                })
+                entry
+                    .actions_produced
+                    .iter()
+                    .any(|a| format!("{:?}", a).to_lowercase().contains(&needle_lower))
             }
             LogFilter::MinDecisionTime(min_us) => entry.timing.total_us >= *min_us,
         }
@@ -421,7 +418,10 @@ impl DecisionLogger {
 
     /// Return all entries recorded on the given tick.
     pub fn entries_for_tick(&self, tick: u64) -> Vec<&DecisionEntry> {
-        self.query(&[LogFilter::TickRange { start: tick, end: tick }])
+        self.query(&[LogFilter::TickRange {
+            start: tick,
+            end: tick,
+        }])
     }
 
     // ── Aggregation ───────────────────────────────────────────────────────────
@@ -440,7 +440,8 @@ impl DecisionLogger {
         }
 
         let mut by_type: HashMap<AgentType, usize> = HashMap::new();
-        let mut unique_agents: std::collections::HashSet<AgentId> = std::collections::HashSet::new();
+        let mut unique_agents: std::collections::HashSet<AgentId> =
+            std::collections::HashSet::new();
         let mut sum_us: u64 = 0;
         let mut max_us: u64 = 0;
         let mut min_tick = u64::MAX;
@@ -518,18 +519,28 @@ impl DecisionLogger {
             }
 
             let (prompt_sent, raw_response, latency_ms) = match &entry.decision_method {
-                DecisionMethod::LlmResponse { model, prompt_tokens, completion_tokens } => (
+                DecisionMethod::LlmResponse {
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                } => (
                     format!("model={} prompt_tokens={}", model, prompt_tokens),
                     format!("completion_tokens={}", completion_tokens),
                     // total_us / 1000 gives ms; clamp to u32::MAX
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
                 ),
-                DecisionMethod::BehaviorTree { active_node, tree_depth } => (
+                DecisionMethod::BehaviorTree {
+                    active_node,
+                    tree_depth,
+                } => (
                     format!("bt_node={} depth={}", active_node, tree_depth),
                     String::new(),
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
                 ),
-                DecisionMethod::FiniteStateMachine { current_state, transition } => (
+                DecisionMethod::FiniteStateMachine {
+                    current_state,
+                    transition,
+                } => (
                     format!("fsm_state={}", current_state),
                     transition.clone().unwrap_or_default(),
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
@@ -539,13 +550,22 @@ impl DecisionLogger {
                     String::new(),
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
                 ),
-                DecisionMethod::NeuralNetwork { action_index, confidence } => (
+                DecisionMethod::NeuralNetwork {
+                    action_index,
+                    confidence,
+                } => (
                     format!("nn_action={} confidence={:.4}", action_index, confidence),
                     String::new(),
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
                 ),
-                DecisionMethod::Hybrid { strategy_source, execution_source } => (
-                    format!("strategy={} execution={}", strategy_source, execution_source),
+                DecisionMethod::Hybrid {
+                    strategy_source,
+                    execution_source,
+                } => (
+                    format!(
+                        "strategy={} execution={}",
+                        strategy_source, execution_source
+                    ),
                     String::new(),
                     (entry.timing.total_us / 1_000).min(u32::MAX as u64) as u32,
                 ),
@@ -607,7 +627,7 @@ impl DecisionLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::{AgentId, AgentType, Action, Observation};
+    use pod_core::{Action, AgentId, AgentType, Observation};
 
     // ── helpers ────────────────────────────────────────────────────────────
 
@@ -697,11 +717,7 @@ mod tests {
         assert_eq!(logger.len(), capacity);
 
         // The five entries kept must be the most recent (ticks 5–9)
-        let remaining: Vec<u64> = logger
-            .query(&[])
-            .into_iter()
-            .map(|e| e.tick)
-            .collect();
+        let remaining: Vec<u64> = logger.query(&[]).into_iter().map(|e| e.tick).collect();
         assert_eq!(remaining, vec![5, 6, 7, 8, 9]);
     }
 
@@ -769,16 +785,28 @@ mod tests {
         logger.log(make_entry(0, npc_id, AgentType::ScriptedNpc)); // total_us = 300
         logger.log(make_entry(1, npc_id, AgentType::ScriptedNpc)); // 300
         logger.log(make_entry(2, npc_id, AgentType::ScriptedNpc)); // 300
-        logger.log(make_llm_entry(3, llm_id));                     // total_us = 121_000
-        logger.log(make_llm_entry(4, llm_id));                     // 121_000
+        logger.log(make_llm_entry(3, llm_id)); // total_us = 121_000
+        logger.log(make_llm_entry(4, llm_id)); // 121_000
 
         let stats = logger.summary_stats();
 
         assert_eq!(stats.total_entries, 5);
         assert_eq!(stats.unique_agents, 2);
         assert_eq!(stats.tick_range, (0, 4));
-        assert_eq!(*stats.entries_by_agent_type.get(&AgentType::ScriptedNpc).unwrap(), 3);
-        assert_eq!(*stats.entries_by_agent_type.get(&AgentType::LlmAgent).unwrap(), 2);
+        assert_eq!(
+            *stats
+                .entries_by_agent_type
+                .get(&AgentType::ScriptedNpc)
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            *stats
+                .entries_by_agent_type
+                .get(&AgentType::LlmAgent)
+                .unwrap(),
+            2
+        );
         assert_eq!(stats.max_decision_time_us, 121_000);
 
         // avg = (300*3 + 121_000*2) / 5 = (900 + 242_000) / 5 = 242_900 / 5 = 48_580
@@ -857,7 +885,11 @@ mod tests {
         assert!(logger.is_enabled());
 
         logger.log(make_entry(3, agent_id, AgentType::ScriptedNpc));
-        assert_eq!(logger.len(), 2, "re-enabled logger should accept new entries");
+        assert_eq!(
+            logger.len(),
+            2,
+            "re-enabled logger should accept new entries"
+        );
     }
 
     // ── test_observation_summary_from_observation ──────────────────────────
@@ -865,8 +897,8 @@ mod tests {
     /// ObservationSummary::from_observation correctly derives each field.
     #[test]
     fn test_observation_summary_from_observation() {
-        use pod_core::observation::{VisibleEntity, Objective};
         use pod_core::id::EntityId;
+        use pod_core::observation::{Objective, VisibleEntity};
 
         let obs = Observation {
             tick: 5,
@@ -886,6 +918,7 @@ mod tests {
                     distance: 7.0,
                     relationship: Relationship::Hostile,
                     health_fraction: None,
+                    ..Default::default()
                 },
                 VisibleEntity {
                     entity_id: EntityId(2),
@@ -896,11 +929,22 @@ mod tests {
                     distance: 15.0,
                     relationship: Relationship::Friendly,
                     health_fraction: None,
+                    ..Default::default()
                 },
             ],
             objectives: vec![
-                Objective { id: "obj1".into(), description: "Survive".into(), progress: 0.5, completed: false },
-                Objective { id: "obj2".into(), description: "Done".into(), progress: 1.0, completed: true },
+                Objective {
+                    id: "obj1".into(),
+                    description: "Survive".into(),
+                    progress: 0.5,
+                    completed: false,
+                },
+                Objective {
+                    id: "obj2".into(),
+                    description: "Done".into(),
+                    progress: 1.0,
+                    completed: true,
+                },
             ],
             ..Default::default()
         };

@@ -621,6 +621,53 @@ impl Default for Inventory {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResourceNode {
+    pub skill: SkillKind,
+    pub tier: u8,
+    pub remaining_uses: u32,
+    pub respawn_ticks: u32,
+    pub experience: u32,
+    pub yield_item: ItemStack,
+}
+
+impl Default for ResourceNode {
+    fn default() -> Self {
+        Self {
+            skill: SkillKind::Mining,
+            tier: 1,
+            remaining_uses: 1,
+            respawn_ticks: 300,
+            experience: 25,
+            yield_item: ItemStack {
+                item_id: "copper-ore".to_string(),
+                display_name: "Copper Ore".to_string(),
+                quantity: 1,
+                stackable: true,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LootContainer {
+    pub coins: u64,
+    pub items: Vec<ItemStack>,
+    pub owner: Option<EntityId>,
+    pub claimed: bool,
+}
+
+impl Default for LootContainer {
+    fn default() -> Self {
+        Self {
+            coins: 0,
+            items: Vec::new(),
+            owner: None,
+            claimed: false,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CreatureTemperament {
     Aggressive,

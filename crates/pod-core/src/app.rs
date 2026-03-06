@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use crate::action::AgentAction;
 use crate::component::{
     AgentControlled, ColorRect, CombatLoadout, CompanionRoster, CreatureIdentity, EncounterState,
-    Health, Inventory, Label, Movement, Perception, Script, SkillBook, Sprite, Transform,
-    Transform3D, Velocity,
+    Health, Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook,
+    Sprite, Transform, Transform3D, Velocity,
 };
 use crate::contract::{VersionedAgentAction, VersionedObservation};
 use crate::observation::Observation;
@@ -294,6 +294,10 @@ impl App {
             .register_component::<CreatureIdentity>("CreatureIdentity");
         self.types
             .register_component::<EncounterState>("EncounterState");
+        self.types
+            .register_component::<ResourceNode>("ResourceNode");
+        self.types
+            .register_component::<LootContainer>("LootContainer");
         self.types.register_contract::<Observation>("Observation");
         self.types.register_contract::<AgentAction>("AgentAction");
         self.types
