@@ -332,5 +332,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-render --lib`
   - `cargo check -p pod-render --target wasm32-unknown-unknown`
 
-**Last updated**: Iteration 43
+### Iteration 44 — Three.js WebGPU Transparent Sort-Depth Batching
+
+- [x] Updated `pod-render`'s Three.js/WebGPU bridge to avoid cross-depth transparent instancing by splitting transparent mesh and sprite batches on shared world-`z` sort depth.
+- [x] Added explicit batch ordering metadata (`sort_depth`, `render_order`) plus precise runtime hints (`sort_metric`, transparent instancing strategy) so Three.js consumers can map batches directly onto `renderOrder` without inferring engine semantics.
+- [x] Added deterministic tests covering transparent mesh and sprite depth splitting plus the emitted batch ordering metadata.
+- [x] Validated touched targets:
+  - `cargo test -p pod-render --lib`
+  - `cargo check -p pod-render --target wasm32-unknown-unknown`
+
+**Last updated**: Iteration 44
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

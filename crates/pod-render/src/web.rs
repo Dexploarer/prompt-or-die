@@ -8,6 +8,7 @@ use crate::camera::Camera;
 use crate::renderer::{DrawType, RenderItem, RenderState, RenderTransform3D};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// Serializable render command for lightweight JS renderers.
@@ -111,6 +112,8 @@ pub struct ThreeJsMeshBatch {
     pub material: String,
     pub layer: i32,
     pub phase: ThreeJsRenderPhase,
+    pub sort_depth: f32,
+    pub render_order: u32,
     pub transparent: bool,
     pub double_sided: bool,
     pub cast_shadows: bool,
@@ -133,6 +136,8 @@ pub struct ThreeJsSpriteBatch {
     pub layer: i32,
     pub billboard: bool,
     pub phase: ThreeJsRenderPhase,
+    pub sort_depth: f32,
+    pub render_order: u32,
     pub transparent: bool,
     pub depth_write: bool,
     pub depth_test: bool,
@@ -155,9 +160,11 @@ pub struct ThreeJsWebGpuHints {
     pub preferred_backend: String,
     pub fallback_backend: String,
     pub use_instancing: bool,
+    pub sort_metric: String,
     pub sort_opaque_front_to_back: bool,
     pub preserve_instance_order: bool,
     pub sort_transparent_back_to_front: bool,
+    pub transparent_instancing_strategy: String,
     pub opaque_depth_write: bool,
     pub transparent_depth_write: bool,
     pub max_pixel_ratio: f32,
@@ -180,6 +187,7 @@ struct MeshBatchKey {
     layer: i32,
     mesh: String,
     material: String,
+    sort_depth_bits: Option<u32>,
     tint_bits: [u32; 4],
     roughness_bits: u32,
     metallic_bits: u32,
@@ -196,6 +204,7 @@ struct SpriteBatchKey {
     texture: String,
     frame: u32,
     billboard: bool,
+    sort_depth_bits: Option<u32>,
     transparent: bool,
 }
 
@@ -292,6 +301,7 @@ impl WebRenderBridge {
                         layer: item.layer,
                         mesh: mesh.clone(),
                         material: material.clone(),
+                        sort_depth_bits: transparent.then_some(transform.position[2].to_bits()),
                         tint_bits: Self::float4_bits(*tint),
                         roughness_bits: roughness.to_bits(),
                         metallic_bits: metallic.to_bits(),
@@ -323,6 +333,7 @@ impl WebRenderBridge {
                         texture: texture.clone(),
                         frame: *frame,
                         billboard: *billboard,
+                        sort_depth_bits: transparent.then_some(transform.position[2].to_bits()),
                         transparent,
                     };
                     sprite_batches
@@ -337,17 +348,21 @@ impl WebRenderBridge {
             }
         }
 
-        ThreeJsWebGpuFrame {
-            camera: CameraState::from(camera),
-            background_color,
-            overlay_commands,
-            mesh_batches: mesh_batches
-                .into_iter()
-                .map(|(key, instances)| ThreeJsMeshBatch {
+        let mut mesh_batches = mesh_batches
+            .into_iter()
+            .map(|(key, instances)| {
+                let sort_depth = key
+                    .sort_depth_bits
+                    .map(f32::from_bits)
+                    .unwrap_or_else(|| Self::representative_sort_depth(&instances));
+
+                ThreeJsMeshBatch {
                     mesh: key.mesh,
                     material: key.material,
                     layer: key.layer,
                     phase: Self::phase_from_transparency(key.transparent),
+                    sort_depth,
+                    render_order: 0,
                     transparent: key.transparent,
                     double_sided: key.double_sided,
                     cast_shadows: key.cast_shadows,
@@ -359,30 +374,58 @@ impl WebRenderBridge {
                     depth_write: !key.transparent,
                     depth_test: true,
                     instances,
-                })
-                .collect(),
-            sprite_batches: sprite_batches
-                .into_iter()
-                .map(|(key, instances)| ThreeJsSpriteBatch {
+                }
+            })
+            .collect::<Vec<_>>();
+        Self::sort_mesh_batches(&mut mesh_batches);
+        for (render_order, batch) in mesh_batches.iter_mut().enumerate() {
+            batch.render_order = render_order as u32;
+        }
+
+        let mut sprite_batches = sprite_batches
+            .into_iter()
+            .map(|(key, instances)| {
+                let sort_depth = key
+                    .sort_depth_bits
+                    .map(f32::from_bits)
+                    .unwrap_or_else(|| Self::representative_sort_depth(&instances));
+
+                ThreeJsSpriteBatch {
                     texture: key.texture,
                     frame: key.frame,
                     layer: key.layer,
                     billboard: key.billboard,
                     phase: Self::phase_from_transparency(key.transparent),
+                    sort_depth,
+                    render_order: 0,
                     transparent: key.transparent,
                     depth_write: !key.transparent,
                     depth_test: true,
                     instances,
-                })
-                .collect(),
+                }
+            })
+            .collect::<Vec<_>>();
+        Self::sort_sprite_batches(&mut sprite_batches);
+        for (render_order, batch) in sprite_batches.iter_mut().enumerate() {
+            batch.render_order = render_order as u32;
+        }
+
+        ThreeJsWebGpuFrame {
+            camera: CameraState::from(camera),
+            background_color,
+            overlay_commands,
+            mesh_batches,
+            sprite_batches,
             hints: ThreeJsWebGpuHints {
                 renderer: "three/webgpu".to_string(),
                 preferred_backend: "webgpu".to_string(),
                 fallback_backend: "webgl2".to_string(),
                 use_instancing: true,
+                sort_metric: "world-z".to_string(),
                 sort_opaque_front_to_back: true,
                 preserve_instance_order: true,
                 sort_transparent_back_to_front: true,
+                transparent_instancing_strategy: "shared-sort-depth".to_string(),
                 opaque_depth_write: true,
                 transparent_depth_write: false,
                 max_pixel_ratio: 2.0,
@@ -609,6 +652,66 @@ impl WebRenderBridge {
 
     fn is_transparent(color: [f32; 4]) -> bool {
         color[3] < 0.999
+    }
+
+    fn representative_sort_depth(instances: &[ThreeJsInstance]) -> f32 {
+        if instances.is_empty() {
+            return 0.0;
+        }
+
+        let total = instances
+            .iter()
+            .map(|instance| instance.position[2])
+            .sum::<f32>();
+        total / instances.len() as f32
+    }
+
+    fn sort_mesh_batches(batches: &mut [ThreeJsMeshBatch]) {
+        batches.sort_by(|left, right| {
+            left.layer
+                .cmp(&right.layer)
+                .then_with(|| Self::phase_rank(left.phase).cmp(&Self::phase_rank(right.phase)))
+                .then_with(|| {
+                    Self::compare_sort_depth(left.phase, left.sort_depth, right.sort_depth)
+                })
+                .then_with(|| left.mesh.cmp(&right.mesh))
+                .then_with(|| left.material.cmp(&right.material))
+        });
+    }
+
+    fn sort_sprite_batches(batches: &mut [ThreeJsSpriteBatch]) {
+        batches.sort_by(|left, right| {
+            left.layer
+                .cmp(&right.layer)
+                .then_with(|| Self::phase_rank(left.phase).cmp(&Self::phase_rank(right.phase)))
+                .then_with(|| {
+                    Self::compare_sort_depth(left.phase, left.sort_depth, right.sort_depth)
+                })
+                .then_with(|| left.texture.cmp(&right.texture))
+                .then_with(|| left.frame.cmp(&right.frame))
+        });
+    }
+
+    fn phase_rank(phase: ThreeJsRenderPhase) -> u8 {
+        match phase {
+            ThreeJsRenderPhase::Opaque => 0,
+            ThreeJsRenderPhase::Transparent => 1,
+        }
+    }
+
+    fn compare_sort_depth(
+        phase: ThreeJsRenderPhase,
+        left_depth: f32,
+        right_depth: f32,
+    ) -> Ordering {
+        match phase {
+            ThreeJsRenderPhase::Opaque => left_depth
+                .partial_cmp(&right_depth)
+                .unwrap_or(Ordering::Equal),
+            ThreeJsRenderPhase::Transparent => right_depth
+                .partial_cmp(&left_depth)
+                .unwrap_or(Ordering::Equal),
+        }
     }
 
     fn float3_bits(values: [f32; 3]) -> [u32; 3] {
@@ -859,6 +962,8 @@ mod tests {
             .expect("tree batch should exist");
         assert_eq!(tree_batch.instances.len(), 2);
         assert_eq!(tree_batch.phase, ThreeJsRenderPhase::Opaque);
+        assert_eq!(tree_batch.sort_depth, 5.5);
+        assert_eq!(tree_batch.render_order, 0);
         assert!(!tree_batch.transparent);
         assert!(tree_batch.depth_write);
         assert_eq!(tree_batch.tint, [1.0, 1.0, 1.0, 1.0]);
@@ -870,13 +975,20 @@ mod tests {
             .find(|batch| batch.mesh == "rock")
             .expect("rock batch should exist");
         assert_eq!(rock_batch.phase, ThreeJsRenderPhase::Transparent);
+        assert_eq!(rock_batch.sort_depth, 2.0);
+        assert_eq!(rock_batch.render_order, 1);
         assert!(rock_batch.transparent);
         assert!(!rock_batch.depth_write);
         assert!(rock_batch.double_sided);
         assert_eq!(rock_batch.emissive, [0.1, 0.0, 0.0]);
         assert_eq!(frame.hints.renderer, "three/webgpu");
+        assert_eq!(frame.hints.sort_metric, "world-z");
         assert!(frame.hints.use_instancing);
         assert!(frame.hints.sort_transparent_back_to_front);
+        assert_eq!(
+            frame.hints.transparent_instancing_strategy,
+            "shared-sort-depth"
+        );
         assert!(!frame.hints.transparent_depth_write);
     }
 
@@ -958,6 +1070,7 @@ mod tests {
             })
             .expect("opaque frame-2 sprite batch should exist");
         assert_eq!(opaque_npc_batch.instances.len(), 1);
+        assert_eq!(opaque_npc_batch.sort_depth, 3.0);
         assert!(opaque_npc_batch.depth_write);
         assert_eq!(
             opaque_npc_batch.instances[0].color,
@@ -973,8 +1086,108 @@ mod tests {
             })
             .expect("transparent frame-2 sprite batch should exist");
         assert_eq!(transparent_npc_batch.instances.len(), 1);
+        assert_eq!(transparent_npc_batch.sort_depth, 6.0);
         assert!(!transparent_npc_batch.depth_write);
         assert_eq!(transparent_npc_batch.instances[0].source_entity, Some(502));
+    }
+
+    #[test]
+    fn threejs_webgpu_frame_splits_transparent_meshes_by_sort_depth() {
+        let mut state = RenderState::new();
+        for (source_entity, z) in [(601_u32, 9.0_f32), (602_u32, 3.0_f32)] {
+            state.add_item(RenderItem {
+                position: Vec2::ZERO,
+                rotation: 0.0,
+                scale: Vec2::ONE,
+                layer: 7,
+                draw_type: DrawType::Mesh3D {
+                    mesh: "glass_panel".to_string(),
+                    material: "glass".to_string(),
+                    tint: [0.6, 0.8, 1.0, 0.35],
+                    roughness: 0.05,
+                    metallic: 0.0,
+                    emissive: [0.0, 0.0, 0.0],
+                    double_sided: true,
+                    transform: RenderTransform3D {
+                        position: [0.0, 0.0, z],
+                        rotation: [0.0, 0.0, 0.0, 1.0],
+                        scale: [1.0, 1.0, 1.0],
+                    },
+                    cast_shadows: false,
+                    receive_shadows: true,
+                },
+                visible: true,
+                source_entity: Some(source_entity),
+            });
+        }
+
+        let frame = WebRenderBridge::to_threejs_webgpu_frame(
+            &state,
+            &default_camera(),
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        let glass_batches = frame
+            .mesh_batches
+            .iter()
+            .filter(|batch| batch.mesh == "glass_panel")
+            .collect::<Vec<_>>();
+
+        assert_eq!(glass_batches.len(), 2);
+        assert_eq!(glass_batches[0].phase, ThreeJsRenderPhase::Transparent);
+        assert_eq!(glass_batches[0].sort_depth, 9.0);
+        assert_eq!(glass_batches[0].render_order, 0);
+        assert_eq!(glass_batches[0].instances[0].source_entity, Some(601));
+        assert_eq!(glass_batches[1].sort_depth, 3.0);
+        assert_eq!(glass_batches[1].render_order, 1);
+        assert_eq!(glass_batches[1].instances[0].source_entity, Some(602));
+    }
+
+    #[test]
+    fn threejs_webgpu_frame_splits_transparent_sprites_by_sort_depth() {
+        let mut state = RenderState::new();
+        for (source_entity, z) in [(701_u32, 8.0_f32), (702_u32, 1.5_f32)] {
+            state.add_item(RenderItem {
+                position: Vec2::ZERO,
+                rotation: 0.0,
+                scale: Vec2::ONE,
+                layer: 8,
+                draw_type: DrawType::Sprite3D {
+                    texture: "fog.png".to_string(),
+                    frame: 0,
+                    tint: [1.0, 1.0, 1.0, 0.4],
+                    transform: RenderTransform3D {
+                        position: [0.0, 0.0, z],
+                        rotation: [0.0, 0.0, 0.0, 1.0],
+                        scale: [2.0, 2.0, 1.0],
+                    },
+                    billboard: true,
+                },
+                visible: true,
+                source_entity: Some(source_entity),
+            });
+        }
+
+        let frame = WebRenderBridge::to_threejs_webgpu_frame(
+            &state,
+            &default_camera(),
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        let fog_batches = frame
+            .sprite_batches
+            .iter()
+            .filter(|batch| batch.texture == "fog.png")
+            .collect::<Vec<_>>();
+
+        assert_eq!(fog_batches.len(), 2);
+        assert_eq!(fog_batches[0].phase, ThreeJsRenderPhase::Transparent);
+        assert_eq!(fog_batches[0].sort_depth, 8.0);
+        assert_eq!(fog_batches[0].render_order, 0);
+        assert_eq!(fog_batches[0].instances[0].source_entity, Some(701));
+        assert_eq!(fog_batches[1].sort_depth, 1.5);
+        assert_eq!(fog_batches[1].render_order, 1);
+        assert_eq!(fog_batches[1].instances[0].source_entity, Some(702));
     }
 
     #[test]
