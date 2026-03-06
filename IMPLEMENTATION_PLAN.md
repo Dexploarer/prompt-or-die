@@ -306,5 +306,13 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-assets`
   - `cargo test -p pod-editor --lib`
 
-**Last updated**: Iteration 40
+### Iteration 41 — Unity GUID Asset Resolution
+
+- [x] Extended the Unity importer to scan local `.meta` files and resolve sprite GUID references back to deterministic asset-relative texture paths during scene/prefab import.
+- [x] Preserved the previous `unity-guid:*` fallback when the importer cannot find a matching `.meta` asset mapping, so incomplete Unity exports still import instead of failing hard.
+- [x] Added deterministic tests covering resolved GUID-to-path imports, serialized prefab artifact output with resolved textures, and fallback behavior when metadata is missing.
+- [x] Validated touched crate:
+  - `cargo test -p pod-assets`
+
+**Last updated**: Iteration 41
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

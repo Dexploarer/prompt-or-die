@@ -49,6 +49,11 @@ fn parse_unity_scene_document(
     source_path: &Path,
 ) -> Result<Scene, AssetImportError> {
     let parsed = parse_unity_documents(document);
+    let guid_assets = collect_unity_guid_assets(
+        source_path
+            .parent()
+            .ok_or_else(|| unity_import_error(source_path, "unity source path has no parent"))?,
+    )?;
     let scene_name = source_path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -115,7 +120,12 @@ fn parse_unity_scene_document(
                 texture: sprite_renderer
                     .sprite_guid
                     .as_ref()
-                    .map(|guid| format!("unity-guid:{guid}"))
+                    .map(|guid| {
+                        guid_assets
+                            .get(guid)
+                            .cloned()
+                            .unwrap_or_else(|| format!("unity-guid:{guid}"))
+                    })
                     .unwrap_or_default(),
                 frame: 0,
                 layer: 0,
@@ -348,6 +358,51 @@ fn parse_unity_inline_f32_map(raw_value: &str) -> Option<HashMap<String, f32>> {
     Some(values)
 }
 
+fn collect_unity_guid_assets(root: &Path) -> Result<HashMap<String, String>, AssetImportError> {
+    let mut guid_assets = HashMap::new();
+    let mut pending = vec![root.to_path_buf()];
+
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).map_err(AssetImportError::from)? {
+            let entry = entry.map_err(AssetImportError::from)?;
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(AssetImportError::from)?;
+            if file_type.is_dir() {
+                pending.push(path);
+                continue;
+            }
+
+            if path.extension().and_then(|ext| ext.to_str()) != Some("meta") {
+                continue;
+            }
+
+            let Some(path_str) = path.to_str() else {
+                continue;
+            };
+            let asset_path = Path::new(path_str.trim_end_matches(".meta")).to_path_buf();
+            if !asset_path.exists() {
+                continue;
+            }
+
+            let document = fs::read_to_string(&path).map_err(AssetImportError::from)?;
+            let Some(guid) = document
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("guid: "))
+                .map(|guid| guid.trim().to_string())
+            else {
+                continue;
+            };
+
+            let relative_asset = asset_path
+                .strip_prefix(root)
+                .map_err(|_| unity_import_error(root, "unity asset escaped importer root"))?;
+            guid_assets.insert(guid, relative_asset.to_string_lossy().replace('\\', "/"));
+        }
+    }
+
+    Ok(guid_assets)
+}
+
 fn quaternion_to_2d_radians(rotation: [f32; 4]) -> f32 {
     2.0 * rotation[2].atan2(rotation[3])
 }
@@ -380,7 +435,13 @@ mod tests {
 
     #[test]
     fn import_unity_scene_preserves_hierarchy_and_native_components() {
-        let source = temp_file_path("sample_scene.unity");
+        let root = temp_file_path("sample_scene_root");
+        fs::create_dir_all(root.join("art")).unwrap();
+        fs::write(root.join("art/player.png"), b"player").unwrap();
+        fs::write(root.join("art/player.png.meta"), "guid: abc123\n").unwrap();
+        fs::write(root.join("art/billboard.png"), b"billboard").unwrap();
+        fs::write(root.join("art/billboard.png.meta"), "guid: def456\n").unwrap();
+        let source = root.join("sample_scene.unity");
         fs::write(
             &source,
             r#"%YAML 1.1
@@ -447,7 +508,7 @@ SpriteRenderer:
             .get_native_component::<Sprite>()
             .expect("sprite should deserialize")
             .expect("sprite should exist");
-        assert_eq!(player_sprite.texture, "unity-guid:abc123");
+        assert_eq!(player_sprite.texture, "art/player.png");
 
         let billboard_transform = billboard
             .get_native_component::<Transform3D>()
@@ -461,14 +522,18 @@ SpriteRenderer:
             .get_native_component::<Sprite>()
             .expect("sprite should deserialize")
             .expect("sprite should exist");
-        assert_eq!(billboard_sprite.texture, "unity-guid:def456");
+        assert_eq!(billboard_sprite.texture, "art/billboard.png");
         assert_eq!(scene.graph.get_parent(billboard.id), Some(player.id));
     }
 
     #[test]
     fn import_asset_writes_serialized_scene_artifact_for_unity_prefabs() {
         let mut cache = AssetCache::new();
-        let source = temp_file_path("enemy.prefab");
+        let root = temp_file_path("unity_prefab_root");
+        fs::create_dir_all(root.join("art")).unwrap();
+        fs::write(root.join("art/enemy.png"), b"enemy").unwrap();
+        fs::write(root.join("art/enemy.png.meta"), "guid: feedbeef\n").unwrap();
+        let source = root.join("enemy.prefab");
         let output_root = temp_file_path("import-root-unity");
         fs::write(
             &source,
@@ -503,11 +568,58 @@ SpriteRenderer:
             serde_json::from_slice(&fs::read(&import.imported_path).unwrap())
                 .expect("artifact should deserialize");
         assert!(imported_scene.metadata.name.ends_with("enemy"));
-        assert!(imported_scene
+        let enemy = imported_scene
             .entities
             .iter()
-            .any(|entity| entity.name == "Enemy"));
+            .find(|entity| entity.name == "Enemy")
+            .expect("enemy entity should exist");
+        let sprite = enemy
+            .get_native_component::<Sprite>()
+            .expect("sprite should deserialize")
+            .expect("sprite should exist");
+        assert_eq!(sprite.texture, "art/enemy.png");
         assert_eq!(cache.total(), 1);
         assert_eq!(normalize_asset_id(&source), import.id);
+    }
+
+    #[test]
+    fn import_unity_scene_falls_back_to_guid_texture_when_meta_is_missing() {
+        let root = temp_file_path("unity_missing_meta_root");
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("fallback.prefab");
+        fs::write(
+            &source,
+            r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1000
+GameObject:
+  m_Name: Fallback
+--- !u!4 &1001
+Transform:
+  m_GameObject: {fileID: 1000}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Father: {fileID: 0}
+--- !u!212 &1002
+SpriteRenderer:
+  m_GameObject: {fileID: 1000}
+  m_Sprite: {fileID: 21300000, guid: no_meta_guid, type: 3}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+"#,
+        )
+        .unwrap();
+
+        let scene = import_unity_scene(&source).expect("unity scene should import");
+        let entity = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Fallback")
+            .expect("fallback entity should exist");
+        let sprite = entity
+            .get_native_component::<Sprite>()
+            .expect("sprite should deserialize")
+            .expect("sprite should exist");
+        assert_eq!(sprite.texture, "unity-guid:no_meta_guid");
     }
 }
