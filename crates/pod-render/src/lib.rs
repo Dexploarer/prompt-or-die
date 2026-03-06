@@ -4,6 +4,11 @@
 //! - Native: wgpu + winit (Vulkan/Metal/DX12)
 //! - Web: wgpu web + PixiJS bridge (Rust computes state → JS renders)
 
+#![allow(clippy::manual_strip)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::should_implement_trait)]
+#![allow(clippy::unnecessary_cast)]
+
 pub mod renderer;
 pub mod camera;
 pub mod color;

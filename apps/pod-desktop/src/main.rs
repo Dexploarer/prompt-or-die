@@ -7,6 +7,8 @@
 //!
 //! No rendering yet — pure simulation, printed to stdout.
 
+#![allow(clippy::manual_is_multiple_of)]
+
 use glam::Vec2;
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentType};

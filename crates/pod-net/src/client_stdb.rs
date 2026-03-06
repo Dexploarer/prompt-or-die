@@ -50,13 +50,14 @@ use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
 
 use pod_stdb::client::{
-    CachedEntity, StdbClient, StdbClientConfig, StdbError, StdbEvent, SubmittedAction, Subscriptions,
+    CachedEntity, StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent,
+    SubmittedAction, Subscriptions,
 };
 use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
 };
 
-use crate::protocol::{ClientId, ServerMessage};
+use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
 
 // ============================================================
@@ -266,6 +267,10 @@ pub struct SpacetimeDBClientConfig {
     pub auth_token: Option<String>,
     /// Player display name
     pub player_name: String,
+    /// Runtime mode for the underlying StdbClient.
+    ///
+    /// `Generated` is production mode; `Emulated` is explicit local fallback.
+    pub connection_mode: StdbConnectionMode,
 }
 
 impl Default for SpacetimeDBClientConfig {
@@ -275,6 +280,7 @@ impl Default for SpacetimeDBClientConfig {
             db_name: "prompt-or-die".into(),
             auth_token: None,
             player_name: "Player".into(),
+            connection_mode: StdbConnectionMode::default(),
         }
     }
 }
@@ -286,6 +292,7 @@ impl From<SpacetimeDBClientConfig> for StdbClientConfig {
             db_name: cfg.db_name,
             auth_token: cfg.auth_token,
             player_name: cfg.player_name,
+            connection_mode: cfg.connection_mode,
         }
     }
 }
@@ -374,6 +381,7 @@ pub struct SpacetimeDBClient {
     inner: StdbClient,
     subscriptions: SpacetimeSubscriptionManager,
     client_id: Option<ClientId>,
+    reconnect_token: ReconnectToken,
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
     welcome_sent: bool,
@@ -387,6 +395,7 @@ impl SpacetimeDBClient {
             inner: StdbClient::new(config.into()),
             subscriptions: SpacetimeSubscriptionManager::new(),
             client_id: None,
+            reconnect_token: ReconnectToken::new(),
             pending_actions: Vec::new(),
             local_snapshot: None,
             welcome_sent: false,
@@ -496,6 +505,7 @@ impl SpacetimeDBClient {
                         if let Some(client_id) = self.client_id {
                             messages.push(ServerMessage::Welcome {
                                 client_id,
+                                reconnect_token: self.reconnect_token,
                                 tick,
                                 snapshot,
                             });
@@ -1207,6 +1217,10 @@ mod tests {
         assert_eq!(cfg.db_name, "prompt-or-die");
         assert!(cfg.auth_token.is_none());
         assert_eq!(cfg.player_name, "Player");
+        #[cfg(debug_assertions)]
+        assert!(matches!(cfg.connection_mode, StdbConnectionMode::Emulated));
+        #[cfg(not(debug_assertions))]
+        assert!(matches!(cfg.connection_mode, StdbConnectionMode::Generated));
     }
 
     #[test]
@@ -1216,12 +1230,14 @@ mod tests {
             db_name: "test-db".into(),
             auth_token: Some("tok123".into()),
             player_name: "Bot".into(),
+            connection_mode: StdbConnectionMode::Emulated,
         };
         let stdb: StdbClientConfig = cfg.into();
         assert_eq!(stdb.host, "http://example.com");
         assert_eq!(stdb.db_name, "test-db");
         assert_eq!(stdb.auth_token, Some("tok123".into()));
         assert_eq!(stdb.player_name, "Bot");
+        assert!(matches!(stdb.connection_mode, StdbConnectionMode::Emulated));
     }
 
     #[test]

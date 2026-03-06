@@ -92,6 +92,8 @@ pub struct StdbClientConfig {
     pub auth_token: Option<String>,
     /// Player display name for connect_agent reducer
     pub player_name: String,
+    /// Connection mode for the client runtime.
+    pub connection_mode: StdbConnectionMode,
 }
 
 impl Default for StdbClientConfig {
@@ -101,6 +103,34 @@ impl Default for StdbClientConfig {
             db_name: "prompt-or-die".into(),
             auth_token: None,
             player_name: "Player".into(),
+            connection_mode: StdbConnectionMode::default(),
+        }
+    }
+}
+
+/// Runtime connection mode for the SpacetimeDB client.
+///
+/// `Generated` is the production mode that requires generated bindings +
+/// `DbConnection` runtime wiring. `Emulated` keeps the local deterministic
+/// reducer/cache simulation path for offline development and tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdbConnectionMode {
+    /// Production path: generated bindings + real SpacetimeDB transport.
+    Generated,
+    /// Local fallback path: in-process emulation (no transport).
+    Emulated,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for StdbConnectionMode {
+    fn default() -> Self {
+        #[cfg(debug_assertions)]
+        {
+            Self::Emulated
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            Self::Generated
         }
     }
 }
@@ -725,8 +755,10 @@ impl StdbClient {
     /// # Generated Bindings Required
     ///
     /// Full implementation requires generated bindings from `spacetime generate`.
-    /// Without them, this transitions to `ConnectionState::Connecting` and
-    /// the connection will not actually establish.
+    /// Use [`StdbConnectionMode::Generated`] for that production path.
+    ///
+    /// Local emulation mode is available only when explicitly selected through
+    /// [`StdbConnectionMode::Emulated`].
     ///
     /// When bindings are available, this will use:
     /// ```rust,ignore
@@ -749,6 +781,15 @@ impl StdbClient {
                 return Err(StdbError::InvalidState("Connection already in progress".into()));
             }
             _ => {}
+        }
+
+        if matches!(self.config.connection_mode, StdbConnectionMode::Generated) {
+            self.state = ConnectionState::Error(
+                "generated SpacetimeDB bindings/runtime are not wired in this build".into(),
+            );
+            return Err(StdbError::ConnectionFailed(
+                "generated SpacetimeDB bindings/runtime are not wired in this build; use StdbConnectionMode::Emulated for local fallback".into(),
+            ));
         }
 
         self.state = ConnectionState::Connecting;
@@ -1696,7 +1737,10 @@ mod tests {
 
     #[test]
     fn test_connection_state_transitions() {
-        let mut client = StdbClient::new(StdbClientConfig::default());
+        let mut client = StdbClient::new(StdbClientConfig {
+            connection_mode: StdbConnectionMode::Emulated,
+            ..StdbClientConfig::default()
+        });
         assert!(matches!(client.connection_state(), ConnectionState::Disconnected));
 
         client.connect().unwrap();
@@ -1704,6 +1748,17 @@ mod tests {
 
         // Double connect should error
         assert!(client.connect().is_err());
+    }
+
+    #[test]
+    fn test_generated_mode_connect_requires_runtime() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            connection_mode: StdbConnectionMode::Generated,
+            ..StdbClientConfig::default()
+        });
+        let err = client.connect().expect_err("generated mode requires runtime wiring");
+        assert!(matches!(err, StdbError::ConnectionFailed(_)));
+        assert!(matches!(client.connection_state(), ConnectionState::Error(_)));
     }
 
     #[test]

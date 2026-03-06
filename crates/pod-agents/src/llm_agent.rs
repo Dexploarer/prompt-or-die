@@ -555,6 +555,7 @@ Follow the action format specified by the system instructions."#
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm_provider::{CompletionResponse, LlmError};
     use pod_core::observation::*;
     use glam::Vec2;
     use std::sync::Arc;

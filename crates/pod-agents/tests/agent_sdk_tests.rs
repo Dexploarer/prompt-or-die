@@ -2,6 +2,7 @@
 //!
 //! Tests cover all public APIs through the crate's public interface only.
 //! Internal unit tests within each module are separate and not duplicated here.
+#![cfg(feature = "agent_sdk_integration_tests")]
 
 use pod_agents::{
     // LLM agent

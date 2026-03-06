@@ -17,6 +17,19 @@ pub struct SaveData {
     pub scene_name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SaveDataBinary {
+    id: Uuid,
+    name: String,
+    description: String,
+    timestamp: String,
+    version: u32,
+    playtime_seconds: u64,
+    metadata: HashMap<String, String>,
+    world_state_json: String,
+    scene_name: String,
+}
+
 impl SaveData {
     pub fn new(name: impl Into<String>, scene_name: impl Into<String>) -> Self {
         Self {
@@ -68,12 +81,36 @@ impl SaveData {
 
     /// Serialize to binary
     pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+        let binary = SaveDataBinary {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            timestamp: self.timestamp.clone(),
+            version: self.version,
+            playtime_seconds: self.playtime_seconds,
+            metadata: self.metadata.clone(),
+            world_state_json: self.world_state.to_string(),
+            scene_name: self.scene_name.clone(),
+        };
+        bincode::serialize(&binary)
     }
 
     /// Deserialize from binary
     pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(data)
+        let binary: SaveDataBinary = bincode::deserialize(data)?;
+        let world_state = serde_json::from_str(&binary.world_state_json)
+            .map_err(|err| Box::new(bincode::ErrorKind::Custom(err.to_string())))?;
+        Ok(Self {
+            id: binary.id,
+            name: binary.name,
+            description: binary.description,
+            timestamp: binary.timestamp,
+            version: binary.version,
+            playtime_seconds: binary.playtime_seconds,
+            metadata: binary.metadata,
+            world_state,
+            scene_name: binary.scene_name,
+        })
     }
 
     fn get_timestamp() -> String {

@@ -12,9 +12,9 @@
 //!
 //! ## Feature Flags
 //!
-//! - **`module`** (default): Enables the SpacetimeDB WASM module code — tables,
+//! - **`module`**: Enables the SpacetimeDB WASM module code — tables,
 //!   reducers, events, observation. This links against WASM host imports and
-//!   cannot be used in native test binaries. Module tests use `spacetime test`.
+//!   is intended for wasm32 module builds. Module tests use `spacetime test`.
 //!
 //! - **`client`**: Enables the native Rust client wrapper for connecting to a
 //!   running SpacetimeDB instance. Depends only on `types` (no WASM imports)
@@ -25,11 +25,11 @@
 //! ## Building & Testing
 //!
 //! ```bash
-//! # Normal build (includes WASM module code):
+//! # Native default build (client wrapper only):
 //! cargo check -p pod-stdb
 //!
-//! # Client-only build (no WASM symbols):
-//! cargo check -p pod-stdb --no-default-features --features client
+//! # WASM module build:
+//! cargo check -p pod-stdb --no-default-features --features module
 //!
 //! # Run client tests (no WASM symbols):
 //! cargo test -p pod-stdb --no-default-features --features client
@@ -60,13 +60,13 @@ pub mod types;
 //
 // To build/test without WASM symbols: --no-default-features --features client
 
-#[cfg(feature = "module")]
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod tables;
-#[cfg(feature = "module")]
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod reducers;
-#[cfg(feature = "module")]
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod events;
-#[cfg(feature = "module")]
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod observation;
 
 // ============================================================

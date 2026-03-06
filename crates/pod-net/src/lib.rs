@@ -45,6 +45,8 @@
 //! };
 //! ```
 
+#![allow(clippy::unnecessary_lazy_evaluations)]
+
 pub mod protocol;
 pub mod snapshot;
 
@@ -61,7 +63,7 @@ pub mod client_web;
 pub mod client_stdb;
 
 // Re-export common types
-pub use protocol::{ClientConfig, ClientId, ClientMessage, ServerConfig, ServerMessage};
+pub use protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage};
 pub use snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,6 +77,20 @@ pub use client_web::{ClientError, WebClient};
 
 #[cfg(feature = "spacetimedb")]
 pub use client_stdb::{SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError};
+
+/// Default web runtime client type.
+///
+/// On web builds with the `spacetimedb` feature enabled, this resolves to
+/// `SpacetimeDBClient`; otherwise it falls back to `WebClient`.
+#[cfg(all(target_arch = "wasm32", feature = "spacetimedb"))]
+pub type WebDefaultClient = SpacetimeDBClient;
+#[cfg(all(target_arch = "wasm32", feature = "spacetimedb"))]
+pub type WebDefaultClientConfig = SpacetimeDBClientConfig;
+
+#[cfg(all(target_arch = "wasm32", not(feature = "spacetimedb")))]
+pub type WebDefaultClient = WebClient;
+#[cfg(all(target_arch = "wasm32", not(feature = "spacetimedb")))]
+pub type WebDefaultClientConfig = ClientConfig;
 
 pub fn init() {
     log::info!("{} initialized", env!("CARGO_PKG_NAME"));

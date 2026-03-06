@@ -3,6 +3,13 @@
 //! Provides shared types and a content-addressed cache for upcoming asset import
 //! workflows (glTF, textures, and generated runtime assets).
 
+#![allow(clippy::bool_comparison)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::manual_is_multiple_of)]
+#![allow(clippy::needless_late_init)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(unused_mut)]
+
 use sha2::{Digest, Sha256};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};

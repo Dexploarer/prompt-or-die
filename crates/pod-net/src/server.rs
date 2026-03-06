@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, RwLock};
 use pod_core::{Action, IdleAgent, World};
 
 use crate::protocol::{
-    ClientId, ClientMessage, ServerConfig as ProtoServerConfig, ServerMessage,
+    ClientId, ClientMessage, ReconnectToken, ServerConfig as ProtoServerConfig, ServerMessage,
 };
 use crate::snapshot::{StateDelta, WorldSnapshot};
 
@@ -29,6 +29,8 @@ struct ClientSession {
     player_name: Option<String>,
     agent_id: Option<pod_core::AgentId>,
     pending_actions: Vec<(u64, Action)>, // (tick, action)
+    reconnect_token: ReconnectToken,
+    last_action_tick: Option<u64>,
 }
 
 impl ClientSession {
@@ -38,6 +40,8 @@ impl ClientSession {
             player_name: Some(player_name),
             agent_id: None,
             pending_actions: Vec::new(),
+            reconnect_token: ReconnectToken::new(),
+            last_action_tick: None,
         }
     }
 }
@@ -313,26 +317,46 @@ impl GameServer {
             match packet {
                 InboundPacket::Message { client_id, message } => {
                     match message {
-                        ClientMessage::Connect { player_name } => {
-                            self.attach_remote_agent(client_id, player_name).await?;
+                        ClientMessage::Connect {
+                            player_name,
+                            reconnect_token,
+                        } => {
+                            self.attach_remote_agent(client_id, player_name, reconnect_token)
+                                .await?;
                         }
                         ClientMessage::ActionBatch { tick, actions } => {
                             let mut overflow = false;
                             let mut unregistered = false;
+                            let mut stale_tick = false;
+                            let mut out_of_window = false;
+                            let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
+                            let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
                             {
                                 let mut clients = self.clients.write().await;
                                 if let Some(session) = clients.get_mut(&client_id) {
                                     if session.agent_id.is_none() {
                                         unregistered = true;
                                     }
-                                    let available = ACTION_QUEUE_MAX_DEPTH
-                                        .saturating_sub(session.pending_actions.len());
-                                    if actions.len() > available {
-                                        overflow = true;
-                                    }
+
                                     if !unregistered {
-                                        for action in actions.into_iter().take(available) {
-                                            session.pending_actions.push((tick, action));
+                                        if tick < min_tick || tick > max_tick {
+                                            out_of_window = true;
+                                        } else if session
+                                            .last_action_tick
+                                            .map(|last| tick < last)
+                                            .unwrap_or(false)
+                                        {
+                                            stale_tick = true;
+                                        } else {
+                                            let available = ACTION_QUEUE_MAX_DEPTH
+                                                .saturating_sub(session.pending_actions.len());
+                                            if actions.len() > available {
+                                                overflow = true;
+                                            }
+                                            for action in actions.into_iter().take(available) {
+                                                session.pending_actions.push((tick, action));
+                                            }
+                                            session.last_action_tick = Some(tick);
                                         }
                                     }
                                 }
@@ -342,6 +366,30 @@ impl GameServer {
                                     client_id,
                                     ServerMessage::Rejected {
                                         reason: "client must send Connect before action batches".into(),
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            if out_of_window {
+                                self.send_to_client(
+                                    client_id,
+                                    ServerMessage::Rejected {
+                                        reason: format!(
+                                            "action batch tick out of window: tick={tick} accepted=[{min_tick}..={max_tick}]"
+                                        ),
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            if stale_tick {
+                                self.send_to_client(
+                                    client_id,
+                                    ServerMessage::Rejected {
+                                        reason: format!(
+                                            "stale action batch tick={tick}; requires non-decreasing submission order"
+                                        ),
                                     },
                                 )
                                 .await;
@@ -475,7 +523,57 @@ impl GameServer {
         &mut self,
         client_id: ClientId,
         player_name: String,
+        reconnect_token: Option<ReconnectToken>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(token) = reconnect_token {
+            let previous_client_id = {
+                let mut clients = self.clients.write().await;
+
+                let previous_client_id = clients.iter().find_map(|(id, session)| {
+                    if *id != client_id && session.reconnect_token == token {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                });
+
+                let previous_session = previous_client_id.and_then(|id| clients.remove(&id));
+
+                if let Some(session) = clients.get_mut(&client_id) {
+                    session.reconnect_token = token;
+                    if let Some(prev) = previous_session {
+                        session.player_name = prev.player_name;
+                        session.agent_id = prev.agent_id;
+                        session.last_action_tick = prev.last_action_tick;
+                        session.pending_actions.clear();
+                    } else if session.player_name.is_none() {
+                        session.player_name = Some(player_name.clone());
+                    }
+                }
+
+                previous_client_id
+            };
+
+            if let Some(previous_client_id) = previous_client_id {
+                self.client_tx.write().await.remove(&previous_client_id);
+                info!(
+                    "Client {} resumed prior session {}",
+                    client_id.0, previous_client_id.0
+                );
+            }
+        }
+
+        let reconnect_token = {
+            let clients = self.clients.read().await;
+            let session = clients.get(&client_id).ok_or_else(|| {
+                Box::new(ServerError::ClientError(format!(
+                    "missing session for client {}",
+                    client_id.0
+                ))) as Box<dyn std::error::Error>
+            })?;
+            session.reconnect_token
+        };
+
         let already_attached = self
             .clients
             .read()
@@ -490,6 +588,7 @@ impl GameServer {
                 client_id,
                 ServerMessage::Welcome {
                     client_id,
+                    reconnect_token,
                     tick: self.tick,
                     snapshot,
                 },
@@ -509,6 +608,7 @@ impl GameServer {
             if let Some(session) = clients.get_mut(&client_id) {
                 session.player_name = Some(player_name);
                 session.agent_id = Some(agent_id);
+                session.last_action_tick = None;
             }
         }
 
@@ -517,6 +617,7 @@ impl GameServer {
             client_id,
             ServerMessage::Welcome {
                 client_id,
+                reconnect_token,
                 tick: self.tick,
                 snapshot,
             },

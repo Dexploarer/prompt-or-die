@@ -121,8 +121,12 @@ impl StateStack {
     }
 
     /// Get a mutable reference to the current state
-    pub fn current_mut(&mut self) -> Option<&mut dyn GameState> {
-        self.states.last_mut().map(|s| s.as_mut())
+    pub fn current_mut(&mut self) -> Option<&mut (dyn GameState + '_)> {
+        if let Some(state) = self.states.last_mut() {
+            Some(state.as_mut())
+        } else {
+            None
+        }
     }
 
     /// Get the depth of the stack

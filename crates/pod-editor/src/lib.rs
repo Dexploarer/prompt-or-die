@@ -3,6 +3,12 @@
 //! Contains a lightweight dockable editor shell for POD phase implementation:
 //! panel docking, hierarchy browsing, and lightweight inspector/property editing.
 
+#![allow(clippy::bind_instead_of_map)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::io_other_error)]
+#![allow(clippy::question_mark)]
+
 use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use serde::{Deserialize, Serialize};

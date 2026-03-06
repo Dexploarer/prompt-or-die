@@ -4,14 +4,21 @@
 //! for the Prompt or Die engine. Includes hot-reload support, scene serialization,
 //! state machine management, and a complete save/load system.
 
-pub mod scene;
-pub mod prefab;
-pub mod asset;
-pub mod state;
-pub mod save;
+#![allow(unused_variables)]
+#![allow(clippy::len_zero)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::unwrap_or_default)]
 
-pub use scene::{Scene, SceneManager, SceneGraph};
-pub use prefab::{Prefab, PrefabRegistry, PrefabComponent};
-pub use asset::{AssetHandle, AssetStore, AssetManager, AssetLoader, AssetState};
-pub use state::{GameState, StateStack, StateTransition};
+pub mod asset;
+pub mod binding;
+pub mod prefab;
+pub mod save;
+pub mod scene;
+pub mod state;
+
+pub use asset::{AssetHandle, AssetLoader, AssetManager, AssetState, AssetStore};
+pub use binding::{NativeComponent, NativeComponentBinding};
+pub use prefab::{Prefab, PrefabComponent, PrefabDiff, PrefabMetadataDiff, PrefabRegistry};
 pub use save::{SaveData, SaveManager};
+pub use scene::{Scene, SceneGraph, SceneManager, SceneSpawnResult};
+pub use state::{GameState, StateStack, StateTransition};

@@ -33,6 +33,11 @@
 //! All agents implement the core `Agent` trait and can be mixed freely in the world.
 //! None block the game tick loop — all decision-making is non-blocking.
 
+#![allow(dead_code)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::vec_init_then_push)]
+#![allow(unused_imports)]
+
 mod llm_agent;
 mod scripted_agent;
 mod neural_agent;

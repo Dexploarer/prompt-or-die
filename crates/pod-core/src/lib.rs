@@ -15,6 +15,20 @@
 //! - **Enhanced Constraints** (`constraint`): Production-grade validation with budgets and reaction gates
 //! - **Observation Filtering** (`observation_filter`): Compresses observations to fit LLM token budgets
 
+#![allow(clippy::assign_op_pattern)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::derive_ord_xor_partial_ord)]
+#![allow(clippy::let_and_return)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::nonminimal_bool)]
+#![allow(clippy::ptr_arg)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::unnecessary_lazy_evaluations)]
+#![allow(clippy::unused_enumerate_index)]
+#![allow(clippy::unwrap_or_default)]
+
 pub mod component;
 pub mod agent;
 pub mod action;

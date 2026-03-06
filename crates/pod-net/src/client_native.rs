@@ -13,7 +13,9 @@ use tokio::sync::mpsc;
 
 use pod_core::Action;
 
-use crate::protocol::{ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ServerMessage};
+use crate::protocol::{
+    ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage,
+};
 use crate::snapshot::WorldSnapshot;
 
 // ============================================================
@@ -39,6 +41,10 @@ pub struct NativeClient {
     pending_actions: Vec<Action>,
     /// Highest server tick applied locally.
     last_server_tick: u64,
+    /// Highest event tick accepted from server.
+    last_event_tick: u64,
+    /// Reconnect token issued by server on first successful connect.
+    reconnect_token: Option<ReconnectToken>,
 }
 
 impl NativeClient {
@@ -114,6 +120,8 @@ impl NativeClient {
             local_snapshot: None,
             pending_actions: Vec::new(),
             last_server_tick: 0,
+            last_event_tick: 0,
+            reconnect_token: None,
         };
 
         // Send connect message
@@ -127,6 +135,7 @@ impl NativeClient {
     async fn send_connect(&mut self) -> Result<(), ClientError> {
         let msg = ClientMessage::Connect {
             player_name: self.config.player_name.clone(),
+            reconnect_token: self.reconnect_token,
         };
 
         self.send_message(msg).await?;
@@ -141,11 +150,13 @@ impl NativeClient {
         .and_then(|msg| {
             if let ServerMessage::Welcome {
                 client_id,
+                reconnect_token,
                 snapshot,
                 ..
             } = msg {
                 self.client_id = Some(client_id);
                 self.local_snapshot = Some(snapshot);
+                self.reconnect_token = Some(reconnect_token);
                 debug!("Received welcome from server, client_id: {}", client_id.0);
                 Ok(())
             } else if let ServerMessage::Rejected { reason } = msg {
@@ -285,17 +296,24 @@ impl NativeClient {
         match message {
             ServerMessage::Welcome {
                 client_id,
+                reconnect_token,
                 tick,
                 snapshot,
             } => {
                 self.client_id = Some(*client_id);
                 self.local_snapshot = Some(snapshot.clone());
                 self.last_server_tick = *tick;
+                self.last_event_tick = *tick;
+                self.reconnect_token = Some(*reconnect_token);
                 true
             }
             ServerMessage::StateDelta { tick, delta } => {
                 if *tick < self.last_server_tick {
                     return false;
+                }
+
+                if self.last_server_tick > 0 && *tick > self.last_server_tick + 1 {
+                    self.local_snapshot = None;
                 }
 
                 self.local_snapshot = Some(match self.local_snapshot.take() {
@@ -308,7 +326,14 @@ impl NativeClient {
                 self.last_server_tick = *tick;
                 true
             }
-            ServerMessage::Pong { .. } | ServerMessage::EventBatch { .. } => true,
+            ServerMessage::EventBatch { tick, .. } => {
+                if *tick < self.last_event_tick {
+                    return false;
+                }
+                self.last_event_tick = *tick;
+                true
+            }
+            ServerMessage::Pong { .. } => true,
             ServerMessage::Rejected { reason } => {
                 error!("Server rejected request: {}", reason);
                 true

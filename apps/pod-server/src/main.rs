@@ -10,6 +10,9 @@
 //! Server is platform-agnostic and knows nothing about rendering,
 //! only about game logic and network I/O.
 
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::wildcard_in_or_patterns)]
+
 use log::{error, info, warn};
 use pod_core::{IdleAgent, World};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,7 +67,7 @@ mod config {
             let map_name = std::env::var("POD_MAP_NAME")
                 .unwrap_or_else(|_| "default".to_string());
             let runtime_mode = std::env::var("POD_RUNTIME_MODE")
-                .unwrap_or_else(|_| "local".to_string());
+                .unwrap_or_else(|_| "network".to_string());
 
             ServerConfig {
                 bind_address,

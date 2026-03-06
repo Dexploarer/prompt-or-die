@@ -3,14 +3,14 @@
 //! This crate provides a 2D physics simulation using Rapier2D with deterministic behavior.
 //! It syncs between the hecs ECS world and Rapier's physics pipeline.
 
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::for_kv_map)]
+
 use glam::Vec2;
 use hecs::World;
 use log::{debug, warn};
-use nalgebra::Vector2;
 use rapier2d::dynamics::{IntegrationParameters, IslandManager, RigidBodyHandle, RigidBodySet};
-use rapier2d::geometry::{
-    Ball, BroadPhase, Capsule, ColliderHandle, ColliderSet, Cuboid, NarrowPhase, SharedShape,
-};
+use rapier2d::geometry::{ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase};
 use rapier2d::pipeline::PhysicsPipeline;
 use rapier2d::prelude::*;
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ pub struct PhysicsWorld {
     /// Island manager for sleeping/waking bodies
     island_manager: IslandManager,
     /// Broad phase collision detection
-    broad_phase: BroadPhase,
+    broad_phase: DefaultBroadPhase,
     /// Narrow phase collision detection and contact resolution
     narrow_phase: NarrowPhase,
     /// Impulse-based joint constraints
@@ -90,7 +90,7 @@ impl PhysicsWorld {
             integration_params: params,
             pipeline: PhysicsPipeline::new(),
             island_manager: IslandManager::new(),
-            broad_phase: BroadPhase::new(),
+            broad_phase: DefaultBroadPhase::new(),
             narrow_phase: NarrowPhase::new(),
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
@@ -124,7 +124,7 @@ impl PhysicsWorld {
             .query::<(&Transform, &RigidBody, &Collider)>()
             .iter()
         {
-            let entity_id = EntityId(entity_id_raw.id());
+            let entity_id = EntityId(entity_id_raw.id().into());
             to_sync.push((entity_id, *transform, *rigid_body, *collider));
         }
 
@@ -149,9 +149,9 @@ impl PhysicsWorld {
         collider: Collider,
     ) -> Result<(), String> {
         // Check if this entity already has physics
-        if let Some(handle) = self.entity_handles.get(&entity_id) {
+        if let Some(handle) = self.entity_handles.get(&entity_id).copied() {
             // Update existing body
-            self.update_body(handle, transform, rigid_body, collider)?;
+            self.update_body(&handle, transform, rigid_body, collider)?;
         } else {
             // Create new body
             self.create_body(hecs_world, entity_id, transform, rigid_body, collider)?;
@@ -177,12 +177,10 @@ impl PhysicsWorld {
         };
 
         let mut rb = RigidBodyBuilder::new(body_type)
-            .position(Isometry2::new(
-                vector![transform.position.x, transform.position.y],
-                transform.rotation,
-            ))
-            .linear_velocity(vector![0.0, 0.0])
-            .angular_velocity(0.0)
+            .translation(vector![transform.position.x, transform.position.y])
+            .rotation(transform.rotation)
+            .linvel(vector![0.0, 0.0])
+            .angvel(0.0)
             .linear_damping(0.0)
             .angular_damping(0.0);
 
@@ -194,19 +192,17 @@ impl PhysicsWorld {
         let body_handle = self.bodies.insert(rb.build());
 
         // Create Collider
-        let collider_shape: SharedShape = match collider.shape {
-            ColliderShape::Circle { radius } => Ball::new(radius).into(),
+        let mut col = match collider.shape {
+            ColliderShape::Circle { radius } => ColliderBuilder::ball(radius),
             ColliderShape::Box {
                 half_width,
                 half_height,
-            } => Cuboid::new(Vector2::new(half_width, half_height)).into(),
+            } => ColliderBuilder::cuboid(half_width, half_height),
             ColliderShape::Capsule {
                 half_height,
                 radius,
-            } => Capsule::new(Vector2::new(0.0, half_height), radius).into(),
-        };
-
-        let mut col = ColliderBuilder::new(collider_shape)
+            } => ColliderBuilder::capsule_y(half_height, radius),
+        }
             .friction(rigid_body.friction)
             .restitution(rigid_body.restitution)
             .sensor(collider.is_trigger)
@@ -245,15 +241,16 @@ impl PhysicsWorld {
     ) -> Result<(), String> {
         // Update body position and rotation
         if let Some(body) = self.bodies.get_mut(handle.body_handle) {
-            let new_position = Isometry2::new(
-                vector![transform.position.x, transform.position.y],
-                transform.rotation,
-            );
-
             // Only update position if it's kinematic or static (dynamic bodies are moved by physics)
             if matches!(body.body_type(), RigidBodyType::Fixed | RigidBodyType::KinematicPositionBased)
             {
-                *body.position_mut() = new_position;
+                body.set_position(
+                    Isometry::new(
+                        vector![transform.position.x, transform.position.y],
+                        transform.rotation,
+                    ),
+                    true,
+                );
             }
         }
 
@@ -293,7 +290,7 @@ impl PhysicsWorld {
             &mut self.impulse_joints,
             &mut self.multibody_joints,
             &mut self.ccd_solver,
-            &mut self.query_pipeline,
+            Some(&mut self.query_pipeline),
             &(),
             &(),
         );
@@ -314,52 +311,26 @@ impl PhysicsWorld {
 
     /// Syncs Rapier body states back to the hecs world
     /// Updates Transform and Velocity components from Rapier bodies
-    /// Note: This requires iterating through all bodies, as we need to reconstruct hecs::Entity
-    /// from EntityId. In the future, consider storing hecs::Entity directly.
     pub fn sync_from_rapier(&self, hecs_world: &mut World) -> Result<(), String> {
-        // Collect all entities that need updating
-        let mut updates = Vec::new();
-
-        for (entity_id, handle) in &self.entity_handles {
-            if let Some(body) = self.bodies.get(handle.body_handle) {
-                let position = body.position().translation.vector;
-                let rotation = body.position().rotation.angle();
-                let linear_vel = body.linvel();
-                let angular_vel = body.angvel();
-
-                let transform = Transform {
-                    position: Vec2::new(position.x, position.y),
-                    rotation,
-                    scale: Vec2::ONE,
-                };
-
-                let velocity = Velocity {
-                    linear: Vec2::new(linear_vel.x, linear_vel.y),
-                    angular: angular_vel,
-                };
-
-                updates.push((*entity_id, transform, velocity));
-            }
-        }
-
-        // Apply updates by querying for matching entities in hecs
-        for (target_entity_id, transform, velocity) in updates {
-            // Find the hecs entity with matching ID
-            let Some(hecs_entity) = hecs_world.find_entity_from_id(target_entity_id.0) else {
+        let mut query = hecs_world.query::<(&mut Transform, &mut Velocity)>();
+        for (entity, (transform, velocity)) in &mut query {
+            let entity_id = EntityId(entity.id().into());
+            let Some(handle) = self.entity_handles.get(&entity_id) else {
+                continue;
+            };
+            let Some(body) = self.bodies.get(handle.body_handle) else {
                 continue;
             };
 
-            if let Ok(mut existing_transform) = hecs_world.get_mut::<Transform>(hecs_entity) {
-                *existing_transform = transform;
-            } else {
-                let _ = hecs_world.insert_one(hecs_entity, transform);
-            }
+            let position = body.position().translation.vector;
+            let rotation = body.position().rotation.angle();
+            let linear_vel = body.linvel();
+            let angular_vel = body.angvel();
 
-            if let Ok(mut existing_velocity) = hecs_world.get_mut::<Velocity>(hecs_entity) {
-                *existing_velocity = velocity;
-            } else {
-                let _ = hecs_world.insert_one(hecs_entity, velocity);
-            }
+            transform.position = Vec2::new(position.x, position.y);
+            transform.rotation = rotation;
+            velocity.linear = Vec2::new(linear_vel.x, linear_vel.y);
+            velocity.angular = angular_vel;
         }
 
         Ok(())
@@ -374,21 +345,32 @@ impl PhysicsWorld {
 
             if let (Some(a), Some(b)) = (entity_a, entity_b) {
                 if contact_pair.has_any_active_contact {
-                    // Get collision point and normal from the first manifold
-                    let mut collision_point = Vec2::ZERO;
-                    let mut collision_normal = Vec2::new(0.0, 1.0);
+                    // Approximate contact point/normal from body centers.
+                    let body_a = self
+                        .colliders
+                        .get(contact_pair.collider1)
+                        .and_then(|c| c.parent())
+                        .and_then(|h| self.bodies.get(h));
+                    let body_b = self
+                        .colliders
+                        .get(contact_pair.collider2)
+                        .and_then(|c| c.parent())
+                        .and_then(|h| self.bodies.get(h));
 
-                    // Iterate through manifolds for this contact pair
-                    for manifold in &contact_pair.manifolds {
-                        if let Some(&contact_point) = manifold.contact_points().first() {
-                            collision_point = Vec2::new(
-                                contact_point.point.x,
-                                contact_point.point.y,
-                            );
-                            collision_normal = Vec2::new(manifold.normal().x, manifold.normal().y);
-                            break; // Use first manifold with contact points
-                        }
-                    }
+                    let (collision_point, collision_normal) = if let (Some(a), Some(b)) = (body_a, body_b) {
+                        let a_pos = a.translation();
+                        let b_pos = b.translation();
+                        let point = Vec2::new((a_pos.x + b_pos.x) * 0.5, (a_pos.y + b_pos.y) * 0.5);
+                        let delta = Vec2::new(b_pos.x - a_pos.x, b_pos.y - a_pos.y);
+                        let normal = if delta.length_squared() > 1e-6 {
+                            delta.normalize()
+                        } else {
+                            Vec2::Y
+                        };
+                        (point, normal)
+                    } else {
+                        (Vec2::ZERO, Vec2::Y)
+                    };
 
                     // Check if either collider is a trigger
                     let is_a_trigger = self.colliders
@@ -569,12 +551,7 @@ impl PhysicsWorld {
     fn get_entity_id_from_collider(&self, collider_handle: ColliderHandle) -> Option<EntityId> {
         if let Some(collider) = self.colliders.get(collider_handle) {
             if let Some(body_handle) = collider.parent() {
-                // Find the entity ID that maps to this body
-                for (entity_id, handle) in &self.entity_handles {
-                    if handle.body_handle == body_handle {
-                        return Some(*entity_id);
-                    }
-                }
+                return self.body_handle_to_entity.get(&body_handle).copied();
             }
         }
         None

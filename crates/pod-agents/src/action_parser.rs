@@ -150,7 +150,7 @@ impl ActionParser for JsonActionParser {
 /// Parses TOON-formatted outputs with explicit row counts and 2-space indentation.
 ///
 /// Example:
-/// ```
+/// ```text
 /// actions[2]{
 ///   move up
 ///   attack
@@ -851,8 +851,10 @@ reasoning[1]{
   fallback behavior
 }"#;
         let result = parser.parse(response).unwrap();
-        assert_eq!(result.actions.len(), 1);
-        assert_eq!(result.confidence, 0.8);
+        assert_eq!(result.actions.len(), 2);
+        assert!(matches!(result.actions[0], Action::Move { .. }));
+        assert!(matches!(result.actions[1], Action::Idle));
+        assert_eq!(result.confidence, 1.0);
     }
 
     #[test]

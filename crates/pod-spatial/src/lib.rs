@@ -9,6 +9,8 @@
 //! - **GridPathfinder**: Simple grid-based A* pathfinding
 //! - **RayCast**: 2D raycasting against spatial index
 
+#![allow(clippy::unwrap_or_default)]
+
 use glam::Vec2;
 use log::{debug, warn};
 use std::collections::{HashMap, HashSet};
