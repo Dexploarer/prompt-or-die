@@ -216,5 +216,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-scene`
   - `cargo test -p pod-scene --lib`
 
-**Last updated**: Iteration 31
+### Iteration 32 — Scene Entity Reference Binding Pass
+
+- [x] Added authored entity reference bindings to `pod-scene` scene entities with stable selectors by scene entity UUID or unique scene entity name.
+- [x] Resolved entity references during scene instantiation against the pre-spawned scene entity map, so native components can bind deterministic runtime entity ids for fields like `FollowCameraController.target` and `Parent3D.parent`.
+- [x] Reused the prefab JSON path assignment logic as shared component-path mutation infrastructure for both prefab property overrides and scene entity reference application.
+- [x] Added deterministic tests covering direct-id entity references, prefab-backed named references, missing-target rejection, and ambiguous-name rejection.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+**Last updated**: Iteration 32
 **Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog
