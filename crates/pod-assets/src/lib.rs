@@ -24,6 +24,10 @@ use std::time::SystemTime;
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
+mod unity_import;
+
+pub use unity_import::import_unity_scene;
+
 /// Canonical asset identifier.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct AssetId(pub String);
@@ -91,6 +95,7 @@ pub enum AssetFormat {
     Jpeg,
     GodotScene,
     TiledMap,
+    UnityScene,
 }
 
 impl fmt::Display for AssetFormat {
@@ -102,6 +107,7 @@ impl fmt::Display for AssetFormat {
             Self::Jpeg => write!(f, "jpeg"),
             Self::GodotScene => write!(f, "godot_scene"),
             Self::TiledMap => write!(f, "tiled_map"),
+            Self::UnityScene => write!(f, "unity_scene"),
         }
     }
 }
@@ -116,6 +122,7 @@ impl AssetFormat {
             "jpg" | "jpeg" => Some(Self::Jpeg),
             "tscn" => Some(Self::GodotScene),
             "tmj" => Some(Self::TiledMap),
+            "unity" | "prefab" => Some(Self::UnityScene),
             _ => None,
         }
     }
@@ -128,6 +135,7 @@ impl AssetFormat {
             Self::Jpeg => "jpeg",
             Self::GodotScene => "scene.json",
             Self::TiledMap => "scene.json",
+            Self::UnityScene => "scene.json",
         }
     }
 
@@ -139,6 +147,7 @@ impl AssetFormat {
             Self::Jpeg => "jpeg",
             Self::GodotScene => "scene",
             Self::TiledMap => "scene",
+            Self::UnityScene => "scene",
         }
     }
 }
@@ -2376,6 +2385,7 @@ fn write_imported_scene_artifact(
     let scene = match format {
         AssetFormat::GodotScene => import_godot_scene(source_path)?,
         AssetFormat::TiledMap => import_tiled_scene(source_path)?,
+        AssetFormat::UnityScene => import_unity_scene(source_path)?,
         _ => {
             return Err(scene_import_error(
                 source_path,
@@ -2666,7 +2676,10 @@ pub fn import_asset(
             format.asset_extension()
         ));
 
-    if matches!(format, AssetFormat::GodotScene | AssetFormat::TiledMap) {
+    if matches!(
+        format,
+        AssetFormat::GodotScene | AssetFormat::TiledMap | AssetFormat::UnityScene
+    ) {
         write_imported_scene_artifact(&source_path, &imported_path, &format)?;
     }
 

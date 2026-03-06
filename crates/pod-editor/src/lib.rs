@@ -2327,6 +2327,9 @@ mod tests {
         app.state
             .asset_browser
             .import_asset("assets/scenes/overworld.tmj");
+        app.state
+            .asset_browser
+            .import_asset("assets/prefabs/enemy.prefab");
 
         let imported = app
             .state
@@ -2343,6 +2346,16 @@ mod tests {
                 .iter()
                 .find(|asset| asset.id == "overworld")
                 .expect("tiled scene asset should be imported")
+                .kind,
+            AssetKind::Scene
+        );
+        assert_eq!(
+            app.state
+                .asset_browser
+                .assets
+                .iter()
+                .find(|asset| asset.id == "enemy")
+                .expect("unity prefab asset should be imported")
                 .kind,
             AssetKind::Scene
         );
@@ -2366,6 +2379,12 @@ mod tests {
             .visible_assets()
             .iter()
             .any(|asset| asset.id == "overworld"));
+        assert!(app
+            .state
+            .asset_browser
+            .visible_assets()
+            .iter()
+            .any(|asset| asset.id == "enemy"));
     }
 
     #[test]
