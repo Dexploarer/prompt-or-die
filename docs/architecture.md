@@ -26,7 +26,7 @@ flowchart LR
     E --> I["pod-scripting"]
     E --> J["pod-animation / pod-physics / pod-spatial"]
     F --> K["Native Client"]
-    F --> L["Browser Client"]
+    F --> L["Browser Client (`apps/pod-web`)"]
     G --> K
     G --> L
     H --> M["SpacetimeDB Runtime"]
@@ -82,6 +82,8 @@ The renderer supports mixed-mode output:
 - 3D mesh draw data
 
 The render layer is downstream of the ECS world. It does not own gameplay state. Instead, it extracts render items from world components and serializes them into backend-specific draw data.
+
+`apps/pod-web` is now the concrete browser consumer for that bridge. It uses Three.js with `three/webgpu` when available, falls back to WebGL2 otherwise, consumes the batched `ThreeJsWebGpuFrame` contract, and still supports the legacy 2D `RenderFrame` path for incremental integration.
 
 ## Networking and persistence
 

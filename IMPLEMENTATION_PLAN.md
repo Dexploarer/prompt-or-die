@@ -341,5 +341,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-render --lib`
   - `cargo check -p pod-render --target wasm32-unknown-unknown`
 
-**Last updated**: Iteration 44
+### Iteration 45 — Browser Three.js Client Baseline
+
+- [x] Added `apps/pod-web`, a real browser-side Three.js client that consumes `pod-render` frame payloads instead of leaving the WebGPU contract as a Rust-only abstraction.
+- [x] Implemented `three/webgpu` initialization with automatic WebGL2 fallback, instanced 3D mesh batching, billboard sprite batching, and a 2D overlay pass for legacy `RenderFrame` content.
+- [x] Added deterministic TypeScript tests for camera rig mapping, transparent sprite tint splitting, and batch ordering preservation, plus a runnable demo bridge exposed through `window.podRender`.
+- [x] Documented the new browser client in the root README, architecture docs, and app-level README.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+
+**Last updated**: Iteration 45
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog
