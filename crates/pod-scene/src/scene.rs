@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
 use crate::prefab::{
-    set_component_path_value, PrefabComponent, PrefabRegistry, PropertyOverride,
-    PropertyOverrideReport,
+    set_component_path_value, ComponentProvenance, ComponentProvenanceLayer, PrefabComponent,
+    PrefabRegistry, PropertyOverride, PropertyOverrideReport,
 };
 
 /// Represents a spawn point in a scene
@@ -370,6 +370,7 @@ pub struct SceneSpawnResult {
     pub entity_map: HashMap<Uuid, Entity>,
     pub ignored_components: Vec<String>,
     pub prefab_override_reports: HashMap<Uuid, PropertyOverrideReport>,
+    pub component_provenance: HashMap<Uuid, HashMap<String, ComponentProvenance>>,
 }
 
 impl SceneSpawnResult {
@@ -383,6 +384,20 @@ impl SceneSpawnResult {
     ) -> Option<&PropertyOverrideReport> {
         self.prefab_override_reports.get(&scene_entity_id)
     }
+
+    pub fn component_provenance_for(
+        &self,
+        scene_entity_id: Uuid,
+    ) -> Option<&HashMap<String, ComponentProvenance>> {
+        self.component_provenance.get(&scene_entity_id)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedEntityComponents {
+    components: HashMap<String, PrefabComponent>,
+    override_report: PropertyOverrideReport,
+    component_provenance: HashMap<String, ComponentProvenance>,
 }
 
 /// Complete scene representation
@@ -565,6 +580,7 @@ impl Scene {
         let mut entity_map = HashMap::new();
         let entity_name_lookup = self.build_entity_name_lookup();
         let mut prefab_override_reports = HashMap::new();
+        let mut component_provenance = HashMap::new();
 
         let scene_entities: Vec<&EntityInstance> = self
             .entities
@@ -588,19 +604,22 @@ impl Scene {
                 .copied()
                 .ok_or_else(|| format!("Scene entity '{}' was not pre-spawned", entity.name))?;
 
-            let (mut resolved_components, override_report) =
-                self.resolve_entity_components(entity, prefabs)?;
+            let mut resolved = self.resolve_entity_components(entity, prefabs)?;
             self.apply_entity_references(
                 entity,
-                &mut resolved_components,
+                &mut resolved.components,
+                &mut resolved.component_provenance,
                 &entity_map,
                 &entity_name_lookup,
             )?;
-            if !override_report.is_empty() {
-                prefab_override_reports.insert(entity.id, override_report);
+            if !resolved.override_report.is_empty() {
+                prefab_override_reports.insert(entity.id, resolved.override_report.clone());
+            }
+            if !resolved.component_provenance.is_empty() {
+                component_provenance.insert(entity.id, resolved.component_provenance.clone());
             }
             let ignored =
-                insert_bound_components(&resolved_components, &mut world.ecs, spawned_entity)?;
+                insert_bound_components(&resolved.components, &mut world.ecs, spawned_entity)?;
             ignored_components.extend(
                 ignored
                     .into_iter()
@@ -616,6 +635,7 @@ impl Scene {
             entity_map,
             ignored_components,
             prefab_override_reports,
+            component_provenance,
         })
     }
 
@@ -623,8 +643,8 @@ impl Scene {
         &self,
         entity: &EntityInstance,
         prefabs: Option<&PrefabRegistry>,
-    ) -> Result<(HashMap<String, PrefabComponent>, PropertyOverrideReport), String> {
-        let (mut components, override_report) = match entity.prefab_ref.as_deref() {
+    ) -> Result<ResolvedEntityComponents, String> {
+        let mut resolved = match entity.prefab_ref.as_deref() {
             Some(prefab_name) => {
                 let registry = prefabs.ok_or_else(|| {
                     format!(
@@ -632,9 +652,13 @@ impl Scene {
                         self.metadata.name, prefab_name
                     )
                 })?;
-                let prefab = registry.resolve_prefab(prefab_name)?;
-                let resolved = prefab.resolved_components_with_report(&entity.prefab_overrides);
-                (resolved.components, resolved.override_report)
+                let resolved = registry
+                    .resolve_components_with_provenance(prefab_name, &entity.prefab_overrides)?;
+                ResolvedEntityComponents {
+                    components: resolved.components,
+                    override_report: resolved.override_report,
+                    component_provenance: resolved.component_provenance,
+                }
             }
             None => {
                 if !entity.prefab_overrides.is_empty() {
@@ -643,15 +667,27 @@ impl Scene {
                         entity.name
                     ));
                 }
-                (HashMap::new(), PropertyOverrideReport::default())
+                ResolvedEntityComponents {
+                    components: HashMap::new(),
+                    override_report: PropertyOverrideReport::default(),
+                    component_provenance: HashMap::new(),
+                }
             }
         };
 
         for (name, component) in &entity.components {
-            components.insert(name.clone(), component.clone());
+            resolved.components.insert(name.clone(), component.clone());
+            resolved
+                .component_provenance
+                .entry(name.clone())
+                .or_default()
+                .push(ComponentProvenanceLayer::SceneComponent {
+                    entity_id: entity.id,
+                    entity_name: entity.name.clone(),
+                });
         }
 
-        Ok((components, override_report))
+        Ok(resolved)
     }
 
     fn build_entity_name_lookup(&self) -> HashMap<String, Vec<Uuid>> {
@@ -746,6 +782,7 @@ impl Scene {
         &self,
         entity: &EntityInstance,
         components: &mut HashMap<String, PrefabComponent>,
+        component_provenance: &mut HashMap<String, ComponentProvenance>,
         entity_map: &HashMap<Uuid, Entity>,
         entity_name_lookup: &HashMap<String, Vec<Uuid>>,
     ) -> Result<(), String> {
@@ -781,6 +818,13 @@ impl Scene {
                         reference.component, reference.path, entity.name, self.metadata.name, err
                     )
                 })?;
+            component_provenance
+                .entry(reference.component.clone())
+                .or_default()
+                .push(ComponentProvenanceLayer::EntityReference {
+                    path: format!("{}.{}", reference.component, reference.path),
+                    target: reference.target.describe(),
+                });
         }
 
         Ok(())
@@ -1467,6 +1511,118 @@ mod tests {
             .expect("override report should still be stored");
         assert_eq!(report.applied.len(), 1);
         assert_eq!(report.applied[0].value, serde_json::json!(9));
+    }
+
+    #[test]
+    fn test_scene_instantiation_tracks_component_provenance_across_prefab_and_scene_layers() {
+        let mut registry = PrefabRegistry::new();
+
+        let mut base = Prefab::new("BaseActor");
+        base.add_native_component(&Transform::at(1.0, 2.0)).unwrap();
+        base.add_native_component(&Sprite {
+            texture: "base".to_string(),
+            layer: 2,
+            ..Default::default()
+        })
+        .unwrap();
+        registry.register("BaseActor", base);
+
+        let mut derived = Prefab::new("DerivedActor").with_base_prefab("BaseActor");
+        derived
+            .add_native_component(&Sprite {
+                texture: "derived".to_string(),
+                layer: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("DerivedActor", derived);
+
+        let mut scene = Scene::new("ProvenanceScene");
+        let mut actor = EntityInstance::new("ActorInstance").with_prefab("DerivedActor");
+        actor.add_prefab_override(PropertyOverride::new("Sprite.layer", serde_json::json!(9)));
+        actor
+            .add_native_component(&Sprite {
+                texture: "scene_local".to_string(),
+                layer: 14,
+                ..Default::default()
+            })
+            .unwrap();
+        let actor_id = scene.add_entity(actor);
+
+        let mut world = World::new(15);
+        let result = scene
+            .instantiate_with_prefabs(&mut world, Some(&registry))
+            .unwrap();
+
+        let provenance = result
+            .component_provenance_for(actor_id)
+            .expect("component provenance should be stored");
+        assert_eq!(
+            provenance["Transform"].layers,
+            vec![ComponentProvenanceLayer::PrefabDefinition {
+                prefab: "BaseActor".to_string()
+            }]
+        );
+        assert_eq!(
+            provenance["Sprite"].layers,
+            vec![
+                ComponentProvenanceLayer::PrefabDefinition {
+                    prefab: "BaseActor".to_string()
+                },
+                ComponentProvenanceLayer::PrefabDefinition {
+                    prefab: "DerivedActor".to_string()
+                },
+                ComponentProvenanceLayer::PropertyOverride {
+                    path: "Sprite.layer".to_string()
+                },
+                ComponentProvenanceLayer::SceneComponent {
+                    entity_id: actor_id,
+                    entity_name: "ActorInstance".to_string()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_scene_instantiation_tracks_entity_reference_provenance() {
+        let mut scene = Scene::new("EntityReferenceProvenanceScene");
+
+        let mut player = EntityInstance::new("Player");
+        player
+            .add_native_component(&Transform3D {
+                position: Vec3::new(4.0, 0.0, 2.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let player_id = scene.add_entity(player);
+
+        let mut camera = EntityInstance::new("Camera");
+        camera.add_native_component(&Camera3D::default()).unwrap();
+        camera
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        camera.add_entity_reference_by_id("FollowCameraController", "target", player_id);
+        let camera_id = scene.add_entity(camera);
+
+        let mut world = World::new(16);
+        let result = scene.instantiate(&mut world).unwrap();
+
+        let provenance = result
+            .component_provenance_for(camera_id)
+            .expect("camera provenance should be recorded");
+        assert_eq!(
+            provenance["FollowCameraController"].layers,
+            vec![
+                ComponentProvenanceLayer::SceneComponent {
+                    entity_id: camera_id,
+                    entity_name: "Camera".to_string()
+                },
+                ComponentProvenanceLayer::EntityReference {
+                    path: "FollowCameraController.target".to_string(),
+                    target: format!("scene entity id {}", player_id),
+                },
+            ]
+        );
     }
 
     #[test]
