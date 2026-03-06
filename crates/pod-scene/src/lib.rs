@@ -22,6 +22,6 @@ pub use prefab::{Prefab, PrefabComponent, PrefabDiff, PrefabMetadataDiff, Prefab
 pub use save::{SaveData, SaveManager};
 pub use scene::{
     EntityInstance, EntityReferenceBinding, EntityReferenceTarget, Scene, SceneGraph, SceneManager,
-    SceneSpawnResult, SpawnPoint,
+    SceneRegion, SceneSpawnResult, SceneStreamFocus, SceneStreamPlan, SpawnPoint, StreamingBounds,
 };
 pub use state::{GameState, StateStack, StateTransition};
