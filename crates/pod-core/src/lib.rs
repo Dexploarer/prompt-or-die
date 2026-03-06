@@ -29,33 +29,45 @@
 #![allow(clippy::unused_enumerate_index)]
 #![allow(clippy::unwrap_or_default)]
 
-pub mod component;
-pub mod agent;
 pub mod action;
-pub mod observation;
-pub mod event;
-pub mod world;
-pub mod tick;
-pub mod id;
-pub mod replay;
-pub mod orchestrator;
+pub mod agent;
+pub mod app;
+pub mod component;
 pub mod constraint;
+pub mod contract;
+pub mod event;
+pub mod id;
+pub mod observation;
 pub mod observation_filter;
+pub mod orchestrator;
+pub mod replay;
+pub mod tick;
+pub mod world;
 
-pub use component::*;
-pub use agent::*;
 pub use action::*;
-pub use observation::*;
-pub use event::*;
-pub use world::World;
-pub use id::*;
-pub use replay::{ReplayRecorder, ReplayPlayer, ReplayFile, ReplayHeader, DecisionTrace};
-pub use orchestrator::{AgentOrchestrator, AgentBatch, PriorityScore, DecisionFreshness};
+pub use agent::*;
+pub use app::{
+    App, AppContext, LastTickResult, Plugin, RegisteredTypeCategory, ResourceStore, SchedulePhase,
+    TypeMetadata, TypeRegistry,
+};
+pub use component::*;
 pub use constraint::{
-    CooldownTracker, ActionBudget, ReactionTimeGate, ConstraintProfile, ConstraintViolation,
+    ActionBudget, ConstraintProfile, ConstraintViolation, CooldownTracker, ReactionTimeGate,
     ValidationPipeline,
 };
-pub use observation_filter::{ObservationFilter, FilteredObservation, SalienceScore, ObservationHistory};
+pub use contract::{
+    AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion,
+    VersionedAgentAction, VersionedObservation, RUNTIME_CONTRACT_VERSION_V1,
+};
+pub use event::*;
+pub use id::*;
+pub use observation::*;
+pub use observation_filter::{
+    FilteredObservation, ObservationFilter, ObservationHistory, SalienceScore,
+};
+pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
+pub use replay::{DecisionTrace, ReplayFile, ReplayHeader, ReplayPlayer, ReplayRecorder};
+pub use world::World;
 
 /// Fixed tick rate — all agents operate on the same clock
 pub const TICKS_PER_SECOND: u32 = 60;

@@ -10,7 +10,7 @@
 //! - Estimates token count and compresses if needed
 //! - Maintains a sliding window of history for context
 
-use crate::observation::{Observation, VisibleEntity, AudibleEvent, Relationship};
+use crate::observation::{AudibleEvent, Observation, Relationship, VisibleEntity};
 use serde::{Deserialize, Serialize};
 
 /// Salience score for an entity (higher = more important)
@@ -57,7 +57,9 @@ impl SalienceScore {
 
 impl Ord for SalienceScore {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+        self.0
+            .partial_cmp(&other.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 
@@ -178,8 +180,12 @@ impl ObservationFilter {
             .take(self.max_events)
             .collect();
 
-        let estimated_tokens =
-            estimate_token_count(message_count, objective_count, &visible_entities, &audible_events);
+        let estimated_tokens = estimate_token_count(
+            message_count,
+            objective_count,
+            &visible_entities,
+            &audible_events,
+        );
 
         // Build filtered observation
         let was_compressed = estimated_tokens > self.token_budget as usize && self.token_budget > 0;
@@ -329,8 +335,8 @@ impl Default for ObservationHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::id::EntityId;
     use crate::component::Team;
+    use crate::id::EntityId;
     use glam::Vec2;
 
     #[test]
@@ -344,6 +350,8 @@ mod tests {
             distance: 50.0,
             relationship: Relationship::Hostile,
             health_fraction: Some(0.2),
+            combat_style: None,
+            creature: None,
         };
 
         let score = SalienceScore::compute(&entity, 100.0, 100.0);
@@ -366,6 +374,7 @@ mod tests {
             self_state: crate::observation::SelfState {
                 agent_id: crate::id::AgentId::new(),
                 entity_id: EntityId(0),
+                runtime_profile: crate::contract::AgentRuntimeProfile::default(),
                 position: Vec2::ZERO,
                 rotation: 0.0,
                 velocity: Vec2::ZERO,
@@ -373,6 +382,11 @@ mod tests {
                 max_health: Some(100.0),
                 team: Team::None,
                 cooldowns: vec![],
+                combat_loadout: None,
+                skills: vec![],
+                inventory: None,
+                companion_roster: None,
+                encounter: None,
             },
             visible_entities: vec![],
             audible_events: vec![],
@@ -392,6 +406,8 @@ mod tests {
                 distance: 50.0 + i as f32,
                 relationship: Relationship::Hostile,
                 health_fraction: Some(0.5),
+                combat_style: None,
+                creature: None,
             });
         }
 

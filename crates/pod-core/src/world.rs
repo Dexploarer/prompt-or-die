@@ -102,6 +102,10 @@ impl World {
             Collider::circle(16.0),
             Health::new(100.0),
             Perception::default(),
+            CombatLoadout::default(),
+            SkillBook::default(),
+            Inventory::default(),
+            CompanionRoster::default(),
             ColorRect::new(32.0, 32.0, [0.2, 0.8, 0.3, 1.0]),
             Label {
                 name: "Player".into(),
@@ -180,6 +184,12 @@ enum ComponentToAdd {
     Perception(Perception),
     Movement(Movement),
     Script(Script),
+    CombatLoadout(CombatLoadout),
+    SkillBook(SkillBook),
+    Inventory(Inventory),
+    CreatureIdentity(CreatureIdentity),
+    CompanionRoster(CompanionRoster),
+    EncounterState(EncounterState),
 }
 
 impl<'w> EntityBuilder<'w> {
@@ -197,7 +207,8 @@ impl<'w> EntityBuilder<'w> {
     }
 
     pub fn with_health(mut self, max: f32) -> Self {
-        self.components.push(ComponentToAdd::Health(Health::new(max)));
+        self.components
+            .push(ComponentToAdd::Health(Health::new(max)));
         self
     }
 
@@ -224,11 +235,10 @@ impl<'w> EntityBuilder<'w> {
     }
 
     pub fn with_perception(mut self, vision_range: f32) -> Self {
-        self.components
-            .push(ComponentToAdd::Perception(Perception {
-                vision_range,
-                ..Default::default()
-            }));
+        self.components.push(ComponentToAdd::Perception(Perception {
+            vision_range,
+            ..Default::default()
+        }));
         self
     }
 
@@ -247,12 +257,42 @@ impl<'w> EntityBuilder<'w> {
         self
     }
 
+    pub fn with_combat_loadout(mut self, loadout: CombatLoadout) -> Self {
+        self.components.push(ComponentToAdd::CombatLoadout(loadout));
+        self
+    }
+
+    pub fn with_skill_book(mut self, skill_book: SkillBook) -> Self {
+        self.components.push(ComponentToAdd::SkillBook(skill_book));
+        self
+    }
+
+    pub fn with_inventory(mut self, inventory: Inventory) -> Self {
+        self.components.push(ComponentToAdd::Inventory(inventory));
+        self
+    }
+
+    pub fn with_creature_identity(mut self, creature: CreatureIdentity) -> Self {
+        self.components
+            .push(ComponentToAdd::CreatureIdentity(creature));
+        self
+    }
+
+    pub fn with_companion_roster(mut self, roster: CompanionRoster) -> Self {
+        self.components
+            .push(ComponentToAdd::CompanionRoster(roster));
+        self
+    }
+
+    pub fn with_encounter_state(mut self, encounter: EncounterState) -> Self {
+        self.components
+            .push(ComponentToAdd::EncounterState(encounter));
+        self
+    }
+
     /// Finalize and spawn the entity
     pub fn build(self) -> hecs::Entity {
-        let entity = self
-            .world
-            .ecs
-            .spawn((self.transform, Velocity::default()));
+        let entity = self.world.ecs.spawn((self.transform, Velocity::default()));
 
         for component in self.components {
             match component {
@@ -285,6 +325,24 @@ impl<'w> EntityBuilder<'w> {
                 }
                 ComponentToAdd::Script(s) => {
                     self.world.ecs.insert_one(entity, s).unwrap();
+                }
+                ComponentToAdd::CombatLoadout(loadout) => {
+                    self.world.ecs.insert_one(entity, loadout).unwrap();
+                }
+                ComponentToAdd::SkillBook(skill_book) => {
+                    self.world.ecs.insert_one(entity, skill_book).unwrap();
+                }
+                ComponentToAdd::Inventory(inventory) => {
+                    self.world.ecs.insert_one(entity, inventory).unwrap();
+                }
+                ComponentToAdd::CreatureIdentity(creature) => {
+                    self.world.ecs.insert_one(entity, creature).unwrap();
+                }
+                ComponentToAdd::CompanionRoster(roster) => {
+                    self.world.ecs.insert_one(entity, roster).unwrap();
+                }
+                ComponentToAdd::EncounterState(encounter) => {
+                    self.world.ecs.insert_one(entity, encounter).unwrap();
                 }
             }
         }

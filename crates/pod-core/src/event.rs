@@ -1,6 +1,6 @@
+use crate::id::{AgentId, EntityId};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::id::{AgentId, EntityId};
 
 /// Game events — things that happen in the world.
 /// Events are broadcast to agents based on their perception.
@@ -14,8 +14,13 @@ pub struct GameEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     // === LIFECYCLE ===
-    EntitySpawned { entity: EntityId, entity_type: String },
-    EntityDestroyed { entity: EntityId },
+    EntitySpawned {
+        entity: EntityId,
+        entity_type: String,
+    },
+    EntityDestroyed {
+        entity: EntityId,
+    },
 
     // === COMBAT ===
     Damage {
@@ -31,6 +36,29 @@ pub enum Event {
         source: Option<EntityId>,
         target: EntityId,
         amount: f32,
+    },
+    SkillXpGained {
+        entity: EntityId,
+        skill: String,
+        amount: u32,
+        new_level: u16,
+    },
+    CreatureCaptured {
+        agent_id: AgentId,
+        species_id: String,
+        nickname: Option<String>,
+    },
+    CompanionSummoned {
+        agent_id: AgentId,
+        species_id: String,
+    },
+    EncounterStarted {
+        encounter_id: u64,
+        kind: String,
+    },
+    EncounterEnded {
+        encounter_id: u64,
+        victory: bool,
     },
 
     // === PHYSICS ===
@@ -50,27 +78,61 @@ pub enum Event {
     },
 
     // === AGENT ===
-    AgentJoined { agent_id: AgentId, agent_type: String },
-    AgentLeft { agent_id: AgentId },
-    AgentSpoke { agent_id: AgentId, message: String, volume: f32 },
+    AgentJoined {
+        agent_id: AgentId,
+        agent_type: String,
+    },
+    AgentLeft {
+        agent_id: AgentId,
+    },
+    AgentSpoke {
+        agent_id: AgentId,
+        message: String,
+        volume: f32,
+    },
 
     // === INTERACTION ===
-    ItemPickedUp { entity: EntityId, item: EntityId },
-    ItemDropped { entity: EntityId, item: EntityId },
-    ItemUsed { entity: EntityId, item: String },
+    ItemPickedUp {
+        entity: EntityId,
+        item: EntityId,
+    },
+    ItemDropped {
+        entity: EntityId,
+        item: EntityId,
+    },
+    ItemUsed {
+        entity: EntityId,
+        item: String,
+    },
 
     // === GAME ===
-    ObjectiveUpdated { id: String, progress: f32 },
-    ObjectiveCompleted { id: String },
-    GameStateChanged { new_state: String },
-    ScoreChanged { team: u8, score: i32 },
+    ObjectiveUpdated {
+        id: String,
+        progress: f32,
+    },
+    ObjectiveCompleted {
+        id: String,
+    },
+    GameStateChanged {
+        new_state: String,
+    },
+    ScoreChanged {
+        team: u8,
+        score: i32,
+    },
 
     // === AUDIO CUE ===
     /// Sound event — used for both actual audio AND agent perception
-    Sound { name: String, intensity: f32 },
+    Sound {
+        name: String,
+        intensity: f32,
+    },
 
     // === CUSTOM ===
-    Custom { name: String, data: String },
+    Custom {
+        name: String,
+        data: String,
+    },
 }
 
 /// Collects events during a tick, then broadcasts them
