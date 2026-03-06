@@ -286,5 +286,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-assets`
   - `cargo test -p pod-editor --lib`
 
-**Last updated**: Iteration 38
+### Iteration 39 — Tiled Scene Importer Foundation
+
+- [x] Extended `pod-assets` with a real Tiled JSON (`.tmj`) import path so Tiled-authored 2D worlds now convert into `pod_scene::Scene` instead of being rejected as unsupported.
+- [x] Mapped Tiled tile layers and object layers onto existing POD bindings (`Transform`, `Sprite`, `ColorRect`) while preserving imported layer/object hierarchy through `SceneGraph`.
+- [x] Reused the existing content-addressed scene artifact output so `.tmj` imports produce serialized scene artifacts beside Godot imports under the same `scene/` cache prefix.
+- [x] Added deterministic tests for direct `.tmj` import, serialized artifact output, and editor-side `.tmj` scene asset recognition.
+- [x] Validated touched crates:
+  - `cargo test -p pod-assets`
+  - `cargo test -p pod-editor --lib`
+
+**Last updated**: Iteration 39
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog
