@@ -247,5 +247,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-scene`
   - `cargo test -p pod-scene --lib`
 
-**Last updated**: Iteration 34
+### Iteration 35 — Scene/Prefab Provenance Reporting Pass
+
+- [x] Added component provenance layers in `pod-scene` so resolved prefab components can explain which prefab definitions, property overrides, scene-authored components, and entity-reference bindings contributed to final runtime state.
+- [x] Extended prefab inheritance resolution with provenance-aware component assembly, preserving full source chains across base/derived prefab merges before overrides are applied.
+- [x] Surfaced per-entity component provenance maps in `SceneSpawnResult`, giving editor/debug tooling stable insight into final component origin across prefab inheritance, scene overrides, and entity-reference resolution.
+- [x] Added deterministic tests covering inherited prefab provenance, scene-local override provenance precedence, and entity-reference provenance tracking.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+**Last updated**: Iteration 35
 **Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog

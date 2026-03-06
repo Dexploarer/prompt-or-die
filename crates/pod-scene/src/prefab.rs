@@ -197,6 +197,67 @@ pub struct ResolvedPrefabComponents {
     pub override_report: PropertyOverrideReport,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ComponentProvenanceLayer {
+    PrefabDefinition {
+        prefab: String,
+    },
+    PropertyOverride {
+        path: String,
+    },
+    SceneComponent {
+        entity_id: Uuid,
+        entity_name: String,
+    },
+    EntityReference {
+        path: String,
+        target: String,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentProvenance {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<ComponentProvenanceLayer>,
+}
+
+impl ComponentProvenance {
+    pub fn from_layer(layer: ComponentProvenanceLayer) -> Self {
+        Self {
+            layers: vec![layer],
+        }
+    }
+
+    pub fn push(&mut self, layer: ComponentProvenanceLayer) {
+        self.layers.push(layer);
+    }
+
+    pub fn current(&self) -> Option<&ComponentProvenanceLayer> {
+        self.layers.last()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPrefabComponentsWithProvenance {
+    pub components: HashMap<String, PrefabComponent>,
+    pub override_report: PropertyOverrideReport,
+    pub component_provenance: HashMap<String, ComponentProvenance>,
+}
+
+impl From<ResolvedPrefabComponentsWithProvenance> for ResolvedPrefabComponents {
+    fn from(value: ResolvedPrefabComponentsWithProvenance) -> Self {
+        Self {
+            components: value.components,
+            override_report: value.override_report,
+        }
+    }
+}
+
 /// Serializable entity template with components
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Prefab {
@@ -316,45 +377,23 @@ impl Prefab {
         &self,
         overrides: &[PropertyOverride],
     ) -> ResolvedPrefabComponents {
+        self.resolved_components_with_provenance(overrides).into()
+    }
+
+    pub fn resolved_components_with_provenance(
+        &self,
+        overrides: &[PropertyOverride],
+    ) -> ResolvedPrefabComponentsWithProvenance {
         let mut components = self.components.clone();
-        let mut override_report = PropertyOverrideReport::default();
+        let mut component_provenance =
+            build_prefab_definition_provenance(self.components.keys(), &self.metadata.name);
+        let override_report =
+            apply_property_overrides(&mut components, overrides, &mut component_provenance);
 
-        for override_ in overrides {
-            let parts: Vec<&str> = override_.path.split('.').collect();
-            if parts.len() < 2 {
-                override_report.ignored.push(IgnoredPropertyOverride {
-                    path: override_.path.clone(),
-                    reason: "override path must include a component name and property path"
-                        .to_string(),
-                });
-                continue;
-            }
-
-            let component_name = parts[0];
-            if let Some(component) = components.get_mut(component_name) {
-                let previous_value = get_component_path_value(component, &parts[1..]).cloned();
-                match set_component_path_value(component, &parts[1..], &override_.value) {
-                    Ok(()) => override_report.applied.push(AppliedPropertyOverride {
-                        path: override_.path.clone(),
-                        previous_value,
-                        value: override_.value.clone(),
-                    }),
-                    Err(reason) => override_report.ignored.push(IgnoredPropertyOverride {
-                        path: override_.path.clone(),
-                        reason,
-                    }),
-                }
-            } else {
-                override_report.ignored.push(IgnoredPropertyOverride {
-                    path: override_.path.clone(),
-                    reason: format!("component '{}' is not present on prefab", component_name),
-                });
-            }
-        }
-
-        ResolvedPrefabComponents {
+        ResolvedPrefabComponentsWithProvenance {
             components,
             override_report,
+            component_provenance,
         }
     }
 
@@ -472,7 +511,9 @@ impl Prefab {
         world: &mut World,
         overrides: &[PropertyOverride],
     ) -> Result<hecs::Entity, String> {
-        let components = self.resolved_components_with_report(overrides).components;
+        let components = self
+            .resolved_components_with_provenance(overrides)
+            .components;
         let entity = world.ecs.spawn(());
         let ignored = insert_bound_components(&components, &mut world.ecs, entity)?;
         for component_name in ignored {
@@ -649,6 +690,72 @@ fn ensure_array_len(array: &mut Vec<serde_json::Value>, len: usize) {
     }
 }
 
+fn build_prefab_definition_provenance<'a>(
+    component_names: impl Iterator<Item = &'a String>,
+    prefab_name: &str,
+) -> HashMap<String, ComponentProvenance> {
+    component_names
+        .map(|component_name| {
+            (
+                component_name.clone(),
+                ComponentProvenance::from_layer(ComponentProvenanceLayer::PrefabDefinition {
+                    prefab: prefab_name.to_string(),
+                }),
+            )
+        })
+        .collect()
+}
+
+fn apply_property_overrides(
+    components: &mut HashMap<String, PrefabComponent>,
+    overrides: &[PropertyOverride],
+    component_provenance: &mut HashMap<String, ComponentProvenance>,
+) -> PropertyOverrideReport {
+    let mut override_report = PropertyOverrideReport::default();
+
+    for override_ in overrides {
+        let parts: Vec<&str> = override_.path.split('.').collect();
+        if parts.len() < 2 {
+            override_report.ignored.push(IgnoredPropertyOverride {
+                path: override_.path.clone(),
+                reason: "override path must include a component name and property path".to_string(),
+            });
+            continue;
+        }
+
+        let component_name = parts[0];
+        if let Some(component) = components.get_mut(component_name) {
+            let previous_value = get_component_path_value(component, &parts[1..]).cloned();
+            match set_component_path_value(component, &parts[1..], &override_.value) {
+                Ok(()) => {
+                    override_report.applied.push(AppliedPropertyOverride {
+                        path: override_.path.clone(),
+                        previous_value,
+                        value: override_.value.clone(),
+                    });
+                    component_provenance
+                        .entry(component_name.to_string())
+                        .or_default()
+                        .push(ComponentProvenanceLayer::PropertyOverride {
+                            path: override_.path.clone(),
+                        });
+                }
+                Err(reason) => override_report.ignored.push(IgnoredPropertyOverride {
+                    path: override_.path.clone(),
+                    reason,
+                }),
+            }
+        } else {
+            override_report.ignored.push(IgnoredPropertyOverride {
+                path: override_.path.clone(),
+                reason: format!("component '{}' is not present on prefab", component_name),
+            });
+        }
+    }
+
+    override_report
+}
+
 /// Global registry of named prefabs
 pub struct PrefabRegistry {
     prefabs: HashMap<String, Prefab>,
@@ -697,6 +804,25 @@ impl PrefabRegistry {
         self.resolve_prefab_internal(name, &mut visiting)
     }
 
+    pub fn resolve_components_with_provenance(
+        &self,
+        name: &str,
+        overrides: &[PropertyOverride],
+    ) -> Result<ResolvedPrefabComponentsWithProvenance, String> {
+        let mut visiting = Vec::new();
+        let (prefab, mut component_provenance) =
+            self.resolve_prefab_internal_with_provenance(name, &mut visiting)?;
+        let mut components = prefab.components.clone();
+        let override_report =
+            apply_property_overrides(&mut components, overrides, &mut component_provenance);
+
+        Ok(ResolvedPrefabComponentsWithProvenance {
+            components,
+            override_report,
+            component_provenance,
+        })
+    }
+
     fn resolve_prefab_internal(
         &self,
         name: &str,
@@ -743,6 +869,65 @@ impl PrefabRegistry {
         resolved.base_prefab = prefab.base_prefab.clone();
         resolved.id = prefab.id;
         Ok(resolved)
+    }
+
+    fn resolve_prefab_internal_with_provenance(
+        &self,
+        name: &str,
+        visiting: &mut Vec<String>,
+    ) -> Result<(Prefab, HashMap<String, ComponentProvenance>), String> {
+        if visiting.iter().any(|current| current == name) {
+            visiting.push(name.to_string());
+            return Err(format!(
+                "Prefab inheritance cycle detected: {}",
+                visiting.join(" -> ")
+            ));
+        }
+
+        let prefab = self
+            .prefabs
+            .get(name)
+            .ok_or_else(|| format!("Prefab '{}' not found", name))?;
+
+        visiting.push(name.to_string());
+
+        let (mut resolved, component_provenance) = if let Some(base_name) = &prefab.base_prefab {
+            let (mut base_prefab, mut base_provenance) =
+                self.resolve_prefab_internal_with_provenance(base_name, visiting)?;
+            base_prefab.metadata = prefab.metadata.clone();
+            base_prefab.base_prefab = prefab.base_prefab.clone();
+
+            for (component_name, component) in &prefab.components {
+                base_prefab
+                    .components
+                    .insert(component_name.clone(), component.clone());
+                base_provenance
+                    .entry(component_name.clone())
+                    .or_default()
+                    .push(ComponentProvenanceLayer::PrefabDefinition {
+                        prefab: name.to_string(),
+                    });
+            }
+            for nested in &prefab.nested_prefabs {
+                if !base_prefab.nested_prefabs.contains(nested) {
+                    base_prefab.nested_prefabs.push(nested.clone());
+                }
+            }
+
+            (base_prefab, base_provenance)
+        } else {
+            (
+                prefab.clone(),
+                build_prefab_definition_provenance(prefab.components.keys(), name),
+            )
+        };
+
+        visiting.pop();
+
+        resolved.metadata = prefab.metadata.clone();
+        resolved.base_prefab = prefab.base_prefab.clone();
+        resolved.id = prefab.id;
+        Ok((resolved, component_provenance))
     }
 
     /// Get a mutable reference to a prefab
@@ -1112,6 +1297,72 @@ mod tests {
 
         assert_eq!(transform.position, Vec3::new(6.0, 7.0, 8.0));
         assert_eq!(mesh.asset_id, "tower");
+    }
+
+    #[test]
+    fn test_prefab_registry_tracks_component_provenance_across_inheritance_and_overrides() {
+        let mut registry = PrefabRegistry::new();
+
+        let mut base = Prefab::new("BaseActor");
+        base.add_native_component(&Transform::at(1.0, 2.0)).unwrap();
+        base.add_native_component(&Sprite {
+            texture: "base".to_string(),
+            layer: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        registry.register("BaseActor", base);
+
+        let mut derived = Prefab::new("MageActor").with_base_prefab("BaseActor");
+        derived
+            .add_native_component(&Sprite {
+                texture: "mage".to_string(),
+                layer: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        derived
+            .add_native_component(&Mesh {
+                asset_id: "staff".to_string(),
+                layer: 7,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("MageActor", derived);
+
+        let resolved = registry
+            .resolve_components_with_provenance(
+                "MageActor",
+                &[PropertyOverride::new("Sprite.layer", serde_json::json!(9))],
+            )
+            .expect("resolved prefab components should be available");
+
+        assert_eq!(
+            resolved.component_provenance["Transform"].layers,
+            vec![ComponentProvenanceLayer::PrefabDefinition {
+                prefab: "BaseActor".to_string()
+            }]
+        );
+        assert_eq!(
+            resolved.component_provenance["Sprite"].layers,
+            vec![
+                ComponentProvenanceLayer::PrefabDefinition {
+                    prefab: "BaseActor".to_string()
+                },
+                ComponentProvenanceLayer::PrefabDefinition {
+                    prefab: "MageActor".to_string()
+                },
+                ComponentProvenanceLayer::PropertyOverride {
+                    path: "Sprite.layer".to_string()
+                },
+            ]
+        );
+        assert_eq!(
+            resolved.component_provenance["Mesh"].layers,
+            vec![ComponentProvenanceLayer::PrefabDefinition {
+                prefab: "MageActor".to_string()
+            }]
+        );
     }
 
     #[test]
