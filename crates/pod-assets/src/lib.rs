@@ -10,8 +10,10 @@
 #![allow(clippy::unnecessary_cast)]
 #![allow(unused_mut)]
 
-use sha2::{Digest, Sha256};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use pod_core::{ColorRect, Sprite, Transform};
+use pod_scene::{EntityInstance, Scene};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
@@ -19,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::SystemTime;
 
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Canonical asset identifier.
@@ -87,6 +89,7 @@ pub enum AssetFormat {
     Obj,
     Png,
     Jpeg,
+    GodotScene,
 }
 
 impl fmt::Display for AssetFormat {
@@ -96,6 +99,7 @@ impl fmt::Display for AssetFormat {
             Self::Obj => write!(f, "obj"),
             Self::Png => write!(f, "png"),
             Self::Jpeg => write!(f, "jpeg"),
+            Self::GodotScene => write!(f, "godot_scene"),
         }
     }
 }
@@ -108,6 +112,7 @@ impl AssetFormat {
             "obj" => Some(Self::Obj),
             "png" => Some(Self::Png),
             "jpg" | "jpeg" => Some(Self::Jpeg),
+            "tscn" => Some(Self::GodotScene),
             _ => None,
         }
     }
@@ -118,6 +123,7 @@ impl AssetFormat {
             Self::Obj => "obj",
             Self::Png => "png",
             Self::Jpeg => "jpeg",
+            Self::GodotScene => "scene.json",
         }
     }
 
@@ -127,6 +133,7 @@ impl AssetFormat {
             Self::Obj => "obj",
             Self::Png => "png",
             Self::Jpeg => "jpeg",
+            Self::GodotScene => "scene",
         }
     }
 }
@@ -284,6 +291,7 @@ impl From<std::io::Error> for AssetCacheError {
 #[derive(Debug)]
 pub enum AssetImportError {
     UnsupportedFormat(PathBuf),
+    SceneImport { path: PathBuf, message: String },
     Cache(AssetCacheError),
 }
 
@@ -291,6 +299,9 @@ impl fmt::Display for AssetImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedFormat(path) => write!(f, "unsupported asset format: {path:?}"),
+            Self::SceneImport { path, message } => {
+                write!(f, "scene import failed for {path:?}: {message}")
+            }
             Self::Cache(err) => write!(f, "asset import cache error: {err}"),
         }
     }
@@ -358,7 +369,9 @@ impl fmt::Display for AssetWatchError {
             Self::WatchPathMissing(path) => {
                 write!(f, "asset watch path does not exist: {path:?}")
             }
-            Self::CallbackFailed(message) => write!(f, "asset reprocess callback failed: {message}"),
+            Self::CallbackFailed(message) => {
+                write!(f, "asset reprocess callback failed: {message}")
+            }
         }
     }
 }
@@ -377,9 +390,8 @@ impl From<std::io::Error> for AssetWatchError {
     }
 }
 
-type ReprocessCallback = dyn Fn(&mut AssetCache, &Path, &Path) -> Result<AssetImport, AssetImportError>
-    + Send
-    + Sync;
+type ReprocessCallback =
+    dyn Fn(&mut AssetCache, &Path, &Path) -> Result<AssetImport, AssetImportError> + Send + Sync;
 
 /// Watches source asset paths and triggers re-import when they change on disk.
 pub struct AssetHotReloader {
@@ -456,10 +468,7 @@ impl AssetHotReloader {
     }
 
     /// Process all currently queued file changes up to `max_events`.
-    pub fn process_pending(
-        &mut self,
-        max_events: usize,
-    ) -> Vec<AssetHotReloadEvent> {
+    pub fn process_pending(&mut self, max_events: usize) -> Vec<AssetHotReloadEvent> {
         let mut unique_paths = HashSet::new();
         let mut outputs = Vec::new();
 
@@ -484,10 +493,7 @@ impl AssetHotReloader {
     }
 
     /// Re-run the reprocess callback for a single path.
-    pub fn reprocess_path(
-        &self,
-        source_path: impl AsRef<Path>,
-    ) -> AssetHotReloadEvent {
+    pub fn reprocess_path(&self, source_path: impl AsRef<Path>) -> AssetHotReloadEvent {
         let source_path = source_path.as_ref();
         let mut path = source_path.to_path_buf();
         let mut cache_guard = match self.cache.lock() {
@@ -631,11 +637,19 @@ impl fmt::Display for TerrainGenerationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDimensions { width, height } => {
-                write!(f, "terrain dimensions must be greater than zero: {width}x{height}")
+                write!(
+                    f,
+                    "terrain dimensions must be greater than zero: {width}x{height}"
+                )
             }
-            Self::InvalidNoiseConfig(message) => write!(f, "invalid terrain noise config: {message}"),
+            Self::InvalidNoiseConfig(message) => {
+                write!(f, "invalid terrain noise config: {message}")
+            }
             Self::DegenerateMesh { width, height } => {
-                write!(f, "terrain mesh requires at least 2x2 samples, got {width}x{height}")
+                write!(
+                    f,
+                    "terrain mesh requires at least 2x2 samples, got {width}x{height}"
+                )
             }
         }
     }
@@ -758,11 +772,7 @@ pub fn generate_terrain_mesh(
 
     let mut normals = vec![Vec3::ZERO; vertices.len()];
     for tri in indices.chunks_exact(3) {
-        let (i0, i1, i2) = (
-            tri[0] as usize,
-            tri[1] as usize,
-            tri[2] as usize,
-        );
+        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         let p0 = Vec3::from_array(vertices[i0].position);
         let p1 = Vec3::from_array(vertices[i1].position);
         let p2 = Vec3::from_array(vertices[i2].position);
@@ -802,7 +812,12 @@ fn fbm_value_noise(
 
     for octave in 0..octaves {
         let octave_scale = 1.0 + octave as f32 * 0.05;
-        value += amplitude * value_noise(x * frequency * octave_scale, y * frequency * octave_scale, seed + octave as u64);
+        value += amplitude
+            * value_noise(
+                x * frequency * octave_scale,
+                y * frequency * octave_scale,
+                seed + octave as u64,
+            );
         max_amplitude += amplitude;
         amplitude *= persistence;
         frequency *= lacunarity;
@@ -925,7 +940,10 @@ impl fmt::Display for ProceduralTextureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDimensions { width, height } => {
-                write!(f, "procedural texture dimensions must be > 0: {width}x{height}")
+                write!(
+                    f,
+                    "procedural texture dimensions must be > 0: {width}x{height}"
+                )
             }
             Self::InvalidChannels(channels) => {
                 write!(f, "texture channel count must be in 1..=4, got {channels}")
@@ -1024,7 +1042,11 @@ pub fn generate_gradient_texture(
         let cx = (config.width as f32 - 1.0) * 0.5;
         let cy = (config.height as f32 - 1.0) * 0.5;
         let distance = (cx * cx + cy * cy).sqrt();
-        if distance == 0.0 { 1.0 } else { distance }
+        if distance == 0.0 {
+            1.0
+        } else {
+            distance
+        }
     };
 
     for y in 0..config.height {
@@ -1067,8 +1089,11 @@ pub fn generate_gradient_texture(
             };
 
             let mut pixel = [0u8; 4];
-            for (channel, (&start_channel, &end_channel)) in
-                config.start_color.iter().zip(config.end_color.iter()).enumerate()
+            for (channel, (&start_channel, &end_channel)) in config
+                .start_color
+                .iter()
+                .zip(config.end_color.iter())
+                .enumerate()
             {
                 pixel[channel] = lerp_channel(start_channel, end_channel, t);
             }
@@ -1131,7 +1156,10 @@ impl std::error::Error for TextToAssetError {}
 
 /// Integration point for external AI generation systems.
 pub trait TextToAssetGenerator: Send + Sync {
-    fn generate_mesh(&self, request: &TextToAssetMeshRequest) -> Result<TriangleMesh, TextToAssetError>;
+    fn generate_mesh(
+        &self,
+        request: &TextToAssetMeshRequest,
+    ) -> Result<TriangleMesh, TextToAssetError>;
 
     fn generate_texture(
         &self,
@@ -1144,7 +1172,10 @@ pub trait TextToAssetGenerator: Send + Sync {
 pub struct NoopTextToAssetGenerator;
 
 impl TextToAssetGenerator for NoopTextToAssetGenerator {
-    fn generate_mesh(&self, _request: &TextToAssetMeshRequest) -> Result<TriangleMesh, TextToAssetError> {
+    fn generate_mesh(
+        &self,
+        _request: &TextToAssetMeshRequest,
+    ) -> Result<TriangleMesh, TextToAssetError> {
         Err(TextToAssetError::BackendUnavailable)
     }
 
@@ -1237,7 +1268,10 @@ impl DungeonMap {
     }
 
     pub fn floor_count(&self) -> usize {
-        self.tiles.iter().filter(|tile| **tile == DungeonTile::Floor as u8).count()
+        self.tiles
+            .iter()
+            .filter(|tile| **tile == DungeonTile::Floor as u8)
+            .count()
     }
 }
 
@@ -1257,9 +1291,14 @@ impl fmt::Display for DungeonGenerationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDimensions { width, height } => {
-                write!(f, "dungeon dimensions must be greater than zero: {width}x{height}")
+                write!(
+                    f,
+                    "dungeon dimensions must be greater than zero: {width}x{height}"
+                )
             }
-            Self::InvalidConfig(message) => write!(f, "invalid dungeon generation config: {message}"),
+            Self::InvalidConfig(message) => {
+                write!(f, "invalid dungeon generation config: {message}")
+            }
         }
     }
 }
@@ -1315,7 +1354,15 @@ pub fn generate_bsp_dungeon(
 
     let mut tiles = vec![DungeonTile::Wall as u8; config.width * config.height];
     let mut rooms = Vec::new();
-    carve_node_rooms(&mut root, &mut rng, config, &mut rooms, &mut tiles, config.width, config.height);
+    carve_node_rooms(
+        &mut root,
+        &mut rng,
+        config,
+        &mut rooms,
+        &mut tiles,
+        config.width,
+        config.height,
+    );
     connect_node_centers(&root, config.width, config.height, &mut tiles);
 
     Ok(DungeonMap {
@@ -1370,7 +1417,9 @@ fn split_bsp_node(node: &mut BspNode, rng: &mut DungeonRng, config: &BspDungeonC
         return;
     }
 
-    if (node.region.width > config.max_leaf_size || node.region.height > config.max_leaf_size) == false {
+    if (node.region.width > config.max_leaf_size || node.region.height > config.max_leaf_size)
+        == false
+    {
         return;
     }
 
@@ -1471,7 +1520,13 @@ fn carve_node_rooms(
     if node.left.is_none() && node.right.is_none() {
         let room = carve_room_in_leaf(node, rng, config);
         if let Some(room_rect) = room {
-            carve_filled_rect(room_rect.clone(), DungeonTile::Floor, tiles, map_width, map_height);
+            carve_filled_rect(
+                room_rect.clone(),
+                DungeonTile::Floor,
+                tiles,
+                map_width,
+                map_height,
+            );
             node.room = Some(room_rect.clone());
             rooms.push(room_rect);
         }
@@ -1491,11 +1546,16 @@ fn carve_room_in_leaf(
     rng: &mut DungeonRng,
     config: &BspDungeonConfig,
 ) -> Option<DungeonRect> {
-    if node.region.width < config.min_room_size + 2 || node.region.height < config.min_room_size + 2 {
+    if node.region.width < config.min_room_size + 2 || node.region.height < config.min_room_size + 2
+    {
         return None;
     }
-    let max_room_width = (node.region.width - 2).min(config.max_room_size).max(config.min_room_size);
-    let max_room_height = (node.region.height - 2).min(config.max_room_size).max(config.min_room_size);
+    let max_room_width = (node.region.width - 2)
+        .min(config.max_room_size)
+        .max(config.min_room_size);
+    let max_room_height = (node.region.height - 2)
+        .min(config.max_room_size)
+        .max(config.min_room_size);
     let room_width = rng.next_range_inclusive(config.min_room_size, max_room_width);
     let room_height = rng.next_range_inclusive(config.min_room_size, max_room_height);
 
@@ -1625,7 +1685,10 @@ impl fmt::Display for TextureProcessError {
                 texture,
                 width,
                 height,
-            } => write!(f, "texture `{texture}` has invalid dimensions: {width}x{height}"),
+            } => write!(
+                f,
+                "texture `{texture}` has invalid dimensions: {width}x{height}"
+            ),
             Self::TextureTooWideForAtlas {
                 texture,
                 width,
@@ -1696,8 +1759,7 @@ impl AssetCache {
 
         if let Some(existing_id) = self.checksum_to_id.get(&checksum) {
             let existing_id = existing_id.clone();
-            self.source_to_id
-                .insert(source_path, existing_id.clone());
+            self.source_to_id.insert(source_path, existing_id.clone());
             return Ok(existing_id);
         }
 
@@ -1788,6 +1850,428 @@ impl AssetCache {
     }
 }
 
+#[derive(Debug, Clone)]
+struct GodotNodeRecord {
+    name: String,
+    node_type: String,
+    parent_path: Option<String>,
+    full_path: String,
+    properties: HashMap<String, String>,
+}
+
+enum GodotSection {
+    Ignore,
+    Node(usize),
+}
+
+/// Import a Godot text scene (`.tscn`) into a POD-authored `Scene`.
+pub fn import_godot_scene(source_path: impl AsRef<Path>) -> Result<Scene, AssetImportError> {
+    let source_path = canonical_source_path(source_path)?;
+    let document = fs::read_to_string(&source_path)?;
+    parse_godot_scene_document(&document, &source_path)
+}
+
+fn parse_godot_scene_document(
+    document: &str,
+    source_path: &Path,
+) -> Result<Scene, AssetImportError> {
+    let scene_name = source_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("imported_scene");
+    let mut scene = Scene::new(scene_name);
+    scene.metadata.description = format!("Imported from Godot scene {}", source_path.display());
+    scene.metadata.tags = vec![
+        "imported".to_string(),
+        "godot".to_string(),
+        "2d".to_string(),
+    ];
+
+    let mut ext_resources = HashMap::<String, String>::new();
+    let mut nodes = Vec::<GodotNodeRecord>::new();
+    let mut section = GodotSection::Ignore;
+
+    for raw_line in document.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            let (section_name, attributes) = parse_godot_section_header(line).ok_or_else(|| {
+                scene_import_error(
+                    source_path,
+                    format!("could not parse Godot section header `{line}`"),
+                )
+            })?;
+
+            section = match section_name.as_str() {
+                "ext_resource" => {
+                    if let (Some(id), Some(path)) = (attributes.get("id"), attributes.get("path")) {
+                        ext_resources.insert(id.clone(), path.clone());
+                    }
+                    GodotSection::Ignore
+                }
+                "node" => {
+                    let name = attributes
+                        .get("name")
+                        .cloned()
+                        .unwrap_or_else(|| "Node".to_string());
+                    let parent_path = attributes.get("parent").cloned();
+                    let node_type = attributes
+                        .get("type")
+                        .cloned()
+                        .unwrap_or_else(|| "Node".to_string());
+                    let full_path = match parent_path.as_deref() {
+                        None => ".".to_string(),
+                        Some(".") => name.clone(),
+                        Some(parent) => format!("{parent}/{name}"),
+                    };
+
+                    if nodes.iter().any(|node| node.full_path == full_path) {
+                        return Err(scene_import_error(
+                            source_path,
+                            format!("duplicate Godot node path `{full_path}`"),
+                        ));
+                    }
+
+                    nodes.push(GodotNodeRecord {
+                        name,
+                        node_type,
+                        parent_path,
+                        full_path,
+                        properties: HashMap::new(),
+                    });
+                    GodotSection::Node(nodes.len() - 1)
+                }
+                _ => GodotSection::Ignore,
+            };
+            continue;
+        }
+
+        if let GodotSection::Node(index) = section {
+            if let Some((key, value)) = line.split_once('=') {
+                nodes[index]
+                    .properties
+                    .insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+    }
+
+    if nodes.is_empty() {
+        return Err(scene_import_error(
+            source_path,
+            "scene does not contain any `[node]` sections",
+        ));
+    }
+
+    let mut node_ids = HashMap::<String, uuid::Uuid>::new();
+    for node in &nodes {
+        let mut entity = EntityInstance::new(node.name.clone());
+
+        if should_import_transform(node) {
+            entity
+                .add_native_component(&build_node_transform(&node.properties))
+                .map_err(|message| scene_import_error(source_path, message))?;
+        }
+
+        if node.node_type == "Sprite2D" {
+            entity
+                .add_native_component(&build_sprite_component(&node.properties, &ext_resources))
+                .map_err(|message| scene_import_error(source_path, message))?;
+        }
+
+        if node.node_type == "ColorRect" {
+            entity
+                .add_native_component(&build_color_rect_component(&node.properties))
+                .map_err(|message| scene_import_error(source_path, message))?;
+        }
+
+        let entity_id = scene.add_entity(entity);
+        node_ids.insert(node.full_path.clone(), entity_id);
+    }
+
+    for node in &nodes {
+        let Some(parent_path) = node.parent_path.as_deref() else {
+            continue;
+        };
+        let child_id = *node_ids.get(&node.full_path).ok_or_else(|| {
+            scene_import_error(
+                source_path,
+                format!("missing child scene entity for `{}`", node.full_path),
+            )
+        })?;
+        let parent_id = *node_ids.get(parent_path).ok_or_else(|| {
+            scene_import_error(
+                source_path,
+                format!("missing parent scene entity for `{parent_path}`"),
+            )
+        })?;
+        scene.graph.set_parent(child_id, parent_id);
+    }
+
+    Ok(scene)
+}
+
+fn write_imported_scene_artifact(
+    source_path: &Path,
+    imported_path: &Path,
+) -> Result<(), AssetImportError> {
+    let scene = import_godot_scene(source_path)?;
+    let bytes = serde_json::to_vec_pretty(&scene)
+        .map_err(|err| scene_import_error(source_path, err.to_string()))?;
+    if let Some(parent) = imported_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(imported_path, bytes)?;
+    Ok(())
+}
+
+fn scene_import_error(source_path: &Path, message: impl Into<String>) -> AssetImportError {
+    AssetImportError::SceneImport {
+        path: source_path.to_path_buf(),
+        message: message.into(),
+    }
+}
+
+fn parse_godot_section_header(line: &str) -> Option<(String, HashMap<String, String>)> {
+    let inner = line.strip_prefix('[')?.strip_suffix(']')?.trim();
+    let split_index = inner.find(char::is_whitespace);
+    let (section_name, rest) = match split_index {
+        Some(index) => (&inner[..index], inner[index..].trim()),
+        None => (inner, ""),
+    };
+    Some((
+        section_name.to_string(),
+        parse_godot_header_attributes(rest),
+    ))
+}
+
+fn parse_godot_header_attributes(input: &str) -> HashMap<String, String> {
+    let bytes = input.as_bytes();
+    let mut attributes = HashMap::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            break;
+        }
+
+        let key_start = index;
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
+            index += 1;
+        }
+        let key = input[key_start..index].trim();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if key.is_empty() || index >= bytes.len() || bytes[index] != b'=' {
+            break;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            break;
+        }
+
+        let value = if bytes[index] == b'"' {
+            index += 1;
+            let value_start = index;
+            while index < bytes.len() && bytes[index] != b'"' {
+                index += 1;
+            }
+            let parsed = input[value_start..index].to_string();
+            if index < bytes.len() {
+                index += 1;
+            }
+            parsed
+        } else {
+            let value_start = index;
+            let mut paren_depth = 0usize;
+            while index < bytes.len() {
+                match bytes[index] {
+                    b'(' => paren_depth += 1,
+                    b')' if paren_depth > 0 => paren_depth -= 1,
+                    b' ' | b'\t' if paren_depth == 0 => break,
+                    _ => {}
+                }
+                index += 1;
+            }
+            input[value_start..index].trim().to_string()
+        };
+
+        attributes.insert(key.to_string(), value);
+    }
+
+    attributes
+}
+
+fn should_import_transform(node: &GodotNodeRecord) -> bool {
+    node.node_type.ends_with("2D")
+        || node.node_type == "ColorRect"
+        || node.properties.contains_key("position")
+        || node.properties.contains_key("rotation")
+        || node.properties.contains_key("rotation_degrees")
+        || node.properties.contains_key("scale")
+}
+
+fn build_node_transform(properties: &HashMap<String, String>) -> Transform {
+    let mut transform = Transform::default();
+    if let Some(position) = properties
+        .get("position")
+        .and_then(|value| parse_vector2(value))
+    {
+        transform.position = position;
+    }
+    if let Some(rotation) = properties
+        .get("rotation")
+        .and_then(|value| value.parse::<f32>().ok())
+        .or_else(|| {
+            properties
+                .get("rotation_degrees")
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(f32::to_radians)
+        })
+    {
+        transform.rotation = rotation;
+    }
+    if let Some(scale) = properties
+        .get("scale")
+        .and_then(|value| parse_vector2(value))
+    {
+        transform.scale = scale;
+    }
+    transform
+}
+
+fn build_sprite_component(
+    properties: &HashMap<String, String>,
+    ext_resources: &HashMap<String, String>,
+) -> Sprite {
+    let mut sprite = Sprite::default();
+    if let Some(texture) = properties
+        .get("texture")
+        .and_then(|value| resolve_godot_resource(value, ext_resources))
+    {
+        sprite.texture = texture;
+    }
+    if let Some(frame) = properties
+        .get("frame")
+        .and_then(|value| value.parse::<u32>().ok())
+    {
+        sprite.frame = frame;
+    }
+    if let Some(layer) = properties
+        .get("z_index")
+        .and_then(|value| value.parse::<i32>().ok())
+    {
+        sprite.layer = layer;
+    }
+    if let Some(visible) = properties
+        .get("visible")
+        .and_then(|value| parse_bool_literal(value))
+    {
+        sprite.visible = visible;
+    }
+    if let Some(color) = properties
+        .get("modulate")
+        .and_then(|value| parse_color(value))
+    {
+        sprite.color = color;
+    }
+    sprite
+}
+
+fn build_color_rect_component(properties: &HashMap<String, String>) -> ColorRect {
+    let size = properties
+        .get("size")
+        .and_then(|value| parse_vector2(value))
+        .unwrap_or(Vec2::ZERO);
+    let color = properties
+        .get("color")
+        .and_then(|value| parse_color(value))
+        .unwrap_or([1.0, 1.0, 1.0, 1.0]);
+    let mut rect = ColorRect::new(size.x, size.y, color);
+    if let Some(layer) = properties
+        .get("z_index")
+        .and_then(|value| value.parse::<i32>().ok())
+    {
+        rect.layer = layer;
+    }
+    rect
+}
+
+fn resolve_godot_resource(
+    raw_value: &str,
+    ext_resources: &HashMap<String, String>,
+) -> Option<String> {
+    let trimmed = raw_value.trim();
+    if let Some(resource_id) = trimmed
+        .strip_prefix("ExtResource(\"")
+        .and_then(|value| value.strip_suffix("\")"))
+    {
+        return ext_resources
+            .get(resource_id)
+            .map(|path| normalize_godot_resource_path(path));
+    }
+
+    Some(normalize_godot_resource_path(trimmed.trim_matches('"')))
+}
+
+fn normalize_godot_resource_path(path: &str) -> String {
+    path.strip_prefix("res://").unwrap_or(path).to_string()
+}
+
+fn parse_bool_literal(raw_value: &str) -> Option<bool> {
+    match raw_value.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_vector2(raw_value: &str) -> Option<Vec2> {
+    let values = parse_f32_call(raw_value, "Vector2")?;
+    if values.len() != 2 {
+        return None;
+    }
+    Some(Vec2::new(values[0], values[1]))
+}
+
+fn parse_color(raw_value: &str) -> Option<[f32; 4]> {
+    if let Some(values) = parse_f32_call(raw_value, "Color") {
+        return match values.as_slice() {
+            [r, g, b] => Some([*r, *g, *b, 1.0]),
+            [r, g, b, a] => Some([*r, *g, *b, *a]),
+            _ => None,
+        };
+    }
+
+    let values = parse_f32_call(raw_value, "Color8")?;
+    match values.as_slice() {
+        [r, g, b] => Some([*r / 255.0, *g / 255.0, *b / 255.0, 1.0]),
+        [r, g, b, a] => Some([*r / 255.0, *g / 255.0, *b / 255.0, *a / 255.0]),
+        _ => None,
+    }
+}
+
+fn parse_f32_call(raw_value: &str, function_name: &str) -> Option<Vec<f32>> {
+    let inner = raw_value
+        .trim()
+        .strip_prefix(function_name)?
+        .strip_prefix('(')?
+        .strip_suffix(')')?;
+    inner
+        .split(',')
+        .map(|part| part.trim().parse::<f32>().ok())
+        .collect::<Option<Vec<_>>>()
+}
+
 /// Create a normalized import plan for a single asset source file.
 pub fn import_asset(
     cache: &mut AssetCache,
@@ -1796,21 +2280,33 @@ pub fn import_asset(
 ) -> Result<AssetImport, AssetImportError> {
     let source_path = canonical_source_path(&source_path)?;
     let checksum = compute_checksum(&source_path)?;
-    let format = AssetFormat::from_path(&source_path).ok_or_else(|| {
-        AssetImportError::UnsupportedFormat(source_path.clone())
-    })?;
+    let format = AssetFormat::from_path(&source_path)
+        .ok_or_else(|| AssetImportError::UnsupportedFormat(source_path.clone()))?;
     let byte_len = fs::metadata(&source_path)?.len();
     let file_id = AssetId::from(format!("sha256:{checksum}"));
     let imported_path = output_root
         .as_ref()
         .join(format.import_prefix())
-        .join(format!("{}.{}", file_id.as_filename(), format.asset_extension()));
+        .join(format!(
+            "{}.{}",
+            file_id.as_filename(),
+            format.asset_extension()
+        ));
+
+    if format == AssetFormat::GodotScene {
+        write_imported_scene_artifact(&source_path, &imported_path)?;
+    }
 
     cache.index_or_refresh(&source_path, imported_path.clone())?;
-    let record = cache
-        .get(&file_id)
-        .cloned()
-        .unwrap_or_else(|| AssetRecord::new(file_id.clone(), source_path.clone(), imported_path.clone(), checksum.clone(), byte_len));
+    let record = cache.get(&file_id).cloned().unwrap_or_else(|| {
+        AssetRecord::new(
+            file_id.clone(),
+            source_path.clone(),
+            imported_path.clone(),
+            checksum.clone(),
+            byte_len,
+        )
+    });
 
     Ok(AssetImport {
         id: record.id,
@@ -1874,7 +2370,9 @@ pub struct MeshLodChain {
 #[derive(Debug)]
 pub enum MeshProcessError {
     EmptyMesh,
-    NonTriangularMesh { index_count: usize },
+    NonTriangularMesh {
+        index_count: usize,
+    },
     InvalidIndex {
         level: u8,
         source_index: usize,
@@ -2004,10 +2502,7 @@ fn run_length_compress(input: &[u8]) -> Vec<u8> {
     while cursor < input.len() {
         let value = input[cursor];
         let mut run = 1usize;
-        while cursor + run < input.len()
-            && input[cursor + run] == value
-            && run < u8::MAX as usize
-        {
+        while cursor + run < input.len() && input[cursor + run] == value && run < u8::MAX as usize {
             run += 1;
         }
         out.push(run as u8);
@@ -2171,9 +2666,9 @@ fn canonical_source_path(source_path: impl AsRef<Path>) -> Result<PathBuf, Asset
         .map_err(|_| AssetCacheError::InvalidSourcePath(source_path.to_path_buf()))
 }
 
-    fn hash_to_hex(bytes: Vec<u8>) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
+fn hash_to_hex(bytes: Vec<u8>) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
 fn fallback_canonicalized_source(path: &Path) -> Option<PathBuf> {
     path.file_name().and_then(|file_name| {
@@ -2192,9 +2687,9 @@ fn now_unix_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::fs;
     use std::path::PathBuf;
-    use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
 
@@ -2314,7 +2809,8 @@ mod tests {
         fs::write(&source, b"obj-bytes").unwrap();
         let canonical_source = source.canonicalize().expect("source path canonicalizes");
 
-        let first = import_asset(&mut cache, &source, &output_root).expect("import should be scheduled");
+        let first =
+            import_asset(&mut cache, &source, &output_root).expect("import should be scheduled");
         let second =
             import_asset(&mut cache, &source, &output_root).expect("import should be scheduled");
 
@@ -2327,6 +2823,144 @@ mod tests {
     }
 
     #[test]
+    fn import_godot_scene_preserves_hierarchy_and_native_components() {
+        let source = temp_file_path("demo_level.tscn");
+        fs::write(
+            &source,
+            r#"
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Texture2D" path="res://art/player.png" id="1_tex"]
+
+[node name="Root" type="Node2D"]
+position = Vector2(1, 2)
+
+[node name="Player" type="Sprite2D" parent="."]
+position = Vector2(4, 5)
+scale = Vector2(1.5, 2.0)
+rotation_degrees = 90
+texture = ExtResource("1_tex")
+frame = 3
+z_index = 7
+visible = false
+modulate = Color(0.25, 0.5, 0.75, 1.0)
+
+[node name="Fog" type="ColorRect" parent="."]
+position = Vector2(-2, 6)
+size = Vector2(32, 18)
+color = Color8(10, 20, 30, 128)
+z_index = -2
+"#,
+        )
+        .unwrap();
+
+        let scene = import_godot_scene(&source).expect("scene should import");
+        assert!(scene.metadata.name.ends_with("demo_level"));
+        assert_eq!(scene.entities.len(), 3);
+
+        let root = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Root")
+            .expect("root entity should exist");
+        let player = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Player")
+            .expect("player entity should exist");
+        let fog = scene
+            .entities
+            .iter()
+            .find(|entity| entity.name == "Fog")
+            .expect("fog entity should exist");
+
+        let root_transform = root
+            .get_native_component::<Transform>()
+            .expect("transform should deserialize")
+            .expect("root transform should exist");
+        assert!(root_transform
+            .position
+            .abs_diff_eq(Vec2::new(1.0, 2.0), 1e-6));
+
+        let player_transform = player
+            .get_native_component::<Transform>()
+            .expect("transform should deserialize")
+            .expect("player transform should exist");
+        assert!(player_transform
+            .position
+            .abs_diff_eq(Vec2::new(4.0, 5.0), 1e-6));
+        assert!(player_transform
+            .scale
+            .abs_diff_eq(Vec2::new(1.5, 2.0), 1e-6));
+        assert!((player_transform.rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+
+        let player_sprite = player
+            .get_native_component::<Sprite>()
+            .expect("sprite should deserialize")
+            .expect("player sprite should exist");
+        assert_eq!(player_sprite.texture, "art/player.png");
+        assert_eq!(player_sprite.frame, 3);
+        assert_eq!(player_sprite.layer, 7);
+        assert!(!player_sprite.visible);
+        assert_eq!(player_sprite.color, [0.25, 0.5, 0.75, 1.0]);
+
+        let fog_rect = fog
+            .get_native_component::<ColorRect>()
+            .expect("color rect should deserialize")
+            .expect("fog rect should exist");
+        assert_eq!(fog_rect.width, 32.0);
+        assert_eq!(fog_rect.height, 18.0);
+        assert_eq!(fog_rect.layer, -2);
+        assert!((fog_rect.color[0] - (10.0 / 255.0)).abs() < 1e-6);
+        assert!((fog_rect.color[1] - (20.0 / 255.0)).abs() < 1e-6);
+        assert!((fog_rect.color[2] - (30.0 / 255.0)).abs() < 1e-6);
+        assert!((fog_rect.color[3] - (128.0 / 255.0)).abs() < 1e-6);
+
+        assert_eq!(scene.graph.get_parent(player.id), Some(root.id));
+        assert_eq!(scene.graph.get_parent(fog.id), Some(root.id));
+    }
+
+    #[test]
+    fn import_asset_writes_serialized_scene_artifact_for_godot_text_scenes() {
+        let mut cache = AssetCache::new();
+        let source = temp_file_path("combat_room.tscn");
+        let output_root = temp_file_path("import-root-scene");
+        fs::write(
+            &source,
+            r#"
+[gd_scene load_steps=1 format=3]
+
+[node name="Room" type="Node2D"]
+position = Vector2(0, 0)
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            AssetFormat::from_path(&source),
+            Some(AssetFormat::GodotScene)
+        );
+
+        let import =
+            import_asset(&mut cache, &source, &output_root).expect("scene import should succeed");
+        assert_eq!(import.format, AssetFormat::GodotScene);
+        assert!(import.imported_path.exists());
+        assert!(import.imported_path.to_string_lossy().contains("/scene/"));
+        assert!(import
+            .imported_path
+            .to_string_lossy()
+            .ends_with(".scene.json"));
+
+        let imported_scene: Scene = serde_json::from_slice(
+            &fs::read(&import.imported_path).expect("artifact should exist"),
+        )
+        .expect("artifact should deserialize to pod_scene::Scene");
+        assert!(imported_scene.metadata.name.ends_with("combat_room"));
+        assert_eq!(imported_scene.entities.len(), 1);
+        assert_eq!(cache.total(), 1);
+    }
+
+    #[test]
     fn import_asset_rejects_unsupported_extension() {
         let mut cache = AssetCache::new();
         let source = temp_file_path("bad.txt");
@@ -2334,7 +2968,10 @@ mod tests {
         fs::write(&source, b"bad").unwrap();
 
         let result = import_asset(&mut cache, &source, &output_root);
-        assert!(matches!(result, Err(AssetImportError::UnsupportedFormat(_))));
+        assert!(matches!(
+            result,
+            Err(AssetImportError::UnsupportedFormat(_))
+        ));
     }
 
     #[test]
@@ -2401,7 +3038,10 @@ mod tests {
             _ => panic!("deleted file should remove cache entry"),
         };
         assert_eq!(removed_id, imported_id);
-        assert!(!cache.lock().expect("cache should lock").contains(&removed_id));
+        assert!(!cache
+            .lock()
+            .expect("cache should lock")
+            .contains(&removed_id));
     }
 
     #[test]
@@ -2464,7 +3104,11 @@ mod tests {
         let second = generate_terrain_heightmap(&b).expect("heightmap should generate");
         assert_eq!(first.heights.len(), second.heights.len());
         assert!(
-            first.heights.iter().zip(second.heights.iter()).any(|(a, b)| (*a - *b).abs() > 0.0001),
+            first
+                .heights
+                .iter()
+                .zip(second.heights.iter())
+                .any(|(a, b)| (*a - *b).abs() > 0.0001),
             "different seeds should produce different terrain samples"
         );
     }
@@ -2483,7 +3127,10 @@ mod tests {
         assert_eq!(map.height, config.height);
         assert_eq!(map.heights.len(), config.width * config.height);
         assert!(map.heights.iter().all(|height| *height >= 0.0));
-        assert!(map.heights.iter().all(|height| *height <= config.max_height));
+        assert!(map
+            .heights
+            .iter()
+            .all(|height| *height <= config.max_height));
     }
 
     #[test]
@@ -2532,8 +3179,14 @@ mod tests {
         let mesh = generate_terrain_mesh(&map).expect("terrain mesh should generate");
 
         assert_eq!(mesh.vertices.len(), config.width * config.height);
-        assert_eq!(mesh.indices.len(), (config.width - 1) * (config.height - 1) * 6);
-        assert_eq!(mesh.triangle_count(), (config.width - 1) * (config.height - 1) * 2);
+        assert_eq!(
+            mesh.indices.len(),
+            (config.width - 1) * (config.height - 1) * 6
+        );
+        assert_eq!(
+            mesh.triangle_count(),
+            (config.width - 1) * (config.height - 1) * 2
+        );
     }
 
     #[test]
@@ -2550,7 +3203,10 @@ mod tests {
         };
         assert!(matches!(
             generate_terrain_mesh(&map),
-            Err(TerrainGenerationError::DegenerateMesh { width: 1, height: 5 })
+            Err(TerrainGenerationError::DegenerateMesh {
+                width: 1,
+                height: 5
+            })
         ));
     }
 
@@ -2633,7 +3289,8 @@ mod tests {
         let mut queue = VecDeque::new();
         let mut seen_count = 0usize;
 
-        let first_floor = (0..dungeon.tiles.len()).find(|index| dungeon.tiles[*index] == DungeonTile::Floor as u8);
+        let first_floor = (0..dungeon.tiles.len())
+            .find(|index| dungeon.tiles[*index] == DungeonTile::Floor as u8);
         let Some(first_floor) = first_floor else {
             panic!("expected at least one floor tile");
         };
@@ -2666,8 +3323,7 @@ mod tests {
         }
 
         assert_eq!(
-            seen_count,
-            floor_count,
+            seen_count, floor_count,
             "all floors should be connected through corridors"
         );
     }
@@ -2769,12 +3425,13 @@ mod tests {
     #[test]
     fn noop_text_to_asset_generator_reports_unavailable() {
         let generator = NoopTextToAssetGenerator;
-        let mesh_err =
-            text_to_mesh_from_prompt(&generator, "a tiny robot in the shape of a cube");
-        let texture_err =
-            text_to_texture_from_prompt(&generator, "crimson nebula", 8, 8);
+        let mesh_err = text_to_mesh_from_prompt(&generator, "a tiny robot in the shape of a cube");
+        let texture_err = text_to_texture_from_prompt(&generator, "crimson nebula", 8, 8);
 
-        assert!(matches!(mesh_err, Err(TextToAssetError::BackendUnavailable)));
+        assert!(matches!(
+            mesh_err,
+            Err(TextToAssetError::BackendUnavailable)
+        ));
         assert!(matches!(
             texture_err,
             Err(TextToAssetError::BackendUnavailable)
@@ -2832,12 +3489,8 @@ mod tests {
         assert_eq!(chain.levels[2].stride, 4);
         assert_eq!(chain.levels[2].mesh.triangle_count(), 1);
 
-        assert!(
-            chain.levels[0].mesh.vertices.len() >= chain.levels[1].mesh.vertices.len()
-        );
-        assert!(
-            chain.levels[1].mesh.vertices.len() >= chain.levels[2].mesh.vertices.len()
-        );
+        assert!(chain.levels[0].mesh.vertices.len() >= chain.levels[1].mesh.vertices.len());
+        assert!(chain.levels[1].mesh.vertices.len() >= chain.levels[2].mesh.vertices.len());
         assert_eq!(chain.source.to_string(), "test_asset");
     }
 
@@ -2947,13 +3600,16 @@ mod tests {
 
         assert_eq!(atlas.id, AssetId::from("atlas"));
         assert_eq!(atlas.placements.len(), 3);
-        assert_eq!(atlas.placements[0], TexturePlacement {
-            id: AssetId::from("tex_a"),
-            x: 0,
-            y: 0,
-            width: 4,
-            height: 2,
-        });
+        assert_eq!(
+            atlas.placements[0],
+            TexturePlacement {
+                id: AssetId::from("tex_a"),
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 2,
+            }
+        );
         assert_eq!(atlas.placements[1].x, 0);
         assert_eq!(atlas.placements[2].y, 7);
         assert_eq!(atlas.height, 8);

@@ -470,7 +470,8 @@ impl FiniteStateMachine {
 
     pub fn remove_state(&mut self, state: &str) {
         self.states.retain(|value| value != state);
-        self.transitions.retain(|transition| transition.from != state && transition.to != state);
+        self.transitions
+            .retain(|transition| transition.from != state && transition.to != state);
         if self.selected_state.as_deref() == Some(state) {
             self.selected_state = self.states.first().cloned();
         }
@@ -619,6 +620,7 @@ impl EditorHistory {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AssetKind {
     Mesh,
+    Scene,
     Texture,
     Audio,
     Script,
@@ -629,6 +631,7 @@ impl AssetKind {
     fn label(self) -> &'static str {
         match self {
             Self::Mesh => "Mesh",
+            Self::Scene => "Scene",
             Self::Texture => "Texture",
             Self::Audio => "Audio",
             Self::Script => "Script",
@@ -645,6 +648,7 @@ impl AssetKind {
             .as_str()
         {
             "gltf" | "glb" | "fbx" => Self::Mesh,
+            "tscn" | "scn" | "unity" | "prefab" | "tmj" => Self::Scene,
             "png" | "jpg" | "jpeg" => Self::Texture,
             "wav" | "ogg" | "mp3" => Self::Audio,
             "lua" | "json" | "ron" => Self::Script,
@@ -712,6 +716,14 @@ impl Default for AssetBrowserState {
                     enabled: true,
                 },
                 EditorAsset {
+                    id: "arena_blockout".to_string(),
+                    path: "assets/scenes/arena_blockout.tscn".to_string(),
+                    label: "arena_blockout".to_string(),
+                    kind: AssetKind::Scene,
+                    size_bytes: 18_432,
+                    enabled: true,
+                },
+                EditorAsset {
                     id: "ui_theme".to_string(),
                     path: "assets/textures/ui_theme.png".to_string(),
                     label: "ui_theme".to_string(),
@@ -750,7 +762,8 @@ impl AssetBrowserState {
             return true;
         }
         let q = query.to_ascii_lowercase();
-        asset.label.to_ascii_lowercase().contains(&q) || asset.path.to_ascii_lowercase().contains(&q)
+        asset.label.to_ascii_lowercase().contains(&q)
+            || asset.path.to_ascii_lowercase().contains(&q)
     }
 
     fn visible_assets(&self) -> Vec<&EditorAsset> {
@@ -880,15 +893,15 @@ impl Default for SceneHierarchy {
         world.add_child(player);
         world.add_child(HierarchyNode::new(1004, "Environment"));
 
-        Self {
-            roots: vec![world],
-        }
+        Self { roots: vec![world] }
     }
 }
 
 impl SceneHierarchy {
     pub fn contains_entity(&self, entity_id: u64) -> bool {
-        self.roots.iter().any(|node| node.contains_entity(entity_id))
+        self.roots
+            .iter()
+            .any(|node| node.contains_entity(entity_id))
     }
 
     pub fn render(&mut self, ui: &mut Ui, selected_entity: &mut Option<u64>) {
@@ -913,12 +926,32 @@ pub struct EntityPropertyMap {
 impl EntityPropertyMap {
     fn with_defaults(entity_id: u64) -> Self {
         let entries = match entity_id {
-            1000 => [("Name", "World"), ("Gravity", "-9.81"), ("Lighting", "Enabled")],
+            1000 => [
+                ("Name", "World"),
+                ("Gravity", "-9.81"),
+                ("Lighting", "Enabled"),
+            ],
             1001 => [("Name", "Player"), ("Health", "100"), ("MoveSpeed", "4.5")],
-            1002 => [("Name", "Player Renderer"), ("Material", "default_player.mat"), ("Visible", "true")],
-            1003 => [("Name", "Player Collider"), ("Shape", "Capsule"), ("Radius", "0.5")],
-            1004 => [("Name", "Environment"), ("Biome", "City"), ("TimeOfDay", "Noon")],
-            _ => [("Name", "Entity"), ("Component", "Transform"), ("Visible", "true")],
+            1002 => [
+                ("Name", "Player Renderer"),
+                ("Material", "default_player.mat"),
+                ("Visible", "true"),
+            ],
+            1003 => [
+                ("Name", "Player Collider"),
+                ("Shape", "Capsule"),
+                ("Radius", "0.5"),
+            ],
+            1004 => [
+                ("Name", "Environment"),
+                ("Biome", "City"),
+                ("TimeOfDay", "Noon"),
+            ],
+            _ => [
+                ("Name", "Entity"),
+                ("Component", "Transform"),
+                ("Visible", "true"),
+            ],
         };
         Self {
             entries: entries
@@ -1115,9 +1148,12 @@ impl PodEditorApp {
     }
 
     pub fn selected_entity_properties(&mut self) -> Option<&mut HashMap<String, String>> {
-        self.state
-            .selected_entity
-            .and_then(|entity_id| self.state.inspector_data.get_mut(&entity_id).map(|props| &mut props.entries))
+        self.state.selected_entity.and_then(|entity_id| {
+            self.state
+                .inspector_data
+                .get_mut(&entity_id)
+                .map(|props| &mut props.entries)
+        })
     }
 
     pub fn viewport_mode(&self) -> ViewportMode {
@@ -1141,9 +1177,7 @@ impl PodEditorApp {
         self.history.remember(self.state.clone());
         self.state.run_state = PlayState::Playing;
         self.state.spacetime_dashboard.apply_connect(true);
-        self.state
-            .spacetime_dashboard
-            .record_reducer_call("play");
+        self.state.spacetime_dashboard.record_reducer_call("play");
         self.push_console("Simulation running".to_string());
     }
 
@@ -1153,9 +1187,7 @@ impl PodEditorApp {
         }
         self.history.remember(self.state.clone());
         self.state.run_state = PlayState::Paused;
-        self.state
-            .spacetime_dashboard
-            .record_reducer_call("pause");
+        self.state.spacetime_dashboard.record_reducer_call("pause");
         self.push_console("Simulation paused".to_string());
     }
 
@@ -1163,9 +1195,7 @@ impl PodEditorApp {
         self.history.remember(self.state.clone());
         self.state.run_state = PlayState::Stopped;
         self.state.spacetime_dashboard.apply_connect(false);
-        self.state
-            .spacetime_dashboard
-            .record_reducer_call("stop");
+        self.state.spacetime_dashboard.record_reducer_call("stop");
         self.push_console("Simulation stopped".to_string());
     }
 
@@ -1178,10 +1208,7 @@ impl PodEditorApp {
     }
 
     pub fn selected_asset_label(&self) -> Option<&str> {
-        self.state
-            .asset_browser
-            .selected
-            .as_deref()
+        self.state.asset_browser.selected.as_deref()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -1213,15 +1240,17 @@ impl PodEditorApp {
     }
 
     pub fn save_project(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        let serialized = serde_json::to_string_pretty(&self.state)
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, format!("serialize failed: {error}")))?;
+        let serialized = serde_json::to_string_pretty(&self.state).map_err(|error| {
+            io::Error::new(io::ErrorKind::Other, format!("serialize failed: {error}"))
+        })?;
         fs::write(path, serialized)
     }
 
     pub fn load_project(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
         let content = fs::read_to_string(path)?;
-        let loaded: EditorState = serde_json::from_str(&content)
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, format!("deserialize failed: {error}")))?;
+        let loaded: EditorState = serde_json::from_str(&content).map_err(|error| {
+            io::Error::new(io::ErrorKind::Other, format!("deserialize failed: {error}"))
+        })?;
         self.state = loaded;
         self.history.clear();
         self.push_console("Project loaded".to_string());
@@ -1234,9 +1263,7 @@ impl PodEditorApp {
             return;
         }
         self.history.remember(self.state.clone());
-        self.state
-            .asset_browser
-            .import_asset(path.clone());
+        self.state.asset_browser.import_asset(path.clone());
         self.push_console(format!("Imported {path}"));
     }
 
@@ -1444,7 +1471,9 @@ impl PodEditorApp {
 
     fn render_hierarchy(&mut self, ui: &mut Ui) {
         ui.heading("Entity Hierarchy");
-        self.state.hierarchy.render(ui, &mut self.state.selected_entity);
+        self.state
+            .hierarchy
+            .render(ui, &mut self.state.selected_entity);
     }
 
     fn render_inspector(&mut self, ui: &mut Ui) {
@@ -1487,7 +1516,13 @@ impl PodEditorApp {
         let prefix = "  ".repeat(depth);
         let active = selected_node == Some(node_id);
         let mut selected = None;
-        if ui.selectable_label(active, format!("{prefix}[#{}] {} {}", node.id, node.kind.label(), node.name)).clicked() {
+        if ui
+            .selectable_label(
+                active,
+                format!("{prefix}[#{}] {} {}", node.id, node.kind.label(), node.name),
+            )
+            .clicked()
+        {
             selected = Some(node_id);
         }
         for child_id in node.children.clone() {
@@ -1606,7 +1641,10 @@ impl PodEditorApp {
             for (index, transition) in self.state.fsm.transitions.iter().enumerate() {
                 if transition.from == state && transition_index_to_remove.is_none() {
                     ui.horizontal(|ui| {
-                        ui.label(format!("{} --{}--> {}", transition.from, transition.on, transition.to));
+                        ui.label(format!(
+                            "{} --{}--> {}",
+                            transition.from, transition.on, transition.to
+                        ));
                         if ui.button("remove").clicked() {
                             transition_index_to_remove = Some(index);
                         }
@@ -1683,7 +1721,10 @@ impl PodEditorApp {
         {
             self.history.remember(self.state.clone());
         }
-        if ui.text_edit_singleline(&mut self.state.llm_agent_config.model).changed() {
+        if ui
+            .text_edit_singleline(&mut self.state.llm_agent_config.model)
+            .changed()
+        {
             let model = self.state.llm_agent_config.model.clone();
             self.set_llm_model(model);
         }
@@ -1692,20 +1733,22 @@ impl PodEditorApp {
         if ui.text_edit_multiline(&mut prompt).changed() {
             self.set_llm_system_prompt(prompt);
         }
-            ui.horizontal(|ui| {
-                ui.label("Temperature");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.state.llm_agent_config.temperature)
-                            .range(0.0..=2.0),
-                    )
-                    .changed()
-                {
-                    self.history.remember(self.state.clone());
-                }
+        ui.horizontal(|ui| {
+            ui.label("Temperature");
+            if ui
+                .add(
+                    egui::DragValue::new(&mut self.state.llm_agent_config.temperature)
+                        .range(0.0..=2.0),
+                )
+                .changed()
+            {
+                self.history.remember(self.state.clone());
+            }
             ui.label("Tool budget");
             if ui
-                .add(egui::DragValue::new(&mut self.state.llm_agent_config.tool_budget))
+                .add(egui::DragValue::new(
+                    &mut self.state.llm_agent_config.tool_budget,
+                ))
                 .changed()
             {
                 self.history.remember(self.state.clone());
@@ -1714,14 +1757,18 @@ impl PodEditorApp {
         ui.horizontal(|ui| {
             ui.label("Max tokens");
             if ui
-                .add(egui::DragValue::new(&mut self.state.llm_agent_config.max_tokens))
+                .add(egui::DragValue::new(
+                    &mut self.state.llm_agent_config.max_tokens,
+                ))
                 .changed()
             {
                 self.history.remember(self.state.clone());
             }
             ui.label("Memory window");
             if ui
-                .add(egui::DragValue::new(&mut self.state.llm_agent_config.memory_window))
+                .add(egui::DragValue::new(
+                    &mut self.state.llm_agent_config.memory_window,
+                ))
                 .changed()
             {
                 self.history.remember(self.state.clone());
@@ -1731,7 +1778,10 @@ impl PodEditorApp {
 
     fn render_spacetime_panel(&mut self, ui: &mut Ui) {
         ui.heading("SpacetimeDB Dashboard");
-        ui.label(format!("World tick: {}", self.state.spacetime_dashboard.world_tick));
+        ui.label(format!(
+            "World tick: {}",
+            self.state.spacetime_dashboard.world_tick
+        ));
         ui.label(format!(
             "Connected players: {}",
             self.state.spacetime_dashboard.connected_players
@@ -1813,14 +1863,19 @@ impl PodEditorApp {
         let visible_assets = self.state.asset_browser.visible_assets();
         for asset in visible_assets {
             let active = selected_asset.as_deref() == Some(asset.id.as_str());
-            if ui.selectable_label(active, format!("{} — {}", asset.label, asset.path)).clicked() {
+            if ui
+                .selectable_label(active, format!("{} — {}", asset.label, asset.path))
+                .clicked()
+            {
                 selection_changed = Some(asset.id.clone());
             }
         }
         if let Some(asset_id) = selection_changed {
             self.state.asset_browser.select(asset_id);
         } else if selected_asset.is_none() && !self.state.asset_browser.assets.is_empty() {
-            self.state.asset_browser.select(self.state.asset_browser.assets[0].id.clone());
+            self.state
+                .asset_browser
+                .select(self.state.asset_browser.assets[0].id.clone());
         }
 
         ui.separator();
@@ -1916,16 +1971,16 @@ impl PodEditorApp {
                         ui.label("Transform");
                         ui.label(format!(
                             "x: {:.2}, y: {:.2}, rot: {:.1}°, scale: {:.2}",
-                            transform.x,
-                            transform.y,
-                            transform.rotation_deg,
-                            transform.scale
+                            transform.x, transform.y, transform.rotation_deg, transform.scale
                         ));
                         ui.separator();
                     } else {
                         ui.label("No transform available for the selected entity.");
                     }
-                    ui.label(format!("Scene entity count: {}", self.state.hierarchy.entity_count()));
+                    ui.label(format!(
+                        "Scene entity count: {}",
+                        self.state.hierarchy.entity_count()
+                    ));
                 } else {
                     ui.label("No selected entity");
                 }
@@ -1937,7 +1992,9 @@ impl PodEditorApp {
                     ui.label("Yaw:");
                     ui.add(egui::DragValue::new(&mut self.state.viewport_3d.camera_yaw).speed(1.0));
                     ui.label("Pitch:");
-                    ui.add(egui::DragValue::new(&mut self.state.viewport_3d.camera_pitch).speed(1.0));
+                    ui.add(
+                        egui::DragValue::new(&mut self.state.viewport_3d.camera_pitch).speed(1.0),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.label("Zoom:");
@@ -2120,7 +2177,8 @@ impl App for PodEditorApp {
                 ui.separator();
                 ui.label(format!(
                     "Selected entity: {}",
-                    self.selected_entity().map_or_else(|| "None".to_string(), |id| id.to_string())
+                    self.selected_entity()
+                        .map_or_else(|| "None".to_string(), |id| id.to_string())
                 ));
             });
         });
@@ -2250,13 +2308,45 @@ mod tests {
         );
 
         app.state.asset_browser.filter = Some(AssetKind::Mesh);
-        assert!(
-            app.state.asset_browser.visible_assets().iter().all(|asset| {
-                asset.kind == AssetKind::Mesh
-            })
-        );
+        assert!(app
+            .state
+            .asset_browser
+            .visible_assets()
+            .iter()
+            .all(|asset| { asset.kind == AssetKind::Mesh }));
         app.state.asset_browser.filter = None;
         assert_eq!(app.state.asset_browser.visible_assets().len(), total + 1);
+    }
+
+    #[test]
+    fn asset_browser_recognizes_scene_assets() {
+        let mut app = PodEditorApp::default();
+        app.state
+            .asset_browser
+            .import_asset("assets/scenes/boss_room.tscn");
+
+        let imported = app
+            .state
+            .asset_browser
+            .assets
+            .iter()
+            .find(|asset| asset.id == "boss_room")
+            .expect("scene asset should be imported");
+        assert_eq!(imported.kind, AssetKind::Scene);
+
+        app.state.asset_browser.filter = Some(AssetKind::Scene);
+        assert!(app
+            .state
+            .asset_browser
+            .visible_assets()
+            .iter()
+            .all(|asset| asset.kind == AssetKind::Scene));
+        assert!(app
+            .state
+            .asset_browser
+            .visible_assets()
+            .iter()
+            .any(|asset| asset.id == "boss_room"));
     }
 
     #[test]
@@ -2297,12 +2387,16 @@ mod tests {
         app.move_selected_entity(1.5, -0.5);
         app.undo();
         assert_eq!(
-            app.selected_entity_transform().expect("entity exists after undo").x,
+            app.selected_entity_transform()
+                .expect("entity exists after undo")
+                .x,
             original_x
         );
         app.redo();
         assert_eq!(
-            app.selected_entity_transform().expect("entity exists after redo").x,
+            app.selected_entity_transform()
+                .expect("entity exists after redo")
+                .x,
             original_x + 1.5
         );
     }
@@ -2319,12 +2413,22 @@ mod tests {
             .behavior_tree
             .selected_node
             .expect("selected after add");
-        let _ = app.state.behavior_tree.nodes.get(&added_node).expect("added node exists");
+        let _ = app
+            .state
+            .behavior_tree
+            .nodes
+            .get(&added_node)
+            .expect("added node exists");
 
         app.set_behavior_node_name(added_node, "TrackEnemy".to_string());
         app.set_behavior_node_kind(added_node, BehaviorTreeNodeKind::Condition);
         assert_eq!(
-            app.state.behavior_tree.nodes.get(&added_node).expect("node still exists").name,
+            app.state
+                .behavior_tree
+                .nodes
+                .get(&added_node)
+                .expect("node still exists")
+                .name,
             "TrackEnemy"
         );
         assert_eq!(
@@ -2345,12 +2449,7 @@ mod tests {
     fn fsm_editor_supports_state_and_transition_lifecycle() {
         let mut app = PodEditorApp::default();
         assert!(app.add_fsm_state("alerted"));
-        assert!(app
-            .state
-            .fsm
-            .states
-            .iter()
-            .any(|state| state == "alerted"));
+        assert!(app.state.fsm.states.iter().any(|state| state == "alerted"));
         assert!(app.add_fsm_transition(
             "idle".to_string(),
             "alerted".to_string(),
