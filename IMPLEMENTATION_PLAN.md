@@ -146,7 +146,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 7.13 Finalize mixed-mode API contract (`RenderItem`, `DrawType`, depth key rules) and add docs
 - [x] 7.14 Add scene-level transform provenance metadata for editor debugging
 - [x] 7.15 Add browser render compatibility checks in CI (headless wgpu + feature checks)
-- [ ] 7.16 Draft public platform docs: architecture, plugin model, agent integration contract
+- [x] 7.16 Draft public platform docs: architecture, plugin model, agent integration contract
 
 ## Phase 8: Shipping Parity
 - [ ] 8.1 Create importers and authoring workflows for major Unity/Godot style assets
@@ -267,5 +267,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-render --lib`
   - `cargo check -p pod-render --target wasm32-unknown-unknown`
 
-**Last updated**: Iteration 36
-**Current focus**: Phase 7.16 platform docs and Phase 9 hardening backlog
+### Iteration 37 — Public Platform Docs Draft
+
+- [x] Added a public `README.md` that explains the project, workspace layout, and entry-point documentation for external readers.
+- [x] Added `docs/architecture.md` describing the current crate boundaries, data flow, runtime authority model, and subsystem responsibilities.
+- [x] Added `docs/plugin-model.md` documenting the extension surfaces that exist today and clearly separating them from the still-unfinished formal plugin lifecycle work.
+- [x] Added `docs/agent-integration-contract.md` defining the shared agent pipeline, trait contract, transport invariants, and integration rules for human and AI controllers.
+- [x] Validated touched files:
+  - `git diff --check`
+
+**Last updated**: Iteration 37
+**Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog
