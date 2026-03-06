@@ -314,5 +314,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Validated touched crate:
   - `cargo test -p pod-assets`
 
-**Last updated**: Iteration 41
+### Iteration 42 — Three.js WebGPU Browser Bridge
+
+- [x] Extended `pod-render`'s browser bridge with a Three.js/WebGPU-oriented frame payload that batches 3D meshes and billboard sprites by GPU-relevant asset keys for instancing-friendly frontend consumption.
+- [x] Preserved the legacy per-item browser payload while adding full 3D transform, billboard, and shadow metadata so JS frontends no longer lose critical world-space information.
+- [x] Re-exposed the browser bridge in native test builds and added deterministic tests covering Three.js batch formation, overlay separation, and full 3D payload serialization.
+- [x] Validated touched targets:
+  - `cargo test -p pod-render --lib`
+  - `cargo check -p pod-render --target wasm32-unknown-unknown`
+
+**Last updated**: Iteration 42
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

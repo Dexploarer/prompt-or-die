@@ -2,7 +2,7 @@
 //!
 //! Platform-agnostic rendering for Prompt or Die.
 //! - Native: wgpu + winit (Vulkan/Metal/DX12)
-//! - Web: wgpu web + PixiJS bridge (Rust computes state → JS renders)
+//! - Web: browser bridge payloads for lightweight JS renderers and Three.js/WebGPU frontends
 
 #![allow(clippy::manual_strip)]
 #![allow(clippy::new_without_default)]
