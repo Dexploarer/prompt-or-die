@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ThreeJsWebGpuFrame } from "./contracts";
 import { buildCameraPose, buildFramePlan, splitSpriteBatchesByTint } from "./frame-plan";
+import { resolveQualityProfile } from "./quality";
 
 describe("buildCameraPose", () => {
   test("maps 2D camera target and zoom into a perspective rig", () => {
@@ -95,7 +96,7 @@ describe("buildFramePlan", () => {
         x: 0,
         y: 0,
         zoom: 1,
-        rotation: 0,
+        rotation: Math.PI,
         viewportWidth: 1280,
         viewportHeight: 720
       },
@@ -172,5 +173,175 @@ describe("buildFramePlan", () => {
     expect(plan.meshBatches[0]?.batch.renderOrder).toBe(0);
     expect(plan.spriteBatches[0]?.batch.renderOrder).toBe(1);
     expect(plan.spriteBatches[0]?.matrices).toHaveLength(1);
+  });
+
+  test("culls far instances and splits visible meshes into lod tiers", () => {
+    const frame: ThreeJsWebGpuFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: Math.PI,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      overlayCommands: [],
+      meshBatches: [
+        {
+          mesh: "tower",
+          material: "stone",
+          layer: 0,
+          phase: "opaque",
+          sortDepth: 0,
+          renderOrder: 0,
+          transparent: false,
+          doubleSided: false,
+          castShadows: true,
+          receiveShadows: true,
+          tint: [1, 1, 1, 1],
+          roughness: 1,
+          metallic: 0,
+          emissive: [0, 0, 0],
+          depthWrite: true,
+          depthTest: true,
+          instances: [
+            { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+            { position: [0, 0, 24], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+            { position: [0, 0, 60], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+            { position: [0, 0, 240], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }
+          ]
+        }
+      ],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    };
+
+    const plan = buildFramePlan(frame, {
+      frustumCulling: false,
+      fov: 140,
+      pitch: 0.18,
+      height: 0,
+      baseDistance: 20,
+      minDistance: 20,
+      maxDistance: 20,
+      meshCullDistance: 120,
+      highDetailDistance: 21,
+      mediumDetailDistance: 55,
+      shadowDistance: 36
+    });
+
+    expect(plan.meshBatches).toHaveLength(3);
+    expect(plan.meshBatches.map((batch) => batch.lodLevel)).toEqual([0, 1, 2]);
+    expect(plan.meshBatches[0]?.visibleCount).toBe(1);
+    expect(plan.meshBatches[0]?.batch.castShadows).toBe(true);
+    expect(plan.meshBatches[1]?.visibleCount).toBe(1);
+    expect(plan.meshBatches[1]?.batch.castShadows).toBe(false);
+    expect(plan.meshBatches[2]?.visibleCount).toBe(1);
+  });
+
+  test("drops instances outside the distance budget", () => {
+    const frame: ThreeJsWebGpuFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: 0,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      overlayCommands: [],
+      meshBatches: [
+        {
+          mesh: "column",
+          material: "stone",
+          layer: 0,
+          phase: "opaque",
+          sortDepth: 0,
+          renderOrder: 0,
+          transparent: false,
+          doubleSided: false,
+          castShadows: true,
+          receiveShadows: true,
+          tint: [1, 1, 1, 1],
+          roughness: 1,
+          metallic: 0,
+          emissive: [0, 0, 0],
+          depthWrite: true,
+          depthTest: true,
+          instances: [
+            { position: [0, 0, -10], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+            { position: [0, 0, -220], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }
+          ]
+        }
+      ],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    };
+
+    const plan = buildFramePlan(frame, {
+      frustumCulling: false,
+      meshCullDistance: 120,
+      highDetailDistance: 30,
+      mediumDetailDistance: 80
+    });
+
+    expect(plan.meshBatches).toHaveLength(1);
+    expect(plan.meshBatches[0]?.visibleCount).toBe(1);
+  });
+});
+
+describe("resolveQualityProfile", () => {
+  test("selects an ultra profile for stronger webgpu hardware", () => {
+    const quality = resolveQualityProfile({
+      backend: "webgpu",
+      hardwareConcurrency: 12,
+      deviceMemory: 16,
+      devicePixelRatio: 2
+    });
+
+    expect(quality.preset).toBe("ultra");
+    expect(quality.maxPixelRatio).toBe(2);
+    expect(quality.enableShadows).toBe(true);
+  });
+
+  test("drops to performance on weaker webgl hardware", () => {
+    const quality = resolveQualityProfile({
+      backend: "webgl2",
+      hardwareConcurrency: 2,
+      deviceMemory: 2,
+      devicePixelRatio: 1
+    });
+
+    expect(quality.preset).toBe("performance");
+    expect(quality.enableShadows).toBe(false);
+    expect(quality.meshCullDistance).toBeLessThan(quality.spriteCullDistance + 80);
   });
 });

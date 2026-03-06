@@ -5,8 +5,11 @@
 It consumes the `pod-render` browser frame contract and provides:
 
 - `three/webgpu` rendering with automatic WebGL2 fallback
-- instanced mesh batches for 3D authored content
+- instanced mesh batches for 3D authored content with distance LOD splitting
 - billboard sprite batches with transparent depth-order preservation
+- CPU-side frustum and distance culling before instance upload
+- adaptive resolution scaling and quality presets for different hardware classes
+- ACES tone mapping, tuned shadows, cached materials, and a richer atmospheric scene baseline
 - a 2D overlay scene for the legacy `RenderFrame` contract
 - a demo bridge via `window.podRender.*` so the app is useful before the Rust wasm entrypoint is wired in
 
