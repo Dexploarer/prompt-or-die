@@ -427,47 +427,70 @@ fn apply_property_override(
     path: &[&str],
     value: &serde_json::Value,
 ) {
+    let _ = set_component_path_value(component, path, value);
+}
+
+pub(crate) fn set_component_path_value(
+    component: &mut PrefabComponent,
+    path: &[&str],
+    value: &serde_json::Value,
+) -> Result<(), String> {
     if path.is_empty() {
-        return;
+        return Err("component path cannot be empty".to_string());
     }
 
     match component {
-        PrefabComponent::Json(json) => {
-            apply_json_override(json, path, value);
-        }
+        PrefabComponent::Json(json) => set_json_path_value(json, path, value),
     }
 }
 
-fn apply_json_override(current: &mut serde_json::Value, path: &[&str], value: &serde_json::Value) {
+fn set_json_path_value(
+    current: &mut serde_json::Value,
+    path: &[&str],
+    value: &serde_json::Value,
+) -> Result<(), String> {
     if path.is_empty() {
         *current = value.clone();
-        return;
+        return Ok(());
     }
 
     let key = path[0];
     if path.len() == 1 {
-        set_json_child(current, key, value.clone());
-        return;
+        return set_json_child(current, key, value.clone());
     }
 
     let next_key = path[1];
-    if let Some(child) = get_or_create_json_child(current, key, next_key) {
-        apply_json_override(child, &path[1..], value);
-    }
+    let child = get_or_create_json_child(current, key, next_key).ok_or_else(|| {
+        format!(
+            "cannot descend through '{}' on non-container JSON value",
+            key
+        )
+    })?;
+    set_json_path_value(child, &path[1..], value)
 }
 
-fn set_json_child(target: &mut serde_json::Value, key: &str, value: serde_json::Value) {
+fn set_json_child(
+    target: &mut serde_json::Value,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
     if let Some(object) = target.as_object_mut() {
         object.insert(key.to_string(), value);
-        return;
+        return Ok(());
     }
 
     if let Some(array) = target.as_array_mut() {
         if let Some(index) = key_to_index(key) {
             ensure_array_len(array, index + 1);
             array[index] = value;
+            return Ok(());
         }
     }
+
+    Err(format!(
+        "cannot assign '{}' on JSON value that is neither an object field nor an addressable array slot",
+        key
+    ))
 }
 
 fn get_or_create_json_child<'a>(

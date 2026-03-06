@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
-use crate::prefab::{PrefabComponent, PrefabRegistry};
+use crate::prefab::{set_component_path_value, PrefabComponent, PrefabRegistry};
 
 /// Represents a spawn point in a scene
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +115,63 @@ impl Default for SceneMetadata {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EntityReferenceTarget {
+    ById { id: Uuid },
+    ByName { name: String },
+}
+
+impl EntityReferenceTarget {
+    pub fn by_id(id: Uuid) -> Self {
+        Self::ById { id }
+    }
+
+    pub fn by_name(name: impl Into<String>) -> Self {
+        Self::ByName { name: name.into() }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Self::ById { id } => format!("scene entity id {}", id),
+            Self::ByName { name } => format!("scene entity name '{}'", name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityReferenceBinding {
+    pub component: String,
+    pub path: String,
+    pub target: EntityReferenceTarget,
+}
+
+impl EntityReferenceBinding {
+    pub fn new(
+        component: impl Into<String>,
+        path: impl Into<String>,
+        target: EntityReferenceTarget,
+    ) -> Self {
+        Self {
+            component: component.into(),
+            path: path.into(),
+            target,
+        }
+    }
+
+    pub fn by_id(component: impl Into<String>, path: impl Into<String>, id: Uuid) -> Self {
+        Self::new(component, path, EntityReferenceTarget::by_id(id))
+    }
+
+    pub fn by_name(
+        component: impl Into<String>,
+        path: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self::new(component, path, EntityReferenceTarget::by_name(name))
+    }
+}
+
 /// Entity instance in a scene with all its component data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityInstance {
@@ -122,6 +179,8 @@ pub struct EntityInstance {
     pub name: String,
     pub prefab_ref: Option<String>, // Reference to a prefab, if this entity was created from one
     pub components: HashMap<String, PrefabComponent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_references: Vec<EntityReferenceBinding>,
 }
 
 impl EntityInstance {
@@ -131,6 +190,7 @@ impl EntityInstance {
             name: name.into(),
             prefab_ref: None,
             components: HashMap::new(),
+            entity_references: Vec::new(),
         }
     }
 
@@ -175,6 +235,28 @@ impl EntityInstance {
 
     pub fn remove_component(&mut self, name: &str) -> Option<PrefabComponent> {
         self.components.remove(name)
+    }
+
+    pub fn add_entity_reference(&mut self, reference: EntityReferenceBinding) {
+        self.entity_references.push(reference);
+    }
+
+    pub fn add_entity_reference_by_id(
+        &mut self,
+        component: impl Into<String>,
+        path: impl Into<String>,
+        id: Uuid,
+    ) {
+        self.add_entity_reference(EntityReferenceBinding::by_id(component, path, id));
+    }
+
+    pub fn add_entity_reference_by_name(
+        &mut self,
+        component: impl Into<String>,
+        path: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        self.add_entity_reference(EntityReferenceBinding::by_name(component, path, name));
     }
 }
 
@@ -282,6 +364,7 @@ impl Scene {
         prefabs: Option<&PrefabRegistry>,
     ) -> Result<SceneSpawnResult, String> {
         let mut entity_map = HashMap::new();
+        let entity_name_lookup = self.build_entity_name_lookup();
 
         for entity in &self.entities {
             entity_map.insert(entity.id, world.ecs.spawn(()));
@@ -295,7 +378,13 @@ impl Scene {
                 .copied()
                 .ok_or_else(|| format!("Scene entity '{}' was not pre-spawned", entity.name))?;
 
-            let resolved_components = self.resolve_entity_components(entity, prefabs)?;
+            let mut resolved_components = self.resolve_entity_components(entity, prefabs)?;
+            self.apply_entity_references(
+                entity,
+                &mut resolved_components,
+                &entity_map,
+                &entity_name_lookup,
+            )?;
             let ignored =
                 insert_bound_components(&resolved_components, &mut world.ecs, spawned_entity)?;
             ignored_components.extend(
@@ -338,6 +427,103 @@ impl Scene {
         }
 
         Ok(components)
+    }
+
+    fn build_entity_name_lookup(&self) -> HashMap<String, Vec<Uuid>> {
+        let mut lookup = HashMap::<String, Vec<Uuid>>::new();
+        for entity in &self.entities {
+            lookup
+                .entry(entity.name.clone())
+                .or_default()
+                .push(entity.id);
+        }
+        lookup
+    }
+
+    fn apply_entity_references(
+        &self,
+        entity: &EntityInstance,
+        components: &mut HashMap<String, PrefabComponent>,
+        entity_map: &HashMap<Uuid, Entity>,
+        entity_name_lookup: &HashMap<String, Vec<Uuid>>,
+    ) -> Result<(), String> {
+        for reference in &entity.entity_references {
+            let target = self.resolve_entity_reference_target(
+                entity,
+                reference,
+                entity_map,
+                entity_name_lookup,
+            )?;
+            let component = components.get_mut(&reference.component).ok_or_else(|| {
+                format!(
+                    "Entity reference '{}.{}' on '{}' requires component '{}'",
+                    reference.component, reference.path, entity.name, reference.component
+                )
+            })?;
+            let path: Vec<&str> = reference
+                .path
+                .split('.')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            if path.is_empty() {
+                return Err(format!(
+                    "Entity reference on '{}' for component '{}' must specify a non-empty property path",
+                    entity.name, reference.component
+                ));
+            }
+
+            set_component_path_value(component, &path, &serde_json::json!(target.id() as u64))
+                .map_err(|err| {
+                    format!(
+                        "Failed to resolve entity reference '{}.{}' on '{}' in scene '{}': {}",
+                        reference.component, reference.path, entity.name, self.metadata.name, err
+                    )
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn resolve_entity_reference_target(
+        &self,
+        entity: &EntityInstance,
+        reference: &EntityReferenceBinding,
+        entity_map: &HashMap<Uuid, Entity>,
+        entity_name_lookup: &HashMap<String, Vec<Uuid>>,
+    ) -> Result<Entity, String> {
+        let target_scene_id = match &reference.target {
+            EntityReferenceTarget::ById { id } => *id,
+            EntityReferenceTarget::ByName { name } => {
+                let matches = entity_name_lookup.get(name).ok_or_else(|| {
+                    format!(
+                        "Entity reference '{}.{}' on '{}' points to missing {}",
+                        reference.component,
+                        reference.path,
+                        entity.name,
+                        reference.target.describe()
+                    )
+                })?;
+
+                if matches.len() != 1 {
+                    return Err(format!(
+                        "Entity reference '{}.{}' on '{}' is ambiguous for {}",
+                        reference.component,
+                        reference.path,
+                        entity.name,
+                        reference.target.describe()
+                    ));
+                }
+
+                matches[0]
+            }
+        };
+
+        entity_map.get(&target_scene_id).copied().ok_or_else(|| {
+            format!(
+                "Entity reference '{}.{}' on '{}' points to unresolved scene entity {}",
+                reference.component, reference.path, entity.name, target_scene_id
+            )
+        })
     }
 
     fn apply_parent_graph(
@@ -531,7 +717,10 @@ fn chrono_format_date() -> String {
 mod tests {
     use super::*;
     use glam::Vec3;
-    use pod_core::{Label, Material, Mesh, Parent3D, Sprite, Team, Transform, Transform3D};
+    use pod_core::{
+        Camera3D, FollowCameraController, Label, Material, Mesh, Parent3D, Sprite, Team, Transform,
+        Transform3D,
+    };
 
     use crate::prefab::Prefab;
 
@@ -760,5 +949,136 @@ mod tests {
         assert_eq!(actor_sprite.texture, "actor_sprite");
         assert_eq!(actor_label.name, "ActorBase");
         assert_eq!(actor_label.team, Team::Team(2));
+    }
+
+    #[test]
+    fn test_scene_instantiation_resolves_entity_references_by_id() {
+        let mut scene = Scene::new("EntityRefScene");
+
+        let mut player = EntityInstance::new("Player");
+        player
+            .add_native_component(&Transform3D {
+                position: Vec3::new(4.0, 0.0, 2.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let player_id = scene.add_entity(player);
+
+        let mut camera = EntityInstance::new("Camera");
+        camera.add_native_component(&Camera3D::default()).unwrap();
+        camera
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        camera.add_entity_reference_by_id("FollowCameraController", "target", player_id);
+        let camera_id = scene.add_entity(camera);
+
+        let mut world = World::new(5);
+        let result = scene.instantiate(&mut world).unwrap();
+
+        let player_entity = result
+            .entity_for(player_id)
+            .expect("player should be spawned");
+        let camera_entity = result
+            .entity_for(camera_id)
+            .expect("camera should be spawned");
+        let controller = world
+            .ecs
+            .get::<&FollowCameraController>(camera_entity)
+            .expect("camera should keep follow controller");
+        assert_eq!(controller.target, player_entity.id() as u64);
+    }
+
+    #[test]
+    fn test_scene_instantiation_resolves_entity_references_by_name_for_prefabs() {
+        let mut registry = PrefabRegistry::new();
+        let mut camera_prefab = Prefab::new("CameraRig");
+        camera_prefab
+            .add_native_component(&Camera3D::default())
+            .unwrap();
+        camera_prefab
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        registry.register("CameraRig", camera_prefab);
+
+        let mut scene = Scene::new("PrefabRefScene");
+
+        let mut player = EntityInstance::new("Player");
+        player
+            .add_native_component(&Transform3D {
+                position: Vec3::new(-2.0, 1.0, 8.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let player_id = scene.add_entity(player);
+
+        let mut camera = EntityInstance::new("Camera").with_prefab("CameraRig");
+        camera.add_entity_reference_by_name("FollowCameraController", "target", "Player");
+        let camera_id = scene.add_entity(camera);
+
+        let mut world = World::new(6);
+        let result = scene
+            .instantiate_with_prefabs(&mut world, Some(&registry))
+            .unwrap();
+
+        let player_entity = result
+            .entity_for(player_id)
+            .expect("player should be spawned");
+        let camera_entity = result
+            .entity_for(camera_id)
+            .expect("camera should be spawned");
+        let controller = world
+            .ecs
+            .get::<&FollowCameraController>(camera_entity)
+            .expect("prefab-backed camera should keep follow controller");
+        assert_eq!(controller.target, player_entity.id() as u64);
+    }
+
+    #[test]
+    fn test_scene_instantiation_rejects_missing_entity_reference_target() {
+        let mut scene = Scene::new("MissingEntityRefScene");
+        let mut camera = EntityInstance::new("Camera");
+        camera.add_native_component(&Camera3D::default()).unwrap();
+        camera
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        camera.add_entity_reference_by_name("FollowCameraController", "target", "Missing");
+        scene.add_entity(camera);
+
+        let mut world = World::new(7);
+        let err = scene.instantiate(&mut world).expect_err(
+            "scene instantiation should fail when a named entity reference is unresolved",
+        );
+        assert!(err.contains("missing scene entity name 'Missing'"));
+    }
+
+    #[test]
+    fn test_scene_instantiation_rejects_ambiguous_entity_reference_name() {
+        let mut scene = Scene::new("AmbiguousEntityRefScene");
+
+        let mut first_player = EntityInstance::new("Player");
+        first_player
+            .add_native_component(&Transform3D::default())
+            .unwrap();
+        scene.add_entity(first_player);
+
+        let mut second_player = EntityInstance::new("Player");
+        second_player
+            .add_native_component(&Transform3D::default())
+            .unwrap();
+        scene.add_entity(second_player);
+
+        let mut camera = EntityInstance::new("Camera");
+        camera.add_native_component(&Camera3D::default()).unwrap();
+        camera
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        camera.add_entity_reference_by_name("FollowCameraController", "target", "Player");
+        scene.add_entity(camera);
+
+        let mut world = World::new(8);
+        let err = scene.instantiate(&mut world).expect_err(
+            "scene instantiation should fail when a named entity reference is ambiguous",
+        );
+        assert!(err.contains("ambiguous"));
     }
 }
