@@ -145,7 +145,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] 7.12 Resolve 2.5D edge-case matrix (cycle-safe parenting, mixed-layer ordering, parented projection fallback)
 - [x] 7.13 Finalize mixed-mode API contract (`RenderItem`, `DrawType`, depth key rules) and add docs
 - [x] 7.14 Add scene-level transform provenance metadata for editor debugging
-- [ ] 7.15 Add browser render compatibility checks in CI (headless wgpu + feature checks)
+- [x] 7.15 Add browser render compatibility checks in CI (headless wgpu + feature checks)
 - [ ] 7.16 Draft public platform docs: architecture, plugin model, agent integration contract
 
 ## Phase 8: Shipping Parity
@@ -257,5 +257,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-scene`
   - `cargo test -p pod-scene --lib`
 
-**Last updated**: Iteration 35
-**Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog
+### Iteration 36 — Browser Render Compatibility CI Pass
+
+- [x] Added a dedicated GitHub Actions browser-render job that installs `wasm32-unknown-unknown`, runs `pod-render` library tests, and checks `pod-render` against the wasm target.
+- [x] Added a headless `wgpu` adapter/device smoke test so CI exercises a real native render backend path without needing a window server.
+- [x] Fixed wasm browser compatibility in the render dependency graph by enabling `getrandom`'s JS path for `pod-core` on `wasm32`, unblocking `rand`/`rand_chacha` usage during browser builds.
+- [x] Exposed the web render bridge during native test builds and added mixed-mode bridge tests so browser serialization for 2D, 2.5D, and 3D render items is exercised in CI.
+- [x] Validated touched targets:
+  - `cargo test -p pod-render --lib`
+  - `cargo check -p pod-render --target wasm32-unknown-unknown`
+
+**Last updated**: Iteration 36
+**Current focus**: Phase 7.16 platform docs and Phase 9 hardening backlog

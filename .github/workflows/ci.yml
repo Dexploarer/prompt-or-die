@@ -31,3 +31,24 @@ jobs:
 
       - name: Cargo clippy
         run: cargo clippy --workspace -- -D warnings
+
+  browser-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Pod Render browser bridge tests
+        run: cargo test -p pod-render --lib
+
+      - name: Pod Render wasm compatibility check
+        run: cargo check -p pod-render --target wasm32-unknown-unknown
