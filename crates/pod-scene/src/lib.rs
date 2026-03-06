@@ -18,7 +18,11 @@ pub mod state;
 
 pub use asset::{AssetHandle, AssetLoader, AssetManager, AssetState, AssetStore};
 pub use binding::{NativeComponent, NativeComponentBinding};
-pub use prefab::{Prefab, PrefabComponent, PrefabDiff, PrefabMetadataDiff, PrefabRegistry};
+pub use prefab::{
+    AppliedPropertyOverride, IgnoredPropertyOverride, Prefab, PrefabComponent, PrefabDiff,
+    PrefabMetadataDiff, PrefabRegistry, PropertyOverride, PropertyOverrideReport,
+    ResolvedPrefabComponents,
+};
 pub use save::{SaveData, SaveManager};
 pub use scene::{
     EntityInstance, EntityReferenceBinding, EntityReferenceTarget, Scene, SceneGraph, SceneManager,

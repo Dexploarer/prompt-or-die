@@ -236,5 +236,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-scene`
   - `cargo test -p pod-scene --lib`
 
-**Last updated**: Iteration 33
+### Iteration 34 — Prefab Override Tracking Pass
+
+- [x] Added structured prefab override reporting in `pod-scene` so prefab resolution now returns applied and ignored override records with previous values for editor/debug inspection.
+- [x] Added authored `prefab_overrides` on scene entities, applied during prefab-backed scene instantiation before full local component replacement semantics.
+- [x] Surfaced per-entity prefab override reports in `SceneSpawnResult`, and rejected invalid authoring cases such as prefab overrides on entities with no prefab source.
+- [x] Hardened override path mutation to reject incompatible JSON shape rewrites instead of silently corrupting typed component payloads.
+- [x] Added deterministic tests covering prefab-level override reports, scene-level prefab override application/reporting, local component precedence, and invalid prefab-override usage.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+**Last updated**: Iteration 34
 **Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog
