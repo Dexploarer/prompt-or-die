@@ -352,5 +352,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun test`
   - `cd apps/pod-web && bun run build`
 
-**Last updated**: Iteration 45
+### Iteration 46 — Browser Three.js Quality Scaling and LOD Pass
+
+- [x] Added hardware-aware quality profiles to `apps/pod-web` with adaptive resolution, anisotropy, shadow budgets, environment intensity, and explicit ultra/high/balanced/performance presets.
+- [x] Added CPU-side distance/frustum culling plus LOD-aware mesh instancing so the browser client can keep large authored worlds efficient without giving up high-detail near-field visuals.
+- [x] Improved the renderer baseline with ACES tone mapping, upgraded lighting/shadow defaults, cached materials, richer atmospheric dressing, correct overlay compositing, and runtime HUD stats.
+- [x] Added deterministic TypeScript coverage for LOD split/cull planning and quality profile selection, then verified the live browser client on `http://127.0.0.1:4173/` with WebGPU active.
+- [x] Suppressed the repeated upstream `THREE.TSL` inline-`Fn()` warning spam down to a single forwarded warning so the runtime console stays useful.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+
+**Last updated**: Iteration 46
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog

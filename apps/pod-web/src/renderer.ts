@@ -11,6 +11,7 @@ import {
 import {
   buildCameraPose,
   buildFramePlan,
+  planningOptionsFromQuality,
   type PodThreeCameraRigOptions,
   type PlannedMeshBatch,
   type PlannedSpriteBatch
@@ -21,6 +22,11 @@ import {
   type RenderFrame,
   type ThreeJsWebGpuFrame
 } from "./contracts";
+import {
+  resolveQualityProfile,
+  type PodThreeQualityPreset,
+  type PodThreeQualityProfile
+} from "./quality";
 
 type RuntimeRenderer = THREE.WebGLRenderer & {
   init?: () => Promise<void>;
@@ -28,15 +34,39 @@ type RuntimeRenderer = THREE.WebGLRenderer & {
   renderAsync?: (scene: THREE.Scene, camera: THREE.Camera) => Promise<void>;
 };
 
+type ThreeConsoleLevel = Parameters<typeof THREE.setConsoleFunction>[0] extends (
+  level: infer Level,
+  ...args: unknown[]
+) => void
+  ? Level
+  : "log" | "warn" | "error";
+
 interface InstancedEntry {
   capacity: number;
   mesh: THREE.InstancedMesh;
   material: THREE.Material;
 }
 
+const INLINE_TSL_FN_WARNING =
+  "THREE.TSL: Return statement used in an inline 'Fn()'. Define a layout struct to allow return values.";
+let installedThreeConsoleFilter = false;
+let didReportInlineFnWarning = false;
+
+export interface PodThreeRendererStats {
+  backend: "webgpu" | "webgl2";
+  qualityPreset: PodThreeQualityPreset;
+  pixelRatio: number;
+  drawCalls: number;
+  triangles: number;
+  textures: number;
+  frameMs: number;
+}
+
 export interface PodThreeWorldRendererOptions {
   assetRegistry?: PodThreeAssetRegistry;
   cameraRig?: PodThreeCameraRigOptions;
+  qualityPreset?: PodThreeQualityPreset;
+  qualityProfile?: Partial<PodThreeQualityProfile>;
   clearColor?: number;
   enableShadows?: boolean;
   showGrid?: boolean;
@@ -58,13 +88,18 @@ export class PodThreeWorldRenderer {
   readonly overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
   readonly assetRegistry: PodThreeAssetRegistry;
   readonly backend: "webgpu" | "webgl2";
+  readonly quality: PodThreeQualityProfile;
 
   private readonly meshEntries = new Map<string, InstancedEntry>();
   private readonly spriteEntries = new Map<string, InstancedEntry>();
+  private readonly meshMaterialCache = new Map<string, THREE.Material>();
+  private readonly spriteMaterialCache = new Map<string, THREE.Material>();
   private readonly overlayObjects = new Array<THREE.Object3D>();
   private readonly resizeObserver: ResizeObserver;
-  private readonly options: Required<Pick<PodThreeWorldRendererOptions, "showGrid" | "enableShadows">> &
-    Omit<PodThreeWorldRendererOptions, "showGrid" | "enableShadows">;
+  private readonly options: PodThreeWorldRendererOptions;
+  private adaptivePixelRatio: number;
+  private smoothedFrameMs = 16.7;
+  private adjustmentCooldown = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -74,11 +109,32 @@ export class PodThreeWorldRenderer {
   ) {
     this.backend = backend;
     this.assetRegistry = options.assetRegistry ?? new DefaultPodThreeAssetRegistry();
-    this.options = {
-      ...options,
-      showGrid: options.showGrid ?? true,
-      enableShadows: options.enableShadows ?? true
+    const deviceMemory = readNavigatorDeviceMemory();
+    const baseQuality = resolveQualityProfile({
+      backend,
+      preferredPreset: options.qualityPreset,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      deviceMemory,
+      devicePixelRatio: window.devicePixelRatio
+    });
+    this.quality = {
+      ...baseQuality,
+      ...options.qualityProfile,
+      maxPixelRatio: Math.min(
+        options.maxPixelRatio ??
+          options.qualityProfile?.maxPixelRatio ??
+          Number.POSITIVE_INFINITY,
+        options.qualityProfile?.maxPixelRatio ?? baseQuality.maxPixelRatio
+      ),
+      enableShadows:
+        options.enableShadows ??
+        options.qualityProfile?.enableShadows ?? baseQuality.enableShadows,
+      showGrid:
+        options.showGrid ??
+        options.qualityProfile?.showGrid ?? baseQuality.showGrid
     };
+    this.options = options;
+    this.adaptivePixelRatio = this.quality.maxPixelRatio;
 
     this.bootstrapScenes();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -89,7 +145,10 @@ export class PodThreeWorldRenderer {
   async applyFrame(frame: ThreeJsWebGpuFrame): Promise<void> {
     this.scene.background = new THREE.Color(...frame.backgroundColor.slice(0, 3));
 
-    const planned = buildFramePlan(frame, this.options.cameraRig);
+    const planned = buildFramePlan(frame, {
+      ...this.options.cameraRig,
+      ...planningOptionsFromQuality(this.quality)
+    });
     this.applyCamera(planned.camera, frame.camera);
     await this.syncMeshBatches(planned.meshBatches);
     await this.syncSpriteBatches(planned.spriteBatches);
@@ -110,6 +169,12 @@ export class PodThreeWorldRenderer {
     for (const entry of this.spriteEntries.values()) {
       disposeInstancedEntry(entry);
     }
+    for (const material of this.meshMaterialCache.values()) {
+      material.dispose();
+    }
+    for (const material of this.spriteMaterialCache.values()) {
+      material.dispose();
+    }
 
     this.clearOverlay();
     this.renderer.dispose();
@@ -117,14 +182,15 @@ export class PodThreeWorldRenderer {
 
   private bootstrapScenes(): void {
     this.scene.fog = new THREE.Fog(0x09111b, 28, 180);
+    this.scene.backgroundIntensity = 0.8;
 
     const hemisphere = new THREE.HemisphereLight(0xa8d1ff, 0x14263f, 1.2);
     this.scene.add(hemisphere);
 
     const sun = new THREE.DirectionalLight(0xfff0cf, 2.6);
     sun.position.set(24, 42, 18);
-    sun.castShadow = this.options.enableShadows;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.castShadow = this.quality.enableShadows;
+    sun.shadow.mapSize.set(this.quality.shadowMapSize, this.quality.shadowMapSize);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 160;
     sun.shadow.camera.left = -60;
@@ -136,6 +202,10 @@ export class PodThreeWorldRenderer {
     const fill = new THREE.DirectionalLight(0x6cbcff, 0.7);
     fill.position.set(-18, 14, -10);
     this.scene.add(fill);
+
+    const rim = new THREE.PointLight(0x4bc1ff, 12, 180, 2.2);
+    rim.position.set(0, 26, 0);
+    this.scene.add(rim);
 
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(140, 64),
@@ -149,11 +219,25 @@ export class PodThreeWorldRenderer {
     ground.receiveShadow = true;
     this.scene.add(ground);
 
-    if (this.options.showGrid) {
+    if (this.quality.showGrid) {
       const grid = new THREE.GridHelper(180, 60, 0x5fa7ff, 0x173049);
       grid.position.y = 0.02;
       this.scene.add(grid);
     }
+
+    const skyline = new THREE.Points(
+      createStarfieldGeometry(640, 220),
+      new THREE.PointsMaterial({
+        color: 0xcde7ff,
+        size: 0.9,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false
+      })
+    );
+    skyline.position.y = 36;
+    this.scene.add(skyline);
 
     this.overlayScene.background = null;
     this.overlayCamera.position.set(0, 0, 5);
@@ -188,11 +272,22 @@ export class PodThreeWorldRenderer {
     const activeKeys = new Set<string>();
 
     for (const planned of batches) {
+      if (planned.visibleCount === 0) {
+        continue;
+      }
+
       activeKeys.add(planned.key);
-      const geometry = await this.assetRegistry.resolveGeometry(planned.batch);
+      const geometry = await this.assetRegistry.resolveGeometry(
+        planned.batch,
+        planned.lodLevel
+      );
       const material =
-        (await this.assetRegistry.resolveMeshMaterial?.(planned.batch)) ??
-        createMeshMaterial(planned.batch);
+        (await this.assetRegistry.resolveMeshMaterial?.(
+          planned.batch,
+          planned.lodLevel,
+          this.quality
+        )) ??
+        this.getOrCreateMeshMaterial(planned);
       const existing = this.meshEntries.get(planned.key);
       const entry = ensureInstancedEntry(
         this.scene,
@@ -225,19 +320,16 @@ export class PodThreeWorldRenderer {
     const activeKeys = new Set<string>();
 
     for (const planned of batches) {
+      if (planned.visibleCount === 0) {
+        continue;
+      }
+
       activeKeys.add(planned.key);
       const resolved = await this.assetRegistry.resolveSpriteTexture({
         texture: planned.batch.texture,
         frame: planned.batch.frame
-      });
-      const material = createSpriteMaterial(
-        resolved,
-        planned.tint,
-        planned.batch.transparent,
-        planned.batch.depthWrite,
-        planned.batch.depthTest,
-        THREE.DoubleSide
-      );
+      }, this.quality.anisotropy);
+      const material = this.getOrCreateSpriteMaterial(planned, resolved);
 
       const existing = this.spriteEntries.get(planned.key);
       const entry = ensureInstancedEntry(
@@ -334,19 +426,133 @@ export class PodThreeWorldRenderer {
   }
 
   private async renderFrame(): Promise<void> {
+    const frameStart = performance.now();
+    const previousAutoClear = this.renderer.autoClear;
+    this.renderer.autoClear = true;
     await renderWithFallback(this.renderer, this.scene, this.camera);
+    this.renderer.autoClear = false;
     this.renderer.clearDepth();
     await renderWithFallback(this.renderer, this.overlayScene, this.overlayCamera);
+    this.renderer.autoClear = previousAutoClear;
+    this.updateAdaptiveResolution(performance.now() - frameStart);
   }
 
   private resize(): void {
     const width = this.canvas.clientWidth || window.innerWidth;
     const height = this.canvas.clientHeight || window.innerHeight;
-    const pixelRatio = Math.min(window.devicePixelRatio, this.options.maxPixelRatio ?? 2);
+    const pixelRatio = Math.min(window.devicePixelRatio, this.adaptivePixelRatio);
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
+  }
+
+  getStats(): PodThreeRendererStats {
+    return {
+      backend: this.backend,
+      qualityPreset: this.quality.preset,
+      pixelRatio: this.renderer.getPixelRatio(),
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      textures: this.renderer.info.memory.textures,
+      frameMs: Number(this.smoothedFrameMs.toFixed(2))
+    };
+  }
+
+  private getOrCreateMeshMaterial(planned: PlannedMeshBatch): THREE.Material {
+    const key = [
+      planned.batch.mesh,
+      planned.batch.material,
+      planned.lodLevel,
+      planned.batch.transparent,
+      planned.batch.doubleSided,
+      planned.batch.tint.join(","),
+      planned.batch.emissive.join(","),
+      planned.batch.roughness,
+      planned.batch.metallic,
+      planned.batch.depthWrite,
+      planned.batch.depthTest,
+      this.quality.environmentIntensity
+    ].join("|");
+    const cached = this.meshMaterialCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const material = createMeshMaterial(planned.batch, planned.lodLevel, this.quality);
+    this.meshMaterialCache.set(key, material);
+    return material;
+  }
+
+  private getOrCreateSpriteMaterial(
+    planned: PlannedSpriteBatch,
+    resolved: Parameters<typeof createSpriteMaterial>[0]
+  ): THREE.Material {
+    const key = [
+      planned.batch.texture,
+      planned.batch.frame,
+      planned.batch.transparent,
+      planned.batch.depthWrite,
+      planned.batch.depthTest,
+      planned.tint.join(",")
+    ].join("|");
+    const cached = this.spriteMaterialCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const material = createSpriteMaterial(
+      resolved,
+      planned.tint,
+      planned.batch.transparent,
+      planned.batch.depthWrite,
+      planned.batch.depthTest,
+      THREE.DoubleSide
+    );
+    this.spriteMaterialCache.set(key, material);
+    return material;
+  }
+
+  private updateAdaptiveResolution(frameMs: number): void {
+    if (!this.quality.enableAdaptiveResolution) {
+      this.smoothedFrameMs = frameMs;
+      return;
+    }
+
+    this.smoothedFrameMs = this.smoothedFrameMs * 0.9 + frameMs * 0.1;
+
+    if (this.adjustmentCooldown > 0) {
+      this.adjustmentCooldown -= 1;
+      return;
+    }
+
+    const upperBound = this.quality.targetFrameMs * 1.08;
+    const lowerBound = this.quality.targetFrameMs * 0.8;
+
+    if (
+      this.smoothedFrameMs > upperBound &&
+      this.adaptivePixelRatio > this.quality.minPixelRatio
+    ) {
+      this.adaptivePixelRatio = Math.max(
+        this.quality.minPixelRatio,
+        this.adaptivePixelRatio - this.quality.adaptiveResolutionStep
+      );
+      this.adjustmentCooldown = 18;
+      this.resize();
+      return;
+    }
+
+    if (
+      this.smoothedFrameMs < lowerBound &&
+      this.adaptivePixelRatio < this.quality.maxPixelRatio
+    ) {
+      this.adaptivePixelRatio = Math.min(
+        this.quality.maxPixelRatio,
+        this.adaptivePixelRatio + this.quality.adaptiveResolutionStep
+      );
+      this.adjustmentCooldown = 24;
+      this.resize();
+    }
   }
 }
 
@@ -354,6 +560,8 @@ async function createRenderer(
   canvas: HTMLCanvasElement,
   options: PodThreeWorldRendererOptions
 ): Promise<{ renderer: RuntimeRenderer; backend: "webgpu" | "webgl2" }> {
+  installThreeConsoleFilter();
+
   if ("gpu" in navigator) {
     try {
       const webgpuModule = await import("three/webgpu");
@@ -365,6 +573,9 @@ async function createRenderer(
       }) as RuntimeRenderer;
       await renderer.init?.();
       renderer.shadowMap.enabled = options.enableShadows ?? true;
+      renderer.shadowMap.type = THREE.VSMShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = options.qualityProfile?.toneMappingExposure ?? 1.05;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       return { renderer, backend: "webgpu" };
     } catch (error) {
@@ -380,6 +591,8 @@ async function createRenderer(
   }) as RuntimeRenderer;
   renderer.shadowMap.enabled = options.enableShadows ?? true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = options.qualityProfile?.toneMappingExposure ?? 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   return { renderer, backend: "webgl2" };
 }
@@ -465,4 +678,70 @@ function disposeObject(object: THREE.Object3D): void {
       child.material.dispose();
     }
   });
+}
+
+function createStarfieldGeometry(count: number, radius: number): THREE.BufferGeometry {
+  const positions = new Float32Array(count * 3);
+
+  for (let index = 0; index < count; index += 1) {
+    const theta = (index * 2.399963229728653) % (Math.PI * 2);
+    const phi = Math.acos(1 - 2 * ((index + 0.5) / count));
+    const distance = radius * (0.65 + (index % 17) / 32);
+    const sinPhi = Math.sin(phi);
+    positions[index * 3] = Math.cos(theta) * sinPhi * distance;
+    positions[index * 3 + 1] = Math.cos(phi) * distance;
+    positions[index * 3 + 2] = Math.sin(theta) * sinPhi * distance;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return geometry;
+}
+
+function readNavigatorDeviceMemory(): number | undefined {
+  const navigatorWithMemory = navigator as Navigator & { deviceMemory?: number };
+  return navigatorWithMemory.deviceMemory;
+}
+
+function installThreeConsoleFilter(): void {
+  if (installedThreeConsoleFilter) {
+    return;
+  }
+
+  const previous = THREE.getConsoleFunction();
+  THREE.setConsoleFunction((level, message, ...params) => {
+    if (level === "warn" && message === INLINE_TSL_FN_WARNING) {
+      if (didReportInlineFnWarning) {
+        return;
+      }
+
+      didReportInlineFnWarning = true;
+      forwardThreeConsoleMessage(
+        level,
+        `${message} Duplicate warnings suppressed by POD; this is currently an upstream Three.js WebGPU material compilation warning.`,
+        params,
+        previous
+      );
+      return;
+    }
+
+    forwardThreeConsoleMessage(level, message, params, previous);
+  });
+  installedThreeConsoleFilter = true;
+}
+
+function forwardThreeConsoleMessage(
+  level: ThreeConsoleLevel,
+  message: string,
+  params: unknown[],
+  previous: ReturnType<typeof THREE.getConsoleFunction> | undefined
+): void {
+  if (previous) {
+    previous(level, message, ...params);
+    return;
+  }
+
+  const consoleMethod =
+    level === "warn" ? console.warn : level === "error" ? console.error : console.log;
+  consoleMethod(message, ...params);
 }

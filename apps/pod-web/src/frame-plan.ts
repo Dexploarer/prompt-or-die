@@ -1,4 +1,4 @@
-import { Matrix4, Quaternion, Vector3 } from "three";
+import { Frustum, Matrix4, PerspectiveCamera, Quaternion, Sphere, Vector3 } from "three";
 
 import type {
   CameraState,
@@ -8,8 +8,11 @@ import type {
   ThreeJsSpriteBatch,
   ThreeJsWebGpuFrame
 } from "./contracts";
+import type { PodThreeQualityProfile } from "./quality";
 
 const DEFAULT_UP = new Vector3(0, 1, 0);
+const DEFAULT_RADIUS = 1.25;
+const TEMP_VIEW_PROJECTION = new Matrix4();
 
 export interface PodThreeCameraRigOptions {
   pitch?: number;
@@ -20,6 +23,15 @@ export interface PodThreeCameraRigOptions {
   fov?: number;
   near?: number;
   far?: number;
+}
+
+export interface PodThreePlanningOptions extends PodThreeCameraRigOptions {
+  frustumCulling?: boolean;
+  meshCullDistance?: number;
+  spriteCullDistance?: number;
+  highDetailDistance?: number;
+  mediumDetailDistance?: number;
+  shadowDistance?: number;
 }
 
 export interface PlannedCameraPose {
@@ -34,6 +46,8 @@ export interface PlannedCameraPose {
 export interface PlannedMeshBatch {
   key: string;
   batch: ThreeJsMeshBatch;
+  lodLevel: 0 | 1 | 2;
+  visibleCount: number;
   matrices: Matrix4[];
 }
 
@@ -41,6 +55,7 @@ export interface PlannedSpriteBatch {
   key: string;
   batch: Omit<ThreeJsSpriteBatch, "instances">;
   tint: RgbaTuple;
+  visibleCount: number;
   instances: ThreeJsInstance[];
   matrices: Matrix4[];
 }
@@ -85,26 +100,60 @@ export function buildCameraPose(
 
 export function buildFramePlan(
   frame: ThreeJsWebGpuFrame,
-  options: PodThreeCameraRigOptions = {}
+  options: PodThreePlanningOptions = {}
 ): PlannedFrame {
   const camera = buildCameraPose(frame.camera, options);
+  const viewCamera = createViewCamera(frame.camera, camera);
+  const frustum = new Frustum().setFromProjectionMatrix(
+    TEMP_VIEW_PROJECTION.multiplyMatrices(viewCamera.projectionMatrix, viewCamera.matrixWorldInverse)
+  );
+  const cameraPosition = new Vector3(...camera.position);
+  const meshCullDistance = options.meshCullDistance ?? Number.POSITIVE_INFINITY;
+  const spriteCullDistance = options.spriteCullDistance ?? Number.POSITIVE_INFINITY;
+  const frustumCulling = options.frustumCulling ?? true;
+  const highDetailDistance = options.highDetailDistance ?? 36;
+  const mediumDetailDistance = options.mediumDetailDistance ?? 108;
+  const shadowDistance = options.shadowDistance ?? 72;
 
   return {
     camera,
-    meshBatches: frame.meshBatches.map((batch) => ({
-      key: createMeshBatchKey(batch),
-      batch,
-      matrices: batch.instances.map((instance) => composeInstanceMatrix(instance))
-    })),
-    spriteBatches: splitSpriteBatchesByTint(frame.spriteBatches).map((batch) => ({
-      ...batch,
-      matrices: batch.instances.map((instance) =>
-        composeInstanceMatrix(
-          instance,
-          batch.batch.billboard ? camera.quaternion : undefined
-        )
-      )
-    }))
+    meshBatches: planMeshBatches(
+      frame.meshBatches,
+      frustum,
+      cameraPosition,
+      highDetailDistance,
+      mediumDetailDistance,
+      meshCullDistance,
+      shadowDistance,
+      frustumCulling
+    ),
+    spriteBatches: planSpriteBatches(
+      frame.spriteBatches,
+      frustum,
+      cameraPosition,
+      spriteCullDistance,
+      camera.quaternion,
+      frustumCulling
+    )
+  };
+}
+
+export function planningOptionsFromQuality(
+  quality: Pick<
+    PodThreeQualityProfile,
+    | "meshCullDistance"
+    | "spriteCullDistance"
+    | "highDetailDistance"
+    | "mediumDetailDistance"
+    | "shadowDistance"
+  >
+): PodThreePlanningOptions {
+  return {
+    meshCullDistance: quality.meshCullDistance,
+    spriteCullDistance: quality.spriteCullDistance,
+    highDetailDistance: quality.highDetailDistance,
+    mediumDetailDistance: quality.mediumDetailDistance,
+    shadowDistance: quality.shadowDistance
   };
 }
 
@@ -147,6 +196,7 @@ export function splitSpriteBatchesByTint(
           depthTest: batch.depthTest
         },
         tint,
+        visibleCount: instances.length,
         instances
       });
       tintIndex += 1;
@@ -177,7 +227,7 @@ export function composeInstanceMatrix(
   return matrix;
 }
 
-function createMeshBatchKey(batch: ThreeJsMeshBatch): string {
+function createMeshBatchKey(batch: ThreeJsMeshBatch, lodLevel?: number): string {
   return [
     "mesh",
     batch.mesh,
@@ -185,7 +235,8 @@ function createMeshBatchKey(batch: ThreeJsMeshBatch): string {
     batch.layer,
     batch.renderOrder,
     batch.phase,
-    batch.transparent ? "transparent" : "opaque"
+    batch.transparent ? "transparent" : "opaque",
+    lodLevel ?? "base"
   ].join(":");
 }
 
@@ -203,4 +254,156 @@ function createSpriteBatchKey(batch: ThreeJsSpriteBatch): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function createViewCamera(
+  frameCamera: CameraState,
+  pose: PlannedCameraPose
+): PerspectiveCamera {
+  const camera = new PerspectiveCamera(
+    pose.fov,
+    frameCamera.viewportWidth / Math.max(frameCamera.viewportHeight, 1),
+    pose.near,
+    pose.far
+  );
+  camera.position.set(...pose.position);
+  camera.quaternion.copy(pose.quaternion);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  return camera;
+}
+
+function planMeshBatches(
+  batches: ThreeJsMeshBatch[],
+  frustum: Frustum,
+  cameraPosition: Vector3,
+  highDetailDistance: number,
+  mediumDetailDistance: number,
+  meshCullDistance: number,
+  shadowDistance: number,
+  frustumCulling: boolean
+): PlannedMeshBatch[] {
+  const planned = new Array<PlannedMeshBatch>();
+
+  for (const batch of batches) {
+    const lodGroups = new Map<
+      0 | 1 | 2,
+      {
+        matrices: Matrix4[];
+        instances: ThreeJsInstance[];
+        nearestDistance: number;
+      }
+    >();
+
+    for (const instance of batch.instances) {
+      const radius = estimateInstanceRadius(instance);
+      const center = new Vector3(...instance.position);
+      const distance = center.distanceTo(cameraPosition);
+
+      if (distance - radius > meshCullDistance) {
+        continue;
+      }
+
+      if (frustumCulling && !frustum.intersectsSphere(new Sphere(center, radius))) {
+        continue;
+      }
+
+      const lodLevel = classifyLod(distance, highDetailDistance, mediumDetailDistance);
+      const group = lodGroups.get(lodLevel) ?? {
+        matrices: [],
+        instances: [],
+        nearestDistance: Number.POSITIVE_INFINITY
+      };
+      group.instances.push(instance);
+      group.matrices.push(composeInstanceMatrix(instance));
+      group.nearestDistance = Math.min(group.nearestDistance, distance);
+      lodGroups.set(lodLevel, group);
+    }
+
+    for (const [lodLevel, group] of lodGroups) {
+      planned.push({
+        key: createMeshBatchKey(batch, lodLevel),
+        batch: {
+          ...batch,
+          castShadows:
+            batch.castShadows && lodLevel < 2 && group.nearestDistance <= shadowDistance
+        },
+        lodLevel,
+        visibleCount: group.instances.length,
+        matrices: group.matrices
+      });
+    }
+  }
+
+  planned.sort((left, right) => {
+    if (left.batch.renderOrder !== right.batch.renderOrder) {
+      return left.batch.renderOrder - right.batch.renderOrder;
+    }
+
+    if (left.lodLevel !== right.lodLevel) {
+      return left.lodLevel - right.lodLevel;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
+
+  return planned;
+}
+
+function planSpriteBatches(
+  batches: ThreeJsSpriteBatch[],
+  frustum: Frustum,
+  cameraPosition: Vector3,
+  spriteCullDistance: number,
+  cameraQuaternion: Quaternion,
+  frustumCulling: boolean
+): PlannedSpriteBatch[] {
+  const visibleBatches = batches
+    .map((batch) => ({
+      ...batch,
+      instances: batch.instances.filter((instance) => {
+        const radius = estimateInstanceRadius(instance);
+        const center = new Vector3(...instance.position);
+        const distance = center.distanceTo(cameraPosition);
+
+        if (distance - radius > spriteCullDistance) {
+          return false;
+        }
+
+        return !frustumCulling || frustum.intersectsSphere(new Sphere(center, radius));
+      })
+    }))
+    .filter((batch) => batch.instances.length > 0);
+
+  return splitSpriteBatchesByTint(visibleBatches).map((batch) => ({
+    ...batch,
+    visibleCount: batch.instances.length,
+    matrices: batch.instances.map((instance) =>
+      composeInstanceMatrix(
+        instance,
+        batch.batch.billboard ? cameraQuaternion : undefined
+      )
+    )
+  }));
+}
+
+function classifyLod(
+  distance: number,
+  highDetailDistance: number,
+  mediumDetailDistance: number
+): 0 | 1 | 2 {
+  if (distance <= highDetailDistance) {
+    return 0;
+  }
+
+  if (distance <= mediumDetailDistance) {
+    return 1;
+  }
+
+  return 2;
+}
+
+function estimateInstanceRadius(instance: ThreeJsInstance): number {
+  return Math.max(...instance.scale) * DEFAULT_RADIUS;
 }

@@ -16,6 +16,7 @@ import {
 import type { BufferGeometry, Material, Side } from "three";
 
 import type { RgbaTuple, ThreeJsMeshBatch, ThreeJsSpriteBatch } from "./contracts";
+import type { PodThreeQualityProfile } from "./quality";
 
 export interface ResolvedSpriteTexture {
   texture: Texture;
@@ -24,10 +25,18 @@ export interface ResolvedSpriteTexture {
 }
 
 export interface PodThreeAssetRegistry {
-  resolveGeometry(batch: ThreeJsMeshBatch): BufferGeometry | Promise<BufferGeometry>;
-  resolveMeshMaterial?(batch: ThreeJsMeshBatch): Material | Promise<Material>;
+  resolveGeometry(
+    batch: ThreeJsMeshBatch,
+    lodLevel?: 0 | 1 | 2
+  ): BufferGeometry | Promise<BufferGeometry>;
+  resolveMeshMaterial?(
+    batch: ThreeJsMeshBatch,
+    lodLevel?: 0 | 1 | 2,
+    quality?: PodThreeQualityProfile
+  ): Material | Promise<Material>;
   resolveSpriteTexture(
-    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">
+    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
+    anisotropy?: number
   ): ResolvedSpriteTexture | Promise<ResolvedSpriteTexture>;
 }
 
@@ -35,8 +44,9 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
   private geometryCache = new Map<string, BufferGeometry>();
   private textureCache = new Map<string, Texture>();
 
-  resolveGeometry(batch: ThreeJsMeshBatch): BufferGeometry {
-    const cached = this.geometryCache.get(batch.mesh);
+  resolveGeometry(batch: ThreeJsMeshBatch, lodLevel: 0 | 1 | 2 = 0): BufferGeometry {
+    const cacheKey = `${batch.mesh}:lod:${lodLevel}`;
+    const cached = this.geometryCache.get(cacheKey);
     if (cached) {
       return cached;
     }
@@ -45,39 +55,58 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
     let geometry: BufferGeometry;
 
     if (meshName.includes("spire") || meshName.includes("obelisk") || meshName.includes("spike")) {
-      geometry = new ConeGeometry(1.2, 4.8, 6);
+      geometry = new ConeGeometry(1.2, 4.8, lodSegments([20, 12, 6], lodLevel));
     } else if (meshName.includes("rock") || meshName.includes("boulder")) {
-      geometry = new DodecahedronGeometry(1.35, 0);
+      geometry =
+        lodLevel === 0
+          ? new DodecahedronGeometry(1.35, 1)
+          : lodLevel === 1
+            ? new DodecahedronGeometry(1.35, 0)
+            : new BoxGeometry(2.2, 1.8, 1.9);
     } else if (
       meshName.includes("column") ||
       meshName.includes("tower") ||
       meshName.includes("pillar")
     ) {
-      geometry = new CylinderGeometry(0.65, 0.9, 5.2, 12);
+      geometry = new CylinderGeometry(
+        0.65,
+        0.9,
+        5.2,
+        lodSegments([20, 12, 8], lodLevel)
+      );
     } else if (meshName.includes("tree") || meshName.includes("pine")) {
-      geometry = new ConeGeometry(1.4, 3.4, 10);
+      geometry = new ConeGeometry(1.4, 3.4, lodSegments([18, 10, 6], lodLevel));
     } else {
       geometry = new BoxGeometry(2, 2, 2);
     }
 
-    this.geometryCache.set(batch.mesh, geometry);
+    this.geometryCache.set(cacheKey, geometry);
     return geometry;
   }
 
-  resolveSpriteTexture(batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">): ResolvedSpriteTexture {
+  resolveSpriteTexture(
+    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
+    anisotropy = 1
+  ): ResolvedSpriteTexture {
     const key = `${batch.texture}:${batch.frame}`;
     const cached = this.textureCache.get(key);
     if (cached) {
+      cached.anisotropy = anisotropy;
       return { texture: cached };
     }
 
     const texture = createRadialTexture(hashColor(batch.texture));
+    texture.anisotropy = anisotropy;
     this.textureCache.set(key, texture);
     return { texture };
   }
 }
 
-export function createMeshMaterial(batch: ThreeJsMeshBatch): MeshStandardMaterial {
+export function createMeshMaterial(
+  batch: ThreeJsMeshBatch,
+  lodLevel: 0 | 1 | 2,
+  quality: Pick<PodThreeQualityProfile, "environmentIntensity">
+): MeshStandardMaterial {
   const material = new MeshStandardMaterial({
     color: new Color(batch.tint[0], batch.tint[1], batch.tint[2]),
     transparent: batch.transparent,
@@ -89,6 +118,10 @@ export function createMeshMaterial(batch: ThreeJsMeshBatch): MeshStandardMateria
     depthTest: batch.depthTest,
     side: batch.doubleSided ? 2 : FrontSide
   });
+  material.dithering = true;
+  material.envMapIntensity =
+    quality.environmentIntensity * (lodLevel === 0 ? 1 : lodLevel === 1 ? 0.92 : 0.82);
+  material.flatShading = lodLevel === 2;
   material.name = `pod-mesh:${batch.mesh}:${batch.material}`;
   return material;
 }
@@ -167,4 +200,8 @@ function hashColor(input: string): [number, number, number] {
     96 + ((hash >> 8) & 0x7f),
     96 + ((hash >> 16) & 0x7f)
   ];
+}
+
+function lodSegments(levels: [number, number, number], lodLevel: 0 | 1 | 2): number {
+  return levels[lodLevel];
 }
