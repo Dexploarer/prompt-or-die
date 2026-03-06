@@ -1,10 +1,12 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use uuid::Uuid;
 use pod_core::World;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use uuid::Uuid;
+
+use crate::binding::{insert_bound_components, NativeComponentBinding};
 
 /// Type-erased component data that can be serialized
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PrefabComponent {
     /// Raw JSON for flexible component representation
@@ -15,6 +17,10 @@ impl PrefabComponent {
     /// Create a component from a JSON value
     pub fn from_json(value: serde_json::Value) -> Self {
         PrefabComponent::Json(value)
+    }
+
+    pub fn from_native<T: NativeComponentBinding>(value: &T) -> Result<Self, String> {
+        Ok(Self::Json(value.to_component_value()?))
     }
 
     /// Get the underlying JSON value
@@ -47,15 +53,88 @@ impl PrefabComponent {
             }
         }
     }
+
+    pub fn get_native<T: NativeComponentBinding>(&self) -> Result<T, String> {
+        T::from_component_value(self.as_json())
+    }
 }
 
 /// Prefab metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrefabMetadata {
     pub name: String,
     pub version: u32,
     pub description: String,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrefabMetadataDiff {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+}
+
+impl PrefabMetadataDiff {
+    fn is_empty(&self) -> bool {
+        self.name.is_none()
+            && self.version.is_none()
+            && self.description.is_none()
+            && self.tags.is_none()
+    }
+
+    fn apply_to(&self, metadata: &mut PrefabMetadata) {
+        if let Some(name) = &self.name {
+            metadata.name = name.clone();
+        }
+        if let Some(version) = self.version {
+            metadata.version = version;
+        }
+        if let Some(description) = &self.description {
+            metadata.description = description.clone();
+        }
+        if let Some(tags) = &self.tags {
+            metadata.tags = tags.clone();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrefabDiff {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<PrefabMetadataDiff>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_prefab: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub added_components: HashMap<String, PrefabComponent>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub changed_components: HashMap<String, PrefabComponent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_components: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added_nested_prefabs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_nested_prefabs: Vec<String>,
+}
+
+impl PrefabDiff {
+    pub fn is_empty(&self) -> bool {
+        self.metadata
+            .as_ref()
+            .map(PrefabMetadataDiff::is_empty)
+            .unwrap_or(true)
+            && self.base_prefab.is_none()
+            && self.added_components.is_empty()
+            && self.changed_components.is_empty()
+            && self.removed_components.is_empty()
+            && self.added_nested_prefabs.is_empty()
+            && self.removed_nested_prefabs.is_empty()
+    }
 }
 
 impl Default for PrefabMetadata {
@@ -90,6 +169,8 @@ impl PropertyOverride {
 pub struct Prefab {
     pub id: Uuid,
     pub metadata: PrefabMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_prefab: Option<String>,
     pub components: HashMap<String, PrefabComponent>,
     pub nested_prefabs: Vec<String>, // References to other prefabs
 }
@@ -102,9 +183,23 @@ impl Prefab {
                 name: name.into(),
                 ..Default::default()
             },
+            base_prefab: None,
             components: HashMap::new(),
             nested_prefabs: Vec::new(),
         }
+    }
+
+    pub fn with_base_prefab(mut self, prefab_name: impl Into<String>) -> Self {
+        self.base_prefab = Some(prefab_name.into());
+        self
+    }
+
+    pub fn set_base_prefab(&mut self, prefab_name: impl Into<String>) {
+        self.base_prefab = Some(prefab_name.into());
+    }
+
+    pub fn clear_base_prefab(&mut self) {
+        self.base_prefab = None;
     }
 
     /// Add a component to the prefab
@@ -119,9 +214,27 @@ impl Prefab {
         Ok(())
     }
 
+    pub fn add_native_component<T: NativeComponentBinding>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), String> {
+        self.components.insert(
+            T::COMPONENT_NAME.to_string(),
+            PrefabComponent::from_native(value)?,
+        );
+        Ok(())
+    }
+
     /// Get a component by name
     pub fn get_component(&self, name: &str) -> Option<&PrefabComponent> {
         self.components.get(name)
+    }
+
+    pub fn get_native_component<T: NativeComponentBinding>(&self) -> Result<Option<T>, String> {
+        self.components
+            .get(T::COMPONENT_NAME)
+            .map(PrefabComponent::get_native::<T>)
+            .transpose()
     }
 
     /// Get a mutable reference to a component
@@ -159,17 +272,132 @@ impl Prefab {
         bincode::deserialize(data)
     }
 
+    pub fn resolved_components(
+        &self,
+        overrides: &[PropertyOverride],
+    ) -> HashMap<String, PrefabComponent> {
+        let mut components = self.components.clone();
+
+        for override_ in overrides {
+            let parts: Vec<&str> = override_.path.split('.').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+
+            let component_name = parts[0];
+            if let Some(component) = components.get_mut(component_name) {
+                apply_property_override(component, &parts[1..], &override_.value);
+            }
+        }
+
+        components
+    }
+
+    pub fn diff_against(&self, base: &Prefab) -> PrefabDiff {
+        let metadata = diff_metadata(&self.metadata, &base.metadata);
+
+        let mut added_components = HashMap::new();
+        let mut changed_components = HashMap::new();
+        let mut removed_components = Vec::new();
+
+        for (name, component) in &self.components {
+            match base.components.get(name) {
+                Some(base_component) if base_component.as_json() == component.as_json() => {}
+                Some(_) => {
+                    changed_components.insert(name.clone(), component.clone());
+                }
+                None => {
+                    added_components.insert(name.clone(), component.clone());
+                }
+            }
+        }
+
+        for component_name in base.components.keys() {
+            if !self.components.contains_key(component_name) {
+                removed_components.push(component_name.clone());
+            }
+        }
+
+        let base_nested: HashSet<&str> = base.nested_prefabs.iter().map(String::as_str).collect();
+        let self_nested: HashSet<&str> = self.nested_prefabs.iter().map(String::as_str).collect();
+
+        let mut added_nested_prefabs: Vec<String> = self
+            .nested_prefabs
+            .iter()
+            .filter(|name| !base_nested.contains(name.as_str()))
+            .cloned()
+            .collect();
+        let mut removed_nested_prefabs: Vec<String> = base
+            .nested_prefabs
+            .iter()
+            .filter(|name| !self_nested.contains(name.as_str()))
+            .cloned()
+            .collect();
+
+        added_nested_prefabs.sort();
+        removed_nested_prefabs.sort();
+        removed_components.sort();
+
+        PrefabDiff {
+            metadata,
+            base_prefab: if self.base_prefab != base.base_prefab {
+                Some(self.base_prefab.clone())
+            } else {
+                None
+            },
+            added_components,
+            changed_components,
+            removed_components,
+            added_nested_prefabs,
+            removed_nested_prefabs,
+        }
+    }
+
+    pub fn apply_diff(&mut self, diff: &PrefabDiff) {
+        if let Some(metadata) = &diff.metadata {
+            metadata.apply_to(&mut self.metadata);
+        }
+        if let Some(base_prefab) = &diff.base_prefab {
+            self.base_prefab = base_prefab.clone();
+        }
+
+        for component_name in &diff.removed_components {
+            self.components.remove(component_name);
+        }
+        for (component_name, component) in &diff.added_components {
+            self.components
+                .insert(component_name.clone(), component.clone());
+        }
+        for (component_name, component) in &diff.changed_components {
+            self.components
+                .insert(component_name.clone(), component.clone());
+        }
+
+        let mut nested_prefabs: Vec<String> = self
+            .nested_prefabs
+            .iter()
+            .filter(|name| !diff.removed_nested_prefabs.contains(name))
+            .cloned()
+            .collect();
+        for nested in &diff.added_nested_prefabs {
+            if !nested_prefabs.contains(nested) {
+                nested_prefabs.push(nested.clone());
+            }
+        }
+        self.nested_prefabs = nested_prefabs;
+    }
+
     /// Spawn this prefab into a world
     pub fn spawn(&self, world: &mut World) -> Result<hecs::Entity, String> {
         let entity = world.ecs.spawn(());
-
-        // Spawn all components
-        for (name, component) in &self.components {
-            log::debug!("Spawning component '{}' for prefab '{}'", name, self.metadata.name);
-            // Component data is stored as JSON; the actual instantiation
-            // would be handled by a system that interprets this JSON
+        let ignored = insert_bound_components(&self.components, &mut world.ecs, entity)?;
+        for component_name in ignored {
+            log::debug!(
+                "Ignoring non-native component '{}' while spawning prefab '{}'",
+                component_name,
+                self.metadata.name
+            );
         }
-
         Ok(entity)
     }
 
@@ -179,50 +407,125 @@ impl Prefab {
         world: &mut World,
         overrides: &[PropertyOverride],
     ) -> Result<hecs::Entity, String> {
-        let mut components = self.components.clone();
-
-        // Apply overrides
-        for override_ in overrides {
-            let parts: Vec<&str> = override_.path.split('.').collect();
-            if parts.len() >= 2 {
-                let component_name = parts[0];
-                if let Some(component) = components.get_mut(component_name) {
-                    // Apply nested property override
-                    apply_property_override(component, &parts[1..], &override_.value);
-                }
-            }
-        }
-
-        // Spawn with overridden components
+        let components = self.resolved_components(overrides);
         let entity = world.ecs.spawn(());
+        let ignored = insert_bound_components(&components, &mut world.ecs, entity)?;
+        for component_name in ignored {
+            log::debug!(
+                "Ignoring non-native component '{}' while spawning prefab '{}'",
+                component_name,
+                self.metadata.name
+            );
+        }
         Ok(entity)
     }
 }
 
 /// Helper to apply nested property overrides
-fn apply_property_override(component: &mut PrefabComponent, path: &[&str], value: &serde_json::Value) {
+fn apply_property_override(
+    component: &mut PrefabComponent,
+    path: &[&str],
+    value: &serde_json::Value,
+) {
     if path.is_empty() {
         return;
     }
 
     match component {
         PrefabComponent::Json(json) => {
-            let mut current = json;
-            for (i, &key) in path.iter().enumerate() {
-                if i == path.len() - 1 {
-                    // Last key, apply the override
-                    if let Some(obj) = current.as_object_mut() {
-                        obj.insert(key.to_string(), value.clone());
-                    }
-                } else {
-                    // Navigate deeper
-                    if !current[key].is_object() {
-                        current[key] = serde_json::json!({});
-                    }
-                    current = &mut current[key];
-                }
-            }
+            apply_json_override(json, path, value);
         }
+    }
+}
+
+fn apply_json_override(current: &mut serde_json::Value, path: &[&str], value: &serde_json::Value) {
+    if path.is_empty() {
+        *current = value.clone();
+        return;
+    }
+
+    let key = path[0];
+    if path.len() == 1 {
+        set_json_child(current, key, value.clone());
+        return;
+    }
+
+    let next_key = path[1];
+    if let Some(child) = get_or_create_json_child(current, key, next_key) {
+        apply_json_override(child, &path[1..], value);
+    }
+}
+
+fn set_json_child(target: &mut serde_json::Value, key: &str, value: serde_json::Value) {
+    if let Some(object) = target.as_object_mut() {
+        object.insert(key.to_string(), value);
+        return;
+    }
+
+    if let Some(array) = target.as_array_mut() {
+        if let Some(index) = key_to_index(key) {
+            ensure_array_len(array, index + 1);
+            array[index] = value;
+        }
+    }
+}
+
+fn get_or_create_json_child<'a>(
+    target: &'a mut serde_json::Value,
+    key: &str,
+    next_key: &str,
+) -> Option<&'a mut serde_json::Value> {
+    match target {
+        serde_json::Value::Object(object) => {
+            let entry = object
+                .entry(key.to_string())
+                .or_insert_with(|| empty_container_for(next_key));
+            if !matches_container(entry, next_key) {
+                *entry = empty_container_for(next_key);
+            }
+            Some(entry)
+        }
+        serde_json::Value::Array(array) => {
+            let index = key_to_index(key)?;
+            ensure_array_len(array, index + 1);
+            if !matches_container(&array[index], next_key) {
+                array[index] = empty_container_for(next_key);
+            }
+            array.get_mut(index)
+        }
+        _ => None,
+    }
+}
+
+fn key_to_index(key: &str) -> Option<usize> {
+    match key {
+        "x" | "r" => Some(0),
+        "y" | "g" => Some(1),
+        "z" | "b" => Some(2),
+        "w" | "a" => Some(3),
+        _ => key.parse::<usize>().ok(),
+    }
+}
+
+fn empty_container_for(next_key: &str) -> serde_json::Value {
+    if key_to_index(next_key).is_some() {
+        serde_json::Value::Array(Vec::new())
+    } else {
+        serde_json::json!({})
+    }
+}
+
+fn matches_container(value: &serde_json::Value, next_key: &str) -> bool {
+    if key_to_index(next_key).is_some() {
+        value.is_array()
+    } else {
+        value.is_object()
+    }
+}
+
+fn ensure_array_len(array: &mut Vec<serde_json::Value>, len: usize) {
+    while array.len() < len {
+        array.push(serde_json::Value::Null);
     }
 }
 
@@ -269,6 +572,59 @@ impl PrefabRegistry {
         self.prefabs.get(name)
     }
 
+    pub fn resolve_prefab(&self, name: &str) -> Result<Prefab, String> {
+        let mut visiting = Vec::new();
+        self.resolve_prefab_internal(name, &mut visiting)
+    }
+
+    fn resolve_prefab_internal(
+        &self,
+        name: &str,
+        visiting: &mut Vec<String>,
+    ) -> Result<Prefab, String> {
+        if visiting.iter().any(|current| current == name) {
+            visiting.push(name.to_string());
+            return Err(format!(
+                "Prefab inheritance cycle detected: {}",
+                visiting.join(" -> ")
+            ));
+        }
+
+        let prefab = self
+            .prefabs
+            .get(name)
+            .ok_or_else(|| format!("Prefab '{}' not found", name))?;
+
+        visiting.push(name.to_string());
+
+        let mut resolved = if let Some(base_name) = &prefab.base_prefab {
+            let mut base_prefab = self.resolve_prefab_internal(base_name, visiting)?;
+            base_prefab.metadata = prefab.metadata.clone();
+            base_prefab.base_prefab = prefab.base_prefab.clone();
+
+            for (component_name, component) in &prefab.components {
+                base_prefab
+                    .components
+                    .insert(component_name.clone(), component.clone());
+            }
+            for nested in &prefab.nested_prefabs {
+                if !base_prefab.nested_prefabs.contains(nested) {
+                    base_prefab.nested_prefabs.push(nested.clone());
+                }
+            }
+            base_prefab
+        } else {
+            prefab.clone()
+        };
+
+        visiting.pop();
+
+        resolved.metadata = prefab.metadata.clone();
+        resolved.base_prefab = prefab.base_prefab.clone();
+        resolved.id = prefab.id;
+        Ok(resolved)
+    }
+
     /// Get a mutable reference to a prefab
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Prefab> {
         self.prefabs.get_mut(name)
@@ -286,9 +642,7 @@ impl PrefabRegistry {
 
     /// Spawn a prefab by name
     pub fn spawn(&self, name: &str, world: &mut World) -> Result<hecs::Entity, String> {
-        self.get(name)
-            .ok_or_else(|| format!("Prefab '{}' not found", name))?
-            .spawn(world)
+        self.resolve_prefab(name)?.spawn(world)
     }
 
     /// Spawn a prefab with overrides
@@ -298,8 +652,7 @@ impl PrefabRegistry {
         world: &mut World,
         overrides: &[PropertyOverride],
     ) -> Result<hecs::Entity, String> {
-        self.get(name)
-            .ok_or_else(|| format!("Prefab '{}' not found", name))?
+        self.resolve_prefab(name)?
             .spawn_with_overrides(world, overrides)
     }
 
@@ -320,6 +673,16 @@ impl PrefabRegistry {
     }
 }
 
+fn diff_metadata(current: &PrefabMetadata, base: &PrefabMetadata) -> Option<PrefabMetadataDiff> {
+    let diff = PrefabMetadataDiff {
+        name: (current.name != base.name).then(|| current.name.clone()),
+        version: (current.version != base.version).then_some(current.version),
+        description: (current.description != base.description).then(|| current.description.clone()),
+        tags: (current.tags != base.tags).then(|| current.tags.clone()),
+    };
+    (!diff.is_empty()).then_some(diff)
+}
+
 impl Default for PrefabRegistry {
     fn default() -> Self {
         Self::new()
@@ -329,6 +692,8 @@ impl Default for PrefabRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::{Vec2, Vec3};
+    use pod_core::{Mesh, Sprite, Transform, Transform3D};
 
     #[test]
     fn test_prefab_creation() {
@@ -343,9 +708,7 @@ mod tests {
     fn test_prefab_components() {
         let mut prefab = Prefab::new("TestPrefab");
         let value = serde_json::json!({"x": 10.0, "y": 20.0});
-        prefab
-            .add_component("Transform", &value)
-            .unwrap();
+        prefab.add_component("Transform", &value).unwrap();
 
         let retrieved = prefab.get_component("Transform").unwrap();
         assert_eq!(
@@ -379,8 +742,7 @@ mod tests {
 
     #[test]
     fn test_property_override() {
-        let override_ =
-            PropertyOverride::new("Transform.position.x", serde_json::json!(42.0));
+        let override_ = PropertyOverride::new("Transform.position.x", serde_json::json!(42.0));
         assert_eq!(override_.path, "Transform.position.x");
     }
 
@@ -391,5 +753,258 @@ mod tests {
 
         assert_eq!(prefab.nested_prefabs.len(), 1);
         assert!(prefab.nested_prefabs.contains(&"ChildPrefab".to_string()));
+    }
+
+    #[test]
+    fn test_native_components_round_trip() {
+        let mut prefab = Prefab::new("NativePrefab");
+        let transform = Transform {
+            position: Vec2::new(2.0, 4.0),
+            rotation: 1.5,
+            scale: Vec2::new(3.0, 5.0),
+        };
+        prefab.add_native_component(&transform).unwrap();
+
+        let restored = prefab
+            .get_native_component::<Transform>()
+            .unwrap()
+            .expect("transform should round-trip");
+
+        assert_eq!(restored.position, transform.position);
+        assert_eq!(restored.rotation, transform.rotation);
+        assert_eq!(restored.scale, transform.scale);
+    }
+
+    #[test]
+    fn test_prefab_spawn_inserts_native_2d_components() {
+        let mut prefab = Prefab::new("SpritePrefab");
+        prefab
+            .add_native_component(&Transform::at(12.0, 24.0))
+            .unwrap();
+        prefab
+            .add_native_component(&Sprite {
+                texture: "hero".to_string(),
+                frame: 3,
+                layer: 7,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let mut world = World::new(42);
+        let entity = prefab.spawn(&mut world).unwrap();
+
+        let transform = world
+            .ecs
+            .get::<&Transform>(entity)
+            .expect("transform should be inserted");
+        let sprite = world
+            .ecs
+            .get::<&Sprite>(entity)
+            .expect("sprite should be inserted");
+
+        assert_eq!(transform.position, Vec2::new(12.0, 24.0));
+        assert_eq!(sprite.texture, "hero");
+        assert_eq!(sprite.layer, 7);
+    }
+
+    #[test]
+    fn test_prefab_spawn_with_overrides_updates_native_components() {
+        let mut prefab = Prefab::new("MeshPrefab");
+        prefab
+            .add_native_component(&Transform3D {
+                position: Vec3::new(1.0, 2.0, 3.0),
+                ..Default::default()
+            })
+            .unwrap();
+        prefab
+            .add_native_component(&Mesh {
+                asset_id: "crate".to_string(),
+                layer: 1,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let overrides = [
+            PropertyOverride::new("Transform3D.position.z", serde_json::json!(9.0)),
+            PropertyOverride::new("Mesh.layer", serde_json::json!(5)),
+        ];
+
+        let mut world = World::new(7);
+        let entity = prefab.spawn_with_overrides(&mut world, &overrides).unwrap();
+
+        let transform = world
+            .ecs
+            .get::<&Transform3D>(entity)
+            .expect("transform3d should be inserted");
+        let mesh = world
+            .ecs
+            .get::<&Mesh>(entity)
+            .expect("mesh should be inserted");
+
+        assert_eq!(transform.position, Vec3::new(1.0, 2.0, 9.0));
+        assert_eq!(mesh.layer, 5);
+    }
+
+    #[test]
+    fn test_prefab_registry_resolves_inherited_components() {
+        let mut registry = PrefabRegistry::new();
+
+        let mut base = Prefab::new("BaseActor");
+        base.add_native_component(&Transform::at(1.0, 2.0)).unwrap();
+        base.add_native_component(&Sprite {
+            texture: "base_actor".to_string(),
+            layer: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        base.add_nested_prefab("WeaponMount");
+        registry.register("BaseActor", base);
+
+        let mut derived = Prefab::new("MageActor").with_base_prefab("BaseActor");
+        derived
+            .add_native_component(&Sprite {
+                texture: "mage_actor".to_string(),
+                layer: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        derived
+            .add_native_component(&Mesh {
+                asset_id: "staff".to_string(),
+                layer: 7,
+                ..Default::default()
+            })
+            .unwrap();
+        derived.add_nested_prefab("SpellFx");
+        registry.register("MageActor", derived);
+
+        let resolved = registry.resolve_prefab("MageActor").unwrap();
+
+        let transform = resolved
+            .get_native_component::<Transform>()
+            .unwrap()
+            .expect("derived prefab should inherit transform");
+        let sprite = resolved
+            .get_native_component::<Sprite>()
+            .unwrap()
+            .expect("derived prefab should override sprite");
+        let mesh = resolved
+            .get_native_component::<Mesh>()
+            .unwrap()
+            .expect("derived prefab should add mesh");
+
+        assert_eq!(transform.position, Vec2::new(1.0, 2.0));
+        assert_eq!(sprite.texture, "mage_actor");
+        assert_eq!(sprite.layer, 5);
+        assert_eq!(mesh.asset_id, "staff");
+        assert!(resolved.nested_prefabs.contains(&"WeaponMount".to_string()));
+        assert!(resolved.nested_prefabs.contains(&"SpellFx".to_string()));
+    }
+
+    #[test]
+    fn test_prefab_registry_detects_inheritance_cycles() {
+        let mut registry = PrefabRegistry::new();
+        registry.register("A", Prefab::new("A").with_base_prefab("B"));
+        registry.register("B", Prefab::new("B").with_base_prefab("A"));
+
+        let error = registry
+            .resolve_prefab("A")
+            .expect_err("cycle should be rejected");
+        assert!(error.contains("Prefab inheritance cycle detected"));
+        assert!(error.contains("A -> B -> A"));
+    }
+
+    #[test]
+    fn test_prefab_registry_spawn_uses_resolved_inheritance() {
+        let mut registry = PrefabRegistry::new();
+
+        let mut base = Prefab::new("BaseMesh");
+        base.add_native_component(&Transform3D {
+            position: Vec3::new(6.0, 7.0, 8.0),
+            ..Default::default()
+        })
+        .unwrap();
+        registry.register("BaseMesh", base);
+
+        let mut derived = Prefab::new("DerivedMesh").with_base_prefab("BaseMesh");
+        derived
+            .add_native_component(&Mesh {
+                asset_id: "tower".to_string(),
+                layer: 3,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("DerivedMesh", derived);
+
+        let mut world = World::new(100);
+        let entity = registry.spawn("DerivedMesh", &mut world).unwrap();
+
+        let transform = world
+            .ecs
+            .get::<&Transform3D>(entity)
+            .expect("spawn should include inherited transform");
+        let mesh = world
+            .ecs
+            .get::<&Mesh>(entity)
+            .expect("spawn should include derived mesh");
+
+        assert_eq!(transform.position, Vec3::new(6.0, 7.0, 8.0));
+        assert_eq!(mesh.asset_id, "tower");
+    }
+
+    #[test]
+    fn test_prefab_diff_round_trip_apply() {
+        let mut base = Prefab::new("Base");
+        base.metadata.description = "base prefab".to_string();
+        base.add_native_component(&Transform::at(1.0, 1.0)).unwrap();
+        base.add_native_component(&Sprite {
+            texture: "base".to_string(),
+            layer: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        base.add_nested_prefab("Mount");
+
+        let mut derived = base.clone().with_base_prefab("BasePrefab");
+        derived.metadata.description = "derived prefab".to_string();
+        derived.remove_component("Transform");
+        derived
+            .add_native_component(&Sprite {
+                texture: "derived".to_string(),
+                layer: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        derived
+            .add_component("EditorMetadata", &serde_json::json!({ "category": "boss" }))
+            .unwrap();
+        derived.add_nested_prefab("SpellFx");
+
+        let diff = derived.diff_against(&base);
+        assert!(!diff.is_empty(), "diff should capture prefab changes");
+        assert!(diff.metadata.is_some(), "metadata diff should be recorded");
+        assert_eq!(diff.base_prefab, Some(Some("BasePrefab".to_string())));
+        assert_eq!(diff.removed_components, vec!["Transform".to_string()]);
+        assert!(diff.changed_components.contains_key("Sprite"));
+        assert!(diff.added_components.contains_key("EditorMetadata"));
+        assert_eq!(diff.added_nested_prefabs, vec!["SpellFx".to_string()]);
+
+        let mut patched = base.clone();
+        patched.apply_diff(&diff);
+
+        assert_eq!(patched.metadata.description, "derived prefab");
+        assert_eq!(patched.base_prefab, Some("BasePrefab".to_string()));
+        assert!(patched.get_component("Transform").is_none());
+        assert_eq!(
+            patched
+                .get_native_component::<Sprite>()
+                .unwrap()
+                .expect("sprite should exist")
+                .texture,
+            "derived"
+        );
+        assert!(patched.get_component("EditorMetadata").is_some());
+        assert!(patched.nested_prefabs.contains(&"Mount".to_string()));
+        assert!(patched.nested_prefabs.contains(&"SpellFx".to_string()));
     }
 }

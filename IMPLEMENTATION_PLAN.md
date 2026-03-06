@@ -196,5 +196,25 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-scripting --offline`
   - `cargo test -p pod-net --offline`
 
-**Last updated**: Iteration 29
-**Current focus**: Phase 9 (Hardening Parity Backlog)
+### Iteration 30 — Native Scene/Prefab Binding Pass
+
+- [x] Added `pod-scene` native component bindings for existing `pod-core` gameplay/render types spanning 2D (`Transform`, `Sprite`, `ColorRect`), 2.5D (`Transform3D` + `Sprite`), and 3D (`Mesh`, `Material`, `Camera3D`, `Light`) while preserving JSON fallback for editor-only component data.
+- [x] Converted scene entity component payloads into typed component maps and implemented direct scene-to-`pod_core::World` instantiation, prefab-backed entity resolution, stable scene-entity spawn mapping, and 3D parent graph linkage via `Parent3D`.
+- [x] Hardened prefab property override application to support both object paths and vector-style array axes (`x`, `y`, `z`, `w` or numeric indices), so authored overrides work against `glam`-serialized transform fields.
+- [x] Added deterministic `pod-scene` tests covering typed prefab round-trips, prefab spawning with native components, override application, ignored editor-only scene metadata, and mixed 2D/2.5D/3D scene instantiation.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+### Iteration 31 — Prefab Inheritance + Diff/Merge Pass
+
+- [x] Added prefab inheritance to `pod-scene` via optional `base_prefab` references with cycle-safe recursive resolution in `PrefabRegistry`.
+- [x] Updated prefab spawning and scene prefab resolution to use fully resolved prefab state, so inherited native components participate in world instantiation for 2D, 2.5D, and 3D entities.
+- [x] Added `PrefabDiff` and `PrefabMetadataDiff` to support authoring-time prefab patch generation and replay (`diff_against` / `apply_diff`) for component add/change/remove and nested-prefab merge behavior.
+- [x] Added deterministic tests covering inheritance resolution precedence, inheritance-cycle rejection, resolved spawning, diff/apply round-trips, and scene instantiation through inherited prefabs.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+**Last updated**: Iteration 31
+**Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog

@@ -1,6 +1,11 @@
+use hecs::Entity;
+use pod_core::{Parent3D, Transform3D, World};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+use crate::binding::{insert_bound_components, NativeComponentBinding};
+use crate::prefab::{PrefabComponent, PrefabRegistry};
 
 /// Represents a spawn point in a scene
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,7 +121,7 @@ pub struct EntityInstance {
     pub id: Uuid,
     pub name: String,
     pub prefab_ref: Option<String>, // Reference to a prefab, if this entity was created from one
-    pub components: serde_json::Value, // Type-erased component data as JSON
+    pub components: HashMap<String, PrefabComponent>,
 }
 
 impl EntityInstance {
@@ -125,13 +130,63 @@ impl EntityInstance {
             id: Uuid::new_v4(),
             name: name.into(),
             prefab_ref: None,
-            components: serde_json::json!({}),
+            components: HashMap::new(),
         }
     }
 
     pub fn with_prefab(mut self, prefab_ref: impl Into<String>) -> Self {
         self.prefab_ref = Some(prefab_ref.into());
         self
+    }
+
+    pub fn add_component<T: serde::Serialize>(
+        &mut self,
+        name: impl Into<String>,
+        value: &T,
+    ) -> Result<(), String> {
+        self.components.insert(
+            name.into(),
+            PrefabComponent::from_json(serde_json::to_value(value).map_err(|err| err.to_string())?),
+        );
+        Ok(())
+    }
+
+    pub fn add_native_component<T: NativeComponentBinding>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), String> {
+        self.components.insert(
+            T::COMPONENT_NAME.to_string(),
+            PrefabComponent::from_native(value)?,
+        );
+        Ok(())
+    }
+
+    pub fn get_component(&self, name: &str) -> Option<&PrefabComponent> {
+        self.components.get(name)
+    }
+
+    pub fn get_native_component<T: NativeComponentBinding>(&self) -> Result<Option<T>, String> {
+        self.components
+            .get(T::COMPONENT_NAME)
+            .map(PrefabComponent::get_native::<T>)
+            .transpose()
+    }
+
+    pub fn remove_component(&mut self, name: &str) -> Option<PrefabComponent> {
+        self.components.remove(name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneSpawnResult {
+    pub entity_map: HashMap<Uuid, Entity>,
+    pub ignored_components: Vec<String>,
+}
+
+impl SceneSpawnResult {
+    pub fn entity_for(&self, scene_entity_id: Uuid) -> Option<Entity> {
+        self.entity_map.get(&scene_entity_id).copied()
     }
 }
 
@@ -216,6 +271,114 @@ impl Scene {
     pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
         bincode::deserialize(data)
     }
+
+    pub fn instantiate(&self, world: &mut World) -> Result<SceneSpawnResult, String> {
+        self.instantiate_with_prefabs(world, None)
+    }
+
+    pub fn instantiate_with_prefabs(
+        &self,
+        world: &mut World,
+        prefabs: Option<&PrefabRegistry>,
+    ) -> Result<SceneSpawnResult, String> {
+        let mut entity_map = HashMap::new();
+
+        for entity in &self.entities {
+            entity_map.insert(entity.id, world.ecs.spawn(()));
+        }
+
+        let mut ignored_components = Vec::new();
+
+        for entity in &self.entities {
+            let spawned_entity = entity_map
+                .get(&entity.id)
+                .copied()
+                .ok_or_else(|| format!("Scene entity '{}' was not pre-spawned", entity.name))?;
+
+            let resolved_components = self.resolve_entity_components(entity, prefabs)?;
+            let ignored =
+                insert_bound_components(&resolved_components, &mut world.ecs, spawned_entity)?;
+            ignored_components.extend(
+                ignored
+                    .into_iter()
+                    .map(|component_name| format!("{}::{}", entity.name, component_name)),
+            );
+        }
+
+        self.apply_parent_graph(world, &entity_map)?;
+
+        ignored_components.sort();
+
+        Ok(SceneSpawnResult {
+            entity_map,
+            ignored_components,
+        })
+    }
+
+    fn resolve_entity_components(
+        &self,
+        entity: &EntityInstance,
+        prefabs: Option<&PrefabRegistry>,
+    ) -> Result<HashMap<String, PrefabComponent>, String> {
+        let mut components = match entity.prefab_ref.as_deref() {
+            Some(prefab_name) => {
+                let registry = prefabs.ok_or_else(|| {
+                    format!(
+                        "Scene '{}' requires prefab registry to resolve '{}'",
+                        self.metadata.name, prefab_name
+                    )
+                })?;
+                registry.resolve_prefab(prefab_name)?.components.clone()
+            }
+            None => HashMap::new(),
+        };
+
+        for (name, component) in &entity.components {
+            components.insert(name.clone(), component.clone());
+        }
+
+        Ok(components)
+    }
+
+    fn apply_parent_graph(
+        &self,
+        world: &mut World,
+        entity_map: &HashMap<Uuid, Entity>,
+    ) -> Result<(), String> {
+        let mut parent_links: Vec<(Uuid, Uuid)> = self
+            .graph
+            .parent_map
+            .iter()
+            .map(|(child, parent)| (child.to_owned(), parent.to_owned()))
+            .collect();
+        parent_links.sort_by_key(|(child, _)| child.as_u128());
+
+        for (child_id, parent_id) in parent_links {
+            let child_entity = entity_map.get(&child_id).copied().ok_or_else(|| {
+                format!("Missing spawned child entity for scene node {}", child_id)
+            })?;
+            let parent_entity = entity_map.get(&parent_id).copied().ok_or_else(|| {
+                format!("Missing spawned parent entity for scene node {}", parent_id)
+            })?;
+
+            if world.ecs.get::<&Transform3D>(child_entity).is_err() {
+                continue;
+            }
+
+            let _ = world.ecs.remove_one::<Parent3D>(child_entity);
+            world
+                .ecs
+                .insert_one(
+                    child_entity,
+                    Parent3D {
+                        parent: parent_entity.id() as u64,
+                    },
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Manages loading, unloading, and transitioning between scenes
@@ -298,7 +461,12 @@ impl SceneManager {
 
     /// Unload a scene
     pub fn unload_scene(&mut self, name: &str) -> Option<Scene> {
-        if self.active_scene.as_ref().map(|n| n == name).unwrap_or(false) {
+        if self
+            .active_scene
+            .as_ref()
+            .map(|n| n == name)
+            .unwrap_or(false)
+        {
             self.active_scene = None;
         }
         self.scene_files.remove(name);
@@ -362,6 +530,10 @@ fn chrono_format_date() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
+    use pod_core::{Label, Material, Mesh, Parent3D, Sprite, Team, Transform, Transform3D};
+
+    use crate::prefab::Prefab;
 
     #[test]
     fn test_scene_graph_parent_child() {
@@ -421,5 +593,172 @@ mod tests {
 
         manager.transition_scene("Scene1", "Scene2").unwrap();
         assert_eq!(manager.get_active_name(), Some("Scene2"));
+    }
+
+    #[test]
+    fn test_scene_instantiation_ignores_unknown_editor_components() {
+        let mut scene = Scene::new("EditorScene");
+        let mut entity = EntityInstance::new("EditorOnly");
+        entity
+            .add_component("EditorMetadata", &serde_json::json!({ "selected": true }))
+            .unwrap();
+        scene.add_entity(entity);
+
+        let mut world = World::new(1);
+        let result = scene.instantiate(&mut world).unwrap();
+
+        assert_eq!(
+            result.ignored_components,
+            vec!["EditorOnly::EditorMetadata"]
+        );
+        assert_eq!(world.entity_count(), 1);
+    }
+
+    #[test]
+    fn test_scene_instantiation_supports_2d_25d_and_3d_entities() {
+        let mut registry = PrefabRegistry::new();
+        let mut actor_base = Prefab::new("BaseBillboardActor");
+        actor_base
+            .add_native_component(&Transform3D {
+                position: Vec3::new(0.0, 0.5, 1.0),
+                ..Default::default()
+            })
+            .unwrap();
+        actor_base
+            .add_native_component(&Label {
+                name: "ActorBase".to_string(),
+                team: Team::Team(2),
+            })
+            .unwrap();
+        registry.register("BaseBillboardActor", actor_base);
+
+        let mut actor_prefab = Prefab::new("BillboardActor").with_base_prefab("BaseBillboardActor");
+        actor_prefab.metadata.description = "Derived billboard actor".to_string();
+        actor_prefab
+            .add_native_component(&Sprite {
+                texture: "actor_sprite".to_string(),
+                layer: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        registry.register("BillboardActor", actor_prefab);
+
+        let mut scene = Scene::new("MixedScene");
+
+        let mut hud = EntityInstance::new("Hud");
+        hud.add_native_component(&Transform::at(-4.0, 8.0)).unwrap();
+        hud.add_native_component(&Sprite {
+            texture: "hud".to_string(),
+            layer: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        scene.add_entity(hud);
+
+        let mut root_mesh = EntityInstance::new("RootMesh");
+        root_mesh
+            .add_native_component(&Transform3D {
+                position: Vec3::new(10.0, 0.0, 2.0),
+                ..Default::default()
+            })
+            .unwrap();
+        root_mesh
+            .add_native_component(&Mesh {
+                asset_id: "tower".to_string(),
+                layer: 3,
+                ..Default::default()
+            })
+            .unwrap();
+        root_mesh
+            .add_native_component(&Material {
+                asset_id: "stone".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let root_mesh_id = scene.add_entity(root_mesh);
+
+        let mut actor = EntityInstance::new("Actor").with_prefab("BillboardActor");
+        actor
+            .add_native_component(&Transform3D {
+                position: Vec3::new(2.0, 1.0, 5.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let actor_id = scene.add_entity(actor);
+        scene.graph.set_parent(actor_id, root_mesh_id);
+
+        let mut world = World::new(9);
+        let result = scene
+            .instantiate_with_prefabs(&mut world, Some(&registry))
+            .unwrap();
+
+        assert!(
+            result.ignored_components.is_empty(),
+            "native-only scene should not produce ignored components"
+        );
+
+        let actor_entity = result
+            .entity_for(actor_id)
+            .expect("actor should be spawned");
+        let root_entity = result
+            .entity_for(root_mesh_id)
+            .expect("root mesh should be spawned");
+        let hud_entity = result
+            .entity_map
+            .values()
+            .copied()
+            .find(|entity| {
+                world
+                    .ecs
+                    .get::<&Sprite>(*entity)
+                    .map(|sprite| sprite.texture == "hud")
+                    .unwrap_or(false)
+            })
+            .expect("hud entity should be spawned");
+
+        let parent = world
+            .ecs
+            .get::<&Parent3D>(actor_entity)
+            .expect("3D child should receive parent linkage");
+        assert_eq!(parent.parent, root_entity.id() as u64);
+
+        let hud_transform = world
+            .ecs
+            .get::<&Transform>(hud_entity)
+            .expect("2D hud should keep Transform");
+        let hud_sprite = world
+            .ecs
+            .get::<&Sprite>(hud_entity)
+            .expect("2D hud should keep Sprite");
+        assert_eq!(hud_transform.position, Transform::at(-4.0, 8.0).position);
+        assert_eq!(hud_sprite.texture, "hud");
+
+        let root_transform = world
+            .ecs
+            .get::<&Transform3D>(root_entity)
+            .expect("3D root should keep Transform3D");
+        let root_mesh = world
+            .ecs
+            .get::<&Mesh>(root_entity)
+            .expect("3D root should keep Mesh");
+        assert_eq!(root_transform.position, Vec3::new(10.0, 0.0, 2.0));
+        assert_eq!(root_mesh.asset_id, "tower");
+
+        let actor_transform = world
+            .ecs
+            .get::<&Transform3D>(actor_entity)
+            .expect("2.5D actor should keep Transform3D");
+        let actor_sprite = world
+            .ecs
+            .get::<&Sprite>(actor_entity)
+            .expect("2.5D actor should keep Sprite");
+        let actor_label = world
+            .ecs
+            .get::<&Label>(actor_entity)
+            .expect("2.5D actor should inherit Label from base prefab");
+        assert_eq!(actor_transform.position, Vec3::new(2.0, 1.0, 5.0));
+        assert_eq!(actor_sprite.texture, "actor_sprite");
+        assert_eq!(actor_label.name, "ActorBase");
+        assert_eq!(actor_label.team, Team::Team(2));
     }
 }
