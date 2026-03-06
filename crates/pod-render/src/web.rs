@@ -42,6 +42,16 @@ pub struct RenderCommand {
     pub cast_shadows: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receive_shadows: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparent: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub double_sided: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emissive: Option<[f32; 3]>,
     pub layer: i32,
     pub visible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,8 +110,17 @@ pub struct ThreeJsMeshBatch {
     pub mesh: String,
     pub material: String,
     pub layer: i32,
+    pub phase: ThreeJsRenderPhase,
+    pub transparent: bool,
+    pub double_sided: bool,
     pub cast_shadows: bool,
     pub receive_shadows: bool,
+    pub tint: [f32; 4],
+    pub roughness: f32,
+    pub metallic: f32,
+    pub emissive: [f32; 3],
+    pub depth_write: bool,
+    pub depth_test: bool,
     pub instances: Vec<ThreeJsInstance>,
 }
 
@@ -113,7 +132,19 @@ pub struct ThreeJsSpriteBatch {
     pub frame: u32,
     pub layer: i32,
     pub billboard: bool,
+    pub phase: ThreeJsRenderPhase,
+    pub transparent: bool,
+    pub depth_write: bool,
+    pub depth_test: bool,
     pub instances: Vec<ThreeJsInstance>,
+}
+
+/// Render phase guidance for Three.js/WebGPU consumers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreeJsRenderPhase {
+    Opaque,
+    Transparent,
 }
 
 /// Runtime hints for a Three.js WebGPU consumer.
@@ -126,6 +157,9 @@ pub struct ThreeJsWebGpuHints {
     pub use_instancing: bool,
     pub sort_opaque_front_to_back: bool,
     pub preserve_instance_order: bool,
+    pub sort_transparent_back_to_front: bool,
+    pub opaque_depth_write: bool,
+    pub transparent_depth_write: bool,
     pub max_pixel_ratio: f32,
 }
 
@@ -146,6 +180,12 @@ struct MeshBatchKey {
     layer: i32,
     mesh: String,
     material: String,
+    tint_bits: [u32; 4],
+    roughness_bits: u32,
+    metallic_bits: u32,
+    emissive_bits: [u32; 3],
+    double_sided: bool,
+    transparent: bool,
     cast_shadows: bool,
     receive_shadows: bool,
 }
@@ -156,6 +196,7 @@ struct SpriteBatchKey {
     texture: String,
     frame: u32,
     billboard: bool,
+    transparent: bool,
 }
 
 /// Web-specific renderer bridge.
@@ -237,14 +278,26 @@ impl WebRenderBridge {
                 DrawType::Mesh3D {
                     mesh,
                     material,
+                    tint,
+                    roughness,
+                    metallic,
+                    emissive,
+                    double_sided,
                     transform,
                     cast_shadows,
                     receive_shadows,
                 } => {
+                    let transparent = Self::is_transparent(*tint);
                     let key = MeshBatchKey {
                         layer: item.layer,
                         mesh: mesh.clone(),
                         material: material.clone(),
+                        tint_bits: Self::float4_bits(*tint),
+                        roughness_bits: roughness.to_bits(),
+                        metallic_bits: metallic.to_bits(),
+                        emissive_bits: Self::float3_bits(*emissive),
+                        double_sided: *double_sided,
+                        transparent,
                         cast_shadows: *cast_shadows,
                         receive_shadows: *receive_shadows,
                     };
@@ -264,11 +317,13 @@ impl WebRenderBridge {
                     transform,
                     billboard,
                 } => {
+                    let transparent = Self::is_transparent(*tint);
                     let key = SpriteBatchKey {
                         layer: item.layer,
                         texture: texture.clone(),
                         frame: *frame,
                         billboard: *billboard,
+                        transparent,
                     };
                     sprite_batches
                         .entry(key)
@@ -292,8 +347,17 @@ impl WebRenderBridge {
                     mesh: key.mesh,
                     material: key.material,
                     layer: key.layer,
+                    phase: Self::phase_from_transparency(key.transparent),
+                    transparent: key.transparent,
+                    double_sided: key.double_sided,
                     cast_shadows: key.cast_shadows,
                     receive_shadows: key.receive_shadows,
+                    tint: Self::bits_to_float4(key.tint_bits),
+                    roughness: f32::from_bits(key.roughness_bits),
+                    metallic: f32::from_bits(key.metallic_bits),
+                    emissive: Self::bits_to_float3(key.emissive_bits),
+                    depth_write: !key.transparent,
+                    depth_test: true,
                     instances,
                 })
                 .collect(),
@@ -304,6 +368,10 @@ impl WebRenderBridge {
                     frame: key.frame,
                     layer: key.layer,
                     billboard: key.billboard,
+                    phase: Self::phase_from_transparency(key.transparent),
+                    transparent: key.transparent,
+                    depth_write: !key.transparent,
+                    depth_test: true,
                     instances,
                 })
                 .collect(),
@@ -314,6 +382,9 @@ impl WebRenderBridge {
                 use_instancing: true,
                 sort_opaque_front_to_back: true,
                 preserve_instance_order: true,
+                sort_transparent_back_to_front: true,
+                opaque_depth_write: true,
+                transparent_depth_write: false,
                 max_pixel_ratio: 2.0,
             },
         }
@@ -394,6 +465,11 @@ impl WebRenderBridge {
                 billboard: None,
                 cast_shadows: None,
                 receive_shadows: None,
+                transparent: Some(Self::is_transparent(*color)),
+                double_sided: None,
+                roughness: None,
+                metallic: None,
+                emissive: None,
                 layer: item.layer,
                 visible: item.visible,
                 source_entity: item.source_entity,
@@ -422,6 +498,11 @@ impl WebRenderBridge {
                 billboard: None,
                 cast_shadows: None,
                 receive_shadows: None,
+                transparent: Some(Self::is_transparent(*tint)),
+                double_sided: None,
+                roughness: None,
+                metallic: None,
+                emissive: None,
                 layer: item.layer,
                 visible: item.visible,
                 source_entity: item.source_entity,
@@ -429,6 +510,11 @@ impl WebRenderBridge {
             DrawType::Mesh3D {
                 mesh,
                 material,
+                tint,
+                roughness,
+                metallic,
+                emissive,
+                double_sided,
                 transform,
                 cast_shadows,
                 receive_shadows,
@@ -441,8 +527,8 @@ impl WebRenderBridge {
                 rotation: 0.0,
                 scale_x: transform.scale[0],
                 scale_y: transform.scale[1],
-                color: [1.0, 1.0, 1.0, 1.0],
-                alpha: 1.0,
+                color: *tint,
+                alpha: tint[3],
                 texture: None,
                 frame: None,
                 mesh: Some(mesh.clone()),
@@ -452,6 +538,11 @@ impl WebRenderBridge {
                 billboard: None,
                 cast_shadows: Some(*cast_shadows),
                 receive_shadows: Some(*receive_shadows),
+                transparent: Some(Self::is_transparent(*tint)),
+                double_sided: Some(*double_sided),
+                roughness: Some(*roughness),
+                metallic: Some(*metallic),
+                emissive: Some(*emissive),
                 layer: item.layer,
                 visible: item.visible,
                 source_entity: item.source_entity,
@@ -482,6 +573,11 @@ impl WebRenderBridge {
                 billboard: Some(*billboard),
                 cast_shadows: None,
                 receive_shadows: None,
+                transparent: Some(Self::is_transparent(*tint)),
+                double_sided: None,
+                roughness: None,
+                metallic: None,
+                emissive: None,
                 layer: item.layer,
                 visible: item.visible,
                 source_entity: item.source_entity,
@@ -501,6 +597,52 @@ impl WebRenderBridge {
             color,
             source_entity,
         }
+    }
+
+    fn phase_from_transparency(transparent: bool) -> ThreeJsRenderPhase {
+        if transparent {
+            ThreeJsRenderPhase::Transparent
+        } else {
+            ThreeJsRenderPhase::Opaque
+        }
+    }
+
+    fn is_transparent(color: [f32; 4]) -> bool {
+        color[3] < 0.999
+    }
+
+    fn float3_bits(values: [f32; 3]) -> [u32; 3] {
+        [
+            values[0].to_bits(),
+            values[1].to_bits(),
+            values[2].to_bits(),
+        ]
+    }
+
+    fn bits_to_float3(values: [u32; 3]) -> [f32; 3] {
+        [
+            f32::from_bits(values[0]),
+            f32::from_bits(values[1]),
+            f32::from_bits(values[2]),
+        ]
+    }
+
+    fn float4_bits(values: [f32; 4]) -> [u32; 4] {
+        [
+            values[0].to_bits(),
+            values[1].to_bits(),
+            values[2].to_bits(),
+            values[3].to_bits(),
+        ]
+    }
+
+    fn bits_to_float4(values: [u32; 4]) -> [f32; 4] {
+        [
+            f32::from_bits(values[0]),
+            f32::from_bits(values[1]),
+            f32::from_bits(values[2]),
+            f32::from_bits(values[3]),
+        ]
     }
 
     /// Post data to JavaScript side.
@@ -661,6 +803,11 @@ mod tests {
                 draw_type: DrawType::Mesh3D {
                     mesh: "tree".to_string(),
                     material: "forest".to_string(),
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                    roughness: 0.8,
+                    metallic: 0.1,
+                    emissive: [0.0, 0.0, 0.0],
+                    double_sided: false,
                     transform: RenderTransform3D {
                         position: [x, 0.0, 8.0 - x],
                         rotation: [0.0, 0.0, 0.0, 1.0],
@@ -681,6 +828,11 @@ mod tests {
             draw_type: DrawType::Mesh3D {
                 mesh: "rock".to_string(),
                 material: "stone".to_string(),
+                tint: [0.5, 0.5, 0.5, 0.4],
+                roughness: 1.0,
+                metallic: 0.0,
+                emissive: [0.1, 0.0, 0.0],
+                double_sided: true,
                 transform: RenderTransform3D {
                     position: [10.0, 0.0, 2.0],
                     rotation: [0.0, 0.0, 0.0, 1.0],
@@ -706,10 +858,26 @@ mod tests {
             .find(|batch| batch.mesh == "tree")
             .expect("tree batch should exist");
         assert_eq!(tree_batch.instances.len(), 2);
+        assert_eq!(tree_batch.phase, ThreeJsRenderPhase::Opaque);
+        assert!(!tree_batch.transparent);
+        assert!(tree_batch.depth_write);
+        assert_eq!(tree_batch.tint, [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(tree_batch.instances[0].source_entity, Some(401));
         assert_eq!(tree_batch.instances[1].source_entity, Some(402));
+        let rock_batch = frame
+            .mesh_batches
+            .iter()
+            .find(|batch| batch.mesh == "rock")
+            .expect("rock batch should exist");
+        assert_eq!(rock_batch.phase, ThreeJsRenderPhase::Transparent);
+        assert!(rock_batch.transparent);
+        assert!(!rock_batch.depth_write);
+        assert!(rock_batch.double_sided);
+        assert_eq!(rock_batch.emissive, [0.1, 0.0, 0.0]);
         assert_eq!(frame.hints.renderer, "three/webgpu");
         assert!(frame.hints.use_instancing);
+        assert!(frame.hints.sort_transparent_back_to_front);
+        assert!(!frame.hints.transparent_depth_write);
     }
 
     #[test]
@@ -779,15 +947,34 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0],
         );
 
-        assert_eq!(frame.sprite_batches.len(), 2);
-        let npc_batch = frame
+        assert_eq!(frame.sprite_batches.len(), 3);
+        let opaque_npc_batch = frame
             .sprite_batches
             .iter()
-            .find(|batch| batch.texture == "npc.png" && batch.frame == 2)
-            .expect("frame-2 sprite batch should exist");
-        assert_eq!(npc_batch.instances.len(), 2);
-        assert_eq!(npc_batch.instances[0].color, Some([1.0, 0.5, 0.5, 1.0]));
-        assert_eq!(npc_batch.instances[1].source_entity, Some(502));
+            .find(|batch| {
+                batch.texture == "npc.png"
+                    && batch.frame == 2
+                    && batch.phase == ThreeJsRenderPhase::Opaque
+            })
+            .expect("opaque frame-2 sprite batch should exist");
+        assert_eq!(opaque_npc_batch.instances.len(), 1);
+        assert!(opaque_npc_batch.depth_write);
+        assert_eq!(
+            opaque_npc_batch.instances[0].color,
+            Some([1.0, 0.5, 0.5, 1.0])
+        );
+        let transparent_npc_batch = frame
+            .sprite_batches
+            .iter()
+            .find(|batch| {
+                batch.texture == "npc.png"
+                    && batch.frame == 2
+                    && batch.phase == ThreeJsRenderPhase::Transparent
+            })
+            .expect("transparent frame-2 sprite batch should exist");
+        assert_eq!(transparent_npc_batch.instances.len(), 1);
+        assert!(!transparent_npc_batch.depth_write);
+        assert_eq!(transparent_npc_batch.instances[0].source_entity, Some(502));
     }
 
     #[test]
