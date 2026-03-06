@@ -226,5 +226,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-scene`
   - `cargo test -p pod-scene --lib`
 
-**Last updated**: Iteration 32
+### Iteration 33 — Scene Streaming Foundation Pass
+
+- [x] Added opt-in scene streaming regions with authored 3D bounds, always-loaded support, and deterministic focus-based activation planning for large-world scene partitioning.
+- [x] Implemented stream-plan dependency expansion so active entities automatically retain required parent graph ancestors and authored entity-reference targets across region boundaries.
+- [x] Added partial scene instantiation for streaming windows, allowing `pod-scene` to spawn only the active subset of a scene while preserving unassigned always-on entities and stable runtime spawn mapping.
+- [x] Added deterministic tests covering region selection, dependency closure, partial streamed instantiation, and invalid region membership rejection.
+- [x] Validated touched crate:
+  - `cargo check -p pod-scene`
+  - `cargo test -p pod-scene --lib`
+
+**Last updated**: Iteration 33
 **Current focus**: Phase 7.5 scene-system parity and Phase 9 hardening backlog

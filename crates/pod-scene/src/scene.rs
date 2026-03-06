@@ -1,7 +1,7 @@
 use hecs::Entity;
 use pod_core::{Parent3D, Transform3D, World};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
@@ -112,6 +112,101 @@ impl Default for SceneMetadata {
             created_at: chrono_format_date(),
             tags: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StreamingBounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+impl StreamingBounds {
+    pub fn new(min: [f32; 3], max: [f32; 3]) -> Self {
+        Self { min, max }
+    }
+
+    pub fn from_center_radius(center: [f32; 3], radius: f32) -> Self {
+        let [x, y, z] = center;
+        Self {
+            min: [x - radius, y - radius, z - radius],
+            max: [x + radius, y + radius, z + radius],
+        }
+    }
+
+    pub fn intersects_focus(&self, focus: &SceneStreamFocus) -> bool {
+        let [center_x, center_y, center_z] = focus.center;
+        let clamped_x = center_x.clamp(self.min[0], self.max[0]);
+        let clamped_y = center_y.clamp(self.min[1], self.max[1]);
+        let clamped_z = center_z.clamp(self.min[2], self.max[2]);
+
+        let dx = center_x - clamped_x;
+        let dy = center_y - clamped_y;
+        let dz = center_z - clamped_z;
+
+        dx * dx + dy * dy + dz * dz <= focus.radius * focus.radius
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneStreamFocus {
+    pub center: [f32; 3],
+    pub radius: f32,
+}
+
+impl SceneStreamFocus {
+    pub fn new(center: [f32; 3], radius: f32) -> Self {
+        Self { center, radius }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SceneRegion {
+    pub id: Uuid,
+    pub name: String,
+    pub bounds: StreamingBounds,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub always_loaded: bool,
+}
+
+impl SceneRegion {
+    pub fn new(name: impl Into<String>, bounds: StreamingBounds) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            bounds,
+            entity_ids: Vec::new(),
+            always_loaded: false,
+        }
+    }
+
+    pub fn add_entity(&mut self, entity_id: Uuid) {
+        if !self.entity_ids.contains(&entity_id) {
+            self.entity_ids.push(entity_id);
+        }
+    }
+
+    pub fn with_always_loaded(mut self, always_loaded: bool) -> Self {
+        self.always_loaded = always_loaded;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneStreamPlan {
+    pub active_region_ids: Vec<Uuid>,
+    pub active_entity_ids: Vec<Uuid>,
+}
+
+impl SceneStreamPlan {
+    pub fn includes_entity(&self, entity_id: Uuid) -> bool {
+        self.active_entity_ids.contains(&entity_id)
+    }
+
+    pub fn includes_region(&self, region_id: Uuid) -> bool {
+        self.active_region_ids.contains(&region_id)
     }
 }
 
@@ -278,6 +373,8 @@ pub struct Scene {
     pub metadata: SceneMetadata,
     pub entities: Vec<EntityInstance>,
     pub spawn_points: Vec<SpawnPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streaming_regions: Vec<SceneRegion>,
     pub graph: SceneGraph,
     pub id: Uuid,
 }
@@ -291,6 +388,7 @@ impl Scene {
             },
             entities: Vec::new(),
             spawn_points: Vec::new(),
+            streaming_regions: Vec::new(),
             graph: SceneGraph::new(),
             id: Uuid::new_v4(),
         }
@@ -334,6 +432,16 @@ impl Scene {
         self.spawn_points.iter().find(|s| s.name == name)
     }
 
+    pub fn add_streaming_region(&mut self, region: SceneRegion) -> Uuid {
+        let id = region.id;
+        self.streaming_regions.push(region);
+        id
+    }
+
+    pub fn get_streaming_region(&self, id: Uuid) -> Option<&SceneRegion> {
+        self.streaming_regions.iter().find(|region| region.id == id)
+    }
+
     /// Serialize scene to JSON
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
@@ -355,7 +463,7 @@ impl Scene {
     }
 
     pub fn instantiate(&self, world: &mut World) -> Result<SceneSpawnResult, String> {
-        self.instantiate_with_prefabs(world, None)
+        self.instantiate_subset(world, None, None)
     }
 
     pub fn instantiate_with_prefabs(
@@ -363,16 +471,99 @@ impl Scene {
         world: &mut World,
         prefabs: Option<&PrefabRegistry>,
     ) -> Result<SceneSpawnResult, String> {
+        self.instantiate_subset(world, prefabs, None)
+    }
+
+    pub fn build_stream_plan(
+        &self,
+        focuses: &[SceneStreamFocus],
+    ) -> Result<SceneStreamPlan, String> {
+        let entity_ids: HashSet<Uuid> = self.entities.iter().map(|entity| entity.id).collect();
+        let mut assigned_entities = HashSet::new();
+        let mut active_entities = HashSet::new();
+        let mut active_region_ids = Vec::new();
+
+        for region in &self.streaming_regions {
+            for entity_id in &region.entity_ids {
+                if !entity_ids.contains(entity_id) {
+                    return Err(format!(
+                        "Streaming region '{}' references missing scene entity {}",
+                        region.name, entity_id
+                    ));
+                }
+                assigned_entities.insert(*entity_id);
+            }
+
+            let is_active = region.always_loaded
+                || focuses
+                    .iter()
+                    .any(|focus| region.bounds.intersects_focus(focus));
+            if is_active {
+                active_region_ids.push(region.id);
+                active_entities.extend(region.entity_ids.iter().copied());
+            }
+        }
+
+        if self.streaming_regions.is_empty() {
+            active_entities.extend(entity_ids.iter().copied());
+        } else {
+            active_entities.extend(
+                self.entities
+                    .iter()
+                    .filter(|entity| !assigned_entities.contains(&entity.id))
+                    .map(|entity| entity.id),
+            );
+        }
+
+        self.expand_streaming_dependencies(&mut active_entities)?;
+
+        let mut active_entity_ids: Vec<Uuid> = active_entities.into_iter().collect();
+        active_region_ids.sort_by_key(Uuid::as_u128);
+        active_entity_ids.sort_by_key(Uuid::as_u128);
+
+        Ok(SceneStreamPlan {
+            active_region_ids,
+            active_entity_ids,
+        })
+    }
+
+    pub fn instantiate_streamed(
+        &self,
+        world: &mut World,
+        focuses: &[SceneStreamFocus],
+        prefabs: Option<&PrefabRegistry>,
+    ) -> Result<SceneSpawnResult, String> {
+        let plan = self.build_stream_plan(focuses)?;
+        let active_entities: HashSet<Uuid> = plan.active_entity_ids.into_iter().collect();
+        self.instantiate_subset(world, prefabs, Some(&active_entities))
+    }
+
+    fn instantiate_subset(
+        &self,
+        world: &mut World,
+        prefabs: Option<&PrefabRegistry>,
+        active_entities: Option<&HashSet<Uuid>>,
+    ) -> Result<SceneSpawnResult, String> {
         let mut entity_map = HashMap::new();
         let entity_name_lookup = self.build_entity_name_lookup();
 
-        for entity in &self.entities {
+        let scene_entities: Vec<&EntityInstance> = self
+            .entities
+            .iter()
+            .filter(|entity| {
+                active_entities
+                    .map(|ids| ids.contains(&entity.id))
+                    .unwrap_or(true)
+            })
+            .collect();
+
+        for entity in &scene_entities {
             entity_map.insert(entity.id, world.ecs.spawn(()));
         }
 
         let mut ignored_components = Vec::new();
 
-        for entity in &self.entities {
+        for entity in &scene_entities {
             let spawned_entity = entity_map
                 .get(&entity.id)
                 .copied()
@@ -438,6 +629,83 @@ impl Scene {
                 .push(entity.id);
         }
         lookup
+    }
+
+    fn expand_streaming_dependencies(
+        &self,
+        active_entities: &mut HashSet<Uuid>,
+    ) -> Result<(), String> {
+        let entity_lookup: HashMap<Uuid, &EntityInstance> = self
+            .entities
+            .iter()
+            .map(|entity| (entity.id, entity))
+            .collect();
+        let entity_name_lookup = self.build_entity_name_lookup();
+        let mut queue: Vec<Uuid> = active_entities.iter().copied().collect();
+
+        while let Some(entity_id) = queue.pop() {
+            let entity = entity_lookup.get(&entity_id).copied().ok_or_else(|| {
+                format!(
+                    "Streaming plan references missing scene entity {} while expanding dependencies",
+                    entity_id
+                )
+            })?;
+
+            if let Some(parent_id) = self.graph.get_parent(entity_id) {
+                if !entity_lookup.contains_key(&parent_id) {
+                    return Err(format!(
+                        "Streaming dependency for '{}' points to missing parent entity {}",
+                        entity.name, parent_id
+                    ));
+                }
+
+                if active_entities.insert(parent_id) {
+                    queue.push(parent_id);
+                }
+            }
+
+            for reference in &entity.entity_references {
+                let target_id = match &reference.target {
+                    EntityReferenceTarget::ById { id } => *id,
+                    EntityReferenceTarget::ByName { name } => {
+                        let matches = entity_name_lookup.get(name).ok_or_else(|| {
+                            format!(
+                                "Streaming dependency '{}.{}' on '{}' points to missing {}",
+                                reference.component,
+                                reference.path,
+                                entity.name,
+                                reference.target.describe()
+                            )
+                        })?;
+
+                        if matches.len() != 1 {
+                            return Err(format!(
+                                "Streaming dependency '{}.{}' on '{}' is ambiguous for {}",
+                                reference.component,
+                                reference.path,
+                                entity.name,
+                                reference.target.describe()
+                            ));
+                        }
+
+                        matches[0]
+                    }
+                };
+
+                if !entity_lookup.contains_key(&target_id) {
+                    return Err(format!(
+                        "Streaming dependency '{}.{}' on '{}' points to missing scene entity {}",
+                        reference.component, reference.path, entity.name, target_id
+                    ));
+                }
+
+                if active_entities.insert(target_id) {
+                    queue.push(target_id);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn apply_entity_references(
@@ -540,12 +808,12 @@ impl Scene {
         parent_links.sort_by_key(|(child, _)| child.as_u128());
 
         for (child_id, parent_id) in parent_links {
-            let child_entity = entity_map.get(&child_id).copied().ok_or_else(|| {
-                format!("Missing spawned child entity for scene node {}", child_id)
-            })?;
-            let parent_entity = entity_map.get(&parent_id).copied().ok_or_else(|| {
-                format!("Missing spawned parent entity for scene node {}", parent_id)
-            })?;
+            let Some(child_entity) = entity_map.get(&child_id).copied() else {
+                continue;
+            };
+            let Some(parent_entity) = entity_map.get(&parent_id).copied() else {
+                continue;
+            };
 
             if world.ecs.get::<&Transform3D>(child_entity).is_err() {
                 continue;
@@ -1080,5 +1348,170 @@ mod tests {
             "scene instantiation should fail when a named entity reference is ambiguous",
         );
         assert!(err.contains("ambiguous"));
+    }
+
+    #[test]
+    fn test_scene_stream_plan_selects_regions_and_unassigned_entities() {
+        let mut scene = Scene::new("StreamingScene");
+
+        let mut near = EntityInstance::new("Near");
+        near.add_native_component(&Transform::at(0.0, 0.0)).unwrap();
+        let near_id = scene.add_entity(near);
+
+        let mut far = EntityInstance::new("Far");
+        far.add_native_component(&Transform::at(100.0, 0.0))
+            .unwrap();
+        let far_id = scene.add_entity(far);
+
+        let mut hud = EntityInstance::new("Hud");
+        hud.add_native_component(&Transform::at(-3.0, 8.0)).unwrap();
+        let hud_id = scene.add_entity(hud);
+
+        let mut near_region = SceneRegion::new(
+            "NearRegion",
+            StreamingBounds::from_center_radius([0.0, 0.0, 0.0], 8.0),
+        );
+        near_region.add_entity(near_id);
+        let near_region_id = scene.add_streaming_region(near_region);
+
+        let mut far_region = SceneRegion::new(
+            "FarRegion",
+            StreamingBounds::from_center_radius([100.0, 0.0, 0.0], 8.0),
+        );
+        far_region.add_entity(far_id);
+        let far_region_id = scene.add_streaming_region(far_region);
+
+        let plan = scene
+            .build_stream_plan(&[SceneStreamFocus::new([0.0, 0.0, 0.0], 12.0)])
+            .unwrap();
+
+        assert!(plan.includes_region(near_region_id));
+        assert!(!plan.includes_region(far_region_id));
+        assert!(plan.includes_entity(near_id));
+        assert!(plan.includes_entity(hud_id));
+        assert!(!plan.includes_entity(far_id));
+    }
+
+    #[test]
+    fn test_scene_stream_plan_includes_parent_and_reference_dependencies() {
+        let mut scene = Scene::new("StreamingDependencies");
+
+        let mut parent = EntityInstance::new("Parent");
+        parent
+            .add_native_component(&Transform3D {
+                position: Vec3::new(20.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let parent_id = scene.add_entity(parent);
+
+        let mut target = EntityInstance::new("Target");
+        target
+            .add_native_component(&Transform3D {
+                position: Vec3::new(22.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .unwrap();
+        let target_id = scene.add_entity(target);
+
+        let mut camera = EntityInstance::new("Camera");
+        camera
+            .add_native_component(&Transform3D {
+                position: Vec3::new(0.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .unwrap();
+        camera.add_native_component(&Camera3D::default()).unwrap();
+        camera
+            .add_native_component(&FollowCameraController::default())
+            .unwrap();
+        camera.add_entity_reference_by_id("FollowCameraController", "target", target_id);
+        let camera_id = scene.add_entity(camera);
+
+        scene.graph.set_parent(camera_id, parent_id);
+
+        let mut near_region = SceneRegion::new(
+            "NearRegion",
+            StreamingBounds::from_center_radius([0.0, 0.0, 0.0], 5.0),
+        );
+        near_region.add_entity(camera_id);
+        scene.add_streaming_region(near_region);
+
+        let mut far_region = SceneRegion::new(
+            "FarRegion",
+            StreamingBounds::from_center_radius([20.0, 0.0, 0.0], 5.0),
+        );
+        far_region.add_entity(parent_id);
+        far_region.add_entity(target_id);
+        scene.add_streaming_region(far_region);
+
+        let plan = scene
+            .build_stream_plan(&[SceneStreamFocus::new([0.0, 0.0, 0.0], 6.0)])
+            .unwrap();
+
+        assert!(plan.includes_entity(camera_id));
+        assert!(plan.includes_entity(parent_id));
+        assert!(plan.includes_entity(target_id));
+    }
+
+    #[test]
+    fn test_scene_instantiate_streamed_only_spawns_active_entities() {
+        let mut scene = Scene::new("InstantiateStreamedScene");
+
+        let mut near = EntityInstance::new("Near");
+        near.add_native_component(&Transform::at(1.0, 1.0)).unwrap();
+        let near_id = scene.add_entity(near);
+
+        let mut far = EntityInstance::new("Far");
+        far.add_native_component(&Transform::at(50.0, 1.0)).unwrap();
+        let far_id = scene.add_entity(far);
+
+        let mut hud = EntityInstance::new("Hud");
+        hud.add_native_component(&Transform::at(-4.0, 8.0)).unwrap();
+        let hud_id = scene.add_entity(hud);
+
+        let mut near_region = SceneRegion::new(
+            "NearRegion",
+            StreamingBounds::from_center_radius([0.0, 0.0, 0.0], 10.0),
+        );
+        near_region.add_entity(near_id);
+        scene.add_streaming_region(near_region);
+
+        let mut far_region = SceneRegion::new(
+            "FarRegion",
+            StreamingBounds::from_center_radius([50.0, 0.0, 0.0], 10.0),
+        );
+        far_region.add_entity(far_id);
+        scene.add_streaming_region(far_region);
+
+        let mut world = World::new(11);
+        let result = scene
+            .instantiate_streamed(
+                &mut world,
+                &[SceneStreamFocus::new([0.0, 0.0, 0.0], 12.0)],
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(world.entity_count(), 2);
+        assert!(result.entity_for(near_id).is_some());
+        assert!(result.entity_for(hud_id).is_some());
+        assert!(result.entity_for(far_id).is_none());
+    }
+
+    #[test]
+    fn test_scene_stream_plan_rejects_missing_region_entities() {
+        let mut scene = Scene::new("BrokenStreamingScene");
+        let mut region = SceneRegion::new(
+            "BrokenRegion",
+            StreamingBounds::from_center_radius([0.0, 0.0, 0.0], 5.0),
+        );
+        region.add_entity(Uuid::new_v4());
+        scene.add_streaming_region(region);
+
+        let err = scene
+            .build_stream_plan(&[SceneStreamFocus::new([0.0, 0.0, 0.0], 10.0)])
+            .expect_err("stream plan should fail when a region references a missing entity");
+        assert!(err.contains("BrokenRegion"));
     }
 }
