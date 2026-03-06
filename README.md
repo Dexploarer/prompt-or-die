@@ -6,6 +6,7 @@ Prompt or Die is an open-source game platform for building games where autonomou
 
 - Deterministic ECS runtime in `pod-core` with a shared agent pipeline: Observe -> Decide -> Validate -> Execute -> Broadcast
 - Native and browser rendering surfaces in `pod-render`, including mixed 2D/2.5D/3D frame extraction
+- A real browser-side Three.js client in `apps/pod-web` that consumes the WebGPU frame contract
 - Scene, prefab, save/load, and state-stack authoring in `pod-scene`
 - Dedicated editor shell in `pod-editor`
 - Direct-connect networking plus SpacetimeDB integration in `pod-net` and `pod-stdb`
@@ -19,6 +20,10 @@ cargo run --bin prompt-or-die
 cargo run --bin pod-server
 cargo test --workspace
 cargo check --workspace
+
+cd apps/pod-web
+bun install
+bun run dev
 ```
 
 ## Workspace map
@@ -39,6 +44,7 @@ crates/
   pod-scripting  Lua scripting API and sandbox
 apps/
   pod-desktop    Desktop runtime and local simulation entry point
+  pod-web        Browser-side Three.js/WebGPU client and bridge demo
   pod-server     Dedicated authoritative server
 specs/
   Product and subsystem requirements
@@ -54,4 +60,4 @@ docs/
 
 ## Current status
 
-The project has completed its deterministic core, networking, rendering baseline, editor scaffold, and scene-system foundations. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle.
+The project has completed its deterministic core, networking, rendering baseline, editor scaffold, scene-system foundations, and the first real browser-side Three.js/WebGPU client. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle.
