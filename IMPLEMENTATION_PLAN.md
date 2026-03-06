@@ -296,5 +296,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-assets`
   - `cargo test -p pod-editor --lib`
 
-**Last updated**: Iteration 39
+### Iteration 40 — Unity Scene/Prefab Importer Foundation
+
+- [x] Extended `pod-assets` with a real Unity text scene/prefab (`.unity`, `.prefab`) import path that converts a focused authoring subset into `pod_scene::Scene`.
+- [x] Mapped Unity `GameObject`, `Transform`/`RectTransform`, and `SpriteRenderer` authoring data onto existing POD bindings (`Transform`, `Transform3D`, `Sprite`) while preserving parent hierarchy through `SceneGraph`.
+- [x] Reused the existing content-addressed scene artifact output so Unity-authored scene imports serialize into the same deterministic `scene/` cache path as Godot and Tiled imports.
+- [x] Added deterministic tests for direct Unity import, serialized artifact output, and editor-side prefab scene asset recognition.
+- [x] Validated touched crates:
+  - `cargo test -p pod-assets`
+  - `cargo test -p pod-editor --lib`
+
+**Last updated**: Iteration 40
 **Current focus**: Phase 8 shipping parity and Phase 9 hardening backlog
