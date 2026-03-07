@@ -82,6 +82,16 @@ impl ClientMessage {
     pub fn decode(bytes: &[u8]) -> Result<Self, bincode::Error> {
         bincode::deserialize(bytes)
     }
+
+    /// Encode to JSON (for WebSocket clients)
+    pub fn encode_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Decode from JSON (for WebSocket clients)
+    pub fn decode_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
 }
 
 // ============================================================
@@ -271,6 +281,25 @@ mod tests {
 
         match decoded {
             ClientMessage::SetDebugTelemetry { enabled } => assert!(enabled),
+            other => panic!("Wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_client_message_json_roundtrip() {
+        let msg = ClientMessage::ActionBatch {
+            tick: 22,
+            actions: vec![Action::Idle],
+        };
+        let json = msg.encode_json().unwrap();
+        let decoded = ClientMessage::decode_json(&json).unwrap();
+
+        match decoded {
+            ClientMessage::ActionBatch { tick, actions } => {
+                assert_eq!(tick, 22);
+                assert_eq!(actions.len(), 1);
+                assert!(matches!(actions.first(), Some(Action::Idle)));
+            }
             other => panic!("Wrong message type: {other:?}"),
         }
     }
