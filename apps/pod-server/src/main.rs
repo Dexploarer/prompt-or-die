@@ -382,6 +382,7 @@ mod stats {
     mod tests {
         use super::ServerStats;
         use glam::Vec2;
+        use pod_core::acceptance::{run_flagship_mmo_acceptance, FlagshipMmoAcceptanceConfig};
         use pod_core::action::Action;
         use pod_core::agent::AgentType;
         use pod_core::contract::AgentRuntimeProfile;
@@ -473,6 +474,29 @@ mod stats {
             assert!((stats.average_trajectory_distance() - 5.0).abs() < f32::EPSILON);
             assert!(stats.action_rejection_rate() > 0.0);
             assert!(stats.tool_call_error_rate() > 0.0);
+        }
+
+        #[test]
+        fn flagship_acceptance_metrics_align_with_server_stats() {
+            let result = run_flagship_mmo_acceptance(FlagshipMmoAcceptanceConfig::ci_smoke())
+                .expect("acceptance scenario should run");
+
+            let mut stats = ServerStats::new(60);
+            for tick in &result.tick_results {
+                stats.record_tick(tick, result.summary.total_agents, false);
+            }
+
+            assert_eq!(stats.capture_actions, result.summary.capture_actions);
+            assert_eq!(stats.summon_actions, result.summary.summon_actions);
+            assert_eq!(stats.gather_actions, result.summary.gather_actions);
+            assert_eq!(stats.loot_actions, result.summary.loot_actions);
+            assert_eq!(stats.total_tool_calls, result.summary.tool_calls);
+            assert_eq!(
+                stats.total_tool_call_errors,
+                result.summary.tool_call_errors
+            );
+            assert_eq!(stats.ticks_completed, result.summary.ticks_completed);
+            assert!(result.parity_passed());
         }
     }
 }
