@@ -22,6 +22,7 @@
 
 #![cfg(feature = "client")]
 
+use pod_core::{AgentToolCallTrace, TickTelemetryFrame, VersionedTickTelemetry};
 use pod_stdb::client::*;
 use pod_stdb::types::*;
 
@@ -139,7 +140,7 @@ fn telemetry_events_are_constructible() {
     let tick = StdbEvent::AgentTelemetryTickReceived {
         tick: 12,
         agent_entity_id: 7,
-        frame_json: "{\"tick_telemetry\":{\"tick\":12}}".into(),
+        frame_json: VersionedTickTelemetry::new(TickTelemetryFrame::empty(12)).to_toon_document(),
     };
     let tool = StdbEvent::AgentToolCallEventReceived {
         tick: 12,
@@ -147,7 +148,8 @@ fn telemetry_events_are_constructible() {
         tool_name: "llm.complete".into(),
         provider: "qwen".into(),
         status: "Succeeded".into(),
-        data_json: "{\"request_units\":128}".into(),
+        data_json: AgentToolCallTrace::success(12, "llm.complete", "qwen", 18, 128, 64)
+            .to_toon_document(),
     };
     let rollup = StdbEvent::AgentTickRollupReceived {
         tick_start: 1,
@@ -916,7 +918,8 @@ fn stdb_event_all_18_variants_constructible() {
         StdbEvent::AgentTelemetryTickReceived {
             tick: 1,
             agent_entity_id: 5,
-            frame_json: "{\"tick_telemetry\":{\"tick\":1}}".into(),
+            frame_json: VersionedTickTelemetry::new(TickTelemetryFrame::empty(1))
+                .to_toon_document(),
         },
         StdbEvent::AgentToolCallEventReceived {
             tick: 1,
@@ -924,7 +927,8 @@ fn stdb_event_all_18_variants_constructible() {
             tool_name: "llm.complete".into(),
             provider: "qwen".into(),
             status: "Succeeded".into(),
-            data_json: "{\"request_units\":42}".into(),
+            data_json: AgentToolCallTrace::success(1, "llm.complete", "qwen", 12, 42, 10)
+                .to_toon_document(),
         },
         StdbEvent::AgentTickRollupReceived {
             tick_start: 1,

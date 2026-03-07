@@ -131,8 +131,9 @@ pub struct WorldEventRow {
 /// Per-agent authoritative telemetry row for editor/debug consumers.
 ///
 /// These rows are transient and intended for short-lived tooling subscriptions.
-/// The detailed payload stays JSON-encoded so client tooling can evolve without
-/// forcing a second flattened schema for every new telemetry field.
+/// The detailed payload stays as a structured document string so client tooling
+/// can evolve without forcing a second flattened schema for every new telemetry
+/// field. Official TOON documents are preferred, with legacy JSON tolerated.
 #[spacetimedb::table(name = agent_telemetry_tick, public)]
 pub struct AgentTelemetryTickRow {
     #[primary_key]

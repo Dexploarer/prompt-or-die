@@ -1,7 +1,12 @@
 import {
   parseRenderFrame,
+  parseReplayFile,
+  parseShardIncidentSummary,
   parseThreeJsWebGpuFrame,
-  parseTickTelemetryEnvelope
+  parseTickTelemetryEnvelope,
+  summarizeReplayFile,
+  type ReplaySummary,
+  type ShardIncidentSummary
 } from "./contracts";
 import { PodThreeWorldRenderer } from "./renderer";
 import { createDemoFrame } from "./sample-frame";
@@ -21,11 +26,15 @@ declare global {
       render: (frame: string) => void;
       renderThreeJsWebGpuFrame: (frame: string) => void;
       renderTickTelemetry: (frame: string) => void;
+      renderReplayDocument: (document: string) => void;
+      renderShardIncidentSummary: (document: string) => void;
       resetTelemetry: () => void;
       resetDemo: () => void;
       getBackend: () => string;
       getStats: () => ReturnType<PodThreeWorldRenderer["getStats"]>;
       getTelemetryStats: () => ReturnType<typeof telemetryStats>;
+      getReplaySummary: () => ReplaySummary | null;
+      getIncidentSummary: () => ShardIncidentSummary | null;
     };
   }
 }
@@ -46,6 +55,9 @@ const telemetryRecoveryLabel =
   document.querySelector<HTMLElement>("#telemetry-recovery");
 const telemetrySummaryLabel =
   document.querySelector<HTMLElement>("#telemetry-summary");
+const replaySummaryLabel = document.querySelector<HTMLElement>("#replay-summary");
+const incidentSummaryLabel =
+  document.querySelector<HTMLElement>("#incident-summary");
 const telemetryPanel = document.querySelector<HTMLElement>("#telemetry-panel");
 const telemetryPrev = document.querySelector<HTMLButtonElement>("#telemetry-prev");
 const telemetryNext = document.querySelector<HTMLButtonElement>("#telemetry-next");
@@ -63,6 +75,8 @@ if (
   !telemetryToolsLabel ||
   !telemetryRecoveryLabel ||
   !telemetrySummaryLabel ||
+  !replaySummaryLabel ||
+  !incidentSummaryLabel ||
   !telemetryPanel ||
   !telemetryPrev ||
   !telemetryNext
@@ -77,6 +91,8 @@ const telemetryActionsNode = telemetryActionsLabel;
 const telemetryToolsNode = telemetryToolsLabel;
 const telemetryRecoveryNode = telemetryRecoveryLabel;
 const telemetrySummaryNode = telemetrySummaryLabel;
+const replaySummaryNode = replaySummaryLabel;
+const incidentSummaryNode = incidentSummaryLabel;
 const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
@@ -90,6 +106,8 @@ const telemetryState = createTelemetryOverlayState(300);
 let liveFrameSource: "demo" | "legacy" | "threejs" = "demo";
 let latestFrameJson: string | null = null;
 let lastTelemetryRevision = -1;
+let latestReplaySummary: ReplaySummary | null = null;
+let latestIncidentSummary: ShardIncidentSummary | null = null;
 
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
@@ -115,6 +133,12 @@ window.podRender = {
   renderTickTelemetry(frame: string) {
     applyTickTelemetry(telemetryState, parseTickTelemetryEnvelope(frame));
   },
+  renderReplayDocument(document: string) {
+    latestReplaySummary = summarizeReplayFile(parseReplayFile(document));
+  },
+  renderShardIncidentSummary(document: string) {
+    latestIncidentSummary = parseShardIncidentSummary(document);
+  },
   resetTelemetry() {
     resetTelemetry(telemetryState);
     renderer.clearTelemetryTrail();
@@ -132,6 +156,12 @@ window.podRender = {
   },
   getTelemetryStats() {
     return telemetryStats(telemetryState);
+  },
+  getReplaySummary() {
+    return latestReplaySummary;
+  },
+  getIncidentSummary() {
+    return latestIncidentSummary;
   }
 };
 
@@ -189,6 +219,14 @@ function renderTelemetryHud(): void {
     stats.tick == null
       ? "Waiting for authoritative telemetry."
       : `tick ${stats.tick} · ${stats.visibleEntities} visible · ${stats.audibleEvents} audible · ${stats.messages} messages`;
+  replaySummaryNode.textContent = latestReplaySummary
+    ? `${latestReplaySummary.name} · ${latestReplaySummary.traceCount} traces · ${latestReplaySummary.trainingSampleCount} samples · ${latestReplaySummary.totalPathDistance.toFixed(
+        2
+      )}u`
+    : "No replay summary loaded";
+  incidentSummaryNode.textContent = latestIncidentSummary
+    ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary}`
+    : "No shard incident summary loaded";
 }
 
 void tick(performance.now());

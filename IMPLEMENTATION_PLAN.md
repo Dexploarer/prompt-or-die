@@ -576,5 +576,25 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-editor --lib`
   - `cargo test -p pod-server --bin pod-server`
 
-**Last updated**: Iteration 64
-**Current focus**: Iteration 65 TOON-backed direct-connect and SpacetimeDB telemetry export parity, plus browser/editor consumption of replay and incident summaries for live debugging, training, and shard operations
+### Iteration 65 — TOON Telemetry Transport Parity and Debug Consumer Ingestion
+
+- [x] Added typed TOON decode helpers in `pod-core` so downstream consumers can validate document kinds and extract payloads without reimplementing TOON envelope parsing.
+- [x] Switched direct-connect debug telemetry transport in `pod-net` from the legacy JSON wrapper to the versioned TOON telemetry contract while keeping gameplay-state traffic unchanged.
+- [x] Updated `pod-net` and `pod-stdb` debug telemetry tests/fixtures to use official TOON documents, and added neutral `last_debug_telemetry_document()` accessors without breaking existing string-based callers.
+- [x] Added official TOON parsing to `apps/pod-web` using the TypeScript TOON package, extending the existing browser contract layer to consume TOON tick telemetry, replay files, and shard incident summaries alongside JSON fallback.
+- [x] Added browser-side replay and incident summary consumption APIs plus HUD surfacing so the flagship WebGPU client can ingest TOON replay/debug artifacts directly.
+- [x] Extended `pod-editor` to import replay and shard incident TOON documents, wiring replay telemetry windows into the existing telemetry panel/dashboard and incident summaries into the operational dashboard state.
+- [x] Expanded the editor dashboard with average tool latency, average trajectory distance, MMO-loop action counts, and retained incident summaries so creator tooling stays connected to runtime/ops artifacts.
+- [x] Added deterministic coverage for TOON telemetry round-tripping in `pod-net`, SpacetimeDB client/debug events using TOON documents, browser TOON parsing/summaries, and editor replay/incident ingestion.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-editor --lib`
+  - `bun test`
+  - `bun run typecheck`
+  - `bun run build`
+
+**Last updated**: Iteration 65
+**Current focus**: Iteration 66 TOON-backed tool-call event and telemetry rollup parity across SpacetimeDB/browser/editor consumers, plus live replay/incident streaming hooks for shard debug operations

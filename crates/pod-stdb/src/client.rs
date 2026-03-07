@@ -2098,15 +2098,21 @@ mod tests {
 
     #[test]
     fn test_receive_debug_telemetry_events() {
+        use pod_core::{AgentToolCallTrace, TickTelemetryFrame, VersionedTickTelemetry};
+
         let mut client = StdbClient::new(StdbClientConfig::default());
-        client.receive_agent_telemetry_tick(8, 41, "{\"tick_telemetry\":{\"tick\":8}}".into());
+        client.receive_agent_telemetry_tick(
+            8,
+            41,
+            VersionedTickTelemetry::new(TickTelemetryFrame::empty(8)).to_toon_document(),
+        );
         client.receive_agent_tool_call_event(
             8,
             41,
             "llm.complete".into(),
             "qwen".into(),
             "Succeeded".into(),
-            "{\"latency_ms\":12}".into(),
+            AgentToolCallTrace::success(8, "llm.complete", "qwen", 12, 24, 8).to_toon_document(),
         );
         client.receive_agent_tick_rollup(1, 60, 41, "{\"distance\":42.0}".into());
 

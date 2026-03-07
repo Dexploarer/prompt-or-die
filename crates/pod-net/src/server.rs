@@ -13,8 +13,7 @@ use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use tokio::sync::{mpsc, RwLock};
 
-use pod_core::{Action, IdleAgent, World};
-use serde_json::json;
+use pod_core::{Action, IdleAgent, VersionedTickTelemetry, World};
 
 use crate::protocol::{
     ClientId, ClientMessage, ReconnectToken, ServerConfig as ProtoServerConfig, ServerMessage,
@@ -219,10 +218,8 @@ impl GameServer {
 
         // Step the world
         let tick_result = self.world.step();
-        self.last_tick_telemetry_json = Some(
-            serde_json::to_string(&json!({ "tick_telemetry": tick_result.telemetry }))
-                .expect("tick telemetry should serialize"),
-        );
+        self.last_tick_telemetry_json =
+            Some(VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document());
 
         debug!(
             "Tick {}: {} entities, {} agents",
@@ -777,6 +774,7 @@ impl std::error::Error for ServerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::decode_toon_value;
 
     #[tokio::test]
     async fn test_server_creation() {
@@ -846,7 +844,9 @@ mod tests {
             match message {
                 ServerMessage::TickTelemetry { frame_json } => {
                     saw_tick_telemetry = true;
-                    assert!(frame_json.contains("\"tick_telemetry\""));
+                    let value =
+                        decode_toon_value(&frame_json).expect("tick telemetry TOON should decode");
+                    assert_eq!(value["document_type"], "versioned_tick_telemetry");
                 }
                 _ => {}
             }
