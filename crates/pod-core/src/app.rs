@@ -7,8 +7,9 @@ use crate::component::{
     Health, Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook,
     Sprite, Transform, Transform3D, Velocity,
 };
-use crate::contract::{VersionedAgentAction, VersionedObservation};
+use crate::contract::{VersionedAgentAction, VersionedObservation, VersionedTickTelemetry};
 use crate::observation::Observation;
+use crate::telemetry::{TelemetryArchive, TickTelemetryFrame};
 use crate::tick::TickResult;
 use crate::World;
 
@@ -167,6 +168,7 @@ impl App {
             broadcast: Vec::new(),
         };
         app.register_core_types();
+        let _ = app.resources.insert(TelemetryArchive::default());
         app
     }
 
@@ -224,6 +226,9 @@ impl App {
 
         let result = self.world.step();
         let _ = self.resources.insert(LastTickResult(result.clone()));
+        if let Some(archive) = self.resources.get_mut::<TelemetryArchive>() {
+            archive.record_tick(result.telemetry.clone());
+        }
 
         self.run_phase(SchedulePhase::PostTick);
         self.run_phase(SchedulePhase::Broadcast);
@@ -301,15 +306,22 @@ impl App {
         self.types.register_contract::<Observation>("Observation");
         self.types.register_contract::<AgentAction>("AgentAction");
         self.types
+            .register_contract::<TickTelemetryFrame>("TickTelemetryFrame");
+        self.types
             .register_contract::<VersionedObservation>("VersionedObservation");
         self.types
             .register_contract::<VersionedAgentAction>("VersionedAgentAction");
+        self.types
+            .register_contract::<VersionedTickTelemetry>("VersionedTickTelemetry");
+        self.types
+            .register_resource::<TelemetryArchive>("TelemetryArchive");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{App, LastTickResult, Plugin, RegisteredTypeCategory, SchedulePhase};
+    use crate::telemetry::TelemetryArchive;
 
     struct TracePlugin;
 
@@ -395,5 +407,26 @@ mod tests {
             .metadata::<crate::observation::Observation>()
             .expect("observation metadata");
         assert_eq!(observation.category, RegisteredTypeCategory::Contract);
+
+        let archive = app
+            .resources()
+            .get::<TelemetryArchive>()
+            .expect("telemetry archive resource");
+        assert!(archive.latest().is_none());
+    }
+
+    #[test]
+    fn app_records_tick_telemetry_into_archive() {
+        let mut app = App::new(11);
+
+        let result = app.update();
+
+        let archive = app
+            .resources()
+            .get::<TelemetryArchive>()
+            .expect("telemetry archive resource");
+        let latest = archive.latest().expect("latest tick telemetry");
+        assert_eq!(latest.tick, result.tick);
+        assert_eq!(latest.tick, 0);
     }
 }

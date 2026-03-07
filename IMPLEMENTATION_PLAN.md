@@ -462,5 +462,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
 
-**Last updated**: Iteration 55
-**Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice
+### Iteration 56 — Core Agent Telemetry and Trajectory Primitives
+
+- [x] Added `pod-core::telemetry` with authoritative trajectory samples, per-action lifecycle traces, shared tool-call telemetry, tick-scoped agent telemetry frames, and a ring-buffer `TelemetryArchive` resource for tooling/debug overlays.
+- [x] Extended `TickResult` so the authoritative observe → decide → validate → execute pipeline emits per-agent telemetry for both human and AI agents, including start/end trajectory samples and submitted/executed/rejected action traces.
+- [x] Registered telemetry contracts/resources in `pod-core::App`, automatically persisted the latest tick telemetry into `TelemetryArchive`, and added a versioned `VersionedTickTelemetry` contract primitive alongside existing action/observation wrappers.
+- [x] Extended `pod-agents::DecisionEntry` with shared tool-call telemetry primitives so LLM-backed and non-LLM agents can report external side effects through one log schema.
+- [x] Added deterministic coverage for trajectory reconstruction, authoritative tick telemetry capture, rejected external-action traces, telemetry archive retention, and decision-log tool-call preservation.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-agents --lib`
+
+**Last updated**: Iteration 56
+**Current focus**: Phase 4 agent/runtime parity instrumentation for the RuneScape-style MMO + companion-creature vertical slice, then surfacing telemetry into browser/editor debug tooling
