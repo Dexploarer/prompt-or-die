@@ -56,6 +56,11 @@
         box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
       }
 
+      .hud--telemetry {
+        inset: 20px 20px auto auto;
+        width: min(420px, calc(100vw - 40px));
+      }
+
       .hud h1 {
         margin: 0 0 8px;
         font-size: 1.1rem;
@@ -87,6 +92,42 @@
       .hud dd {
         margin: 0;
       }
+
+      .hud__controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .hud__controls-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .hud button {
+        border: 1px solid rgba(138, 245, 207, 0.26);
+        border-radius: 999px;
+        background: rgba(138, 245, 207, 0.08);
+        color: var(--copy);
+        padding: 7px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .hud button:hover {
+        background: rgba(138, 245, 207, 0.16);
+      }
+
+      .hud code {
+        color: var(--panel-accent);
+      }
+
+      #telemetry-panel[data-telemetry-enabled="false"] .telemetry-debug-only {
+        opacity: 0.56;
+      }
     </style>
   </head>
   <body>
@@ -110,6 +151,31 @@
           <dd id="stats-label">warming up…</dd>
           <dt>Bridge</dt>
           <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code></dd>
+        </dl>
+      </section>
+      <section class="hud hud--telemetry" id="telemetry-panel" data-telemetry-enabled="false">
+        <h1>Debug Telemetry</h1>
+        <p id="telemetry-summary">
+          Authoritative trails, action traces, tool-call metrics, and recovery diagnostics for
+          editor/debug clients.
+        </p>
+        <div class="hud__controls">
+          <button id="telemetry-toggle" type="button">Enable Telemetry</button>
+          <div class="hud__controls-group telemetry-debug-only">
+            <button id="telemetry-prev" type="button">Prev</button>
+            <span id="telemetry-selection">No agent selected</span>
+            <button id="telemetry-next" type="button">Next</button>
+          </div>
+        </div>
+        <dl class="telemetry-debug-only">
+          <dt>Trail</dt>
+          <dd id="telemetry-trail">0 samples</dd>
+          <dt>Actions</dt>
+          <dd id="telemetry-actions">submitted 0 · executed 0 · rejected 0</dd>
+          <dt>Tools</dt>
+          <dd id="telemetry-tools">No tool calls</dd>
+          <dt>Recovery</dt>
+          <dd id="telemetry-recovery">No recovery telemetry</dd>
         </dl>
       </section>
     </div>

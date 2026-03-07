@@ -11,8 +11,12 @@
 
 use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
+use pod_core::{
+    ActionLifecycleStage, AgentTelemetryFrame, AgentType, TelemetryConfig, TickTelemetryFrame,
+    ToolCallStatus, TrajectorySample,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -33,6 +37,7 @@ pub enum EditorPanel {
     BehaviorTree,
     FiniteStateMachine,
     LlmAgentConfig,
+    Telemetry,
     SpacetimeDashboard,
 }
 
@@ -53,6 +58,7 @@ impl EditorPanel {
             Self::BehaviorTree => "Behavior Tree",
             Self::FiniteStateMachine => "FSM",
             Self::LlmAgentConfig => "LLM Agent",
+            Self::Telemetry => "Telemetry",
             Self::SpacetimeDashboard => "SpacetimeDB",
         }
     }
@@ -70,6 +76,7 @@ impl EditorPanel {
             Self::BehaviorTree => DockRegion::Left,
             Self::FiniteStateMachine => DockRegion::Left,
             Self::LlmAgentConfig => DockRegion::Right,
+            Self::Telemetry => DockRegion::Right,
             Self::SpacetimeDashboard => DockRegion::Right,
             Self::Viewport => DockRegion::Center,
         }
@@ -159,6 +166,7 @@ pub struct DockLayout {
     pub behavior_tree: DockRegion,
     pub finite_state_machine: DockRegion,
     pub llm_agent_config: DockRegion,
+    pub telemetry: DockRegion,
     pub spacetime_dashboard: DockRegion,
     pub left_width: f32,
     pub right_width: f32,
@@ -175,6 +183,7 @@ impl Default for DockLayout {
             behavior_tree: EditorPanel::BehaviorTree.default_dock_region(),
             finite_state_machine: EditorPanel::FiniteStateMachine.default_dock_region(),
             llm_agent_config: EditorPanel::LlmAgentConfig.default_dock_region(),
+            telemetry: EditorPanel::Telemetry.default_dock_region(),
             spacetime_dashboard: EditorPanel::SpacetimeDashboard.default_dock_region(),
             left_width: 230.0,
             right_width: 250.0,
@@ -194,6 +203,7 @@ impl DockLayout {
             EditorPanel::BehaviorTree => self.behavior_tree,
             EditorPanel::FiniteStateMachine => self.finite_state_machine,
             EditorPanel::LlmAgentConfig => self.llm_agent_config,
+            EditorPanel::Telemetry => self.telemetry,
             EditorPanel::SpacetimeDashboard => self.spacetime_dashboard,
         }
     }
@@ -208,6 +218,7 @@ impl DockLayout {
             EditorPanel::BehaviorTree => self.behavior_tree = region,
             EditorPanel::FiniteStateMachine => self.finite_state_machine = region,
             EditorPanel::LlmAgentConfig => self.llm_agent_config = region,
+            EditorPanel::Telemetry => self.telemetry = region,
             EditorPanel::SpacetimeDashboard => self.spacetime_dashboard = region,
         }
     }
@@ -241,7 +252,7 @@ impl DockLayout {
         self.bottom_height = height.clamp(90.0, 300.0);
     }
 
-    pub fn panels_for() -> [EditorPanel; 8] {
+    pub fn panels_for() -> [EditorPanel; 9] {
         [
             EditorPanel::Hierarchy,
             EditorPanel::Inspector,
@@ -250,6 +261,7 @@ impl DockLayout {
             EditorPanel::BehaviorTree,
             EditorPanel::FiniteStateMachine,
             EditorPanel::LlmAgentConfig,
+            EditorPanel::Telemetry,
             EditorPanel::SpacetimeDashboard,
         ]
     }
@@ -526,10 +538,25 @@ impl Default for LlmAgentConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TelemetryAgentSummary {
+    pub agent_id: String,
+    pub entity_id: Option<u64>,
+    pub role: String,
+    pub trajectory_distance: f32,
+    pub rejected_actions: usize,
+    pub tool_errors: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpacetimeDashboardState {
-    pub world_tick: u64,
+    pub latest_tick: u64,
     pub connected_players: u32,
-    pub pending_events: u32,
+    pub action_rejection_rate: f32,
+    pub tool_call_error_rate: f32,
+    pub agent_summaries: Vec<TelemetryAgentSummary>,
+    pub visible_entity_count: usize,
+    pub audible_event_count: usize,
+    pub message_count: usize,
     pub last_reducer_call: String,
     pub reducer_calls: u32,
 }
@@ -537,9 +564,14 @@ pub struct SpacetimeDashboardState {
 impl Default for SpacetimeDashboardState {
     fn default() -> Self {
         Self {
-            world_tick: 0,
+            latest_tick: 0,
             connected_players: 0,
-            pending_events: 0,
+            action_rejection_rate: 0.0,
+            tool_call_error_rate: 0.0,
+            agent_summaries: Vec::new(),
+            visible_entity_count: 0,
+            audible_event_count: 0,
+            message_count: 0,
             last_reducer_call: "none".to_string(),
             reducer_calls: 0,
         }
@@ -550,12 +582,174 @@ impl SpacetimeDashboardState {
     pub fn record_reducer_call(&mut self, name: impl Into<String>) {
         self.last_reducer_call = name.into();
         self.reducer_calls = self.reducer_calls.saturating_add(1);
-        self.world_tick = self.world_tick.saturating_add(1);
-        self.pending_events = self.pending_events.saturating_sub(1);
     }
 
     pub fn apply_connect(&mut self, connected: bool) {
         self.connected_players = if connected { 1 } else { 0 };
+    }
+
+    pub fn record_tick_telemetry(&mut self, frame: &TickTelemetryFrame) {
+        self.latest_tick = frame.tick;
+        self.connected_players = frame
+            .agents
+            .iter()
+            .filter(|agent| agent.runtime_profile.agent_type == AgentType::Human)
+            .count() as u32;
+        self.visible_entity_count = frame
+            .agents
+            .iter()
+            .map(|agent| agent.visible_entity_count)
+            .sum();
+        self.audible_event_count = frame
+            .agents
+            .iter()
+            .map(|agent| agent.audible_event_count)
+            .sum();
+        self.message_count = frame.agents.iter().map(|agent| agent.message_count).sum();
+
+        let total_actions = frame
+            .agents
+            .iter()
+            .map(|agent| agent.action_trace.len())
+            .sum::<usize>();
+        let rejected_actions = frame
+            .agents
+            .iter()
+            .flat_map(|agent| agent.action_trace.iter())
+            .filter(|trace| trace.stage == ActionLifecycleStage::Rejected)
+            .count();
+        self.action_rejection_rate = if total_actions == 0 {
+            0.0
+        } else {
+            rejected_actions as f32 / total_actions as f32
+        };
+
+        let total_tool_calls = frame
+            .agents
+            .iter()
+            .map(|agent| agent.tool_calls.len())
+            .sum::<usize>();
+        let tool_errors = frame
+            .agents
+            .iter()
+            .flat_map(|agent| agent.tool_calls.iter())
+            .filter(|trace| {
+                !matches!(
+                    trace.status,
+                    ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                )
+            })
+            .count();
+        self.tool_call_error_rate = if total_tool_calls == 0 {
+            0.0
+        } else {
+            tool_errors as f32 / total_tool_calls as f32
+        };
+
+        self.agent_summaries = frame
+            .agents
+            .iter()
+            .map(|agent| TelemetryAgentSummary {
+                agent_id: agent.agent_id.to_string(),
+                entity_id: agent.entity_id.map(|entity_id| entity_id.0),
+                role: format!("{:?}", agent.runtime_profile.role),
+                trajectory_distance: agent
+                    .trajectory
+                    .as_ref()
+                    .map(|trajectory| trajectory.distance_travelled)
+                    .unwrap_or_default(),
+                rejected_actions: agent
+                    .action_trace
+                    .iter()
+                    .filter(|trace| trace.stage == ActionLifecycleStage::Rejected)
+                    .count(),
+                tool_errors: agent
+                    .tool_calls
+                    .iter()
+                    .filter(|trace| {
+                        !matches!(
+                            trace.status,
+                            ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                        )
+                    })
+                    .count(),
+            })
+            .collect();
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TelemetryPanelState {
+    pub max_ticks: usize,
+    pub timeline: VecDeque<TickTelemetryFrame>,
+}
+
+impl Default for TelemetryPanelState {
+    fn default() -> Self {
+        Self::with_capacity(TelemetryConfig::default().editor_timeline_ticks)
+    }
+}
+
+impl TelemetryPanelState {
+    pub fn with_capacity(max_ticks: usize) -> Self {
+        Self {
+            max_ticks: max_ticks.max(1),
+            timeline: VecDeque::with_capacity(max_ticks.max(1)),
+        }
+    }
+
+    pub fn record_tick(&mut self, frame: TickTelemetryFrame) {
+        if self.timeline.len() >= self.max_ticks {
+            self.timeline.pop_front();
+        }
+        self.timeline.push_back(frame);
+    }
+
+    pub fn latest(&self) -> Option<&TickTelemetryFrame> {
+        self.timeline.back()
+    }
+
+    pub fn latest_agent_for_entity(&self, entity_id: u64) -> Option<&AgentTelemetryFrame> {
+        self.timeline.iter().rev().find_map(|frame| {
+            frame
+                .agents
+                .iter()
+                .find(|agent| agent.entity_id.map(|id| id.0) == Some(entity_id))
+        })
+    }
+
+    pub fn trajectory_for_entity(&self, entity_id: u64) -> Vec<TrajectorySample> {
+        let mut samples = Vec::new();
+        for frame in &self.timeline {
+            if let Some(agent) = frame
+                .agents
+                .iter()
+                .find(|agent| agent.entity_id.map(|id| id.0) == Some(entity_id))
+            {
+                if let Some(trajectory) = &agent.trajectory {
+                    if samples.is_empty() {
+                        samples.push(trajectory.start);
+                    }
+                    samples.push(trajectory.end);
+                }
+            }
+        }
+        samples
+    }
+
+    pub fn trajectory_distance_for_entity(&self, entity_id: u64) -> f32 {
+        self.timeline
+            .iter()
+            .flat_map(|frame| frame.agents.iter())
+            .filter(|agent| agent.entity_id.map(|id| id.0) == Some(entity_id))
+            .map(|agent| {
+                agent
+                    .trajectory
+                    .as_ref()
+                    .map(|trajectory| trajectory.distance_travelled)
+                    .unwrap_or_default()
+            })
+            .sum()
     }
 }
 
@@ -1030,6 +1224,7 @@ pub struct EditorState {
     pub behavior_tree: BehaviorTree,
     pub fsm: FiniteStateMachine,
     pub llm_agent_config: LlmAgentConfig,
+    pub telemetry: TelemetryPanelState,
     pub spacetime_dashboard: SpacetimeDashboardState,
 }
 
@@ -1061,6 +1256,7 @@ impl Default for EditorState {
             behavior_tree: BehaviorTree::default(),
             fsm: FiniteStateMachine::default(),
             llm_agent_config: LlmAgentConfig::default(),
+            telemetry: TelemetryPanelState::default(),
             spacetime_dashboard: SpacetimeDashboardState::default(),
         }
     }
@@ -1349,6 +1545,11 @@ impl PodEditorApp {
             .record_reducer_call(name.into());
     }
 
+    pub fn record_tick_telemetry(&mut self, frame: TickTelemetryFrame) {
+        self.state.telemetry.record_tick(frame.clone());
+        self.state.spacetime_dashboard.record_tick_telemetry(&frame);
+    }
+
     pub fn selected_entity_transform(&mut self) -> Option<&mut Transform2D> {
         self.state
             .selected_entity
@@ -1399,6 +1600,7 @@ impl PodEditorApp {
             EditorPanel::BehaviorTree,
             EditorPanel::FiniteStateMachine,
             EditorPanel::LlmAgentConfig,
+            EditorPanel::Telemetry,
             EditorPanel::SpacetimeDashboard,
         ] {
             let region = self.state.layout.region_for_panel(panel);
@@ -1779,16 +1981,26 @@ impl PodEditorApp {
     fn render_spacetime_panel(&mut self, ui: &mut Ui) {
         ui.heading("SpacetimeDB Dashboard");
         ui.label(format!(
-            "World tick: {}",
-            self.state.spacetime_dashboard.world_tick
+            "Latest tick: {}",
+            self.state.spacetime_dashboard.latest_tick
         ));
         ui.label(format!(
             "Connected players: {}",
             self.state.spacetime_dashboard.connected_players
         ));
         ui.label(format!(
-            "Pending events: {}",
-            self.state.spacetime_dashboard.pending_events
+            "Action rejection rate: {:.1}%",
+            self.state.spacetime_dashboard.action_rejection_rate * 100.0
+        ));
+        ui.label(format!(
+            "Tool-call error rate: {:.1}%",
+            self.state.spacetime_dashboard.tool_call_error_rate * 100.0
+        ));
+        ui.label(format!(
+            "Visible/audible/messages: {}/{}/{}",
+            self.state.spacetime_dashboard.visible_entity_count,
+            self.state.spacetime_dashboard.audible_event_count,
+            self.state.spacetime_dashboard.message_count
         ));
         ui.label(format!(
             "Last reducer call: {}",
@@ -1799,8 +2011,100 @@ impl PodEditorApp {
             self.state.spacetime_dashboard.reducer_calls
         ));
         ui.separator();
+        ui.label("Per-agent trajectory distance");
+        if self.state.spacetime_dashboard.agent_summaries.is_empty() {
+            ui.label("No authoritative telemetry recorded yet.");
+        } else {
+            for summary in &self.state.spacetime_dashboard.agent_summaries {
+                ui.label(format!(
+                    "{} · {} · {:.2}u · {} rejected · {} tool errors",
+                    summary.role,
+                    summary
+                        .entity_id
+                        .map(|entity_id| format!("E({entity_id})"))
+                        .unwrap_or_else(|| summary.agent_id.clone()),
+                    summary.trajectory_distance,
+                    summary.rejected_actions,
+                    summary.tool_errors
+                ));
+            }
+        }
+        ui.separator();
         if ui.button("Simulate reducer").clicked() {
             self.set_spacetime_reducer_call("manual_reducer");
+        }
+    }
+
+    fn render_telemetry_panel(&mut self, ui: &mut Ui) {
+        ui.heading("Telemetry");
+        ui.label(format!(
+            "Retained ticks: {} / {}",
+            self.state.telemetry.timeline.len(),
+            self.state.telemetry.max_ticks
+        ));
+        if let Some(entity_id) = self.state.selected_entity {
+            ui.label(format!("Selected entity: #{entity_id}"));
+            let trajectory = self.state.telemetry.trajectory_for_entity(entity_id);
+            let total_distance = self
+                .state
+                .telemetry
+                .trajectory_distance_for_entity(entity_id);
+            ui.label(format!(
+                "Trajectory samples: {} · distance {:.2}u",
+                trajectory.len(),
+                total_distance
+            ));
+
+            if let Some(agent) = self.state.telemetry.latest_agent_for_entity(entity_id) {
+                let submitted = agent
+                    .action_trace
+                    .iter()
+                    .filter(|trace| trace.stage == ActionLifecycleStage::Submitted)
+                    .count();
+                let executed = agent
+                    .action_trace
+                    .iter()
+                    .filter(|trace| trace.stage == ActionLifecycleStage::Executed)
+                    .count();
+                let rejected = agent
+                    .action_trace
+                    .iter()
+                    .filter(|trace| trace.stage == ActionLifecycleStage::Rejected)
+                    .count();
+                ui.label(format!(
+                    "Actions: submitted {} · executed {} · rejected {}",
+                    submitted, executed, rejected
+                ));
+                ui.label(format!(
+                    "Observations: {} visible · {} audible · {} messages",
+                    agent.visible_entity_count, agent.audible_event_count, agent.message_count
+                ));
+                if let Some(tool) = agent.tool_calls.last() {
+                    ui.label(format!(
+                        "Tool call: {} via {} · {:?} · {}ms",
+                        tool.tool_name, tool.provider, tool.status, tool.latency_ms
+                    ));
+                    if let Some(error) = &tool.error_message {
+                        ui.label(format!("Last tool error: {error}"));
+                    }
+                } else {
+                    ui.label("Tool calls: none");
+                }
+                if let Some(trajectory) = &agent.trajectory {
+                    ui.label(format!(
+                        "Latest segment: ({:.2}, {:.2}) → ({:.2}, {:.2})",
+                        trajectory.start.position.x,
+                        trajectory.start.position.y,
+                        trajectory.end.position.x,
+                        trajectory.end.position.y
+                    ));
+                }
+            } else {
+                ui.label("No telemetry recorded for the selected entity yet.");
+            }
+        } else {
+            ui.label("No entity selected.");
+            ui.label("Selection stays synced with the hierarchy and inspector.");
         }
     }
 
@@ -2034,6 +2338,7 @@ impl PodEditorApp {
                             EditorPanel::Console => self.render_console(ui),
                             EditorPanel::FiniteStateMachine => self.render_fsm_editor(ui),
                             EditorPanel::LlmAgentConfig => self.render_llm_agent_panel(ui),
+                            EditorPanel::Telemetry => self.render_telemetry_panel(ui),
                             EditorPanel::SpacetimeDashboard => self.render_spacetime_panel(ui),
                             EditorPanel::Viewport => {}
                         }
@@ -2056,6 +2361,7 @@ impl PodEditorApp {
                             EditorPanel::BehaviorTree => self.render_behavior_tree_editor(ui),
                             EditorPanel::FiniteStateMachine => self.render_fsm_editor(ui),
                             EditorPanel::LlmAgentConfig => self.render_llm_agent_panel(ui),
+                            EditorPanel::Telemetry => self.render_telemetry_panel(ui),
                             EditorPanel::SpacetimeDashboard => self.render_spacetime_panel(ui),
                             EditorPanel::Console => self.render_console(ui),
                             EditorPanel::Viewport => {}
@@ -2079,6 +2385,7 @@ impl PodEditorApp {
                             EditorPanel::BehaviorTree => self.render_behavior_tree_editor(ui),
                             EditorPanel::FiniteStateMachine => self.render_fsm_editor(ui),
                             EditorPanel::LlmAgentConfig => self.render_llm_agent_panel(ui),
+                            EditorPanel::Telemetry => self.render_telemetry_panel(ui),
                             EditorPanel::SpacetimeDashboard => self.render_spacetime_panel(ui),
                             EditorPanel::Viewport => {}
                         }
@@ -2101,6 +2408,7 @@ impl PodEditorApp {
                         EditorPanel::BehaviorTree => self.render_behavior_tree_editor(ui),
                         EditorPanel::FiniteStateMachine => self.render_fsm_editor(ui),
                         EditorPanel::LlmAgentConfig => self.render_llm_agent_panel(ui),
+                        EditorPanel::Telemetry => self.render_telemetry_panel(ui),
                         EditorPanel::SpacetimeDashboard => self.render_spacetime_panel(ui),
                         EditorPanel::Viewport => self.render_viewport(ui),
                     }
@@ -2138,6 +2446,7 @@ impl App for PodEditorApp {
                     EditorPanel::BehaviorTree,
                     EditorPanel::FiniteStateMachine,
                     EditorPanel::LlmAgentConfig,
+                    EditorPanel::Telemetry,
                     EditorPanel::SpacetimeDashboard,
                 ] {
                     if ui
@@ -2208,6 +2517,75 @@ pub fn launch_headless_editor() -> Result<(), eframe::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::{
+        Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId, AgentRole,
+        AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace, EntityId, TickTelemetryFrame,
+        ToolCallStatus,
+    };
+
+    fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {
+        let runtime_profile = AgentRuntimeProfile {
+            role: AgentRole::Player,
+            agent_type: AgentType::Human,
+            capabilities: AgentCapabilities::player_default(),
+        };
+        let mut agent = AgentTelemetryFrame::new(
+            tick,
+            AgentId::new(),
+            Some(EntityId(entity_id)),
+            runtime_profile,
+            7,
+            2,
+            1,
+            4,
+            1,
+            Some(TrajectorySample::new(
+                tick,
+                tick as f32 / 60.0,
+                glam::Vec2::new(tick as f32, entity_id as f32 / 1000.0),
+                glam::Vec2::X,
+                0.0,
+            )),
+        );
+        agent.update_trajectory_end(TrajectorySample::new(
+            tick,
+            (tick + 1) as f32 / 60.0,
+            glam::Vec2::new(tick as f32 + 1.0, entity_id as f32 / 1000.0 + 0.5),
+            glam::Vec2::new(1.0, 0.5),
+            0.1,
+        ));
+        agent.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Submitted,
+            Action::Idle,
+            None,
+        );
+        agent.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Executed,
+            Action::Idle,
+            None,
+        );
+        agent.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Rejected,
+            Action::Idle,
+            Some("cooldown".to_string()),
+        );
+        agent.record_tool_call(AgentToolCallTrace::failure(
+            tick,
+            "llm.complete",
+            "qwen",
+            ToolCallStatus::TimedOut,
+            48,
+            "timeout",
+        ));
+
+        TickTelemetryFrame {
+            tick,
+            agents: vec![agent],
+        }
+    }
 
     #[test]
     fn editor_default_state_is_viewport() {
@@ -2406,6 +2784,7 @@ mod tests {
             EditorPanel::BehaviorTree,
             EditorPanel::FiniteStateMachine,
             EditorPanel::LlmAgentConfig,
+            EditorPanel::Telemetry,
             EditorPanel::SpacetimeDashboard,
         ] {
             app.set_dock_region(panel, DockRegion::Left);
@@ -2436,6 +2815,44 @@ mod tests {
                 .expect("entity exists after redo")
                 .x,
             original_x + 1.5
+        );
+    }
+
+    #[test]
+    fn telemetry_panel_tracks_selected_entity_history() {
+        let mut app = PodEditorApp::default();
+        app.record_tick_telemetry(sample_tick_telemetry(10, 1001));
+        app.record_tick_telemetry(sample_tick_telemetry(11, 1001));
+
+        let samples = app.state.telemetry.trajectory_for_entity(1001);
+        assert_eq!(samples.len(), 3);
+        assert_eq!(app.selected_entity(), Some(1001));
+        assert_eq!(
+            app.state
+                .telemetry
+                .latest_agent_for_entity(1001)
+                .expect("selected entity telemetry")
+                .message_count,
+            1
+        );
+    }
+
+    #[test]
+    fn spacetime_dashboard_aggregates_authoritative_telemetry() {
+        let mut app = PodEditorApp::default();
+        app.record_tick_telemetry(sample_tick_telemetry(12, 1001));
+
+        assert_eq!(app.state.spacetime_dashboard.latest_tick, 12);
+        assert_eq!(app.state.spacetime_dashboard.connected_players, 1);
+        assert_eq!(app.state.spacetime_dashboard.visible_entity_count, 7);
+        assert_eq!(app.state.spacetime_dashboard.audible_event_count, 2);
+        assert_eq!(app.state.spacetime_dashboard.message_count, 1);
+        assert!(app.state.spacetime_dashboard.action_rejection_rate > 0.0);
+        assert!(app.state.spacetime_dashboard.tool_call_error_rate > 0.0);
+        assert_eq!(app.state.spacetime_dashboard.agent_summaries.len(), 1);
+        assert_eq!(
+            app.state.spacetime_dashboard.agent_summaries[0].entity_id,
+            Some(1001)
         );
     }
 
@@ -2526,7 +2943,7 @@ mod tests {
         app.set_spacetime_reducer_call("tick");
         assert_eq!(app.state.spacetime_dashboard.reducer_calls, start + 1);
         assert_eq!(app.state.spacetime_dashboard.last_reducer_call, "tick");
-        assert_eq!(app.state.spacetime_dashboard.world_tick, 1);
+        assert_eq!(app.state.spacetime_dashboard.latest_tick, 0);
     }
 
     #[test]

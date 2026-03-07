@@ -72,7 +72,8 @@ pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, Priorit
 pub use replay::{DecisionTrace, ReplayFile, ReplayHeader, ReplayPlayer, ReplayRecorder};
 pub use telemetry::{
     ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentToolCallTrace,
-    AgentTrajectoryFrame, TelemetryArchive, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    AgentTrajectoryFrame, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
+    TrajectorySample,
 };
 pub use world::World;
 

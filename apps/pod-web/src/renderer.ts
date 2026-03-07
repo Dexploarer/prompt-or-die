@@ -20,6 +20,7 @@ import {
   legacyFrameToThreeJsFrame,
   type RenderCommand,
   type RenderFrame,
+  type TelemetryTrajectorySample,
   type ThreeJsWebGpuFrame
 } from "./contracts";
 import {
@@ -100,6 +101,8 @@ export class PodThreeWorldRenderer {
   private adaptivePixelRatio: number;
   private smoothedFrameMs = 16.7;
   private adjustmentCooldown = 0;
+  private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
+    null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -177,6 +180,7 @@ export class PodThreeWorldRenderer {
     }
 
     this.clearOverlay();
+    this.clearTelemetryTrail();
     this.renderer.dispose();
   }
 
@@ -423,6 +427,44 @@ export class PodThreeWorldRenderer {
       disposeObject(object);
     }
     this.overlayObjects.length = 0;
+  }
+
+  setTelemetryTrail(samples: TelemetryTrajectorySample[]): void {
+    this.clearTelemetryTrail();
+    if (samples.length < 2) {
+      return;
+    }
+
+    const points = samples.map(
+      (sample, index) =>
+        new THREE.Vector3(
+          sample.position[0],
+          0.22 + index * 0.0035,
+          sample.position[1]
+        )
+    );
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: new THREE.Color(0.54, 0.96, 0.81),
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false
+    });
+    const line = new THREE.Line(geometry, material);
+    line.renderOrder = 10_000;
+    line.frustumCulled = false;
+    this.scene.add(line);
+    this.telemetryTrail = line;
+  }
+
+  clearTelemetryTrail(): void {
+    if (!this.telemetryTrail) {
+      return;
+    }
+    this.scene.remove(this.telemetryTrail);
+    this.telemetryTrail.geometry.dispose();
+    this.telemetryTrail.material.dispose();
+    this.telemetryTrail = null;
   }
 
   private async renderFrame(): Promise<void> {

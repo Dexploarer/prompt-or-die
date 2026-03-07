@@ -7,7 +7,9 @@ import {
   DodecahedronGeometry,
   FrontSide,
   MeshBasicMaterial,
+  MeshToonMaterial,
   MeshStandardMaterial,
+  NearestFilter,
   PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
@@ -106,7 +108,23 @@ export function createMeshMaterial(
   batch: ThreeJsMeshBatch,
   lodLevel: 0 | 1 | 2,
   quality: Pick<PodThreeQualityProfile, "environmentIntensity">
-): MeshStandardMaterial {
+): Material {
+  if (shouldUseToonShading(batch)) {
+    const material = new MeshToonMaterial({
+      color: new Color(batch.tint[0], batch.tint[1], batch.tint[2]),
+      transparent: batch.transparent,
+      opacity: batch.tint[3],
+      emissive: new Color(batch.emissive[0], batch.emissive[1], batch.emissive[2]),
+      emissiveIntensity: 0.4 + quality.environmentIntensity * 0.25,
+      depthWrite: batch.depthWrite,
+      depthTest: batch.depthTest,
+      side: batch.doubleSided ? 2 : FrontSide,
+      gradientMap: getToonGradientMap()
+    });
+    material.name = `pod-toon:${batch.mesh}:${batch.material}`;
+    return material;
+  }
+
   const material = new MeshStandardMaterial({
     color: new Color(batch.tint[0], batch.tint[1], batch.tint[2]),
     transparent: batch.transparent,
@@ -204,4 +222,39 @@ function hashColor(input: string): [number, number, number] {
 
 function lodSegments(levels: [number, number, number], lodLevel: 0 | 1 | 2): number {
   return levels[lodLevel];
+}
+
+let toonGradientMap: Texture | null = null;
+
+function getToonGradientMap(): Texture {
+  if (toonGradientMap) {
+    return toonGradientMap;
+  }
+
+  const gradient = new Uint8Array([
+    48, 48, 48, 255, 116, 116, 116, 255, 184, 184, 184, 255, 255, 255, 255, 255
+  ]);
+  const texture = new DataTexture(gradient, 4, 1);
+  texture.needsUpdate = true;
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.generateMipmaps = false;
+  texture.name = "pod-toon-gradient";
+  toonGradientMap = texture;
+  return texture;
+}
+
+function shouldUseToonShading(batch: ThreeJsMeshBatch): boolean {
+  if (batch.transparent) {
+    return false;
+  }
+
+  const token = `${batch.mesh} ${batch.material}`.toLowerCase();
+  return (
+    batch.metallic <= 0.2 &&
+    /basalt|obsidian|stone|tower|column|pillar|rock|boulder|tree|pine|terrain|foliage/.test(
+      token
+    )
+  );
 }

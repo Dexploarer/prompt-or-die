@@ -7,6 +7,25 @@ use crate::action::Action;
 use crate::contract::AgentRuntimeProfile;
 use crate::id::{AgentId, EntityId};
 
+/// Shared retention defaults for telemetry consumers across runtime, browser,
+/// and editor tooling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelemetryConfig {
+    pub core_archive_ticks: usize,
+    pub browser_overlay_samples: usize,
+    pub editor_timeline_ticks: usize,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            core_archive_ticks: 600,
+            browser_overlay_samples: 300,
+            editor_timeline_ticks: 600,
+        }
+    }
+}
+
 /// Single trajectory sample for one agent at a specific simulation boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TrajectorySample {
@@ -263,7 +282,7 @@ pub struct TelemetryArchive {
 
 impl Default for TelemetryArchive {
     fn default() -> Self {
-        Self::with_capacity(256)
+        Self::with_capacity(TelemetryConfig::default().core_archive_ticks)
     }
 }
 
@@ -318,9 +337,17 @@ mod tests {
     use crate::contract::{AgentCapabilities, AgentRole};
 
     use super::{
-        AgentTelemetryFrame, AgentToolCallTrace, TelemetryArchive, TickTelemetryFrame,
-        ToolCallStatus, TrajectorySample,
+        AgentTelemetryFrame, AgentToolCallTrace, TelemetryArchive, TelemetryConfig,
+        TickTelemetryFrame, ToolCallStatus, TrajectorySample,
     };
+
+    #[test]
+    fn telemetry_config_defaults_match_debug_surface_plan() {
+        let config = TelemetryConfig::default();
+        assert_eq!(config.core_archive_ticks, 600);
+        assert_eq!(config.browser_overlay_samples, 300);
+        assert_eq!(config.editor_timeline_ticks, 600);
+    }
 
     #[test]
     fn trajectory_frame_tracks_distance() {
@@ -399,5 +426,20 @@ mod tests {
             archive.latest().expect("latest frame").agents[0].tool_calls[0].status,
             ToolCallStatus::TimedOut
         );
+    }
+
+    #[test]
+    fn telemetry_archive_respects_max_frame_capacity() {
+        let mut archive = TelemetryArchive::with_capacity(2);
+        archive.record_tick(TickTelemetryFrame::empty(1));
+        archive.record_tick(TickTelemetryFrame::empty(2));
+        archive.record_tick(TickTelemetryFrame::empty(3));
+
+        let ticks = archive
+            .frames()
+            .iter()
+            .map(|frame| frame.tick)
+            .collect::<Vec<_>>();
+        assert_eq!(ticks, vec![2, 3]);
     }
 }

@@ -1,5 +1,6 @@
 export type Vec3Tuple = [number, number, number];
 export type Vec4Tuple = [number, number, number, number];
+export type Vec2Tuple = [number, number];
 export type RgbaTuple = [number, number, number, number];
 
 export interface CameraState {
@@ -129,6 +130,135 @@ export function parseThreeJsWebGpuFrame(
 
 export function parseRenderFrame(frame: string | RenderFrame): RenderFrame {
   return typeof frame === "string" ? (JSON.parse(frame) as RenderFrame) : frame;
+}
+
+export interface TelemetryRuntimeProfile {
+  role: string;
+  agent_type: string;
+  capabilities: Record<string, boolean>;
+}
+
+export interface TelemetryTrajectorySample {
+  tick: number;
+  elapsed_secs: number;
+  position: Vec2Tuple;
+  velocity: Vec2Tuple;
+  rotation: number;
+}
+
+export interface TelemetryTrajectoryFrame {
+  start: TelemetryTrajectorySample;
+  end: TelemetryTrajectorySample;
+  displacement: Vec2Tuple;
+  distance_travelled: number;
+}
+
+export interface TelemetryActionTrace {
+  source: string;
+  stage: string;
+  action: Record<string, unknown>;
+  rejection_reason?: string | null;
+}
+
+export interface TelemetryToolCallTrace {
+  tick: number;
+  tool_name: string;
+  provider: string;
+  status: string;
+  latency_ms: number;
+  request_units: number;
+  response_units: number;
+  error_message?: string | null;
+}
+
+export interface TelemetryAgentFrame {
+  tick: number;
+  agent_id: string;
+  entity_id?: number | null;
+  runtime_profile: TelemetryRuntimeProfile;
+  visible_entity_count: number;
+  audible_event_count: number;
+  message_count: number;
+  available_action_count: number;
+  objective_count: number;
+  trajectory?: TelemetryTrajectoryFrame | null;
+  action_trace: TelemetryActionTrace[];
+  tool_calls: TelemetryToolCallTrace[];
+}
+
+export interface TickTelemetryFrame {
+  tick: number;
+  agents: TelemetryAgentFrame[];
+}
+
+export interface EntityDrift {
+  entity_id: number;
+  position_error: number;
+  velocity_error: number;
+  rotation_error: number;
+  health_error?: number | null;
+  max_health_error?: number | null;
+  movement_speed_error?: number | null;
+}
+
+export interface RecoveryRequestState {
+  awaiting_full_snapshot: boolean;
+  request_attempts: number;
+  last_request_server_tick?: number | null;
+  last_request_digest?: number | null;
+  next_retry_tick?: number | null;
+}
+
+export interface CatchUpDiagnostics {
+  authoritative_tick?: number | null;
+  authoritative_digest?: number | null;
+  predicted_tick?: number | null;
+  predicted_digest?: number | null;
+  presentation_tick?: number | null;
+  desired_presentation_tick?: number | null;
+  presentation_drift_ticks?: number | null;
+  history_snapshots: number;
+  oldest_authoritative_tick?: number | null;
+  latest_authoritative_tick?: number | null;
+  pending_action_batches: number;
+  replayed_action_count: number;
+  controlled_entity_drift?: EntityDrift | null;
+  recovery: RecoveryRequestState;
+}
+
+export interface TickTelemetryEnvelope {
+  tickTelemetry: TickTelemetryFrame;
+  recovery?: CatchUpDiagnostics | null;
+}
+
+export function parseTickTelemetryEnvelope(
+  frame: string | TickTelemetryFrame | TickTelemetryEnvelope
+): TickTelemetryEnvelope {
+  const parsed =
+    typeof frame === "string"
+      ? (JSON.parse(frame) as TickTelemetryFrame | TickTelemetryEnvelope)
+      : frame;
+
+  if ("agents" in parsed) {
+    return { tickTelemetry: parsed };
+  }
+
+  if ("tickTelemetry" in parsed) {
+    return parsed;
+  }
+
+  const snakeCase = parsed as {
+    tick_telemetry?: TickTelemetryFrame;
+    recovery?: CatchUpDiagnostics | null;
+  };
+  if (snakeCase.tick_telemetry) {
+    return {
+      tickTelemetry: snakeCase.tick_telemetry,
+      recovery: snakeCase.recovery ?? null
+    };
+  }
+
+  throw new Error("Invalid tick telemetry payload");
 }
 
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {
