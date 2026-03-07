@@ -22,7 +22,7 @@ use pod_core::component::SkillKind;
 use pod_core::contract::AgentRuntimeProfile;
 use pod_core::id::{AgentId as CoreAgentId, EntityId as CoreEntityId};
 use pod_core::telemetry::{
-    ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentTickRollup,
+    ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
     TickTelemetryFrame, TrajectorySample,
 };
 use pod_core::{decode_toon_document, VersionedTickTelemetry};
@@ -1207,7 +1207,8 @@ pub fn execute_tick(ctx: &ReducerContext) {
                 executed = true;
             }
             ActionKind::Speak => {
-                if let (Some(msg), Some(vol)) = (submission.message.clone(), submission.volume.clone())
+                if let (Some(msg), Some(vol)) =
+                    (submission.message.clone(), submission.volume.clone())
                 {
                     if let Some(tf) = ctx.db.transform().entity_id().find(eid) {
                         ctx.db.speech_event().insert(SpeechEventRow {
@@ -1319,6 +1320,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
 
     update_telemetry_trajectory_ends(ctx, current_tick, elapsed + dt, &mut telemetry_frames);
     emit_agent_telemetry_rows(ctx, current_tick, &telemetry_frames);
+    emit_agent_tool_call_events(ctx, &telemetry_frames);
     emit_agent_tick_rollups(ctx, current_tick);
 
     // ── Phase 5: Advance tick ──
@@ -1398,7 +1400,10 @@ fn decode_observation_counts(document: &str) -> ObservationCounts {
             .as_array()
             .map(Vec::len)
             .unwrap_or_default(),
-        messages: value["messages"].as_array().map(Vec::len).unwrap_or_default(),
+        messages: value["messages"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default(),
     }
 }
 
@@ -1574,6 +1579,48 @@ fn emit_agent_telemetry_rows(
     }
 }
 
+fn emit_agent_tool_call_events(
+    ctx: &ReducerContext,
+    telemetry_frames: &HashMap<u64, AgentTelemetryFrame>,
+) {
+    for event in collect_agent_tool_call_events(telemetry_frames) {
+        ctx.db
+            .agent_tool_call_event()
+            .insert(AgentToolCallEventRow {
+                row_id: 0,
+                tick: event.tick,
+                agent_entity_id: event.agent_entity_id,
+                tool_name: event.trace.tool_name.clone(),
+                provider: event.trace.provider.clone(),
+                status: format!("{:?}", event.trace.status),
+                latency_ms: event.trace.latency_ms,
+                request_units: event.trace.request_units,
+                response_units: event.trace.response_units,
+                data_json: event.to_toon_document(),
+            });
+    }
+}
+
+fn collect_agent_tool_call_events(
+    telemetry_frames: &HashMap<u64, AgentTelemetryFrame>,
+) -> Vec<AgentToolCallEvent> {
+    let mut entity_ids: Vec<u64> = telemetry_frames.keys().copied().collect();
+    entity_ids.sort_unstable();
+
+    let mut events = Vec::new();
+    for entity_id in entity_ids {
+        let Some(frame) = telemetry_frames.get(&entity_id) else {
+            continue;
+        };
+
+        for trace in &frame.tool_calls {
+            events.push(AgentToolCallEvent::new(entity_id, trace.clone()));
+        }
+    }
+
+    events
+}
+
 fn emit_agent_tick_rollups(ctx: &ReducerContext, current_tick: u64) {
     if (current_tick + 1) % ROLLUP_WINDOW_TICKS != 0 {
         return;
@@ -1588,9 +1635,10 @@ fn emit_agent_tick_rollups(ctx: &ReducerContext, current_tick: u64) {
         .iter()
         .filter(|row| row.tick >= window_start && row.tick <= current_tick)
     {
-        let Ok(versioned) =
-            decode_toon_document::<VersionedTickTelemetry>(&row.frame_json, "versioned_tick_telemetry")
-        else {
+        let Ok(versioned) = decode_toon_document::<VersionedTickTelemetry>(
+            &row.frame_json,
+            "versioned_tick_telemetry",
+        ) else {
             continue;
         };
         for frame in versioned.payload.agents {
@@ -1629,14 +1677,17 @@ fn emit_agent_tick_rollups(ctx: &ReducerContext, current_tick: u64) {
 }
 
 fn action_count(frame: &AgentTelemetryFrame, stage: ActionLifecycleStage) -> u32 {
-    frame.action_trace
+    frame
+        .action_trace
         .iter()
         .filter(|trace| trace.stage == stage)
         .count() as u32
 }
 
 fn stable_agent_id(entity_id: u64) -> CoreAgentId {
-    CoreAgentId(Uuid::from_u128(0x504f4453544442000000000000000000u128 | entity_id as u128))
+    CoreAgentId(Uuid::from_u128(
+        0x504f4453544442000000000000000000u128 | entity_id as u128,
+    ))
 }
 
 fn core_agent_type(agent_type: &AgentType) -> CoreAgentType {
@@ -1646,6 +1697,65 @@ fn core_agent_type(agent_type: &AgentType) -> CoreAgentType {
         AgentType::NeuralAgent => CoreAgentType::NeuralAgent,
         AgentType::ScriptedNpc => CoreAgentType::ScriptedNpc,
         AgentType::System => CoreAgentType::System,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pod_core::telemetry::{AgentToolCallTrace, ToolCallStatus};
+    use pod_core::{decode_toon_document, AgentType};
+
+    #[test]
+    fn collect_agent_tool_call_events_exports_toon_ready_rows() {
+        let mut frame = AgentTelemetryFrame::new(
+            12,
+            stable_agent_id(44),
+            Some(CoreEntityId(44)),
+            AgentRuntimeProfile::for_agent_type(CoreAgentType::LlmAgent),
+            3,
+            1,
+            0,
+            2,
+            1,
+            None,
+            None,
+        );
+        frame.record_tool_call(AgentToolCallTrace::new(
+            12,
+            "llm.complete",
+            "qwen",
+            ToolCallStatus::TimedOut,
+            48,
+            128,
+            0,
+            Some("timeout".into()),
+        ));
+        frame.record_tool_call(AgentToolCallTrace::success(
+            12,
+            "tool.lookup",
+            "catalog",
+            8,
+            16,
+            12,
+        ));
+
+        let mut telemetry_frames = HashMap::new();
+        telemetry_frames.insert(44, frame);
+
+        let events = collect_agent_tool_call_events(&telemetry_frames);
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|event| event.agent_entity_id == 44 && event.tick == 12));
+
+        let exported: AgentToolCallEvent =
+            decode_toon_document(&events[0].to_toon_document(), "agent_tool_call_event")
+                .expect("tool-call event should decode");
+        assert_eq!(exported.agent_entity_id, 44);
+        assert_eq!(exported.trace.tool_name, "llm.complete");
+        assert_eq!(exported.trace.provider, "qwen");
+        assert_eq!(exported.trace.status, ToolCallStatus::TimedOut);
     }
 }
 

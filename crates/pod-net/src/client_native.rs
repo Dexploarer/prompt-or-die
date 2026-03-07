@@ -11,7 +11,7 @@ use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use tokio::sync::mpsc;
 
-use pod_core::Action;
+use pod_core::{decode_toon_value, Action};
 
 use crate::protocol::{
     ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage,
@@ -64,6 +64,10 @@ pub struct NativeClient {
     last_reconciliation: Option<ReconciliationReport>,
     /// Most recent debug telemetry payload received from the server.
     last_debug_telemetry_json: Option<String>,
+    /// Most recent debug document of any supported TOON kind.
+    last_debug_document: Option<String>,
+    /// Pending TOON debug documents gathered since the last drain.
+    pending_debug_documents: Vec<String>,
     /// Recovery request throttle/telemetry for full-snapshot resync.
     recovery_state: RecoveryRequestState,
     /// Authoritative history for presentation smoothing.
@@ -156,6 +160,8 @@ impl NativeClient {
             reconnect_token: None,
             last_reconciliation: None,
             last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -459,7 +465,11 @@ impl NativeClient {
             }
             ServerMessage::Pong { .. } => true,
             ServerMessage::TickTelemetry { frame_json } => {
-                self.last_debug_telemetry_json = Some(frame_json.clone());
+                self.record_debug_document(frame_json.clone());
+                true
+            }
+            ServerMessage::DebugDocument { document } => {
+                self.record_debug_document(document.clone());
                 true
             }
             ServerMessage::Rejected { reason } => {
@@ -508,6 +518,8 @@ impl NativeClient {
         );
         self.recovery_state.clear();
         self.last_debug_telemetry_json = None;
+        self.last_debug_document = None;
+        self.pending_debug_documents.clear();
         self.clear_presentation_state();
 
         info!("Disconnected from server");
@@ -555,6 +567,16 @@ impl NativeClient {
 
     pub fn last_debug_telemetry_document(&self) -> Option<&str> {
         self.last_debug_telemetry_json()
+    }
+
+    pub fn last_debug_document(&self) -> Option<&str> {
+        self.last_debug_document
+            .as_deref()
+            .or_else(|| self.last_debug_telemetry_document())
+    }
+
+    pub fn drain_debug_documents(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_debug_documents)
     }
 
     /// Inspect the local rollback/replay path from a chosen authoritative tick.
@@ -729,6 +751,20 @@ impl NativeClient {
             used_hard_resync,
         });
     }
+
+    fn record_debug_document(&mut self, document: String) {
+        if decode_toon_value(&document)
+            .ok()
+            .and_then(|value| value["document_type"].as_str().map(str::to_owned))
+            .as_deref()
+            == Some("versioned_tick_telemetry")
+        {
+            self.last_debug_telemetry_json = Some(document.clone());
+        }
+
+        self.last_debug_document = Some(document.clone());
+        self.pending_debug_documents.push(document);
+    }
 }
 
 // ============================================================
@@ -899,6 +935,8 @@ mod tests {
             reconnect_token: None,
             last_reconciliation: None,
             last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
             recovery_state: RecoveryRequestState::default(),
             render_buffer,
             render_clock,
@@ -945,6 +983,8 @@ mod tests {
             reconnect_token: None,
             last_reconciliation: None,
             last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -983,6 +1023,8 @@ mod tests {
             reconnect_token: None,
             last_reconciliation: None,
             last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -997,5 +1039,58 @@ mod tests {
             .last_debug_telemetry_document()
             .expect("debug telemetry stored")
             .contains("versioned_tick_telemetry"));
+        assert_eq!(client.drain_debug_documents().len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_debug_document_updates_generic_cache() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+        };
+
+        let message = ServerMessage::DebugDocument {
+            document: pod_core::AgentToolCallEvent::new(
+                44,
+                pod_core::AgentToolCallTrace::success(4, "llm.complete", "qwen", 18, 128, 64),
+            )
+            .to_toon_document(),
+        };
+        assert!(client.apply_server_message(&message));
+        assert!(client
+            .last_debug_document()
+            .expect("latest debug document stored")
+            .contains("agent_tool_call_event"));
+        assert!(client.last_debug_telemetry_document().is_none());
+        assert_eq!(client.drain_debug_documents().len(), 1);
     }
 }

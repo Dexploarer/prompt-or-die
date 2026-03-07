@@ -13,7 +13,10 @@ use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use tokio::sync::{mpsc, RwLock};
 
-use pod_core::{Action, IdleAgent, VersionedTickTelemetry, World};
+use pod_core::{
+    Action, AgentTickRollup, AgentToolCallEvent, IdleAgent, TelemetryArchive, TelemetryConfig,
+    VersionedTickTelemetry, World,
+};
 
 use crate::protocol::{
     ClientId, ClientMessage, ReconnectToken, ServerConfig as ProtoServerConfig, ServerMessage,
@@ -93,6 +96,10 @@ pub struct GameServer {
     last_snapshot: Option<WorldSnapshot>,
     /// Latest authoritative telemetry payload for debug/editor clients.
     last_tick_telemetry_json: Option<String>,
+    /// Recent authoritative telemetry retained for live debug rollups.
+    debug_archive: TelemetryArchive,
+    /// TOON debug documents collected during the current authoritative tick.
+    pending_debug_documents: Vec<String>,
 }
 
 impl GameServer {
@@ -111,6 +118,10 @@ impl GameServer {
             last_snapshot_tick: 0,
             last_snapshot: None,
             last_tick_telemetry_json: None,
+            debug_archive: TelemetryArchive::with_capacity(
+                TelemetryConfig::default().core_archive_ticks,
+            ),
+            pending_debug_documents: Vec::new(),
         }
     }
 
@@ -218,8 +229,30 @@ impl GameServer {
 
         // Step the world
         let tick_result = self.world.step();
-        self.last_tick_telemetry_json =
-            Some(VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document());
+        self.debug_archive
+            .record_tick(tick_result.telemetry.clone());
+        self.pending_debug_documents.clear();
+
+        let telemetry_document =
+            VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document();
+        self.last_tick_telemetry_json = Some(telemetry_document.clone());
+        self.pending_debug_documents.push(telemetry_document);
+
+        for agent in &tick_result.telemetry.agents {
+            let Some(entity_id) = agent.entity_id else {
+                continue;
+            };
+            for trace in &agent.tool_calls {
+                self.pending_debug_documents
+                    .push(AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document());
+            }
+        }
+
+        if (tick_result.tick + 1) % 60 == 0 {
+            for rollup in self.debug_rollups_for_tick(tick_result.tick) {
+                self.pending_debug_documents.push(rollup.to_toon_document());
+            }
+        }
 
         debug!(
             "Tick {}: {} entities, {} agents",
@@ -503,6 +536,7 @@ impl GameServer {
             .any(|session| session.debug_telemetry_enabled);
 
         if !has_state_update && !has_debug_subscribers {
+            self.pending_debug_documents.clear();
             return Ok(());
         }
 
@@ -523,18 +557,19 @@ impl GameServer {
             }
 
             if session.debug_telemetry_enabled {
-                if let Some(frame_json) = &self.last_tick_telemetry_json {
-                    if let Some(tx) = self.client_tx.read().await.get(client_id) {
+                if let Some(tx) = self.client_tx.read().await.get(client_id) {
+                    for document in &self.pending_debug_documents {
                         if let Err(e) = tx
-                            .send(ServerMessage::TickTelemetry {
-                                frame_json: frame_json.clone(),
+                            .send(ServerMessage::DebugDocument {
+                                document: document.clone(),
                             })
                             .await
                         {
                             error!(
-                                "Failed to send debug telemetry to client {}: {}",
+                                "Failed to send debug document to client {}: {}",
                                 client_id.0, e
                             );
+                            break;
                         }
                     }
                 }
@@ -547,6 +582,7 @@ impl GameServer {
         if has_state_update {
             self.last_snapshot = Some(current_snapshot);
         }
+        self.pending_debug_documents.clear();
 
         Ok(())
     }
@@ -746,6 +782,40 @@ impl GameServer {
 
         Ok(())
     }
+
+    fn debug_rollups_for_tick(&self, tick_end: u64) -> Vec<AgentTickRollup> {
+        let tick_start = tick_end.saturating_sub(59);
+        let mut frames_by_agent = HashMap::<u64, Vec<pod_core::AgentTelemetryFrame>>::new();
+
+        for frame in self
+            .debug_archive
+            .frames()
+            .iter()
+            .filter(|frame| frame.tick >= tick_start && frame.tick <= tick_end)
+        {
+            for agent in &frame.agents {
+                let Some(entity_id) = agent.entity_id else {
+                    continue;
+                };
+                frames_by_agent
+                    .entry(entity_id.0)
+                    .or_default()
+                    .push(agent.clone());
+            }
+        }
+
+        let mut entity_ids: Vec<u64> = frames_by_agent.keys().copied().collect();
+        entity_ids.sort_unstable();
+
+        entity_ids
+            .into_iter()
+            .filter_map(|entity_id| {
+                frames_by_agent
+                    .get(&entity_id)
+                    .and_then(|frames| AgentTickRollup::from_agent_frames(entity_id, frames))
+            })
+            .collect()
+    }
 }
 
 // ============================================================
@@ -816,7 +886,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_broadcast_updates_emits_tick_telemetry_for_debug_clients_only() {
+    async fn test_broadcast_updates_emits_debug_documents_for_debug_clients_only() {
         let config = ProtoServerConfig::default();
         let world = World::new(42);
         let mut server = GameServer::new(config, world);
@@ -842,10 +912,10 @@ mod tests {
         let mut saw_tick_telemetry = false;
         while let Ok(message) = rx.try_recv() {
             match message {
-                ServerMessage::TickTelemetry { frame_json } => {
+                ServerMessage::DebugDocument { document } => {
                     saw_tick_telemetry = true;
                     let value =
-                        decode_toon_value(&frame_json).expect("tick telemetry TOON should decode");
+                        decode_toon_value(&document).expect("tick telemetry TOON should decode");
                     assert_eq!(value["document_type"], "versioned_tick_telemetry");
                 }
                 _ => {}

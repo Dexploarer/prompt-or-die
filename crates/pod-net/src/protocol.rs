@@ -116,6 +116,9 @@ pub enum ServerMessage {
     /// Raw authoritative telemetry payload for debug/editor consumers.
     TickTelemetry { frame_json: String },
 
+    /// Generic TOON debug document for editor/debug consumers.
+    DebugDocument { document: String },
+
     /// Response to ping request
     Pong { client_ts: u64, server_ts: u64 },
 
@@ -317,6 +320,25 @@ mod tests {
                     decode_toon_value(&frame_json).expect("tick telemetry TOON should decode");
                 assert_eq!(value["document_type"], "versioned_tick_telemetry");
                 assert_eq!(value["payload"]["payload"]["tick"], 7);
+            }
+            other => panic!("Wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_debug_document_json_roundtrip() {
+        let msg = ServerMessage::DebugDocument {
+            document: VersionedTickTelemetry::new(TickTelemetryFrame::empty(9)).to_toon_document(),
+        };
+        let json = msg.encode_json().unwrap();
+        let decoded = ServerMessage::decode_json(&json).unwrap();
+
+        match decoded {
+            ServerMessage::DebugDocument { document } => {
+                let value =
+                    decode_toon_value(&document).expect("debug document TOON should decode");
+                assert_eq!(value["document_type"], "versioned_tick_telemetry");
+                assert_eq!(value["payload"]["payload"]["tick"], 9);
             }
             other => panic!("Wrong message type: {other:?}"),
         }

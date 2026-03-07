@@ -614,5 +614,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-server --bin pod-server`
   - `cargo test -p pod-net --features spacetimedb --lib`
 
-**Last updated**: Iteration 67
-**Current focus**: Iteration 68 browser/editor consumption of live authoritative shard debug streams plus embedded-agent tool-call persistence into the SpacetimeDB runtime path
+### Iteration 68
+- [x] Added a generic `ServerMessage::DebugDocument` TOON transport in `pod-net` so direct-connect debug consumers can receive authoritative telemetry/tool/rollup documents without inventing another JSON-only side channel.
+- [x] Updated native, web, and SpacetimeDB pod-net clients to retain and drain live TOON debug documents while preserving the existing tick-telemetry convenience accessors for tooling that still wants the latest authoritative telemetry frame.
+- [x] Extended the direct-connect `GameServer` debug path to retain authoritative telemetry history, emit live tool-call events from embedded agents, and derive 60-tick rollups for debug subscribers over the same live document surface.
+- [x] Closed the remaining SpacetimeDB runtime gap by persisting reducer-side embedded tool-call telemetry into `agent_tool_call_event` rows as canonical TOON `agent_tool_call_event` documents.
+- [x] Added deterministic coverage for the new protocol message, native/debug client queues, direct-connect server debug broadcasting, and reducer-side tool-call TOON event generation.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
+
+**Last updated**: Iteration 68
+**Current focus**: Iteration 69 browser/editor live wiring for direct-connect shard debug streams plus MMO world/runtime slice completion beyond TOON telemetry parity
