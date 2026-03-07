@@ -15,6 +15,7 @@ use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentType};
 use pod_core::id::AgentId;
 use pod_core::observation::Observation;
+use pod_core::{AgentToolCallTrace, ToolCallStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
@@ -22,7 +23,10 @@ use std::time::{Duration, Instant};
 
 use crate::action_parser::{ActionParser, FallbackParser};
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
-use crate::llm_provider::{CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage};
+use crate::llm_provider::{
+    failed_tool_call_trace, parse_failed_tool_call_trace, success_tool_call_trace,
+    CompletionRequest, LlmProvider, MockProvider, TokenBudget, TokenUsage, LLM_COMPLETE_TOOL_NAME,
+};
 #[cfg(test)]
 use crate::prompt_template::CompactTemplate;
 use crate::prompt_template::{PromptTemplate, ToonTemplate};
@@ -72,6 +76,7 @@ pub struct DecisionTrace {
     pub llm_response: String,
     pub parsed_actions: Vec<Action>,
     pub reasoning: String,
+    pub tool_calls: Vec<AgentToolCallTrace>,
 }
 
 // ============================================================
@@ -87,6 +92,7 @@ struct LlmResult {
     raw_response: String,
     usage: Option<TokenUsage>,
     trace: Option<DecisionTrace>,
+    tool_calls: Vec<AgentToolCallTrace>,
 }
 
 /// Pending decision waiting for reaction delay to elapse.
@@ -140,6 +146,7 @@ pub struct LlmAgent {
     // --- Decision double buffer ---
     decision_buffer: DecisionBuffer,
     decision_traces: VecDeque<DecisionTrace>,
+    recent_tool_calls: VecDeque<AgentToolCallTrace>,
 
     // --- Stale action replay ---
     last_action: Option<Action>,
@@ -173,6 +180,7 @@ impl LlmAgent {
                 pending: None,
             },
             decision_traces: VecDeque::new(),
+            recent_tool_calls: VecDeque::new(),
             last_action: None,
             stale_action_decay: 1.0,
             ticks_since_last_decision: 0,
@@ -227,6 +235,7 @@ impl LlmAgent {
                 pending: None,
             },
             decision_traces: VecDeque::new(),
+            recent_tool_calls: VecDeque::new(),
             last_action: None,
             stale_action_decay: 1.0,
             ticks_since_last_decision: 0,
@@ -241,6 +250,10 @@ impl LlmAgent {
     /// Clear decision traces (to free memory).
     pub fn clear_traces(&mut self) {
         self.decision_traces.clear();
+    }
+
+    pub fn recent_tool_calls(&self) -> &VecDeque<AgentToolCallTrace> {
+        &self.recent_tool_calls
     }
 
     /// Access the conversation memory.
@@ -301,6 +314,18 @@ impl LlmAgent {
                 "LLM agent {} skipping request: token budget exceeded ({} estimated, budget full)",
                 self.id, estimated_tokens
             );
+            self.recent_tool_calls.push_back(AgentToolCallTrace::new(
+                observation.tick,
+                LLM_COMPLETE_TOOL_NAME,
+                self.provider.name(),
+                ToolCallStatus::BudgetExceeded,
+                0,
+                estimated_tokens,
+                0,
+                Some(format!(
+                    "Token budget exceeded before provider call (estimated {estimated_tokens} units)"
+                )),
+            ));
             return;
         }
 
@@ -323,28 +348,48 @@ impl LlmAgent {
         self.request_in_flight = true;
 
         std::thread::spawn(move || {
+            let started_at = Instant::now();
             match provider.complete(&request) {
                 Ok(completion) => {
+                    let elapsed = started_at.elapsed();
                     // Parse the LLM response into actions
-                    let (actions, reasoning, raw) = match parser.parse(&completion.content) {
-                        Ok(result) => {
-                            for w in &result.warnings {
-                                warn!("LLM agent {} parse warning: {}", agent_id, w);
+                    let (actions, reasoning, raw, tool_calls) =
+                        match parser.parse(&completion.content) {
+                            Ok(result) => {
+                                for w in &result.warnings {
+                                    warn!("LLM agent {} parse warning: {}", agent_id, w);
+                                }
+                                (
+                                    result.actions,
+                                    result.reasoning,
+                                    result.raw_response,
+                                    vec![success_tool_call_trace(
+                                        tick,
+                                        provider.name(),
+                                        elapsed,
+                                        &completion.usage,
+                                    )],
+                                )
                             }
-                            (result.actions, result.reasoning, result.raw_response)
-                        }
-                        Err(e) => {
-                            warn!(
-                                "LLM agent {} parse failed ({}), falling back to Idle",
-                                agent_id, e
-                            );
-                            (
-                                vec![Action::Idle],
-                                "Parse error fallback".to_string(),
-                                completion.content.clone(),
-                            )
-                        }
-                    };
+                            Err(e) => {
+                                warn!(
+                                    "LLM agent {} parse failed ({}), falling back to Idle",
+                                    agent_id, e
+                                );
+                                (
+                                    vec![Action::Idle],
+                                    "Parse error fallback".to_string(),
+                                    completion.content.clone(),
+                                    vec![parse_failed_tool_call_trace(
+                                        tick,
+                                        provider.name(),
+                                        elapsed,
+                                        &completion.usage,
+                                        e.to_string(),
+                                    )],
+                                )
+                            }
+                        };
 
                     let trace = if enable_trace {
                         Some(DecisionTrace {
@@ -357,6 +402,7 @@ impl LlmAgent {
                             llm_response: raw.clone(),
                             parsed_actions: actions.clone(),
                             reasoning: reasoning.clone(),
+                            tool_calls: tool_calls.clone(),
                         })
                     } else {
                         None
@@ -368,6 +414,7 @@ impl LlmAgent {
                         raw_response: raw,
                         usage: Some(completion.usage),
                         trace,
+                        tool_calls,
                     };
 
                     debug!(
@@ -378,6 +425,7 @@ impl LlmAgent {
                     let _ = tx.send(result);
                 }
                 Err(e) => {
+                    let elapsed = started_at.elapsed();
                     error!("LLM request failed for agent {}: {}", agent_id, e);
                     // Send an Idle fallback so the agent doesn't hang
                     let _ = tx.send(LlmResult {
@@ -386,6 +434,12 @@ impl LlmAgent {
                         raw_response: String::new(),
                         usage: None,
                         trace: None,
+                        tool_calls: vec![failed_tool_call_trace(
+                            tick,
+                            provider.name(),
+                            elapsed,
+                            &e,
+                        )],
                     });
                 }
             }
@@ -437,6 +491,7 @@ impl LlmAgent {
             self.decision_buffer.ready_actions = Some(result.actions);
             self.decision_buffer.ready_reasoning = result.reasoning;
             self.decision_buffer.trace = result.trace;
+            self.recent_tool_calls.extend(result.tool_calls);
         }
     }
 }
@@ -485,7 +540,7 @@ impl Agent for LlmAgent {
 
         // Check if reaction delay is complete
         if let Some(ready_actions) = self.check_reaction_delay() {
-            self.decision_buffer.pending = None;
+            let pending = self.decision_buffer.pending.take();
 
             if !ready_actions.is_empty() {
                 // Record last action for decay
@@ -493,7 +548,7 @@ impl Agent for LlmAgent {
 
                 // Record to conversation memory
                 let reasoning = self.decision_buffer.ready_reasoning.clone();
-                if let Some(pending) = &self.decision_buffer.pending {
+                if let Some(pending) = &pending {
                     self.memory
                         .record(&pending.observation, &ready_actions, &reasoning);
                 }
@@ -531,6 +586,10 @@ impl Agent for LlmAgent {
 
     fn constraints_mut(&mut self) -> &mut AgentConstraints {
         &mut self.constraints
+    }
+
+    fn drain_tool_calls(&mut self) -> Vec<AgentToolCallTrace> {
+        self.recent_tool_calls.drain(..).collect()
     }
 }
 
@@ -691,6 +750,8 @@ reasoning[1]{
             .back()
             .expect("a decision trace should be recorded");
         assert_eq!(trace.reasoning, "Default smoke test");
+        assert_eq!(trace.tool_calls.len(), 1);
+        assert_eq!(trace.tool_calls[0].tool_name, LLM_COMPLETE_TOOL_NAME);
     }
 
     #[test]
@@ -818,9 +879,81 @@ reasoning[1]{
             llm_response: String::new(),
             parsed_actions: vec![],
             reasoning: String::new(),
+            tool_calls: vec![],
         });
         assert_eq!(agent.decision_traces().len(), 1);
         agent.clear_traces();
         assert!(agent.decision_traces().is_empty());
+    }
+
+    #[test]
+    fn successful_llm_requests_emit_tool_call_traces() {
+        let mut agent = LlmAgent::new(LlmAgentConfig {
+            reaction_time_ms: 0,
+            ..Default::default()
+        });
+        let obs = make_obs(5, true);
+        agent.observe(obs);
+        std::thread::sleep(Duration::from_millis(50));
+        let _ = agent.decide();
+
+        let tool_calls = agent.drain_tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].tool_name, LLM_COMPLETE_TOOL_NAME);
+        assert_eq!(tool_calls[0].status, ToolCallStatus::Succeeded);
+        assert!(tool_calls[0].request_units > 0);
+    }
+
+    #[test]
+    fn parse_failures_emit_parse_error_tool_trace() {
+        let provider = Arc::new(MockProvider::new("not valid action syntax".into()));
+        let mut agent = LlmAgent::with_components(
+            LlmAgentConfig {
+                reaction_time_ms: 0,
+                ..Default::default()
+            },
+            provider,
+            Arc::new(CompactTemplate::default()),
+            Arc::new(crate::action_parser::JsonActionParser),
+            MemoryConfig::default(),
+            TokenBudget::unlimited(),
+        );
+
+        agent.observe(make_obs(6, false));
+        std::thread::sleep(Duration::from_millis(50));
+        let _ = agent.decide();
+
+        let tool_calls = agent.drain_tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].status, ToolCallStatus::ParseError);
+        assert!(tool_calls[0]
+            .error_message
+            .as_deref()
+            .expect("parse error")
+            .contains("Invalid format"));
+    }
+
+    #[test]
+    fn budget_rejections_emit_budget_exceeded_tool_trace_without_request() {
+        let mut agent = LlmAgent::with_components(
+            LlmAgentConfig::default(),
+            Arc::new(MockProvider::idle()),
+            Arc::new(CompactTemplate::default()),
+            Arc::new(FallbackParser::default_chain()),
+            MemoryConfig::default(),
+            TokenBudget::new(1, 1),
+        );
+
+        agent.budget.record_usage(&TokenUsage {
+            prompt_tokens: 1,
+            completion_tokens: 0,
+            total_tokens: 1,
+        });
+        agent.spawn_llm_request(&make_obs(7, false));
+
+        assert!(!agent.request_in_flight);
+        let tool_calls = agent.drain_tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].status, ToolCallStatus::BudgetExceeded);
     }
 }

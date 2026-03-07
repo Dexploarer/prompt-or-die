@@ -511,5 +511,21 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `bun test`
   - `bun run typecheck`
 
-**Last updated**: Iteration 59
-**Current focus**: Iteration 60 embedded-agent tool/runtime instrumentation, replay/training export, and MMO operational telemetry on top of the new authority export path
+### Iteration 60 — Embedded Tool Contracts, Replay Preservation, and MMO Server Telemetry
+
+- [x] Added first-class embedded tool/runtime contracts to `pod-core`: `ToolDefinition`, `ToolCatalog`, `ToolPolicy`, `ToolBudget`, `ToolInvocationRequest`, and `ToolInvocationResult`, and registered them in the runtime type registry alongside the existing action/observation/telemetry contracts.
+- [x] Expanded `ToolCallStatus` with explicit `RateLimited`, `ParseError`, `ApiError`, and `BudgetExceeded` states so agent-side provider telemetry can distinguish transport, provider, parser, and budget failures.
+- [x] Added `Agent::drain_tool_calls()` to the shared agent trait and wired authoritative tick execution to record drained tool-call traces into `TickTelemetryFrame`, so the telemetry spine now carries real embedded-agent side effects instead of empty placeholders.
+- [x] Instrumented `LlmAgent` and `HybridAgent` provider calls with canonical `llm.complete` tool traces, including success usage units, parse failures, provider failures, and pre-flight budget rejections.
+- [x] Fixed `LlmAgent`'s ready-action memory recording path so completed observations are no longer dropped before they can be persisted to conversation memory.
+- [x] Extended replay artifacts so `DecisionTrace` preserves `tool_calls`, and added optional embedded `telemetry_windows` support on `ReplayFile` for authoritative telemetry bundling.
+- [x] Updated `DecisionLogger::to_replay_file()` so tool-call telemetry survives conversion into replay/debug artifacts.
+- [x] Upgraded `apps/pod-server` runtime stats to consume the shared telemetry spine, tracking rejection rate, tool-call error/latency metrics, average agent trajectory distance, tick-budget overruns, and MMO-loop capture/summon/gather/loot counts.
+- [x] Added deterministic coverage for tool-contract serialization, agent tool-trace draining into authoritative tick telemetry, provider error-status mapping, LLM/hybrid tool-call instrumentation, replay preservation of tool calls, replay telemetry embedding, and server telemetry rollups.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-agents --lib`
+  - `cargo test -p pod-server --bin pod-server`
+
+**Last updated**: Iteration 60
+**Current focus**: Iteration 61 training/export helpers plus flagship MMO acceptance harness on top of the authoritative telemetry and replay spine

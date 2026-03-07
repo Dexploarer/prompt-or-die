@@ -598,11 +598,16 @@ impl DecisionLogger {
                 prompt_sent,
                 raw_response,
                 actions_taken: entry.actions_produced.clone(),
+                tool_calls: entry.tool_calls.clone(),
                 latency_ms,
             });
         }
 
-        ReplayFile { header, traces }
+        ReplayFile {
+            header,
+            traces,
+            telemetry_windows: vec![],
+        }
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────
@@ -843,6 +848,7 @@ mod tests {
         assert_eq!(replay.header.world_seed, 99);
         assert_eq!(replay.header.tick_count, 2); // ticks 0 and 1 → count = max+1 = 2
         assert_eq!(replay.header.agent_count, 2);
+        assert!(replay.telemetry_windows.is_empty());
 
         // Tick 0 should have two traces
         assert_eq!(replay.traces[0].len(), 2);
@@ -980,5 +986,32 @@ mod tests {
         assert_eq!(stored[0].tool_calls.len(), 1);
         assert_eq!(stored[0].tool_calls[0].tool_name, "pathfind");
         assert_eq!(stored[0].tool_calls[0].provider, "openai");
+    }
+
+    #[test]
+    fn replay_conversion_preserves_tool_calls() {
+        let mut logger = DecisionLogger::new();
+        let agent_id = AgentId::new();
+        let mut entry = make_llm_entry(2, agent_id);
+        entry.tool_calls.push(AgentToolCallTrace::new(
+            2,
+            "llm.complete",
+            "mock",
+            pod_core::ToolCallStatus::ParseError,
+            18,
+            120,
+            0,
+            Some("bad json".into()),
+        ));
+
+        logger.log(entry);
+
+        let replay = logger.to_replay_file("tool-calls", 5);
+        assert_eq!(replay.traces[2].len(), 1);
+        assert_eq!(replay.traces[2][0].tool_calls.len(), 1);
+        assert_eq!(
+            replay.traces[2][0].tool_calls[0].status,
+            pod_core::ToolCallStatus::ParseError
+        );
     }
 }

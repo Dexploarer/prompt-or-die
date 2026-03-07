@@ -2,6 +2,7 @@ use crate::action::{Action, AgentConstraints};
 use crate::contract::AgentRuntimeProfile;
 use crate::id::{AgentId, EntityId};
 use crate::observation::Observation;
+use crate::telemetry::AgentToolCallTrace;
 use serde::{Deserialize, Serialize};
 
 /// The type of agent — used for logging/analytics only.
@@ -56,6 +57,12 @@ pub trait Agent: Send {
 
     /// Mutable access to constraints (for status effects, etc.)
     fn constraints_mut(&mut self) -> &mut AgentConstraints;
+
+    /// Drain any non-gameplay tool/runtime side effects produced while deciding.
+    /// Defaults to empty so non-tool-using agents do not need to implement it.
+    fn drain_tool_calls(&mut self) -> Vec<AgentToolCallTrace> {
+        Vec::new()
+    }
 
     /// Called when the agent joins the game
     fn on_join(&mut self) {}

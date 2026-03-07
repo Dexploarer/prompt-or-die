@@ -87,6 +87,11 @@ pub fn execute_tick(
         telemetry_indices.insert(slot.agent.id(), telemetry_index);
         slot.agent.observe(obs);
         let decisions = slot.agent.decide();
+        if let Some(index) = telemetry_indices.get(&slot.agent.id()).copied() {
+            for trace in slot.agent.drain_tool_calls() {
+                telemetry_frames[index].record_tool_call(trace);
+            }
+        }
         for action in decisions {
             if let Some(index) = telemetry_indices.get(&slot.agent.id()).copied() {
                 telemetry_frames[index].record_action(
@@ -1550,6 +1555,7 @@ mod tests {
     use crate::action::AgentConstraints;
     use crate::agent::{Agent, AgentType};
     use crate::id::{AgentId, EntityId};
+    use crate::telemetry::{AgentToolCallTrace, ToolCallStatus};
     use std::sync::{Arc, Mutex};
 
     struct RecordingAgent {
@@ -1600,6 +1606,50 @@ mod tests {
 
         fn constraints_mut(&mut self) -> &mut AgentConstraints {
             &mut self.constraints
+        }
+    }
+
+    struct ToolTracingAgent {
+        id: AgentId,
+        constraints: AgentConstraints,
+        tool_calls: Vec<AgentToolCallTrace>,
+    }
+
+    impl ToolTracingAgent {
+        fn new(tool_calls: Vec<AgentToolCallTrace>) -> Self {
+            Self {
+                id: AgentId::new(),
+                constraints: AgentConstraints::default(),
+                tool_calls,
+            }
+        }
+    }
+
+    impl Agent for ToolTracingAgent {
+        fn id(&self) -> AgentId {
+            self.id
+        }
+
+        fn agent_type(&self) -> AgentType {
+            AgentType::LlmAgent
+        }
+
+        fn observe(&mut self, _observation: Observation) {}
+
+        fn decide(&mut self) -> Vec<Action> {
+            vec![Action::Idle]
+        }
+
+        fn constraints(&self) -> &AgentConstraints {
+            &self.constraints
+        }
+
+        fn constraints_mut(&mut self) -> &mut AgentConstraints {
+            &mut self.constraints
+        }
+
+        fn drain_tool_calls(&mut self) -> Vec<AgentToolCallTrace> {
+            std::mem::take(&mut self.tool_calls)
         }
     }
 
@@ -2121,6 +2171,52 @@ mod tests {
             .as_deref()
             .expect("rejection reason")
             .contains("magnitude too large"));
+    }
+
+    #[test]
+    fn tick_result_captures_tool_call_traces_from_agents() {
+        let mut ecs = hecs::World::new();
+        let actor_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+
+        let tool_trace = AgentToolCallTrace::new(
+            8,
+            "llm.complete",
+            "mock",
+            ToolCallStatus::ParseError,
+            24,
+            128,
+            64,
+            Some("invalid response".into()),
+        );
+        let mut slot = AgentSlot::new(Box::new(ToolTracingAgent::new(vec![tool_trace])));
+        slot.entity_id = Some(actor_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            8,
+            vec![],
+            &mut next_entity_id,
+        );
+
+        assert_eq!(result.telemetry.agents.len(), 1);
+        let telemetry = &result.telemetry.agents[0];
+        assert_eq!(telemetry.tool_calls.len(), 1);
+        assert_eq!(telemetry.tool_calls[0].status, ToolCallStatus::ParseError);
+        assert_eq!(telemetry.tool_calls[0].request_units, 128);
+        assert_eq!(
+            telemetry.tool_calls[0].error_message.as_deref(),
+            Some("invalid response")
+        );
     }
 
     #[test]

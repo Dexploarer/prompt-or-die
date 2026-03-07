@@ -12,9 +12,10 @@
 //! - Debugging of specific agent behaviors
 //! - Sharing exact replay scenarios across teams
 
+use crate::action::Action;
 use crate::id::AgentId;
 use crate::observation::Observation;
-use crate::action::Action;
+use crate::telemetry::{AgentToolCallTrace, TickTelemetryFrame};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -34,6 +35,9 @@ pub struct DecisionTrace {
     pub raw_response: String,
     /// The actions the AI decided on (parsed from raw_response)
     pub actions_taken: Vec<Action>,
+    /// Tool/provider side effects associated with the decision.
+    #[serde(default)]
+    pub tool_calls: Vec<AgentToolCallTrace>,
     /// How long the API took to respond (ms)
     pub latency_ms: u32,
 }
@@ -45,6 +49,9 @@ pub struct ReplayFile {
     pub header: ReplayHeader,
     /// Traces indexed by [tick][agent_id]
     pub traces: Vec<Vec<DecisionTrace>>,
+    /// Optional authoritative telemetry windows embedded alongside decision traces.
+    #[serde(default)]
+    pub telemetry_windows: Vec<TickTelemetryFrame>,
 }
 
 /// Metadata about a replay recording
@@ -89,6 +96,7 @@ impl ReplayRecorder {
         prompt_sent: String,
         raw_response: String,
         actions_taken: Vec<Action>,
+        tool_calls: Vec<AgentToolCallTrace>,
         latency_ms: u32,
     ) {
         let observation_hash = hash_observation(observation);
@@ -100,6 +108,7 @@ impl ReplayRecorder {
             prompt_sent,
             raw_response,
             actions_taken,
+            tool_calls,
             latency_ms,
         };
 
@@ -117,6 +126,15 @@ impl ReplayRecorder {
 
     /// Finalize into a ReplayFile
     pub fn finalize(self, header: ReplayHeader) -> ReplayFile {
+        self.finalize_with_telemetry(header, Vec::new())
+    }
+
+    /// Finalize into a `ReplayFile` with embedded authoritative telemetry windows.
+    pub fn finalize_with_telemetry(
+        self,
+        header: ReplayHeader,
+        telemetry_windows: Vec<TickTelemetryFrame>,
+    ) -> ReplayFile {
         // Group traces by tick
         let mut traces_by_tick: HashMap<u64, Vec<DecisionTrace>> = HashMap::new();
         for trace in self.traces {
@@ -135,7 +153,11 @@ impl ReplayRecorder {
             }
         }
 
-        ReplayFile { header, traces }
+        ReplayFile {
+            header,
+            traces,
+            telemetry_windows,
+        }
     }
 }
 
@@ -168,10 +190,7 @@ impl ReplayPlayer {
     /// Returns None if this agent has no recorded decision for this tick
     pub fn get_next_decision(&mut self, agent_id: AgentId) -> Option<DecisionTrace> {
         let traces = self.file.traces.get(self.current_tick as usize)?;
-        traces
-            .iter()
-            .find(|t| t.agent_id == agent_id)
-            .cloned()
+        traces.iter().find(|t| t.agent_id == agent_id).cloned()
     }
 
     /// Advance to the next tick
@@ -208,7 +227,11 @@ fn hash_observation(obs: &Observation) -> u64 {
     obs.tick.hash(&mut hasher);
     obs.self_state.position.x.to_bits().hash(&mut hasher);
     obs.self_state.position.y.to_bits().hash(&mut hasher);
-    obs.self_state.health.unwrap_or(0.0).to_bits().hash(&mut hasher);
+    obs.self_state
+        .health
+        .unwrap_or(0.0)
+        .to_bits()
+        .hash(&mut hasher);
     obs.visible_entities.len().hash(&mut hasher);
 
     // Hash entity IDs to catch world state changes
@@ -247,6 +270,7 @@ mod tests {
             "Move forward".to_string(),
             "Action: Move".to_string(),
             vec![Action::Idle],
+            Vec::new(),
             100,
         );
 
@@ -266,17 +290,25 @@ mod tests {
             notes: String::new(),
         };
 
-        let traces = vec![vec![DecisionTrace {
-            tick: 0,
-            agent_id: AgentId::new(),
-            observation_hash: 0,
-            prompt_sent: String::new(),
-            raw_response: String::new(),
-            actions_taken: vec![],
-            latency_ms: 0,
-        }]; 10];
+        let traces = vec![
+            vec![DecisionTrace {
+                tick: 0,
+                agent_id: AgentId::new(),
+                observation_hash: 0,
+                prompt_sent: String::new(),
+                raw_response: String::new(),
+                actions_taken: vec![],
+                tool_calls: vec![],
+                latency_ms: 0,
+            }];
+            10
+        ];
 
-        let file = ReplayFile { header, traces };
+        let file = ReplayFile {
+            header,
+            traces,
+            telemetry_windows: vec![],
+        };
         let mut player = ReplayPlayer::new(file);
 
         assert_eq!(player.current_tick(), 0);
@@ -284,5 +316,21 @@ mod tests {
 
         player.advance_tick();
         assert_eq!(player.current_tick(), 1);
+    }
+
+    #[test]
+    fn replay_recorder_can_embed_telemetry_windows() {
+        let recorder = ReplayRecorder::new();
+        let header = ReplayHeader {
+            name: "telemetry".into(),
+            timestamp: 0,
+            world_seed: 1,
+            tick_count: 1,
+            agent_count: 0,
+            notes: String::new(),
+        };
+        let file = recorder.finalize_with_telemetry(header, vec![TickTelemetryFrame::empty(0)]);
+        assert_eq!(file.telemetry_windows.len(), 1);
+        assert_eq!(file.telemetry_windows[0].tick, 0);
     }
 }

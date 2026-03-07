@@ -4,8 +4,12 @@
 //! All providers implement the blocking `LlmProvider` trait, called from
 //! the LlmAgent's decision thread.
 
+use pod_core::{AgentToolCallTrace, ToolCallStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::time::Duration;
+
+pub const LLM_COMPLETE_TOOL_NAME: &str = "llm.complete";
 
 // ============================================================
 // ERROR TYPES
@@ -44,6 +48,74 @@ impl fmt::Display for LlmError {
 }
 
 impl std::error::Error for LlmError {}
+
+pub fn tool_call_status_for_error(error: &LlmError) -> ToolCallStatus {
+    match error {
+        LlmError::Timeout => ToolCallStatus::TimedOut,
+        LlmError::RateLimited { .. } => ToolCallStatus::RateLimited,
+        LlmError::Parse(_) => ToolCallStatus::ParseError,
+        LlmError::Api { .. } => ToolCallStatus::ApiError,
+        LlmError::BudgetExceeded { .. } => ToolCallStatus::BudgetExceeded,
+        LlmError::Network(_) => ToolCallStatus::Failed,
+    }
+}
+
+fn latency_ms(duration: Duration) -> u32 {
+    duration.as_millis().min(u128::from(u32::MAX)) as u32
+}
+
+pub fn success_tool_call_trace(
+    tick: u64,
+    provider_name: &str,
+    elapsed: Duration,
+    usage: &TokenUsage,
+) -> AgentToolCallTrace {
+    AgentToolCallTrace::success(
+        tick,
+        LLM_COMPLETE_TOOL_NAME,
+        provider_name,
+        latency_ms(elapsed),
+        usage.prompt_tokens,
+        usage.completion_tokens,
+    )
+}
+
+pub fn failed_tool_call_trace(
+    tick: u64,
+    provider_name: &str,
+    elapsed: Duration,
+    error: &LlmError,
+) -> AgentToolCallTrace {
+    AgentToolCallTrace::new(
+        tick,
+        LLM_COMPLETE_TOOL_NAME,
+        provider_name,
+        tool_call_status_for_error(error),
+        latency_ms(elapsed),
+        0,
+        0,
+        Some(error.to_string()),
+    )
+}
+
+pub fn parse_failed_tool_call_trace(
+    tick: u64,
+    provider_name: &str,
+    elapsed: Duration,
+    usage: &TokenUsage,
+    error_message: impl Into<String>,
+) -> AgentToolCallTrace {
+    AgentToolCallTrace::new(
+        tick,
+        LLM_COMPLETE_TOOL_NAME,
+        provider_name,
+        ToolCallStatus::ParseError,
+        latency_ms(elapsed),
+        usage.prompt_tokens,
+        usage.completion_tokens,
+        Some(error_message.into()),
+    )
+}
 
 // ============================================================
 // REQUEST / RESPONSE TYPES
@@ -231,7 +303,9 @@ impl OpenAiProvider {
             });
         }
 
-        let resp: AnthropicResponse = response.json().map_err(|e| LlmError::Parse(e.to_string()))?;
+        let resp: AnthropicResponse = response
+            .json()
+            .map_err(|e| LlmError::Parse(e.to_string()))?;
 
         let content = resp
             .content
@@ -320,7 +394,9 @@ impl LlmProvider for OpenAiProvider {
             });
         }
 
-        let resp: ChatResponse = response.json().map_err(|e| LlmError::Parse(e.to_string()))?;
+        let resp: ChatResponse = response
+            .json()
+            .map_err(|e| LlmError::Parse(e.to_string()))?;
 
         let content = resp
             .choices
@@ -504,9 +580,8 @@ mod tests {
     #[test]
     fn test_mock_provider_queued() {
         let provider = MockProvider::idle();
-        provider.queue_response(
-            r#"{"actions": ["Attack"], "reasoning": "Enemy nearby"}"#.to_string(),
-        );
+        provider
+            .queue_response(r#"{"actions": ["Attack"], "reasoning": "Enemy nearby"}"#.to_string());
 
         let request = CompletionRequest {
             model: "test".to_string(),
@@ -559,5 +634,37 @@ mod tests {
             retry_after_ms: 5000,
         };
         assert!(format!("{}", err).contains("5000"));
+    }
+
+    #[test]
+    fn tool_call_status_mapping_is_specific() {
+        assert_eq!(
+            tool_call_status_for_error(&LlmError::Timeout),
+            ToolCallStatus::TimedOut
+        );
+        assert_eq!(
+            tool_call_status_for_error(&LlmError::RateLimited {
+                retry_after_ms: 100
+            }),
+            ToolCallStatus::RateLimited
+        );
+        assert_eq!(
+            tool_call_status_for_error(&LlmError::Parse("bad".into())),
+            ToolCallStatus::ParseError
+        );
+        assert_eq!(
+            tool_call_status_for_error(&LlmError::Api {
+                status: 500,
+                message: "boom".into(),
+            }),
+            ToolCallStatus::ApiError
+        );
+        assert_eq!(
+            tool_call_status_for_error(&LlmError::BudgetExceeded {
+                requested: 4,
+                remaining: 1,
+            }),
+            ToolCallStatus::BudgetExceeded
+        );
     }
 }
