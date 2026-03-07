@@ -4,6 +4,7 @@ use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
+use crate::component::EncounterState;
 use crate::contract::AgentRuntimeProfile;
 use crate::id::{AgentId, EntityId};
 
@@ -220,6 +221,7 @@ pub struct AgentTelemetryFrame {
     pub message_count: usize,
     pub available_action_count: usize,
     pub objective_count: usize,
+    pub encounter: Option<EncounterState>,
     pub trajectory: Option<AgentTrajectoryFrame>,
     pub action_trace: Vec<AgentActionTrace>,
     pub tool_calls: Vec<AgentToolCallTrace>,
@@ -237,6 +239,7 @@ impl AgentTelemetryFrame {
         message_count: usize,
         available_action_count: usize,
         objective_count: usize,
+        encounter: Option<EncounterState>,
         trajectory_start: Option<TrajectorySample>,
     ) -> Self {
         Self {
@@ -249,6 +252,7 @@ impl AgentTelemetryFrame {
             message_count,
             available_action_count,
             objective_count,
+            encounter,
             trajectory: trajectory_start.map(|start| AgentTrajectoryFrame::new(start, start)),
             action_trace: Vec::new(),
             tool_calls: Vec::new(),
@@ -408,6 +412,7 @@ mod tests {
             0,
             4,
             1,
+            None,
             Some(start),
         );
         first.update_trajectory_end(mid);
@@ -427,6 +432,7 @@ mod tests {
             1,
             3,
             1,
+            None,
             Some(mid),
         );
         second.update_trajectory_end(end);

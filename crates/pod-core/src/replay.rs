@@ -13,9 +13,12 @@
 //! - Sharing exact replay scenarios across teams
 
 use crate::action::Action;
+use crate::component::{EncounterKind, EncounterState};
 use crate::id::AgentId;
 use crate::observation::Observation;
-use crate::telemetry::{AgentToolCallTrace, TickTelemetryFrame};
+use crate::telemetry::{
+    ActionLifecycleStage, AgentToolCallTrace, TickTelemetryFrame, ToolCallStatus,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -52,6 +55,153 @@ pub struct ReplayFile {
     /// Optional authoritative telemetry windows embedded alongside decision traces.
     #[serde(default)]
     pub telemetry_windows: Vec<TickTelemetryFrame>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionOutcomeSummary {
+    pub submitted: usize,
+    pub executed: usize,
+    pub rejected: usize,
+    pub queued: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum EncounterTransition {
+    Joined {
+        encounter_id: u64,
+        kind: EncounterKind,
+    },
+    Left {
+        encounter_id: u64,
+        kind: EncounterKind,
+    },
+    CombatStateChanged {
+        encounter_id: u64,
+        in_combat: bool,
+    },
+    CaptureAvailabilityChanged {
+        encounter_id: u64,
+        capture_allowed: bool,
+    },
+    TargetChanged {
+        encounter_id: u64,
+        primary_target: Option<crate::id::EntityId>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReplayTrainingSample {
+    pub tick: u64,
+    pub agent_id: AgentId,
+    pub path_distance: f32,
+    pub action_outcomes: ActionOutcomeSummary,
+    pub encounter_transition: Option<EncounterTransition>,
+    pub tool_call_latency_ms: u32,
+    pub tool_call_error_count: usize,
+}
+
+impl ReplayFile {
+    pub fn training_samples(&self) -> Vec<ReplayTrainingSample> {
+        let mut samples = Vec::new();
+        let mut previous_encounters = HashMap::<AgentId, EncounterState>::new();
+
+        for window in &self.telemetry_windows {
+            for agent in &window.agents {
+                let mut action_outcomes = ActionOutcomeSummary::default();
+                for trace in &agent.action_trace {
+                    match trace.stage {
+                        ActionLifecycleStage::Submitted => action_outcomes.submitted += 1,
+                        ActionLifecycleStage::Executed => action_outcomes.executed += 1,
+                        ActionLifecycleStage::Rejected => action_outcomes.rejected += 1,
+                        ActionLifecycleStage::Queued => action_outcomes.queued += 1,
+                    }
+                }
+
+                let encounter_transition = classify_encounter_transition(
+                    previous_encounters.get(&agent.agent_id),
+                    agent.encounter.as_ref(),
+                );
+                if let Some(encounter) = &agent.encounter {
+                    previous_encounters.insert(agent.agent_id, encounter.clone());
+                } else {
+                    previous_encounters.remove(&agent.agent_id);
+                }
+
+                let tool_call_latency_ms = agent
+                    .tool_calls
+                    .iter()
+                    .map(|trace| trace.latency_ms)
+                    .sum::<u32>();
+                let tool_call_error_count = agent
+                    .tool_calls
+                    .iter()
+                    .filter(|trace| {
+                        !matches!(
+                            trace.status,
+                            ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                        )
+                    })
+                    .count();
+
+                samples.push(ReplayTrainingSample {
+                    tick: window.tick,
+                    agent_id: agent.agent_id,
+                    path_distance: agent
+                        .trajectory
+                        .as_ref()
+                        .map(|trajectory| trajectory.distance_travelled)
+                        .unwrap_or_default(),
+                    action_outcomes,
+                    encounter_transition,
+                    tool_call_latency_ms,
+                    tool_call_error_count,
+                });
+            }
+        }
+
+        samples
+    }
+}
+
+fn classify_encounter_transition(
+    previous: Option<&EncounterState>,
+    current: Option<&EncounterState>,
+) -> Option<EncounterTransition> {
+    match (previous, current) {
+        (None, Some(current)) => Some(EncounterTransition::Joined {
+            encounter_id: current.encounter_id,
+            kind: current.kind,
+        }),
+        (Some(previous), None) => Some(EncounterTransition::Left {
+            encounter_id: previous.encounter_id,
+            kind: previous.kind,
+        }),
+        (Some(previous), Some(current)) if previous.encounter_id != current.encounter_id => {
+            Some(EncounterTransition::Joined {
+                encounter_id: current.encounter_id,
+                kind: current.kind,
+            })
+        }
+        (Some(previous), Some(current)) if previous.in_combat != current.in_combat => {
+            Some(EncounterTransition::CombatStateChanged {
+                encounter_id: current.encounter_id,
+                in_combat: current.in_combat,
+            })
+        }
+        (Some(previous), Some(current)) if previous.capture_allowed != current.capture_allowed => {
+            Some(EncounterTransition::CaptureAvailabilityChanged {
+                encounter_id: current.encounter_id,
+                capture_allowed: current.capture_allowed,
+            })
+        }
+        (Some(previous), Some(current)) if previous.primary_target != current.primary_target => {
+            Some(EncounterTransition::TargetChanged {
+                encounter_id: current.encounter_id,
+                primary_target: current.primary_target,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Metadata about a replay recording
@@ -246,6 +396,11 @@ fn hash_observation(obs: &Observation) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract::{AgentCapabilities, AgentRole, AgentRuntimeProfile};
+    use crate::telemetry::{
+        ActionLifecycleStage, ActionSource, AgentTelemetryFrame, TrajectorySample,
+    };
+    use glam::Vec2;
 
     #[test]
     fn test_replay_recorder() {
@@ -332,5 +487,152 @@ mod tests {
         let file = recorder.finalize_with_telemetry(header, vec![TickTelemetryFrame::empty(0)]);
         assert_eq!(file.telemetry_windows.len(), 1);
         assert_eq!(file.telemetry_windows[0].tick, 0);
+    }
+
+    #[test]
+    fn replay_training_samples_capture_path_action_and_encounter_transitions() {
+        let agent_id = AgentId::new();
+        let profile = AgentRuntimeProfile {
+            role: AgentRole::Player,
+            agent_type: crate::agent::AgentType::LlmAgent,
+            capabilities: AgentCapabilities::player_default(),
+        };
+
+        let mut first = AgentTelemetryFrame::new(
+            0,
+            agent_id,
+            None,
+            profile,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Some(EncounterState {
+                encounter_id: 7,
+                kind: EncounterKind::WildCreature,
+                threat_level: 0.5,
+                primary_target: None,
+                active_turn_owner: None,
+                capture_allowed: false,
+                in_combat: true,
+            }),
+            Some(TrajectorySample::new(0, 0.0, Vec2::ZERO, Vec2::ZERO, 0.0)),
+        );
+        first.update_trajectory_end(TrajectorySample::new(
+            0,
+            1.0 / 60.0,
+            Vec2::new(3.0, 4.0),
+            Vec2::ZERO,
+            0.0,
+        ));
+        first.record_action(
+            ActionSource::AgentDecision,
+            ActionLifecycleStage::Submitted,
+            Action::Attack,
+            None,
+        );
+        first.record_action(
+            ActionSource::AgentDecision,
+            ActionLifecycleStage::Executed,
+            Action::Attack,
+            None,
+        );
+        first.record_tool_call(AgentToolCallTrace::new(
+            0,
+            "llm.complete",
+            "mock",
+            ToolCallStatus::ParseError,
+            12,
+            100,
+            0,
+            Some("bad json".into()),
+        ));
+
+        let mut second = AgentTelemetryFrame::new(
+            1,
+            agent_id,
+            None,
+            profile,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Some(EncounterState {
+                encounter_id: 7,
+                kind: EncounterKind::WildCreature,
+                threat_level: 0.2,
+                primary_target: None,
+                active_turn_owner: None,
+                capture_allowed: true,
+                in_combat: false,
+            }),
+            Some(TrajectorySample::new(
+                1,
+                1.0 / 60.0,
+                Vec2::new(3.0, 4.0),
+                Vec2::ZERO,
+                0.0,
+            )),
+        );
+        second.update_trajectory_end(TrajectorySample::new(
+            1,
+            2.0 / 60.0,
+            Vec2::new(4.0, 4.0),
+            Vec2::ZERO,
+            0.0,
+        ));
+        second.record_action(
+            ActionSource::AgentDecision,
+            ActionLifecycleStage::Rejected,
+            Action::CaptureCreature {
+                target: crate::id::EntityId(9),
+                tool_slot: Some(0),
+            },
+            Some("too healthy".into()),
+        );
+
+        let file = ReplayFile {
+            header: ReplayHeader {
+                name: "training".into(),
+                timestamp: 0,
+                world_seed: 1,
+                tick_count: 2,
+                agent_count: 1,
+                notes: String::new(),
+            },
+            traces: vec![],
+            telemetry_windows: vec![
+                TickTelemetryFrame {
+                    tick: 0,
+                    agents: vec![first],
+                },
+                TickTelemetryFrame {
+                    tick: 1,
+                    agents: vec![second],
+                },
+            ],
+        };
+
+        let samples = file.training_samples();
+        assert_eq!(samples.len(), 2);
+        assert!((samples[0].path_distance - 5.0).abs() < f32::EPSILON);
+        assert_eq!(samples[0].action_outcomes.executed, 1);
+        assert_eq!(samples[0].tool_call_error_count, 1);
+        assert!(matches!(
+            samples[0].encounter_transition,
+            Some(EncounterTransition::Joined {
+                encounter_id: 7,
+                kind: EncounterKind::WildCreature
+            })
+        ));
+        assert!(matches!(
+            samples[1].encounter_transition,
+            Some(EncounterTransition::CombatStateChanged {
+                encounter_id: 7,
+                in_combat: false
+            })
+        ));
     }
 }

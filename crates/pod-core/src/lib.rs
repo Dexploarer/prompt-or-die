@@ -70,7 +70,10 @@ pub use observation_filter::{
     FilteredObservation, ObservationFilter, ObservationHistory, SalienceScore,
 };
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
-pub use replay::{DecisionTrace, ReplayFile, ReplayHeader, ReplayPlayer, ReplayRecorder};
+pub use replay::{
+    ActionOutcomeSummary, DecisionTrace, EncounterTransition, ReplayFile, ReplayHeader,
+    ReplayPlayer, ReplayRecorder, ReplayTrainingSample,
+};
 pub use telemetry::{
     ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentToolCallTrace,
     AgentTrajectoryFrame, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,

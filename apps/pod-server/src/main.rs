@@ -403,6 +403,7 @@ mod stats {
                 2,
                 4,
                 1,
+                None,
                 Some(TrajectorySample::new(7, 0.0, Vec2::ZERO, Vec2::ZERO, 0.0)),
             );
             agent.update_trajectory_end(TrajectorySample::new(

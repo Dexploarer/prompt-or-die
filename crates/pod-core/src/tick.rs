@@ -82,6 +82,7 @@ pub fn execute_tick(
             obs.messages.len(),
             obs.available_actions.len(),
             obs.objectives.len(),
+            obs.self_state.encounter.clone(),
             trajectory_start,
         ));
         telemetry_indices.insert(slot.agent.id(), telemetry_index);

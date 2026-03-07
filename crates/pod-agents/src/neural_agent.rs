@@ -183,6 +183,18 @@ impl NeuralAgent {
         &self.experience_buffer
     }
 
+    /// Extract authoritative training samples for a specific agent from a replay.
+    pub fn training_samples_from_replay(
+        replay: &pod_core::ReplayFile,
+        agent_id: AgentId,
+    ) -> Vec<pod_core::ReplayTrainingSample> {
+        replay
+            .training_samples()
+            .into_iter()
+            .filter(|sample| sample.agent_id == agent_id)
+            .collect()
+    }
+
     /// Record experience transition (for training)
     pub fn record_experience(
         &mut self,
@@ -403,6 +415,7 @@ impl Agent for NeuralAgent {
 mod tests {
     use super::*;
     use pod_core::component::Team;
+    use pod_core::contract::{AgentCapabilities, AgentRole, AgentRuntimeProfile};
     use pod_core::observation::{SelfState, VisibleEntity};
 
     fn make_test_observation() -> Observation {
@@ -503,5 +516,52 @@ mod tests {
         // Should wrap around
         let wrapped = index_to_action(100 % ACTION_COUNT);
         assert_eq!(format!("{:?}", action_large), format!("{:?}", wrapped));
+    }
+
+    #[test]
+    fn training_samples_from_replay_filter_by_agent() {
+        let agent_id = AgentId::new();
+        let other_agent = AgentId::new();
+        let profile = AgentRuntimeProfile {
+            role: AgentRole::Player,
+            agent_type: AgentType::NeuralAgent,
+            capabilities: AgentCapabilities::player_default(),
+        };
+
+        let first = pod_core::AgentTelemetryFrame::new(
+            0, agent_id, None, profile, 0, 0, 0, 0, 0, None, None,
+        );
+        let second = pod_core::AgentTelemetryFrame::new(
+            0,
+            other_agent,
+            None,
+            profile,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+        );
+        let replay = pod_core::ReplayFile {
+            header: pod_core::ReplayHeader {
+                name: "training".into(),
+                timestamp: 0,
+                world_seed: 1,
+                tick_count: 1,
+                agent_count: 2,
+                notes: String::new(),
+            },
+            traces: vec![],
+            telemetry_windows: vec![pod_core::TickTelemetryFrame {
+                tick: 0,
+                agents: vec![first, second],
+            }],
+        };
+
+        let samples = NeuralAgent::training_samples_from_replay(&replay, agent_id);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].agent_id, agent_id);
     }
 }
