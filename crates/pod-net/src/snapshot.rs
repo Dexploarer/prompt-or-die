@@ -78,6 +78,52 @@ pub struct ReconciliationReport {
     pub used_hard_resync: bool,
 }
 
+/// Magnitude of divergence between two snapshots for a specific entity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityDrift {
+    pub entity_id: u64,
+    pub position_error: f32,
+    pub velocity_error: f32,
+    pub rotation_error: f32,
+    pub health_error: Option<f32>,
+    pub max_health_error: Option<f32>,
+    pub movement_speed_error: Option<f32>,
+}
+
+/// Preview of the local rollback/replay path that rebuilds prediction from an
+/// authoritative rewind point plus unacknowledged input history.
+#[derive(Debug, Clone)]
+pub struct RollbackPreview {
+    pub requested_rewind_tick: u64,
+    pub baseline_tick: u64,
+    pub replayed_batches: usize,
+    pub replayed_action_count: usize,
+    pub first_replayed_tick: Option<u64>,
+    pub last_replayed_tick: Option<u64>,
+    pub authoritative_digest: u64,
+    pub predicted_digest: u64,
+    pub predicted_snapshot: WorldSnapshot,
+    pub controlled_entity_drift: Option<EntityDrift>,
+}
+
+/// Presentation/catch-up state useful for debugging prediction recovery.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatchUpDiagnostics {
+    pub authoritative_tick: Option<u64>,
+    pub authoritative_digest: Option<u64>,
+    pub predicted_tick: Option<u64>,
+    pub predicted_digest: Option<u64>,
+    pub presentation_tick: Option<f32>,
+    pub desired_presentation_tick: Option<f32>,
+    pub presentation_drift_ticks: Option<f32>,
+    pub history_snapshots: usize,
+    pub oldest_authoritative_tick: Option<u64>,
+    pub latest_authoritative_tick: Option<u64>,
+    pub pending_action_batches: usize,
+    pub replayed_action_count: usize,
+    pub controlled_entity_drift: Option<EntityDrift>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotUpdateError {
     MissingBaseline {
@@ -167,6 +213,26 @@ impl SnapshotInterpolationBuffer {
 
     pub fn latest_tick(&self) -> Option<u64> {
         self.snapshots.back().map(|snapshot| snapshot.tick)
+    }
+
+    pub fn oldest_tick(&self) -> Option<u64> {
+        self.snapshots.front().map(|snapshot| snapshot.tick)
+    }
+
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    /// Rewinds to the newest authoritative snapshot at or before the requested
+    /// tick. If the requested tick predates local history, the oldest retained
+    /// snapshot is returned instead.
+    pub fn rewind_to(&self, tick: u64) -> Option<WorldSnapshot> {
+        self.snapshots
+            .iter()
+            .rev()
+            .find(|snapshot| snapshot.tick <= tick)
+            .cloned()
+            .or_else(|| self.snapshots.front().cloned())
     }
 
     pub fn push(&mut self, snapshot: WorldSnapshot) {
@@ -283,10 +349,18 @@ impl RenderClock {
         self.render_tick
     }
 
+    pub fn desired_tick(&self, latest_authoritative_tick: u64) -> f32 {
+        latest_authoritative_tick as f32 - self.config.interpolation_delay_ticks.max(0.0)
+    }
+
+    pub fn drift_from_desired(&self, latest_authoritative_tick: u64) -> Option<f32> {
+        self.render_tick
+            .map(|render_tick| self.desired_tick(latest_authoritative_tick) - render_tick)
+    }
+
     pub fn advance(&mut self, latest_authoritative_tick: u64, frame_delta_seconds: f32) -> f32 {
         let frame_delta_seconds = frame_delta_seconds.max(0.0);
-        let desired_tick =
-            latest_authoritative_tick as f32 - self.config.interpolation_delay_ticks.max(0.0);
+        let desired_tick = self.desired_tick(latest_authoritative_tick);
         let mut render_tick = self.render_tick.unwrap_or(desired_tick);
         let drift = desired_tick - render_tick;
 
@@ -562,6 +636,82 @@ pub fn compose_presentation_snapshot(
     sampled
 }
 
+/// Build a rollback preview by rewinding authoritative history to a requested
+/// tick and replaying every locally predicted batch after that point.
+pub fn build_rollback_preview(
+    authoritative_history: &SnapshotInterpolationBuffer,
+    rewind_tick: u64,
+    controlled_entity: Option<u64>,
+    prediction_history: &[PredictedActionBatch],
+) -> Option<RollbackPreview> {
+    let baseline = authoritative_history.rewind_to(rewind_tick)?;
+    let replay_batches = prediction_history
+        .iter()
+        .filter(|batch| batch.tick > baseline.tick)
+        .cloned()
+        .collect::<Vec<_>>();
+    let predicted_snapshot =
+        baseline.replay_predicted_actions(controlled_entity, replay_batches.as_slice());
+
+    Some(RollbackPreview {
+        requested_rewind_tick: rewind_tick,
+        baseline_tick: baseline.tick,
+        replayed_batches: replay_batches.len(),
+        replayed_action_count: replay_batches.iter().map(|batch| batch.actions.len()).sum(),
+        first_replayed_tick: replay_batches.first().map(|batch| batch.tick),
+        last_replayed_tick: replay_batches.last().map(|batch| batch.tick),
+        authoritative_digest: baseline.digest(),
+        predicted_digest: predicted_snapshot.digest(),
+        controlled_entity_drift: controlled_entity.and_then(|entity_id| {
+            entity_drift_between_snapshots(&baseline, &predicted_snapshot, entity_id)
+        }),
+        predicted_snapshot,
+    })
+}
+
+/// Build a client-facing summary of prediction, presentation, and catch-up
+/// state from the currently retained authoritative history.
+pub fn build_catch_up_diagnostics(
+    authoritative_history: &SnapshotInterpolationBuffer,
+    authoritative_snapshot: Option<&WorldSnapshot>,
+    predicted_snapshot: Option<&WorldSnapshot>,
+    controlled_entity: Option<u64>,
+    prediction_history: &[PredictedActionBatch],
+    render_clock: &RenderClock,
+) -> CatchUpDiagnostics {
+    let latest_authoritative_tick = authoritative_history
+        .latest_tick()
+        .or_else(|| authoritative_snapshot.map(|snapshot| snapshot.tick));
+    let presentation_tick = render_clock.current_tick();
+    let desired_presentation_tick =
+        latest_authoritative_tick.map(|tick| render_clock.desired_tick(tick));
+    let presentation_drift_ticks =
+        latest_authoritative_tick.and_then(|tick| render_clock.drift_from_desired(tick));
+
+    CatchUpDiagnostics {
+        authoritative_tick: authoritative_snapshot
+            .map(|snapshot| snapshot.tick)
+            .or(latest_authoritative_tick),
+        authoritative_digest: authoritative_snapshot.map(WorldSnapshot::digest),
+        predicted_tick: predicted_snapshot.map(|snapshot| snapshot.tick),
+        predicted_digest: predicted_snapshot.map(WorldSnapshot::digest),
+        presentation_tick,
+        desired_presentation_tick,
+        presentation_drift_ticks,
+        history_snapshots: authoritative_history.snapshot_count(),
+        oldest_authoritative_tick: authoritative_history.oldest_tick(),
+        latest_authoritative_tick,
+        pending_action_batches: prediction_history.len(),
+        replayed_action_count: prediction_history
+            .iter()
+            .map(|batch| batch.actions.len())
+            .sum(),
+        controlled_entity_drift: controlled_entity.and_then(|entity_id| {
+            entity_drift_between_snapshots(authoritative_snapshot?, predicted_snapshot?, entity_id)
+        }),
+    }
+}
+
 fn interpolate_snapshots(
     lower: &WorldSnapshot,
     upper: &WorldSnapshot,
@@ -638,6 +788,47 @@ fn lerp_option_f32(lower: Option<f32>, upper: Option<f32>, factor: f32) -> Optio
         (None, Some(_)) => None,
         (None, None) => None,
     }
+}
+
+fn entity_drift_between_snapshots(
+    authoritative: &WorldSnapshot,
+    predicted: &WorldSnapshot,
+    entity_id: u64,
+) -> Option<EntityDrift> {
+    let authoritative_entity = authoritative
+        .entities
+        .iter()
+        .find(|entity| entity.id == entity_id)?;
+    let predicted_entity = predicted
+        .entities
+        .iter()
+        .find(|entity| entity.id == entity_id)?;
+
+    Some(EntityDrift {
+        entity_id,
+        position_error: authoritative_entity
+            .position
+            .distance(predicted_entity.position),
+        velocity_error: authoritative_entity
+            .velocity
+            .distance(predicted_entity.velocity),
+        rotation_error: (authoritative_entity.rotation - predicted_entity.rotation).abs(),
+        health_error: match (authoritative_entity.health, predicted_entity.health) {
+            (Some(authoritative), Some(predicted)) => Some((authoritative - predicted).abs()),
+            _ => None,
+        },
+        max_health_error: match (authoritative_entity.max_health, predicted_entity.max_health) {
+            (Some(authoritative), Some(predicted)) => Some((authoritative - predicted).abs()),
+            _ => None,
+        },
+        movement_speed_error: match (
+            authoritative_entity.movement_speed,
+            predicted_entity.movement_speed,
+        ) {
+            (Some(authoritative), Some(predicted)) => Some((authoritative - predicted).abs()),
+            _ => None,
+        },
+    })
 }
 
 fn apply_predicted_action(entity: &mut EntitySnapshot, action: &Action) {
@@ -1113,6 +1304,176 @@ mod tests {
 
         let second = clock.advance(40, 0.0);
         assert!((second - 38.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_interpolation_buffer_rewind_returns_latest_snapshot_before_tick() {
+        let mut buffer = SnapshotInterpolationBuffer::default();
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![],
+        });
+        buffer.push(WorldSnapshot {
+            tick: 15,
+            entities: vec![],
+        });
+        buffer.push(WorldSnapshot {
+            tick: 20,
+            entities: vec![],
+        });
+
+        assert_eq!(buffer.rewind_to(16).unwrap().tick, 15);
+        assert_eq!(buffer.rewind_to(8).unwrap().tick, 10);
+    }
+
+    #[test]
+    fn test_build_rollback_preview_replays_batches_after_rewind_tick() {
+        let mut buffer = SnapshotInterpolationBuffer::default();
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 7,
+                position: Vec2::ZERO,
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        });
+        buffer.push(WorldSnapshot {
+            tick: 12,
+            entities: vec![EntitySnapshot {
+                id: 7,
+                position: Vec2::new(2.0, 0.0),
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        });
+
+        let preview = build_rollback_preview(
+            &buffer,
+            11,
+            Some(7),
+            &[
+                PredictedActionBatch {
+                    tick: 11,
+                    actions: vec![Action::Move { direction: Vec2::X }],
+                },
+                PredictedActionBatch {
+                    tick: 12,
+                    actions: vec![Action::Stop],
+                },
+                PredictedActionBatch {
+                    tick: 13,
+                    actions: vec![Action::Move { direction: Vec2::Y }],
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(preview.requested_rewind_tick, 11);
+        assert_eq!(preview.baseline_tick, 10);
+        assert_eq!(preview.replayed_batches, 3);
+        assert_eq!(preview.replayed_action_count, 3);
+        assert_eq!(preview.first_replayed_tick, Some(11));
+        assert_eq!(preview.last_replayed_tick, Some(13));
+        assert_eq!(preview.predicted_snapshot.tick, 13);
+        let controlled = preview
+            .predicted_snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == 7)
+            .unwrap();
+        assert!((controlled.position.x - 2.0).abs() < 0.001);
+        assert!((controlled.position.y - 2.0).abs() < 0.001);
+        assert_eq!(
+            preview
+                .controlled_entity_drift
+                .as_ref()
+                .map(|drift| drift.entity_id),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn test_build_catch_up_diagnostics_reports_drift_and_history_window() {
+        let authoritative = WorldSnapshot {
+            tick: 12,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(6.0, 0.0),
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: Some(10.0),
+                max_health: Some(10.0),
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        };
+        let predicted = WorldSnapshot {
+            tick: 13,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(8.0, 0.0),
+                velocity: Vec2::new(120.0, 0.0),
+                rotation: 0.5,
+                health: Some(10.0),
+                max_health: Some(10.0),
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        };
+        let mut buffer = SnapshotInterpolationBuffer::default();
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: authoritative.entities.clone(),
+        });
+        buffer.push(WorldSnapshot {
+            tick: 11,
+            entities: authoritative.entities.clone(),
+        });
+        buffer.push(authoritative.clone());
+
+        let mut clock = RenderClock::default();
+        let presentation_tick = clock.advance(12, 1.0 / 60.0);
+        assert!((presentation_tick - 11.0).abs() < 0.001);
+
+        let diagnostics = build_catch_up_diagnostics(
+            &buffer,
+            Some(&authoritative),
+            Some(&predicted),
+            Some(1),
+            &[PredictedActionBatch {
+                tick: 13,
+                actions: vec![Action::Move { direction: Vec2::X }],
+            }],
+            &clock,
+        );
+
+        assert_eq!(diagnostics.authoritative_tick, Some(12));
+        assert_eq!(diagnostics.predicted_tick, Some(13));
+        assert_eq!(diagnostics.history_snapshots, 3);
+        assert_eq!(diagnostics.oldest_authoritative_tick, Some(10));
+        assert_eq!(diagnostics.latest_authoritative_tick, Some(12));
+        assert_eq!(diagnostics.pending_action_batches, 1);
+        assert_eq!(diagnostics.replayed_action_count, 1);
+        assert_eq!(diagnostics.presentation_tick, Some(11.0));
+        assert_eq!(diagnostics.desired_presentation_tick, Some(10.0));
+        assert_eq!(diagnostics.presentation_drift_ticks, Some(-1.0));
+        assert!(
+            diagnostics
+                .controlled_entity_drift
+                .as_ref()
+                .unwrap()
+                .position_error
+                > 1.9
+        );
     }
 
     #[test]

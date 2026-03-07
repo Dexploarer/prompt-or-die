@@ -59,7 +59,8 @@ use pod_stdb::types::{
 
 use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{
-    compose_presentation_snapshot, EntitySnapshot, InterpolatedSnapshot, RenderClock,
+    build_catch_up_diagnostics, build_rollback_preview, compose_presentation_snapshot,
+    CatchUpDiagnostics, EntitySnapshot, InterpolatedSnapshot, RenderClock, RollbackPreview,
     SnapshotInterpolationBuffer, StateDelta, WorldSnapshot,
 };
 
@@ -838,6 +839,39 @@ impl SpacetimeDBClient {
         self.render_clock.current_tick()
     }
 
+    /// Inspect the local rollback/replay path from a chosen retained tick.
+    ///
+    /// SpacetimeDB clients currently replay zero local prediction batches here;
+    /// this still exposes retained authoritative history for rewind tooling and
+    /// keeps the surface aligned with direct-connect clients.
+    pub fn rollback_preview(&self, rewind_tick: Option<u64>) -> Option<RollbackPreview> {
+        let rewind_tick =
+            rewind_tick.or_else(|| self.local_snapshot.as_ref().map(|snapshot| snapshot.tick))?;
+        build_rollback_preview(
+            &self.render_buffer,
+            rewind_tick,
+            self.inner.controlled_entity(),
+            &[],
+        )
+    }
+
+    /// Rewind to the newest retained authoritative snapshot at or before `tick`.
+    pub fn rewind_authoritative_snapshot(&self, tick: u64) -> Option<WorldSnapshot> {
+        self.render_buffer.rewind_to(tick)
+    }
+
+    /// Summarize current presentation drift and retained-history state.
+    pub fn catch_up_diagnostics(&self) -> CatchUpDiagnostics {
+        build_catch_up_diagnostics(
+            &self.render_buffer,
+            self.local_snapshot.as_ref(),
+            self.local_snapshot.as_ref(),
+            self.inner.controlled_entity(),
+            &[],
+            &self.render_clock,
+        )
+    }
+
     /// Access the underlying [`StdbClient`] for advanced operations
     /// (e.g., calling reducers directly, inspecting cached state).
     pub fn inner(&self) -> &StdbClient {
@@ -1435,6 +1469,32 @@ mod tests {
         assert_eq!(sampled.snapshot.entities.len(), 1);
         assert!(sampled.snapshot.entities[0].position.x >= 4.0);
         assert!(client.presentation_tick().is_some());
+    }
+
+    #[test]
+    fn test_diagnostics_and_rewind_surface_local_history() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.local_snapshot = Some(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 3,
+                position: Vec2::new(1.0, 2.0),
+                velocity: Vec2::new(30.0, 0.0),
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(90.0),
+                label: Some("npc".into()),
+            }],
+        });
+        client.ingest_local_snapshot();
+        client.render_clock.advance(10, 1.0 / 60.0);
+
+        let diagnostics = client.catch_up_diagnostics();
+        assert_eq!(diagnostics.authoritative_tick, Some(10));
+        assert_eq!(diagnostics.history_snapshots, 1);
+        assert_eq!(client.rewind_authoritative_snapshot(5).unwrap().tick, 10);
+        assert_eq!(client.rollback_preview(None).unwrap().baseline_tick, 10);
     }
 
     #[test]

@@ -67,10 +67,11 @@ pub use protocol::{
     ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage,
 };
 pub use snapshot::{
-    apply_authoritative_update, compose_presentation_snapshot, EntitySnapshot,
+    apply_authoritative_update, build_catch_up_diagnostics, build_rollback_preview,
+    compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntitySnapshot,
     InterpolatedSnapshot, InterpolationConfig, PredictedActionBatch, ReconciliationReport,
-    RenderClock, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
-    WorldSnapshot,
+    RenderClock, RollbackPreview, SnapshotInterpolationBuffer, SnapshotSampleMode,
+    SnapshotUpdateError, StateDelta, WorldSnapshot,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

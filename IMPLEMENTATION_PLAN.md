@@ -430,5 +430,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
 
-**Last updated**: Iteration 52
+### Iteration 53 — Pod-Net Rollback Preview and Catch-Up Diagnostics
+
+- [x] Added reusable rollback/rewind inspection primitives to `pod-net`: authoritative history rewind, `RollbackPreview`, `EntityDrift`, and `CatchUpDiagnostics` built directly from retained snapshot history plus pending predicted input batches.
+- [x] Extended the snapshot/render clock layer with history window introspection and delayed-target drift reporting so prediction recovery can be inspected without widening the wire protocol.
+- [x] Exposed rollback preview, authoritative rewind, and catch-up diagnostics through native QUIC, browser WebSocket, and SpacetimeDB client adapters.
+- [x] Added deterministic coverage for rewind clamping, rollback replay from an arbitrary retained tick, presentation drift diagnostics, native direct-connect diagnostics, and SpacetimeDB rewind accessors.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+
+**Last updated**: Iteration 53
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice
