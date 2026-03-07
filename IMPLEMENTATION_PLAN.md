@@ -473,5 +473,26 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-core --lib`
   - `cargo test -p pod-agents --lib`
 
-**Last updated**: Iteration 56
-**Current focus**: Phase 4 agent/runtime parity instrumentation for the RuneScape-style MMO + companion-creature vertical slice, then surfacing telemetry into browser/editor debug tooling
+### Iteration 57 — One-page App Summary PDF
+
+- [x] Generated a repo-evidence-only one-page summary PDF at `output/pdf/prompt-or-die-summary.pdf`.
+- [x] Verified the artifact stays on a single page and remains legible after rendering to PNG for visual QA.
+
+### Iteration 58 — Browser and Editor Telemetry Consumers
+
+- [x] Added `TelemetryConfig` to `pod-core` as the shared retention source for runtime archives, browser debug trails, and editor timelines, and wired `App::new()` to size `TelemetryArchive` from that config.
+- [x] Added a typed `pod-web` telemetry contract plus `window.podRender.renderTickTelemetry(...)`, `window.podRender.resetTelemetry()`, and `window.podRender.getTelemetryStats()` for editor/debug clients.
+- [x] Added a debug-only browser telemetry HUD with selected-agent cycling, world-space trajectory trails, action and tool-call summaries, and recovery-diagnostic display.
+- [x] Added `EditorPanel::Telemetry` and `TelemetryPanelState` to `pod-editor`, reusing the existing selected entity across hierarchy, inspector, viewport, and telemetry views.
+- [x] Replaced the old `SpacetimeDashboardState` placeholder counters with authoritative telemetry rollups: latest tick, rejection/error rates, per-agent trajectory summaries, and visible/audible/message counts.
+- [x] Applied Three.js toon-material shading to the stylized opaque world-geometry path while keeping transparent/glass surfaces on the standard material path.
+- [x] Added deterministic coverage for telemetry config defaults, editor telemetry retention/selection sync, browser telemetry parsing/summary logic, and toon-material selection.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-editor --lib`
+  - `bun test`
+  - `bun run typecheck`
+  - `bun run build`
+
+**Last updated**: Iteration 58
+**Current focus**: Iteration 59 authority export for direct-connect and SpacetimeDB telemetry, then provider/tool-call instrumentation for embedded agents

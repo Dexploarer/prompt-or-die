@@ -9,7 +9,7 @@ use crate::component::{
 };
 use crate::contract::{VersionedAgentAction, VersionedObservation, VersionedTickTelemetry};
 use crate::observation::Observation;
-use crate::telemetry::{TelemetryArchive, TickTelemetryFrame};
+use crate::telemetry::{TelemetryArchive, TelemetryConfig, TickTelemetryFrame};
 use crate::tick::TickResult;
 use crate::World;
 
@@ -168,7 +168,11 @@ impl App {
             broadcast: Vec::new(),
         };
         app.register_core_types();
-        let _ = app.resources.insert(TelemetryArchive::default());
+        let telemetry_config = TelemetryConfig::default();
+        let _ = app.resources.insert(telemetry_config);
+        let _ = app.resources.insert(TelemetryArchive::with_capacity(
+            telemetry_config.core_archive_ticks,
+        ));
         app
     }
 
@@ -315,13 +319,15 @@ impl App {
             .register_contract::<VersionedTickTelemetry>("VersionedTickTelemetry");
         self.types
             .register_resource::<TelemetryArchive>("TelemetryArchive");
+        self.types
+            .register_resource::<TelemetryConfig>("TelemetryConfig");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{App, LastTickResult, Plugin, RegisteredTypeCategory, SchedulePhase};
-    use crate::telemetry::TelemetryArchive;
+    use crate::telemetry::{TelemetryArchive, TelemetryConfig};
 
     struct TracePlugin;
 
@@ -413,6 +419,11 @@ mod tests {
             .get::<TelemetryArchive>()
             .expect("telemetry archive resource");
         assert!(archive.latest().is_none());
+        let telemetry_config = app
+            .resources()
+            .get::<TelemetryConfig>()
+            .expect("telemetry config resource");
+        assert_eq!(telemetry_config.core_archive_ticks, 600);
     }
 
     #[test]
