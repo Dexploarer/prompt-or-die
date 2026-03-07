@@ -540,5 +540,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-server --bin pod-server`
   - `cargo test -p pod-editor --lib`
 
-**Last updated**: Iteration 61
-**Current focus**: Iteration 62 flagship MMO acceptance harness and shard-scale parity validation on top of the authoritative replay/training telemetry spine
+### Iteration 62 — Flagship MMO Acceptance Harness and Parity Validation
+
+- [x] Added a reusable `pod-core::acceptance` module with deterministic flagship MMO scenario configs, shard-scale target metadata, paired human/AI parity reporting, replay export, and authoritative summary metrics.
+- [x] Implemented a RuneScape-style acceptance loop covering chat, traversal, combat cadence, capture, summon, companion commands, gather, loot, and embedded tool-call telemetry without leaving the shared observe → decide → validate → execute pipeline.
+- [x] Added deterministic parity validation that compares paired human and autonomous agents on observation signatures and decided action schedules while allowing tool-call differences on the AI side.
+- [x] Wired `pod-server` validation to consume the acceptance harness and assert that server stats align with authoritative acceptance-summary metrics.
+- [x] Added deterministic coverage for shard-target defaults, flagship MMO loop completion, encounter-transition replay exports, and server-stat alignment.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-server --bin pod-server`
+
+**Last updated**: Iteration 62
+**Current focus**: Iteration 63 browser/editor acceptance consumption and flagship-world render/debug validation on top of the deterministic MMO acceptance harness

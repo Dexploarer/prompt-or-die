@@ -15,6 +15,7 @@
 //! - **Enhanced Constraints** (`constraint`): Production-grade validation with budgets and reaction gates
 //! - **Observation Filtering** (`observation_filter`): Compresses observations to fit LLM token budgets
 //! - **Telemetry** (`telemetry`): Authoritative per-tick trajectories, action traces, and tool-call primitives
+//! - **Acceptance Harness** (`acceptance`): Deterministic flagship MMO scenarios for parity and shard validation
 
 #![allow(clippy::assign_op_pattern)]
 #![allow(clippy::collapsible_if)]
@@ -30,6 +31,7 @@
 #![allow(clippy::unused_enumerate_index)]
 #![allow(clippy::unwrap_or_default)]
 
+pub mod acceptance;
 pub mod action;
 pub mod agent;
 pub mod app;
@@ -46,6 +48,10 @@ pub mod telemetry;
 pub mod tick;
 pub mod world;
 
+pub use acceptance::{
+    run_flagship_mmo_acceptance, AcceptanceParityReport, FlagshipMmoAcceptanceConfig,
+    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, FlagshipMmoScaleTarget,
+};
 pub use action::*;
 pub use agent::*;
 pub use app::{
