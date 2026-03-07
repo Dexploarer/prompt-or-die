@@ -55,6 +55,8 @@ pub struct WebClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Whether the client has already requested an immediate recovery snapshot.
+    awaiting_recovery_snapshot: bool,
     /// Authoritative history for presentation smoothing.
     render_buffer: SnapshotInterpolationBuffer,
     /// Presentation clock for interpolation/catch-up recovery.
@@ -85,6 +87,7 @@ impl WebClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            awaiting_recovery_snapshot: false,
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
             reconnect_attempts: 0,
@@ -290,6 +293,7 @@ impl WebClient {
                 self.last_server_tick = *tick;
                 self.last_acknowledged_action_tick = None;
                 self.last_event_tick = *tick;
+                self.awaiting_recovery_snapshot = false;
                 self.reconnect_attempts = 0;
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: *tick,
@@ -315,6 +319,7 @@ impl WebClient {
 
                 let gap_detected = self.last_server_tick > 0 && *tick > self.last_server_tick + 1;
                 if gap_detected && !*is_full_snapshot {
+                    self.request_full_snapshot();
                     self.authoritative_snapshot = None;
                     self.local_snapshot = None;
                     self.clear_presentation_state();
@@ -341,6 +346,7 @@ impl WebClient {
                             &format!("Authoritative update rejected at tick {}: {:?}", tick, err)
                                 .into(),
                         );
+                        self.request_full_snapshot();
                         self.authoritative_snapshot = None;
                         self.local_snapshot = None;
                         self.clear_presentation_state();
@@ -350,6 +356,9 @@ impl WebClient {
                 };
 
                 self.authoritative_snapshot = Some(authoritative_snapshot);
+                if *is_full_snapshot {
+                    self.awaiting_recovery_snapshot = false;
+                }
                 self.ingest_authoritative_snapshot();
                 self.prune_acknowledged_predictions(*acknowledged_action_tick);
                 self.rebuild_predicted_snapshot();
@@ -417,6 +426,7 @@ impl WebClient {
 
         self.websocket = None;
         self.connected = false;
+        self.awaiting_recovery_snapshot = false;
         self.clear_presentation_state();
         Ok(())
     }
@@ -515,6 +525,7 @@ impl WebClient {
         self.local_snapshot = Some(snapshot);
         self.ingest_authoritative_snapshot();
         self.connected = true;
+        self.awaiting_recovery_snapshot = false;
     }
 
     fn prune_acknowledged_predictions(&mut self, acknowledged_action_tick: Option<u64>) {
@@ -546,6 +557,36 @@ impl WebClient {
     fn clear_presentation_state(&mut self) {
         self.render_buffer.clear();
         self.render_clock.reset();
+    }
+
+    fn request_full_snapshot(&mut self) {
+        if self.awaiting_recovery_snapshot {
+            return;
+        }
+
+        let last_known_tick = self
+            .authoritative_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.tick)
+            .or(Some(self.last_server_tick).filter(|tick| *tick > 0));
+        let last_known_digest = self
+            .authoritative_snapshot
+            .as_ref()
+            .map(WorldSnapshot::digest);
+
+        match self.send_message(ClientMessage::RequestFullSnapshot {
+            last_known_tick,
+            last_known_digest,
+        }) {
+            Ok(()) => {
+                self.awaiting_recovery_snapshot = true;
+            }
+            Err(err) => {
+                web_sys::console::warn_1(
+                    &format!("Failed to request full snapshot recovery: {err}").into(),
+                );
+            }
+        }
     }
 
     fn record_reconciliation(
