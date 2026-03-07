@@ -17,7 +17,9 @@ use crate::protocol::{
     ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage,
 };
 use crate::snapshot::{
-    apply_authoritative_update, PredictedActionBatch, ReconciliationReport, WorldSnapshot,
+    apply_authoritative_update, compose_presentation_snapshot, InterpolatedSnapshot,
+    PredictedActionBatch, ReconciliationReport, RenderClock, SnapshotInterpolationBuffer,
+    WorldSnapshot,
 };
 
 // ============================================================
@@ -57,6 +59,10 @@ pub struct NativeClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Authoritative history for presentation smoothing.
+    render_buffer: SnapshotInterpolationBuffer,
+    /// Presentation clock for interpolation/catch-up recovery.
+    render_clock: RenderClock,
 }
 
 impl NativeClient {
@@ -142,6 +148,8 @@ impl NativeClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
         };
 
         // Send connect message
@@ -181,6 +189,7 @@ impl NativeClient {
                 self.controlled_entity = controlled_entity;
                 self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot);
+                self.ingest_authoritative_snapshot();
                 self.reconnect_token = Some(reconnect_token);
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
@@ -356,6 +365,7 @@ impl NativeClient {
                 self.controlled_entity = *controlled_entity;
                 self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot.clone());
+                self.ingest_authoritative_snapshot();
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
                 self.last_server_tick = *tick;
@@ -387,6 +397,7 @@ impl NativeClient {
                 if gap_detected && !*is_full_snapshot {
                     self.authoritative_snapshot = None;
                     self.local_snapshot = None;
+                    self.clear_presentation_state();
                     self.record_reconciliation(*tick, *authoritative_digest, true);
                     return false;
                 }
@@ -409,12 +420,14 @@ impl NativeClient {
                         error!("Authoritative update rejected at tick {}: {:?}", tick, err);
                         self.authoritative_snapshot = None;
                         self.local_snapshot = None;
+                        self.clear_presentation_state();
                         self.record_reconciliation(*tick, *authoritative_digest, true);
                         return false;
                     }
                 };
 
                 self.authoritative_snapshot = Some(authoritative_snapshot);
+                self.ingest_authoritative_snapshot();
                 self.prune_acknowledged_predictions(*acknowledged_action_tick);
                 self.rebuild_predicted_snapshot();
                 self.last_server_tick = *tick;
@@ -467,6 +480,7 @@ impl NativeClient {
             quinn::VarInt::from_u32(0),
             reason.unwrap_or("Disconnect").as_bytes(),
         );
+        self.clear_presentation_state();
 
         info!("Disconnected from server");
         Ok(())
@@ -477,9 +491,29 @@ impl NativeClient {
         self.local_snapshot.as_ref()
     }
 
+    /// Sample a smoothed presentation snapshot for rendering.
+    pub fn presentation_snapshot(
+        &mut self,
+        frame_delta_seconds: f32,
+    ) -> Option<InterpolatedSnapshot> {
+        let latest_tick = self.render_buffer.latest_tick()?;
+        let target_tick = self.render_clock.advance(latest_tick, frame_delta_seconds);
+        let sampled = self.render_buffer.sample(target_tick)?;
+        Some(compose_presentation_snapshot(
+            sampled,
+            self.local_snapshot.as_ref(),
+            self.controlled_entity,
+        ))
+    }
+
     /// Get the last authoritative world snapshot confirmed by the server.
     pub fn authoritative_snapshot(&self) -> Option<&WorldSnapshot> {
         self.authoritative_snapshot.as_ref()
+    }
+
+    /// Current presentation tick after interpolation/catch-up correction.
+    pub fn presentation_tick(&self) -> Option<f32> {
+        self.render_clock.current_tick()
     }
 
     /// Get the most recent reconciliation report.
@@ -520,6 +554,17 @@ impl NativeClient {
         self.local_snapshot = self.authoritative_snapshot.as_ref().map(|snapshot| {
             snapshot.replay_predicted_actions(self.controlled_entity, &self.prediction_history)
         });
+    }
+
+    fn ingest_authoritative_snapshot(&mut self) {
+        if let Some(snapshot) = self.authoritative_snapshot.as_ref() {
+            self.render_buffer.push(snapshot.clone());
+        }
+    }
+
+    fn clear_presentation_state(&mut self) {
+        self.render_buffer.clear();
+        self.render_clock.reset();
     }
 
     fn record_reconciliation(
