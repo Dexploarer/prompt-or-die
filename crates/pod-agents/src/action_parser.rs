@@ -2,7 +2,7 @@
 //!
 //! Supports multiple response formats from LLMs:
 //! - JSON: `{"actions": [...], "reasoning": "..."}`
-//! - TOON: `actions[2]{...}`
+//! - TOON: `actions[2]: stop,attack`
 //! - Key-value: `ACTION: move up\nREASON: ...`
 //! - Natural language: regex extraction from free-form text
 //!
@@ -13,8 +13,7 @@ use log::{debug, warn};
 use pod_core::action::{Action, CompanionCommand, SpeakVolume};
 use pod_core::component::SkillKind;
 use pod_core::id::EntityId;
-use serde::Deserialize;
-use std::collections::HashMap;
+use toon_format::decode_default as decode_toon;
 
 // ============================================================
 // PARSE RESULT
@@ -77,15 +76,6 @@ pub trait ActionParser: Send + Sync {
 /// This is the default and recommended parser.
 pub struct JsonActionParser;
 
-/// Intermediate JSON structure from LLM
-#[derive(Deserialize)]
-struct LlmJsonResponse {
-    actions: Option<Vec<serde_json::Value>>,
-    reasoning: Option<String>,
-    #[serde(alias = "reason")]
-    reason_alt: Option<String>,
-}
-
 impl ActionParser for JsonActionParser {
     fn parse(&self, response: &str) -> Result<ActionParseResult, ActionParseError> {
         let response = response.trim();
@@ -96,46 +86,9 @@ impl ActionParser for JsonActionParser {
         // Try to extract JSON from response (LLMs sometimes wrap in markdown)
         let json_str = extract_json(response).unwrap_or(response);
 
-        let parsed: LlmJsonResponse = serde_json::from_str(json_str)
+        let parsed: serde_json::Value = serde_json::from_str(json_str)
             .map_err(|e| ActionParseError::InvalidFormat(format!("JSON parse failed: {}", e)))?;
-
-        let reasoning = parsed
-            .reasoning
-            .or(parsed.reason_alt)
-            .unwrap_or_else(|| "No reasoning provided".to_string());
-
-        let mut actions = Vec::new();
-        let mut warnings = Vec::new();
-
-        if let Some(action_values) = parsed.actions {
-            for val in &action_values {
-                match val {
-                    serde_json::Value::String(s) => match parse_action_string(s) {
-                        Ok(action) => actions.push(action),
-                        Err(e) => warnings.push(format!("Unknown action '{}': {}", s, e)),
-                    },
-                    serde_json::Value::Object(obj) => match parse_action_object(obj) {
-                        Ok(action) => actions.push(action),
-                        Err(e) => warnings.push(format!("Invalid action object: {}", e)),
-                    },
-                    _ => warnings.push(format!("Unexpected action value: {}", val)),
-                }
-            }
-        }
-
-        if actions.is_empty() {
-            actions.push(Action::Idle);
-        }
-
-        let confidence = if warnings.is_empty() { 1.0 } else { 0.7 };
-
-        Ok(ActionParseResult {
-            actions,
-            reasoning,
-            confidence,
-            raw_response: response.to_string(),
-            warnings,
-        })
+        parse_structured_action_payload(&parsed, response)
     }
 
     fn name(&self) -> &str {
@@ -147,17 +100,12 @@ impl ActionParser for JsonActionParser {
 // TOON PARSER
 // ============================================================
 
-/// Parses TOON-formatted outputs with explicit row counts and 2-space indentation.
+/// Parses official TOON outputs like `actions[2]: stop,attack`.
 ///
 /// Example:
 /// ```text
-/// actions[2]{
-///   move up
-///   attack
-/// }
-/// reasoning[1]{
-///   Hold position until cleared.
-/// }
+/// actions[2]: stop,attack
+/// reasoning: Hold position until cleared.
 /// ```
 pub struct ToonActionParser;
 
@@ -168,47 +116,79 @@ impl ActionParser for ToonActionParser {
             return Err(ActionParseError::EmptyResponse);
         }
 
-        let sections = parse_toon_sections(response)?;
-
-        let action_rows = sections.get("actions").cloned().unwrap_or_else(Vec::new);
-        let reasoning_rows = sections.get("reasoning").cloned().unwrap_or_else(Vec::new);
-
-        let mut actions = Vec::new();
-        let mut warnings = Vec::new();
-
-        if action_rows.is_empty() {
-            actions.push(Action::Idle);
-        } else {
-            for row in &action_rows {
-                match parse_action_string(row) {
-                    Ok(action) => actions.push(action),
-                    Err(e) => warnings.push(format!("Unknown action '{}': {}", row, e)),
-                }
-            }
-            if actions.is_empty() {
-                actions.push(Action::Idle);
-            }
-        }
-
-        let reasoning = if reasoning_rows.is_empty() {
-            "No reasoning provided".to_string()
-        } else {
-            reasoning_rows.join("\n")
-        };
-
-        let confidence = if warnings.is_empty() { 1.0 } else { 0.8 };
-
-        Ok(ActionParseResult {
-            actions,
-            reasoning,
-            confidence,
-            raw_response: response.to_string(),
-            warnings,
-        })
+        let parsed: serde_json::Value = decode_toon(response)
+            .map_err(|e| ActionParseError::InvalidFormat(format!("TOON parse failed: {}", e)))?;
+        parse_structured_action_payload(&parsed, response)
     }
 
     fn name(&self) -> &str {
         "toon"
+    }
+}
+
+fn parse_structured_action_payload(
+    value: &serde_json::Value,
+    raw_response: &str,
+) -> Result<ActionParseResult, ActionParseError> {
+    let obj = value.as_object().ok_or_else(|| {
+        ActionParseError::InvalidFormat("Structured response must decode to an object".to_string())
+    })?;
+
+    let mut actions = Vec::new();
+    let mut warnings = Vec::new();
+
+    if let Some(action_value) = obj.get("actions") {
+        parse_action_value(action_value, &mut actions, &mut warnings);
+    }
+
+    if actions.is_empty() {
+        actions.push(Action::Idle);
+    }
+
+    let reasoning = obj
+        .get("reasoning")
+        .or_else(|| obj.get("reason"))
+        .map(stringify_reasoning)
+        .unwrap_or_else(|| "No reasoning provided".to_string());
+
+    let confidence = if warnings.is_empty() { 1.0 } else { 0.7 };
+
+    Ok(ActionParseResult {
+        actions,
+        reasoning,
+        confidence,
+        raw_response: raw_response.to_string(),
+        warnings,
+    })
+}
+
+fn parse_action_value(
+    value: &serde_json::Value,
+    actions: &mut Vec<Action>,
+    warnings: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                parse_action_value(item, actions, warnings);
+            }
+        }
+        serde_json::Value::String(s) => match parse_action_string(s) {
+            Ok(action) => actions.push(action),
+            Err(e) => warnings.push(format!("Unknown action '{}': {}", s, e)),
+        },
+        serde_json::Value::Object(obj) => match parse_action_object(obj) {
+            Ok(action) => actions.push(action),
+            Err(e) => warnings.push(format!("Invalid action object: {}", e)),
+        },
+        other => warnings.push(format!("Unexpected action value: {}", other)),
+    }
+}
+
+fn stringify_reasoning(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "No reasoning provided".into()),
     }
 }
 
@@ -805,126 +785,6 @@ fn extract_json(s: &str) -> Option<&str> {
     None
 }
 
-fn parse_toon_sections(raw: &str) -> Result<HashMap<String, Vec<String>>, ActionParseError> {
-    let mut sections: HashMap<String, Vec<String>> = HashMap::new();
-    let mut current: Option<(String, usize, Vec<String>)> = None;
-    let mut saw_section = false;
-
-    for line in raw.lines() {
-        let trimmed = line.trim_end_matches(&['\r', '\n'][..]).trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if trimmed == "```" || trimmed.starts_with("```toon") {
-            continue;
-        }
-
-        if trimmed == "}" {
-            let (name, expected_rows, rows) = current.take().ok_or_else(|| {
-                ActionParseError::InvalidFormat("Unexpected TOON section close".to_string())
-            })?;
-            if rows.len() != expected_rows {
-                return Err(ActionParseError::InvalidFormat(format!(
-                    "Section '{}' expected {} rows but got {}",
-                    name,
-                    expected_rows,
-                    rows.len()
-                )));
-            }
-            if sections.contains_key(&name) {
-                return Err(ActionParseError::InvalidFormat(format!(
-                    "Duplicate TOON section '{}'",
-                    name
-                )));
-            }
-            sections.insert(name, rows);
-            continue;
-        }
-
-        if let Some((name, expected_rows)) = parse_toon_header(trimmed) {
-            if current.is_some() {
-                return Err(ActionParseError::InvalidFormat(
-                    "Nested TOON sections are not allowed".to_string(),
-                ));
-            }
-            current = Some((name, expected_rows, Vec::new()));
-            saw_section = true;
-            continue;
-        }
-
-        if let Some((name, expected_rows, rows)) = current.as_mut() {
-            if !line.starts_with("  ") {
-                return Err(ActionParseError::InvalidFormat(format!(
-                    "Section '{}' rows must start with two spaces",
-                    name
-                )));
-            }
-            if rows.len() >= *expected_rows {
-                return Err(ActionParseError::InvalidFormat(format!(
-                    "Section '{}' has more rows than declared ({})",
-                    name, expected_rows
-                )));
-            }
-            let row = line[2..].trim();
-            if row.is_empty() {
-                return Err(ActionParseError::InvalidFormat(format!(
-                    "Section '{}' has an empty row",
-                    name
-                )));
-            }
-            rows.push(row.to_string());
-            continue;
-        }
-
-        if saw_section {
-            return Err(ActionParseError::InvalidFormat(
-                "TOON content found outside section body".to_string(),
-            ));
-        }
-
-        return Err(ActionParseError::InvalidFormat(
-            "No TOON section headers found".to_string(),
-        ));
-    }
-
-    if let Some((name, expected_rows, rows)) = current {
-        return Err(ActionParseError::InvalidFormat(format!(
-            "TOON section '{}' missing closing brace (expected {} rows, got {})",
-            name,
-            expected_rows,
-            rows.len()
-        )));
-    }
-    if !saw_section {
-        return Err(ActionParseError::InvalidFormat(
-            "No TOON section headers found".to_string(),
-        ));
-    }
-
-    Ok(sections)
-}
-
-fn parse_toon_header(line: &str) -> Option<(String, usize)> {
-    let line = line.trim();
-    if !line.ends_with('{') {
-        return None;
-    }
-
-    let header = &line[..line.len().saturating_sub(1)].trim();
-    let open = header.rfind('[')?;
-    let close = header.rfind(']')?;
-    if open >= close {
-        return None;
-    }
-
-    let name = header[..open].trim().to_ascii_lowercase();
-    let count = header[open + 1..close].trim();
-    let expected_rows = count.parse::<usize>().ok()?;
-
-    Some((name, expected_rows))
-}
-
 // ============================================================
 // TESTS
 // ============================================================
@@ -1090,42 +950,28 @@ mod tests {
     #[test]
     fn test_toon_parser_basic() {
         let parser = ToonActionParser;
-        let response = r#"actions[2]{
-  move up
-  attack
-}
-reasoning[1]{
-  Keep distance while advancing.
-}"#;
+        let response = r#"actions[2]: stop,attack
+reasoning: Keep distance while advancing."#;
         let result = parser.parse(response).unwrap();
         assert_eq!(result.actions.len(), 2);
         assert_eq!(result.reasoning, "Keep distance while advancing.");
-        assert!(matches!(result.actions[0], Action::Move { .. }));
+        assert!(matches!(result.actions[0], Action::Stop));
         assert!(matches!(result.actions[1], Action::Attack));
     }
 
     #[test]
     fn test_toon_parser_mismatched_count() {
         let parser = ToonActionParser;
-        let response = r#"actions[2]{
-  move up
-}
-reasoning[1]{
-  Bad count declaration.
-}"#;
+        let response = r#"actions[2]: stop
+reasoning: Bad count declaration."#;
         assert!(parser.parse(response).is_err());
     }
 
     #[test]
     fn test_toon_parser_unknown_rows() {
         let parser = ToonActionParser;
-        let response = r#"actions[2]{
-  move up
-  nonsense
-}
-reasoning[1]{
-  fallback behavior
-}"#;
+        let response = r#"actions[2]: move up,nonsense
+reasoning: fallback behavior"#;
         let result = parser.parse(response).unwrap();
         assert_eq!(result.actions.len(), 2);
         assert!(matches!(result.actions[0], Action::Move { .. }));
@@ -1136,13 +982,7 @@ reasoning[1]{
     #[test]
     fn test_fallback_parser_includes_toon() {
         let parser = FallbackParser::default_chain();
-        let result = parser
-            .parse(
-                r#"actions[1]{
-  stop
-}"#,
-            )
-            .unwrap();
+        let result = parser.parse(r#"actions[1]: stop"#).unwrap();
         assert!(matches!(result.actions[0], Action::Stop));
     }
 }

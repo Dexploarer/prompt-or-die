@@ -551,5 +551,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-core --lib`
   - `cargo test -p pod-server --bin pod-server`
 
-**Last updated**: Iteration 62
-**Current focus**: Iteration 63 browser/editor acceptance consumption and flagship-world render/debug validation on top of the deterministic MMO acceptance harness
+### Iteration 63 — Official TOON Agent Prompt/Response Compliance
+
+- [x] Replaced the repo-local pseudo-TOON prompt shape in `pod-agents` with the official TOON format from `https://toonformat.dev/` using the `toon-format` Rust crate.
+- [x] Switched `ToonTemplate` to emit spec-compliant TOON documents that round-trip through the official decoder instead of the previous custom block syntax.
+- [x] Switched `ToonActionParser` to decode official TOON objects into gameplay actions, preserving the shared structured action payload path used by the JSON parser.
+- [x] Updated the LLM-agent integration tests and parser/template coverage to assert actual TOON decoding rather than string-matching the old fake syntax.
+- [x] Validated touched targets:
+  - `cargo test -p pod-agents --lib`
+  - `cargo test -p pod-agents --features agent_sdk_integration_tests`
+
+**Last updated**: Iteration 63
+**Current focus**: Iteration 64 browser/editor acceptance consumption and flagship-world render/debug validation on top of the deterministic MMO acceptance harness, with TOON used at structured agent I/O boundaries

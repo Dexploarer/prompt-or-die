@@ -707,13 +707,9 @@ mod tests {
     #[test]
     fn test_new_agent_uses_toon_template_and_parser_by_default() {
         let captured = Arc::new(Mutex::new(None));
-        let response = r#"actions[1]{
-  stop
-}
-reasoning[1]{
-  Default smoke test
-}"#
-        .to_string();
+        let response = r#"actions[1]: stop
+reasoning: Default smoke test"#
+            .to_string();
         let provider = Arc::new(CapturingProvider::new(response, Arc::clone(&captured)));
 
         let mut agent = LlmAgent::new(LlmAgentConfig {
@@ -732,14 +728,21 @@ reasoning[1]{
             .clone()
             .expect("provider should have captured completion request");
 
-        assert!(request.user_prompt.contains("self["));
-        assert!(request.user_prompt.contains("visible_entities["));
-        assert!(request.user_prompt.contains("available_actions["));
-        assert!(request
-            .system_prompt
-            .contains("TOON-formatted observations"));
+        let prompt_section = request
+            .user_prompt
+            .split("Current observation:\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\nRespond with a valid TOON object").next())
+            .expect("request should include the TOON observation section");
+        let decoded_prompt: serde_json::Value =
+            toon_format::decode_default(prompt_section).expect("prompt should decode as TOON");
+        assert_eq!(decoded_prompt["tick"], 1);
+        assert!(decoded_prompt["self_state"].is_object());
+        assert!(decoded_prompt["available_actions"].is_array());
+        assert!(request.system_prompt.contains("official TOON"));
+        assert!(request.system_prompt.contains("toonformat.dev"));
         assert!(request.system_prompt.contains("actions["));
-        assert!(request.system_prompt.contains("reasoning["));
+        assert!(request.system_prompt.contains("reasoning:"));
 
         let actions = agent.decide();
         assert_eq!(actions.len(), 1);

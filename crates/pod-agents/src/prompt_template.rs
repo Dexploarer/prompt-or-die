@@ -8,8 +8,9 @@
 //! - JsonTemplate: Machine-readable JSON for structured output models
 
 use pod_core::observation::{Observation, Relationship, VisibleEntity};
+use serde::Serialize;
 use std::collections::HashMap;
-use std::fmt::Write;
+use toon_format::encode_default as encode_toon;
 
 const JSON_ACTION_INSTRUCTION: &str = r#"
 Respond with a JSON object like this:
@@ -34,18 +35,15 @@ List multiple actions if needed. Actions are processed in order each tick.
 "#;
 
 const TOON_ACTION_INSTRUCTION: &str = r#"
-Respond with TOON blocks exactly like this (with 2-space-indented rows and explicit counts):
-actions[N]{
-  move up
-  attack
-}
-reasoning[M]{
-  Brief explanation for this tick.
-}
+Respond with a valid TOON object that decodes to this shape:
+actions[2]: stop,attack
+reasoning: Brief explanation for this tick
 
 Important:
-- Actions must be 2-space indented rows inside each block.
-- [N] and [M] must exactly match the number of rows in each block.
+- Use the official TOON format from https://toonformat.dev/.
+- Return a single TOON object, not markdown fences.
+- `actions` must be an array of action strings or action objects.
+- `reasoning` must be a single string.
 - Unknown actions are ignored and will default to Idle.
 "#;
 
@@ -369,136 +367,23 @@ impl PromptTemplate for JsonTemplate {
 // TOON TEMPLATE
 // ============================================================
 
-/// TOON-formatted template for strict block/row prompts and responses.
-pub struct ToonTemplate;
-
-impl ToonTemplate {
-    fn push_section(output: &mut String, name: &str, rows: &[String]) {
-        let _ = writeln!(output, "{}[{}]{{", name, rows.len());
-        for row in rows {
-            let _ = writeln!(output, "  {}", row);
-        }
-        output.push_str("}\n");
-    }
+fn encode_to_toon<T: Serialize>(value: &T) -> String {
+    encode_toon(value).unwrap_or_else(|_| {
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
+    })
 }
+
+/// Official TOON v3 template for structured observation prompts.
+pub struct ToonTemplate;
 
 impl PromptTemplate for ToonTemplate {
     fn format_observation(&self, obs: &Observation) -> String {
-        let mut out = String::new();
-
-        let mut self_rows = Vec::new();
-        let hp = obs
-            .self_state
-            .health
-            .map_or("unknown".to_string(), |h| format!("{:.0}", h));
-        let max_hp = obs
-            .self_state
-            .max_health
-            .map_or("unknown".to_string(), |h| format!("{:.0}", h));
-        let rotation = obs.self_state.rotation.to_degrees();
-        self_rows.push(format!(
-            "tick={} elapsed={:.2} position={:.0},{:.0} rotation={:.0} health={}/{} velocity={:.1},{:.1} team={:?} entity_id={:?} agent_id={:?}",
-            obs.tick,
-            obs.elapsed_secs,
-            obs.self_state.position.x,
-            obs.self_state.position.y,
-            rotation,
-            hp,
-            max_hp,
-            obs.self_state.velocity.x,
-            obs.self_state.velocity.y,
-            obs.self_state.team,
-            obs.self_state.entity_id.0,
-            obs.self_state.agent_id
-        ));
-        self_rows.push(format!("cooldowns={}", obs.self_state.cooldowns.len()));
-        let cooldown_rows: Vec<String> = obs
-            .self_state
-            .cooldowns
-            .iter()
-            .map(|cd| format!("{} rem={}/{}", cd.name, cd.remaining_ticks, cd.total_ticks))
-            .collect();
-
-        let visible_rows: Vec<String> = obs
-            .visible_entities
-            .iter()
-            .map(|e| {
-                let hp = e
-                    .health_fraction
-                    .map(|v| format!("{:.0}%", v * 100.0))
-                    .unwrap_or_else(|| "unknown".to_string());
-                format!(
-                    "{} id={} pos={:.0},{:.0} vel={:.1},{:.1} rot={:.0} relation={:?} distance={:.0} hp={}",
-                    e.entity_type,
-                    e.entity_id.0,
-                    e.position.x,
-                    e.position.y,
-                    e.velocity.x,
-                    e.velocity.y,
-                    e.rotation,
-                    e.relationship,
-                    e.distance,
-                    hp
-                )
-            })
-            .collect();
-
-        let available_action_rows: Vec<String> = obs
-            .available_actions
-            .iter()
-            .enumerate()
-            .map(|(idx, action)| format!("{}: {}", idx, action))
-            .collect();
-
-        let message_rows: Vec<String> = obs
-            .messages
-            .iter()
-            .map(|message| {
-                format!(
-                    "from={:?} channel={:?} content={}",
-                    message.from, message.channel, message.content
-                )
-            })
-            .collect();
-
-        let objective_rows: Vec<String> = obs
-            .objectives
-            .iter()
-            .map(|obj| {
-                format!(
-                    "{} progress={:.0}% completed={} desc={}",
-                    obj.id,
-                    obj.progress * 100.0,
-                    obj.completed,
-                    obj.description
-                )
-            })
-            .collect();
-
-        let audio_rows: Vec<String> = obs
-            .audible_events
-            .iter()
-            .map(|event| {
-                format!(
-                    "{} at {:.0} ({:.0})",
-                    event.event_type, event.distance, event.intensity
-                )
-            })
-            .collect();
-
-        Self::push_section(&mut out, "self", &self_rows);
-        Self::push_section(&mut out, "cooldowns", &cooldown_rows);
-        Self::push_section(&mut out, "visible_entities", &visible_rows);
-        Self::push_section(&mut out, "available_actions", &available_action_rows);
-        Self::push_section(&mut out, "messages", &message_rows);
-        Self::push_section(&mut out, "objectives", &objective_rows);
-        Self::push_section(&mut out, "audio", &audio_rows);
-        out
+        encode_to_toon(obs)
     }
 
     fn format_system_prompt(&self, base_prompt: &str, action_instructions: &str) -> String {
         format!(
-            "{}\n\nTOON-formatted observations are required for this model. Preserve strict section counts.\n{}",
+            "{}\n\nUse the official TOON format from https://toonformat.dev/ for both observations and structured responses.\n{}",
             base_prompt, action_instructions
         )
     }
@@ -688,9 +573,11 @@ mod tests {
         let template = ToonTemplate;
         let obs = test_observation();
         let result = template.format_observation(&obs);
-        assert!(result.contains("self["));
-        assert!(result.contains("visible_entities"));
-        assert!(result.contains("objectives"));
+        let decoded: serde_json::Value = toon_format::decode_default(&result).unwrap();
+        assert_eq!(decoded["tick"], 100);
+        assert!(decoded["self_state"].is_object());
+        assert!(decoded["visible_entities"].is_array());
+        assert!(decoded["objectives"].is_array());
     }
 
     #[test]
