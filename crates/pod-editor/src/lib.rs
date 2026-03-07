@@ -12,8 +12,9 @@
 use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
-    encode_toon_document, ActionLifecycleStage, AgentTelemetryFrame, AgentType, CreatureIdentity,
-    CreatureTemperament, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    decode_toon_document, encode_toon_document, Action, ActionLifecycleStage, AgentTelemetryFrame,
+    AgentType, CreatureIdentity, CreatureTemperament, ReplayFile,
+    ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -553,10 +554,18 @@ pub struct SpacetimeDashboardState {
     pub connected_players: u32,
     pub action_rejection_rate: f32,
     pub tool_call_error_rate: f32,
+    pub average_tool_latency_ms: f32,
+    pub average_trajectory_distance: f32,
     pub agent_summaries: Vec<TelemetryAgentSummary>,
     pub visible_entity_count: usize,
     pub audible_event_count: usize,
     pub message_count: usize,
+    pub capture_actions: usize,
+    pub summon_actions: usize,
+    pub gather_actions: usize,
+    pub loot_actions: usize,
+    #[serde(default)]
+    pub latest_incident_summary: Option<ShardIncidentSummary>,
     pub last_reducer_call: String,
     pub reducer_calls: u32,
 }
@@ -568,10 +577,17 @@ impl Default for SpacetimeDashboardState {
             connected_players: 0,
             action_rejection_rate: 0.0,
             tool_call_error_rate: 0.0,
+            average_tool_latency_ms: 0.0,
+            average_trajectory_distance: 0.0,
             agent_summaries: Vec::new(),
             visible_entity_count: 0,
             audible_event_count: 0,
             message_count: 0,
+            capture_actions: 0,
+            summon_actions: 0,
+            gather_actions: 0,
+            loot_actions: 0,
+            latest_incident_summary: None,
             last_reducer_call: "none".to_string(),
             reducer_calls: 0,
         }
@@ -645,6 +661,37 @@ impl SpacetimeDashboardState {
         } else {
             tool_errors as f32 / total_tool_calls as f32
         };
+        self.average_tool_latency_ms = if total_tool_calls == 0 {
+            0.0
+        } else {
+            frame
+                .agents
+                .iter()
+                .flat_map(|agent| agent.tool_calls.iter())
+                .map(|trace| trace.latency_ms as f32)
+                .sum::<f32>()
+                / total_tool_calls as f32
+        };
+        self.average_trajectory_distance = if frame.agents.is_empty() {
+            0.0
+        } else {
+            frame
+                .agents
+                .iter()
+                .map(|agent| {
+                    agent
+                        .trajectory
+                        .as_ref()
+                        .map(|trajectory| trajectory.distance_travelled)
+                        .unwrap_or_default()
+                })
+                .sum::<f32>()
+                / frame.agents.len() as f32
+        };
+        self.capture_actions = 0;
+        self.summon_actions = 0;
+        self.gather_actions = 0;
+        self.loot_actions = 0;
 
         self.agent_summaries = frame
             .agents
@@ -675,6 +722,36 @@ impl SpacetimeDashboardState {
                     .count(),
             })
             .collect();
+
+        for trace in frame
+            .agents
+            .iter()
+            .flat_map(|agent| agent.action_trace.iter())
+        {
+            if trace.stage != ActionLifecycleStage::Executed {
+                continue;
+            }
+            match &trace.action {
+                Action::CaptureCreature { .. } => self.capture_actions += 1,
+                Action::SummonCompanion { .. } => self.summon_actions += 1,
+                Action::GatherResource { .. } => self.gather_actions += 1,
+                Action::Loot { .. } => self.loot_actions += 1,
+                _ => {}
+            }
+        }
+    }
+
+    pub fn apply_incident_summary(&mut self, summary: ShardIncidentSummary) {
+        self.latest_tick = summary.latest_tick;
+        self.action_rejection_rate = summary.action_rejection_rate;
+        self.tool_call_error_rate = summary.tool_call_error_rate;
+        self.average_tool_latency_ms = summary.average_tool_latency_ms;
+        self.average_trajectory_distance = summary.average_trajectory_distance;
+        self.capture_actions = summary.capture_actions;
+        self.summon_actions = summary.summon_actions;
+        self.gather_actions = summary.gather_actions;
+        self.loot_actions = summary.loot_actions;
+        self.latest_incident_summary = Some(summary);
     }
 
     pub fn to_toon_document(&self) -> String {
@@ -707,6 +784,13 @@ impl TelemetryPanelState {
             self.timeline.pop_front();
         }
         self.timeline.push_back(frame);
+    }
+
+    pub fn replace_timeline(&mut self, frames: impl IntoIterator<Item = TickTelemetryFrame>) {
+        self.timeline.clear();
+        for frame in frames {
+            self.record_tick(frame);
+        }
     }
 
     pub fn latest(&self) -> Option<&TickTelemetryFrame> {
@@ -1535,6 +1619,8 @@ pub struct EditorState {
     pub telemetry: TelemetryPanelState,
     pub spacetime_dashboard: SpacetimeDashboardState,
     pub creator_catalog: CreatorCatalog,
+    #[serde(default)]
+    pub latest_replay: Option<ReplayFile>,
 }
 
 impl Default for EditorState {
@@ -1584,6 +1670,7 @@ impl Default for EditorState {
             telemetry: TelemetryPanelState::default(),
             spacetime_dashboard: SpacetimeDashboardState::default(),
             creator_catalog,
+            latest_replay: None,
         }
     }
 }
@@ -1604,6 +1691,7 @@ pub struct EditorSnapshotExport {
     pub fsm: FiniteStateMachine,
     pub latest_tick_telemetry: Option<TickTelemetryFrame>,
     pub spacetime_dashboard: SpacetimeDashboardState,
+    pub latest_replay: Option<ReplayFile>,
 }
 
 impl EditorSnapshotExport {
@@ -1636,6 +1724,7 @@ impl EditorSnapshotExport {
             fsm: state.fsm.clone(),
             latest_tick_telemetry: state.telemetry.latest().cloned(),
             spacetime_dashboard: state.spacetime_dashboard.clone(),
+            latest_replay: state.latest_replay.clone(),
         }
     }
 
@@ -1924,6 +2013,40 @@ impl PodEditorApp {
 
     pub fn export_snapshot_toon_document(&self) -> String {
         EditorSnapshotExport::from_state(&self.state).to_toon_document()
+    }
+
+    pub fn import_replay_toon_document(&mut self, document: &str) -> Result<(), String> {
+        let replay: ReplayFile = decode_toon_document(document, "replay_file")?;
+        let telemetry_windows = replay.telemetry_windows.clone();
+        let replay_name = replay.header.name.clone();
+
+        self.history.remember(self.state.clone());
+        self.state.latest_replay = Some(replay);
+        if !telemetry_windows.is_empty() {
+            self.state
+                .telemetry
+                .replace_timeline(telemetry_windows.clone());
+            if let Some(last_frame) = telemetry_windows.last() {
+                self.state
+                    .spacetime_dashboard
+                    .record_tick_telemetry(last_frame);
+            }
+        }
+        self.push_console(format!("Imported replay {replay_name}"));
+        Ok(())
+    }
+
+    pub fn import_shard_incident_toon_document(&mut self, document: &str) -> Result<(), String> {
+        let summary: ShardIncidentSummary =
+            decode_toon_document(document, "shard_incident_summary")?;
+        let shard_id = summary.shard_id.clone();
+
+        self.history.remember(self.state.clone());
+        self.state
+            .spacetime_dashboard
+            .apply_incident_summary(summary);
+        self.push_console(format!("Imported shard incident summary for {shard_id}"));
+        Ok(())
     }
 
     pub fn can_undo(&self) -> bool {
@@ -3038,7 +3161,8 @@ mod tests {
     use pod_core::{
         decode_toon_value, Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId,
         AgentRole, AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace,
-        CreatureTemperament, EntityId, TickTelemetryFrame, ToolCallStatus,
+        CreatureTemperament, EntityId, ReplayFile, ReplayHeader, ShardIncidentSummary,
+        TickTelemetryFrame, ToolCallStatus,
     };
 
     fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {
@@ -3103,6 +3227,21 @@ mod tests {
         TickTelemetryFrame {
             tick,
             agents: vec![agent],
+        }
+    }
+
+    fn sample_replay_file() -> ReplayFile {
+        ReplayFile {
+            header: ReplayHeader {
+                name: "flagship-mmo-loop".to_string(),
+                timestamp: 1_741_315_200,
+                world_seed: 42,
+                tick_count: 2,
+                agent_count: 1,
+                notes: "acceptance".to_string(),
+            },
+            traces: Vec::new(),
+            telemetry_windows: vec![sample_tick_telemetry(15, 1001)],
         }
     }
 
@@ -3470,6 +3609,66 @@ mod tests {
             "editor_spacetime_dashboard"
         );
         assert_eq!(dashboard_value["payload"]["latest_tick"], 14);
+    }
+
+    #[test]
+    fn editor_imports_replay_toon_into_existing_telemetry_surfaces() {
+        let mut app = PodEditorApp::default();
+        let replay = sample_replay_file();
+
+        app.import_replay_toon_document(&replay.to_toon_document())
+            .expect("replay TOON should import");
+
+        assert_eq!(
+            app.state
+                .latest_replay
+                .as_ref()
+                .expect("replay stored")
+                .header
+                .name,
+            "flagship-mmo-loop"
+        );
+        assert_eq!(
+            app.state.telemetry.latest().expect("telemetry synced").tick,
+            15
+        );
+        assert_eq!(app.state.spacetime_dashboard.latest_tick, 15);
+    }
+
+    #[test]
+    fn editor_imports_shard_incident_toon_into_dashboard_state() {
+        let mut app = PodEditorApp::default();
+        let summary = ShardIncidentSummary {
+            shard_id: "alpha-1".to_string(),
+            latest_tick: 240,
+            severity: pod_core::IncidentSeverity::Warning,
+            summary: "Shard alpha-1 requires attention".to_string(),
+            tick_budget_overrun_rate: 0.08,
+            action_rejection_rate: 0.02,
+            tool_call_error_rate: 0.11,
+            average_tool_latency_ms: 820.0,
+            average_trajectory_distance: 3.2,
+            peak_entity_count: 512,
+            peak_agent_count: 128,
+            capture_actions: 4,
+            summon_actions: 2,
+            gather_actions: 7,
+            loot_actions: 9,
+            notes: vec!["tool-call error rate exceeds 10%".to_string()],
+        };
+
+        app.import_shard_incident_toon_document(&summary.to_toon_document())
+            .expect("incident TOON should import");
+
+        let incident = app
+            .state
+            .spacetime_dashboard
+            .latest_incident_summary
+            .as_ref()
+            .expect("incident stored");
+        assert_eq!(incident.shard_id, "alpha-1");
+        assert_eq!(app.state.spacetime_dashboard.average_tool_latency_ms, 820.0);
+        assert_eq!(app.state.spacetime_dashboard.capture_actions, 4);
     }
 
     #[test]

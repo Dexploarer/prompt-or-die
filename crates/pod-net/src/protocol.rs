@@ -213,6 +213,7 @@ impl Default for ClientConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::{decode_toon_value, TickTelemetryFrame, VersionedTickTelemetry};
 
     #[test]
     fn test_client_message_roundtrip() {
@@ -304,14 +305,18 @@ mod tests {
     #[test]
     fn test_tick_telemetry_json_roundtrip() {
         let msg = ServerMessage::TickTelemetry {
-            frame_json: "{\"tick_telemetry\":{\"tick\":7,\"agents\":[]}}".into(),
+            frame_json: VersionedTickTelemetry::new(TickTelemetryFrame::empty(7))
+                .to_toon_document(),
         };
         let json = msg.encode_json().unwrap();
         let decoded = ServerMessage::decode_json(&json).unwrap();
 
         match decoded {
             ServerMessage::TickTelemetry { frame_json } => {
-                assert!(frame_json.contains("\"tick\":7"));
+                let value =
+                    decode_toon_value(&frame_json).expect("tick telemetry TOON should decode");
+                assert_eq!(value["document_type"], "versioned_tick_telemetry");
+                assert_eq!(value["payload"]["payload"]["tick"], 7);
             }
             other => panic!("Wrong message type: {other:?}"),
         }

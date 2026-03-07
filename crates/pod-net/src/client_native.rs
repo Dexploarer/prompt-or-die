@@ -553,6 +553,10 @@ impl NativeClient {
         self.last_debug_telemetry_json.as_deref()
     }
 
+    pub fn last_debug_telemetry_document(&self) -> Option<&str> {
+        self.last_debug_telemetry_json()
+    }
+
     /// Inspect the local rollback/replay path from a chosen authoritative tick.
     pub fn rollback_preview(&self, rewind_tick: Option<u64>) -> Option<RollbackPreview> {
         let rewind_tick = rewind_tick.or_else(|| {
@@ -813,6 +817,7 @@ impl std::error::Error for ClientError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::{TickTelemetryFrame, VersionedTickTelemetry};
 
     #[test]
     fn test_client_creation() {
@@ -984,12 +989,13 @@ mod tests {
         };
 
         let message = ServerMessage::TickTelemetry {
-            frame_json: "{\"tick_telemetry\":{\"tick\":4,\"agents\":[]}}".into(),
+            frame_json: VersionedTickTelemetry::new(TickTelemetryFrame::empty(4))
+                .to_toon_document(),
         };
         assert!(client.apply_server_message(&message));
-        assert_eq!(
-            client.last_debug_telemetry_json(),
-            Some("{\"tick_telemetry\":{\"tick\":4,\"agents\":[]}}")
-        );
+        assert!(client
+            .last_debug_telemetry_document()
+            .expect("debug telemetry stored")
+            .contains("versioned_tick_telemetry"));
     }
 }

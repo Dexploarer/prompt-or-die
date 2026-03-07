@@ -486,6 +486,10 @@ impl WebClient {
         self.last_debug_telemetry_json.as_deref()
     }
 
+    pub fn last_debug_telemetry_document(&self) -> Option<&str> {
+        self.last_debug_telemetry_json()
+    }
+
     /// Inspect the local rollback/replay path from a chosen authoritative tick.
     pub fn rollback_preview(&self, rewind_tick: Option<u64>) -> Option<RollbackPreview> {
         let rewind_tick = rewind_tick.or_else(|| {

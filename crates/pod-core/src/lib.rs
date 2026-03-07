@@ -88,7 +88,10 @@ pub use telemetry::{
     AgentTrajectoryFrame, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
     TrajectorySample,
 };
-pub use toon::{decode_toon_value, encode_toon_document, encode_toon_string};
+pub use toon::{
+    decode_toon_document, decode_toon_string, decode_toon_value, encode_toon_document,
+    encode_toon_string,
+};
 pub use world::World;
 
 /// Fixed tick rate — all agents operate on the same clock

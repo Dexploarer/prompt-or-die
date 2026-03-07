@@ -866,6 +866,10 @@ impl SpacetimeDBClient {
         self.last_debug_telemetry_json.as_deref()
     }
 
+    pub fn last_debug_telemetry_document(&self) -> Option<&str> {
+        self.last_debug_telemetry_json()
+    }
+
     /// Inspect the local rollback/replay path from a chosen retained tick.
     ///
     /// SpacetimeDB clients currently replay zero local prediction batches here;
@@ -1215,7 +1219,9 @@ fn convert_world_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::action::SpeakVolume as CoreSpeakVolume;
+    use pod_core::{
+        action::SpeakVolume as CoreSpeakVolume, TickTelemetryFrame, VersionedTickTelemetry,
+    };
 
     #[test]
     fn test_entity_to_snapshot_defaults() {
@@ -1569,19 +1575,19 @@ mod tests {
         client.inner_mut().receive_agent_telemetry_tick(
             12,
             44,
-            "{\"tick_telemetry\":{\"tick\":12,\"agents\":[]}}".into(),
+            VersionedTickTelemetry::new(TickTelemetryFrame::empty(12)).to_toon_document(),
         );
 
         let messages = client.poll_updates();
         assert!(messages.iter().any(|message| matches!(
             message,
             ServerMessage::TickTelemetry { frame_json }
-                if frame_json.contains("\"tick\":12")
+                if frame_json.contains("versioned_tick_telemetry")
         )));
-        assert_eq!(
-            client.last_debug_telemetry_json(),
-            Some("{\"tick_telemetry\":{\"tick\":12,\"agents\":[]}}")
-        );
+        assert!(client
+            .last_debug_telemetry_document()
+            .expect("debug telemetry stored")
+            .contains("versioned_tick_telemetry"));
     }
 
     #[test]

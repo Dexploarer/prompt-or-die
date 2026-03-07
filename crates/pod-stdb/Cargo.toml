@@ -49,3 +49,4 @@ rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
 [dev-dependencies]
+pod-core = { path = "../pod-core" }

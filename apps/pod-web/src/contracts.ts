@@ -1,3 +1,5 @@
+import { decode as decodeToon } from "@toon-format/toon";
+
 export type Vec3Tuple = [number, number, number];
 export type Vec4Tuple = [number, number, number, number];
 export type Vec2Tuple = [number, number];
@@ -231,34 +233,276 @@ export interface TickTelemetryEnvelope {
   recovery?: CatchUpDiagnostics | null;
 }
 
+export interface ReplayHeader {
+  name: string;
+  timestamp: number;
+  world_seed: number;
+  tick_count: number;
+  agent_count: number;
+  notes: string;
+}
+
+export interface ReplayActionOutcomeSummary {
+  submitted: number;
+  executed: number;
+  rejected: number;
+  queued: number;
+}
+
+export interface ReplayTrainingSample {
+  tick: number;
+  agent_id: string;
+  path_distance: number;
+  action_outcomes: ReplayActionOutcomeSummary;
+  encounter_transition?: Record<string, unknown> | null;
+  tool_call_latency_ms: number;
+  tool_call_error_count: number;
+}
+
+export interface ReplayDecisionTrace {
+  tick: number;
+  agent_id: string;
+  observation_hash: number;
+  prompt_sent: string;
+  raw_response: string;
+  actions_taken: Record<string, unknown>[];
+  tool_calls: TelemetryToolCallTrace[];
+  latency_ms: number;
+}
+
+export interface ReplayFileDocument {
+  header: ReplayHeader;
+  traces: ReplayDecisionTrace[][];
+  telemetry_windows: TickTelemetryFrame[];
+  training_samples: ReplayTrainingSample[];
+}
+
+export interface ReplaySummary {
+  name: string;
+  tickCount: number;
+  agentCount: number;
+  traceCount: number;
+  trainingSampleCount: number;
+  telemetryWindowCount: number;
+  toolCallCount: number;
+  toolCallErrors: number;
+  totalPathDistance: number;
+  notes: string;
+  latestTelemetryTick: number | null;
+}
+
+export interface ShardIncidentSummary {
+  shard_id: string;
+  latest_tick: number;
+  severity: string;
+  summary: string;
+  tick_budget_overrun_rate: number;
+  action_rejection_rate: number;
+  tool_call_error_rate: number;
+  average_tool_latency_ms: number;
+  average_trajectory_distance: number;
+  peak_entity_count: number;
+  peak_agent_count: number;
+  capture_actions: number;
+  summon_actions: number;
+  gather_actions: number;
+  loot_actions: number;
+  notes: string[];
+}
+
+interface ToonDocumentEnvelope<T = unknown> {
+  document_type: string;
+  payload: T;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decodeStructuredString(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return decodeToon(value);
+  }
+}
+
+function documentEnvelope(value: unknown): ToonDocumentEnvelope | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.document_type !== "string" || !("payload" in value)) {
+    return null;
+  }
+
+  return value as unknown as ToonDocumentEnvelope;
+}
+
+function directTickTelemetryFrame(value: unknown): TickTelemetryFrame | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (typeof value.tick !== "number" || !Array.isArray(value.agents)) {
+    return null;
+  }
+  return value as unknown as TickTelemetryFrame;
+}
+
+function directTickTelemetryEnvelope(value: unknown): TickTelemetryEnvelope | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const tickTelemetry = directTickTelemetryFrame(value.tickTelemetry);
+  if (tickTelemetry) {
+    return {
+      tickTelemetry,
+      recovery: (value.recovery as CatchUpDiagnostics | null | undefined) ?? null
+    };
+  }
+
+  const snakeCaseTickTelemetry = directTickTelemetryFrame(value.tick_telemetry);
+  if (snakeCaseTickTelemetry) {
+    return {
+      tickTelemetry: snakeCaseTickTelemetry,
+      recovery: (value.recovery as CatchUpDiagnostics | null | undefined) ?? null
+    };
+  }
+
+  return null;
+}
+
 export function parseTickTelemetryEnvelope(
   frame: string | TickTelemetryFrame | TickTelemetryEnvelope
 ): TickTelemetryEnvelope {
   const parsed =
     typeof frame === "string"
-      ? (JSON.parse(frame) as TickTelemetryFrame | TickTelemetryEnvelope)
+      ? decodeStructuredString(frame)
       : frame;
 
-  if ("agents" in parsed) {
-    return { tickTelemetry: parsed };
+  const envelopeDocument = documentEnvelope(parsed);
+  if (envelopeDocument) {
+    switch (envelopeDocument.document_type) {
+      case "tick_telemetry_envelope":
+        return parseTickTelemetryEnvelope(envelopeDocument.payload as TickTelemetryEnvelope);
+      case "tick_telemetry_frame":
+        return {
+          tickTelemetry: parseTickTelemetryEnvelope(
+            envelopeDocument.payload as TickTelemetryFrame
+          ).tickTelemetry,
+          recovery: null
+        };
+      case "versioned_tick_telemetry": {
+        const versioned = envelopeDocument.payload;
+        if (isRecord(versioned) && "payload" in versioned) {
+          return {
+            tickTelemetry: parseTickTelemetryEnvelope(
+              versioned.payload as TickTelemetryFrame
+            ).tickTelemetry,
+            recovery: null
+          };
+        }
+        break;
+      }
+    }
   }
 
-  if ("tickTelemetry" in parsed) {
-    return parsed;
+  const directEnvelope = directTickTelemetryEnvelope(parsed);
+  if (directEnvelope) {
+    return directEnvelope;
   }
 
-  const snakeCase = parsed as {
-    tick_telemetry?: TickTelemetryFrame;
-    recovery?: CatchUpDiagnostics | null;
-  };
-  if (snakeCase.tick_telemetry) {
-    return {
-      tickTelemetry: snakeCase.tick_telemetry,
-      recovery: snakeCase.recovery ?? null
-    };
+  const directFrame = directTickTelemetryFrame(parsed);
+  if (directFrame) {
+    return { tickTelemetry: directFrame };
   }
 
   throw new Error("Invalid tick telemetry payload");
+}
+
+export function parseReplayFile(
+  replay: string | ReplayFileDocument
+): ReplayFileDocument {
+  const parsed =
+    typeof replay === "string" ? decodeStructuredString(replay) : replay;
+  const replayDocument = documentEnvelope(parsed);
+
+  if (replayDocument?.document_type === "replay_file") {
+    return replayDocument.payload as ReplayFileDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    isRecord(parsed.header) &&
+    Array.isArray(parsed.traces) &&
+    Array.isArray(parsed.telemetry_windows) &&
+    Array.isArray(parsed.training_samples)
+  ) {
+    return parsed as unknown as ReplayFileDocument;
+  }
+
+  throw new Error("Invalid replay payload");
+}
+
+export function summarizeReplayFile(replay: ReplayFileDocument): ReplaySummary {
+  const traces = replay.traces.flat();
+  const toolCallCount = traces.reduce(
+    (count, trace) => count + trace.tool_calls.length,
+    0
+  );
+  const toolCallErrors = traces.reduce(
+    (count, trace) =>
+      count +
+      trace.tool_calls.filter(
+        (toolCall) =>
+          toolCall.status !== "Succeeded" && toolCall.status !== "Requested"
+      ).length,
+    0
+  );
+  const totalPathDistance = replay.training_samples.reduce(
+    (distance, sample) => distance + sample.path_distance,
+    0
+  );
+
+  return {
+    name: replay.header.name,
+    tickCount: replay.header.tick_count,
+    agentCount: replay.header.agent_count,
+    traceCount: traces.length,
+    trainingSampleCount: replay.training_samples.length,
+    telemetryWindowCount: replay.telemetry_windows.length,
+    toolCallCount,
+    toolCallErrors,
+    totalPathDistance: Number(totalPathDistance.toFixed(2)),
+    notes: replay.header.notes,
+    latestTelemetryTick: replay.telemetry_windows.at(-1)?.tick ?? null
+  };
+}
+
+export function parseShardIncidentSummary(
+  summary: string | ShardIncidentSummary
+): ShardIncidentSummary {
+  const parsed =
+    typeof summary === "string" ? decodeStructuredString(summary) : summary;
+  const summaryDocument = documentEnvelope(parsed);
+
+  if (summaryDocument?.document_type === "shard_incident_summary") {
+    return summaryDocument.payload as ShardIncidentSummary;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.shard_id === "string" &&
+    typeof parsed.latest_tick === "number" &&
+    typeof parsed.summary === "string"
+  ) {
+    return parsed as unknown as ShardIncidentSummary;
+  }
+
+  throw new Error("Invalid shard incident summary payload");
 }
 
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {
