@@ -603,5 +603,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Extended `pod-editor` with TOON imports for tool-call events, tick rollups, and generic live debug documents, keeping dashboard/telemetry state aligned with replay and incident ingestion.
 - [x] Added deterministic coverage for core TOON telemetry exports, SpacetimeDB debug-document retention, browser live debug routing, and editor live TOON imports.
 
-**Last updated**: Iteration 66
-**Current focus**: Iteration 67 live SpacetimeDB telemetry row production and shard-ops document streaming from authoritative runtime paths, plus browser/editor consumption of those streams end to end
+### Iteration 67
+- [x] Extended the SpacetimeDB reducer path to emit authoritative `agent_telemetry_tick` rows as real TOON `versioned_tick_telemetry` documents instead of leaving the debug tables empty.
+- [x] Added bounded retention pruning for live telemetry, tool-call, and rollup tables in the SpacetimeDB reducer path so debug subscriptions stay bounded over long shard lifetimes.
+- [x] Added authoritative 60-tick `agent_tick_rollup` production in `pod-stdb`, deriving rollups from the retained per-agent telemetry documents already written into the shard tables.
+- [x] Added a `ShardOpsDebugStream` in `apps/pod-server` so the in-memory authoritative server loop can emit TOON telemetry, tool-call events, rollups, and incident summaries through one live debug document surface.
+- [x] Added deterministic server coverage for the live shard debug stream and validated the SpacetimeDB reducer module on `wasm32`.
+- [x] Validated touched targets:
+  - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+
+**Last updated**: Iteration 67
+**Current focus**: Iteration 68 browser/editor consumption of live authoritative shard debug streams plus embedded-agent tool-call persistence into the SpacetimeDB runtime path

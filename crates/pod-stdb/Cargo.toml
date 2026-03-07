@@ -34,6 +34,7 @@ unstable = ["module"]
 client = []
 
 [dependencies]
+pod-core = { path = "../pod-core" }
 # Core dep for WASM module — optional, gated behind "module" feature.
 # The spacetimedb crate links against WASM host functions that cannot be resolved
 # on native arm64/x86 test binaries. Making it optional allows client-only builds
@@ -47,6 +48,6 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
+uuid.workspace = true
 
 [dev-dependencies]
-pod-core = { path = "../pod-core" }

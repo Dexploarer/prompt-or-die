@@ -12,9 +12,36 @@
 use crate::events::*;
 use crate::tables::*;
 use crate::types::*;
-use serde_json::json;
+use glam::Vec2;
+use pod_core::action::{
+    AbilityTarget as CoreAbilityTarget, Action as CoreAction,
+    CompanionCommand as CoreCompanionCommand, SpeakVolume as CoreSpeakVolume,
+};
+use pod_core::agent::AgentType as CoreAgentType;
+use pod_core::component::SkillKind;
+use pod_core::contract::AgentRuntimeProfile;
+use pod_core::id::{AgentId as CoreAgentId, EntityId as CoreEntityId};
+use pod_core::telemetry::{
+    ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentTickRollup,
+    TickTelemetryFrame, TrajectorySample,
+};
+use pod_core::{decode_toon_document, VersionedTickTelemetry};
+use serde_json::{json, Value};
 use spacetimedb::{Identity, ReducerContext, Table};
 use std::collections::HashMap;
+use uuid::Uuid;
+
+const TELEMETRY_RETENTION_TICKS: u64 = 600;
+const TOOL_EVENT_RETENTION_TICKS: u64 = 36_000;
+const ROLLUP_RETENTION_TICKS: u64 = 36_000;
+const ROLLUP_WINDOW_TICKS: u64 = 60;
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ObservationCounts {
+    visible_entities: usize,
+    audible_events: usize,
+    messages: usize,
+}
 
 fn reject_reducer(ctx: &ReducerContext, reason: impl Into<String>) {
     let reason_text = reason.into();
@@ -795,12 +822,17 @@ pub fn execute_tick(ctx: &ReducerContext) {
 
     let current_tick = ws.tick;
     let dt = 1.0 / ws.ticks_per_second as f32;
+    let elapsed = current_tick as f32 * dt;
 
     // ── Phase 1: Clear previous tick's events ──
     crate::observation::clear_old_events(ctx, current_tick);
+    prune_debug_telemetry_rows(ctx, current_tick);
 
     // ── Phase 2: Build observations ──
     crate::observation::build_observations(ctx, current_tick);
+    let observation_counts = collect_observation_counts(ctx, current_tick);
+    let mut telemetry_frames =
+        seed_agent_telemetry_frames(ctx, current_tick, elapsed, &observation_counts);
 
     // ── Phase 3: Process submitted actions ──
     let constraints_rows: Vec<AgentConstraintsRow> = ctx.db.agent_constraints().iter().collect();
@@ -823,28 +855,56 @@ pub fn execute_tick(ctx: &ReducerContext) {
 
     for submission in submissions {
         let eid = submission.entity_id;
+        let telemetry_action = submission_to_core_action(&submission);
+        record_submitted_action(&mut telemetry_frames, eid, telemetry_action.clone());
 
         let Some(entity) = ctx.db.entity().entity_id().find(eid) else {
+            record_rejected_action(
+                &mut telemetry_frames,
+                eid,
+                telemetry_action,
+                "Submission source entity missing",
+            );
             continue;
         };
         if !entity.alive {
+            record_rejected_action(
+                &mut telemetry_frames,
+                eid,
+                telemetry_action,
+                "Submission source entity is not alive",
+            );
             continue;
         }
 
         let mut constraints = ctx.db.agent_constraints().entity_id().find(eid);
         if let Some(ref c) = constraints {
             if !c.can_act {
+                record_rejected_action(
+                    &mut telemetry_frames,
+                    eid,
+                    telemetry_action,
+                    "Agent cannot act this tick",
+                );
                 continue;
             }
 
             let actions_this_tick = action_counts.entry(eid).or_insert(0);
             if *actions_this_tick >= c.actions_per_tick {
+                record_rejected_action(
+                    &mut telemetry_frames,
+                    eid,
+                    telemetry_action,
+                    "Agent exceeded per-tick action budget",
+                );
                 continue;
             }
             *actions_this_tick += 1;
         }
 
-        // Execute action based on kind
+        let mut executed = false;
+        let mut rejection_reason: Option<&'static str> = None;
+
         match submission.action_kind {
             ActionKind::Move => {
                 if let (Some(dx), Some(dy)) = (submission.direction_x, submission.direction_y) {
@@ -857,9 +917,18 @@ pub fn execute_tick(ctx: &ReducerContext) {
                                 vel.linear_x = nx * mvmt.max_speed;
                                 vel.linear_y = ny * mvmt.max_speed;
                                 ctx.db.velocity().entity_id().update(vel);
+                                executed = true;
+                            } else {
+                                rejection_reason = Some("Move direction magnitude too small");
                             }
+                        } else {
+                            rejection_reason = Some("Move source velocity missing");
                         }
+                    } else {
+                        rejection_reason = Some("Move source movement settings missing");
                     }
+                } else {
+                    rejection_reason = Some("Move action missing direction");
                 }
             }
             ActionKind::Stop => {
@@ -868,6 +937,9 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     vel.linear_y = 0.0;
                     vel.angular = 0.0;
                     ctx.db.velocity().entity_id().update(vel);
+                    executed = true;
+                } else {
+                    rejection_reason = Some("Stop source velocity missing");
                 }
             }
             ActionKind::Rotate => {
@@ -875,7 +947,12 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     if let Some(mut tf) = ctx.db.transform().entity_id().find(eid) {
                         tf.rotation = angle;
                         ctx.db.transform().entity_id().update(tf);
+                        executed = true;
+                    } else {
+                        rejection_reason = Some("Rotate source transform missing");
                     }
+                } else {
+                    rejection_reason = Some("Rotate action missing angle");
                 }
             }
             ActionKind::LookAt => {
@@ -886,8 +963,15 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         if (dx * dx + dy * dy) > 0.0001 {
                             tf.rotation = dy.atan2(dx);
                             ctx.db.transform().entity_id().update(tf);
+                            executed = true;
+                        } else {
+                            rejection_reason = Some("LookAt target coincides with source");
                         }
+                    } else {
+                        rejection_reason = Some("LookAt source transform missing");
                     }
+                } else {
+                    rejection_reason = Some("LookAt action missing target");
                 }
             }
             ActionKind::Attack => {
@@ -896,16 +980,19 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     .map(|c| c.attack_cooldown_remaining > 0)
                     .unwrap_or(false);
                 if cooling_down {
-                    continue;
-                }
-
-                if let Some(target_id) = find_attack_target(ctx, eid) {
+                    rejection_reason = Some("Attack is on cooldown");
+                } else if let Some(target_id) = find_attack_target(ctx, eid) {
                     if apply_attack(ctx, current_tick, eid, target_id) {
                         if let Some(mut c) = constraints.take() {
                             c.attack_cooldown_remaining = c.attack_cooldown;
                             ctx.db.agent_constraints().entity_id().update(c);
                         }
+                        executed = true;
+                    } else {
+                        rejection_reason = Some("Attack target invalid or out of range");
                     }
+                } else {
+                    rejection_reason = Some("No hostile target in range");
                 }
             }
             ActionKind::AttackTarget => {
@@ -914,39 +1001,43 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     .map(|c| c.attack_cooldown_remaining > 0)
                     .unwrap_or(false);
                 if cooling_down {
-                    continue;
-                }
-
-                let Some(target_id) = submission.target_entity_id else {
-                    continue;
-                };
-                if target_id == eid {
-                    continue;
-                }
-
-                if apply_attack(ctx, current_tick, eid, target_id) {
-                    if let Some(mut c) = constraints.take() {
-                        c.attack_cooldown_remaining = c.attack_cooldown;
-                        ctx.db.agent_constraints().entity_id().update(c);
+                    rejection_reason = Some("Attack is on cooldown");
+                } else if let Some(target_id) = submission.target_entity_id {
+                    if target_id == eid {
+                        rejection_reason = Some("Cannot attack self");
+                    } else if apply_attack(ctx, current_tick, eid, target_id) {
+                        if let Some(mut c) = constraints.take() {
+                            c.attack_cooldown_remaining = c.attack_cooldown;
+                            ctx.db.agent_constraints().entity_id().update(c);
+                        }
+                        executed = true;
+                    } else {
+                        rejection_reason = Some("AttackTarget target invalid or out of range");
                     }
+                } else {
+                    rejection_reason = Some("AttackTarget missing target entity");
                 }
             }
             ActionKind::CaptureCreature => {
-                let Some(target_id) = submission.target_entity_id else {
-                    continue;
-                };
-                let tool_slot = submission
-                    .ability_slot
-                    .map(|slot| slot.to_string())
-                    .unwrap_or_else(|| "null".to_string());
-                ctx.db.world_event().insert(WorldEventRow {
-                    event_id: 0,
-                    tick: current_tick,
-                    event_kind: WorldEventKind::AbilityUsed,
-                    entity_id: eid,
-                    secondary_entity_id: Some(target_id),
-                    data_json: format!(r#"{{"type":"capture_creature","tool_slot":{tool_slot}}}"#),
-                });
+                if let Some(target_id) = submission.target_entity_id {
+                    let tool_slot = submission
+                        .ability_slot
+                        .map(|slot| slot.to_string())
+                        .unwrap_or_else(|| "null".to_string());
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::AbilityUsed,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: format!(
+                            r#"{{"type":"capture_creature","tool_slot":{tool_slot}}}"#
+                        ),
+                    });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("CaptureCreature missing target entity");
+                }
             }
             ActionKind::SummonCompanion => {
                 let slot = submission.ability_slot.unwrap_or(0);
@@ -958,6 +1049,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: None,
                     data_json: format!(r#"{{"type":"summon_companion","slot":{slot}}}"#),
                 });
+                executed = true;
             }
             ActionKind::CommandCompanion => {
                 let slot = submission.ability_slot.unwrap_or(0);
@@ -980,37 +1072,42 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         r#"{{"type":"command_companion","slot":{slot},"command":"{command}","target":{target_id}}}"#
                     ),
                 });
+                executed = true;
             }
             ActionKind::GatherResource => {
-                let Some(target_id) = submission.target_entity_id else {
-                    continue;
-                };
-                let skill = submission
-                    .signal_type
-                    .clone()
-                    .unwrap_or_else(|| "gather".to_string())
-                    .replace('"', "\\\"");
-                ctx.db.world_event().insert(WorldEventRow {
-                    event_id: 0,
-                    tick: current_tick,
-                    event_kind: WorldEventKind::AbilityUsed,
-                    entity_id: eid,
-                    secondary_entity_id: Some(target_id),
-                    data_json: format!(r#"{{"type":"gather_resource","skill":"{skill}"}}"#),
-                });
+                if let Some(target_id) = submission.target_entity_id {
+                    let skill = submission
+                        .signal_type
+                        .clone()
+                        .unwrap_or_else(|| "gather".to_string())
+                        .replace('"', "\\\"");
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::AbilityUsed,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: format!(r#"{{"type":"gather_resource","skill":"{skill}"}}"#),
+                    });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("GatherResource missing target entity");
+                }
             }
             ActionKind::Loot => {
-                let Some(target_id) = submission.target_entity_id else {
-                    continue;
-                };
-                ctx.db.world_event().insert(WorldEventRow {
-                    event_id: 0,
-                    tick: current_tick,
-                    event_kind: WorldEventKind::ItemPickedUp,
-                    entity_id: eid,
-                    secondary_entity_id: Some(target_id),
-                    data_json: r#"{"type":"loot"}"#.to_string(),
-                });
+                if let Some(target_id) = submission.target_entity_id {
+                    ctx.db.world_event().insert(WorldEventRow {
+                        event_id: 0,
+                        tick: current_tick,
+                        event_kind: WorldEventKind::ItemPickedUp,
+                        entity_id: eid,
+                        secondary_entity_id: Some(target_id),
+                        data_json: r#"{"type":"loot"}"#.to_string(),
+                    });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("Loot missing target entity");
+                }
             }
             ActionKind::SetAutoRetaliate => {
                 let enabled = submission.signal_data.as_deref() == Some("true");
@@ -1022,6 +1119,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: None,
                     data_json: format!(r#"{{"type":"set_auto_retaliate","enabled":{enabled}}}"#),
                 });
+                executed = true;
             }
             ActionKind::Interact => {
                 if let Some(target_id) = find_interaction_target(ctx, eid) {
@@ -1033,21 +1131,28 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         secondary_entity_id: Some(target_id),
                         data_json: "{}".to_string(),
                     });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("No interaction target in range");
                 }
             }
             ActionKind::InteractWith => {
-                let Some(target_id) = submission.target_entity_id else {
-                    continue;
-                };
-                if in_range(ctx, eid, target_id, INTERACT_RANGE) {
-                    ctx.db.world_event().insert(WorldEventRow {
-                        event_id: 0,
-                        tick: current_tick,
-                        event_kind: WorldEventKind::InteractionTriggered,
-                        entity_id: eid,
-                        secondary_entity_id: Some(target_id),
-                        data_json: "{}".to_string(),
-                    });
+                if let Some(target_id) = submission.target_entity_id {
+                    if in_range(ctx, eid, target_id, INTERACT_RANGE) {
+                        ctx.db.world_event().insert(WorldEventRow {
+                            event_id: 0,
+                            tick: current_tick,
+                            event_kind: WorldEventKind::InteractionTriggered,
+                            entity_id: eid,
+                            secondary_entity_id: Some(target_id),
+                            data_json: "{}".to_string(),
+                        });
+                        executed = true;
+                    } else {
+                        rejection_reason = Some("InteractWith target out of range");
+                    }
+                } else {
+                    rejection_reason = Some("InteractWith missing target entity");
                 }
             }
             ActionKind::Pickup => {
@@ -1060,6 +1165,9 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         secondary_entity_id: Some(target_id),
                         data_json: "{}".to_string(),
                     });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("Pickup missing target entity");
                 }
             }
             ActionKind::Drop => {
@@ -1072,6 +1180,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: None,
                     data_json: format!(r#"{{"slot":{slot}}}"#),
                 });
+                executed = true;
             }
             ActionKind::UseItem => {
                 let slot = submission.ability_slot.unwrap_or(0);
@@ -1083,6 +1192,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: None,
                     data_json: format!(r#"{{"item_slot":{slot}}}"#),
                 });
+                executed = true;
             }
             ActionKind::UseAbility => {
                 let slot = submission.ability_slot.unwrap_or(0);
@@ -1094,10 +1204,10 @@ pub fn execute_tick(ctx: &ReducerContext) {
                     secondary_entity_id: submission.target_entity_id,
                     data_json: format!(r#"{{"slot":{slot}}}"#),
                 });
+                executed = true;
             }
             ActionKind::Speak => {
-                if let (Some(msg), Some(vol)) =
-                    (submission.message.clone(), submission.volume.clone())
+                if let (Some(msg), Some(vol)) = (submission.message.clone(), submission.volume.clone())
                 {
                     if let Some(tf) = ctx.db.transform().entity_id().find(eid) {
                         ctx.db.speech_event().insert(SpeechEventRow {
@@ -1109,14 +1219,20 @@ pub fn execute_tick(ctx: &ReducerContext) {
                             pos_x: tf.pos_x,
                             pos_y: tf.pos_y,
                         });
+                        executed = true;
+                    } else {
+                        rejection_reason = Some("Speak source transform missing");
                     }
+                } else {
+                    rejection_reason = Some("Speak action missing message or volume");
                 }
             }
             ActionKind::Signal => {
                 let signal_type = submission
                     .signal_type
+                    .clone()
                     .unwrap_or_else(|| "signal".to_string());
-                let signal_data = submission.signal_data.unwrap_or_default();
+                let signal_data = submission.signal_data.clone().unwrap_or_default();
                 let escaped_type = signal_type.replace('"', "\\\"");
                 let escaped_data = signal_data.replace('"', "\\\"");
                 ctx.db.world_event().insert(WorldEventRow {
@@ -1130,6 +1246,7 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         escaped_type, escaped_data
                     ),
                 });
+                executed = true;
             }
             ActionKind::Spawn => {
                 if let (Some(prefab), Some(x), Some(y)) = (
@@ -1166,11 +1283,20 @@ pub fn execute_tick(ctx: &ReducerContext) {
                         secondary_entity_id: None,
                         data_json: prefab,
                     });
+                    executed = true;
+                } else {
+                    rejection_reason = Some("Spawn action missing prefab or position");
                 }
             }
             ActionKind::Idle => {
-                // Explicit no-op
+                executed = true;
             }
+        }
+
+        if executed {
+            record_executed_action(&mut telemetry_frames, eid, telemetry_action);
+        } else if let Some(reason) = rejection_reason {
+            record_rejected_action(&mut telemetry_frames, eid, telemetry_action, reason);
         }
     }
 
@@ -1191,11 +1317,467 @@ pub fn execute_tick(ctx: &ReducerContext) {
         }
     }
 
+    update_telemetry_trajectory_ends(ctx, current_tick, elapsed + dt, &mut telemetry_frames);
+    emit_agent_telemetry_rows(ctx, current_tick, &telemetry_frames);
+    emit_agent_tick_rollups(ctx, current_tick);
+
     // ── Phase 5: Advance tick ──
     ws.tick = current_tick + 1;
     ctx.db.world_state().id().update(ws);
 
     log::debug!("[pod-stdb] Tick {current_tick} → {}", current_tick + 1);
+}
+
+fn prune_debug_telemetry_rows(ctx: &ReducerContext, current_tick: u64) {
+    let telemetry_floor = current_tick.saturating_sub(TELEMETRY_RETENTION_TICKS.saturating_sub(1));
+    let old_telemetry_rows: Vec<u64> = ctx
+        .db
+        .agent_telemetry_tick()
+        .iter()
+        .filter(|row| row.tick < telemetry_floor)
+        .map(|row| row.row_id)
+        .collect();
+    for row_id in old_telemetry_rows {
+        ctx.db.agent_telemetry_tick().row_id().delete(row_id);
+    }
+
+    let tool_event_floor =
+        current_tick.saturating_sub(TOOL_EVENT_RETENTION_TICKS.saturating_sub(1));
+    let old_tool_rows: Vec<u64> = ctx
+        .db
+        .agent_tool_call_event()
+        .iter()
+        .filter(|row| row.tick < tool_event_floor)
+        .map(|row| row.row_id)
+        .collect();
+    for row_id in old_tool_rows {
+        ctx.db.agent_tool_call_event().row_id().delete(row_id);
+    }
+
+    let rollup_floor = current_tick.saturating_sub(ROLLUP_RETENTION_TICKS.saturating_sub(1));
+    let old_rollup_rows: Vec<u64> = ctx
+        .db
+        .agent_tick_rollup()
+        .iter()
+        .filter(|row| row.tick_end < rollup_floor)
+        .map(|row| row.row_id)
+        .collect();
+    for row_id in old_rollup_rows {
+        ctx.db.agent_tick_rollup().row_id().delete(row_id);
+    }
+}
+
+fn collect_observation_counts(
+    ctx: &ReducerContext,
+    current_tick: u64,
+) -> HashMap<u64, ObservationCounts> {
+    ctx.db
+        .observation_event()
+        .iter()
+        .filter(|row| row.tick == current_tick)
+        .map(|row| {
+            (
+                row.observer_entity_id,
+                decode_observation_counts(&row.observation_json),
+            )
+        })
+        .collect()
+}
+
+fn decode_observation_counts(document: &str) -> ObservationCounts {
+    let Ok(value) = serde_json::from_str::<Value>(document) else {
+        return ObservationCounts::default();
+    };
+
+    ObservationCounts {
+        visible_entities: value["visible_entities"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default(),
+        audible_events: value["audible_events"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default(),
+        messages: value["messages"].as_array().map(Vec::len).unwrap_or_default(),
+    }
+}
+
+fn seed_agent_telemetry_frames(
+    ctx: &ReducerContext,
+    current_tick: u64,
+    elapsed: f32,
+    observation_counts: &HashMap<u64, ObservationCounts>,
+) -> HashMap<u64, AgentTelemetryFrame> {
+    let mut frames = HashMap::new();
+
+    for entity in ctx.db.entity().iter().filter(|entity| entity.alive) {
+        let Some(agent_type) = entity.agent_type.clone() else {
+            continue;
+        };
+        let Some(transform) = ctx.db.transform().entity_id().find(entity.entity_id) else {
+            continue;
+        };
+        let velocity = ctx.db.velocity().entity_id().find(entity.entity_id);
+        let counts = observation_counts
+            .get(&entity.entity_id)
+            .copied()
+            .unwrap_or_default();
+
+        let trajectory_start = TrajectorySample::new(
+            current_tick,
+            elapsed,
+            Vec2::new(transform.pos_x, transform.pos_y),
+            velocity
+                .as_ref()
+                .map(|value| Vec2::new(value.linear_x, value.linear_y))
+                .unwrap_or(Vec2::ZERO),
+            transform.rotation,
+        );
+
+        frames.insert(
+            entity.entity_id,
+            AgentTelemetryFrame::new(
+                current_tick,
+                stable_agent_id(entity.entity_id),
+                Some(CoreEntityId(entity.entity_id)),
+                AgentRuntimeProfile::for_agent_type(core_agent_type(&agent_type)),
+                counts.visible_entities,
+                counts.audible_events,
+                counts.messages,
+                0,
+                0,
+                None,
+                Some(trajectory_start),
+            ),
+        );
+    }
+
+    frames
+}
+
+fn record_submitted_action(
+    telemetry_frames: &mut HashMap<u64, AgentTelemetryFrame>,
+    entity_id: u64,
+    action: CoreAction,
+) {
+    if let Some(frame) = telemetry_frames.get_mut(&entity_id) {
+        frame.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Submitted,
+            action,
+            None,
+        );
+    }
+}
+
+fn record_executed_action(
+    telemetry_frames: &mut HashMap<u64, AgentTelemetryFrame>,
+    entity_id: u64,
+    action: CoreAction,
+) {
+    if let Some(frame) = telemetry_frames.get_mut(&entity_id) {
+        frame.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Executed,
+            action,
+            None,
+        );
+    }
+}
+
+fn record_rejected_action(
+    telemetry_frames: &mut HashMap<u64, AgentTelemetryFrame>,
+    entity_id: u64,
+    action: CoreAction,
+    reason: impl Into<String>,
+) {
+    if let Some(frame) = telemetry_frames.get_mut(&entity_id) {
+        frame.record_action(
+            ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Rejected,
+            action,
+            Some(reason.into()),
+        );
+    }
+}
+
+fn update_telemetry_trajectory_ends(
+    ctx: &ReducerContext,
+    current_tick: u64,
+    elapsed: f32,
+    telemetry_frames: &mut HashMap<u64, AgentTelemetryFrame>,
+) {
+    for (entity_id, frame) in telemetry_frames.iter_mut() {
+        let Some(transform) = ctx.db.transform().entity_id().find(*entity_id) else {
+            continue;
+        };
+        let velocity = ctx.db.velocity().entity_id().find(*entity_id);
+        frame.update_trajectory_end(TrajectorySample::new(
+            current_tick,
+            elapsed,
+            Vec2::new(transform.pos_x, transform.pos_y),
+            velocity
+                .as_ref()
+                .map(|value| Vec2::new(value.linear_x, value.linear_y))
+                .unwrap_or(Vec2::ZERO),
+            transform.rotation,
+        ));
+    }
+}
+
+fn emit_agent_telemetry_rows(
+    ctx: &ReducerContext,
+    current_tick: u64,
+    telemetry_frames: &HashMap<u64, AgentTelemetryFrame>,
+) {
+    let mut entity_ids: Vec<u64> = telemetry_frames.keys().copied().collect();
+    entity_ids.sort_unstable();
+
+    for entity_id in entity_ids {
+        let Some(frame) = telemetry_frames.get(&entity_id) else {
+            continue;
+        };
+        let document = VersionedTickTelemetry::new(TickTelemetryFrame {
+            tick: current_tick,
+            agents: vec![frame.clone()],
+        })
+        .to_toon_document();
+        let trajectory = frame.trajectory.as_ref();
+        ctx.db.agent_telemetry_tick().insert(AgentTelemetryTickRow {
+            row_id: 0,
+            tick: current_tick,
+            agent_entity_id: entity_id,
+            visible_entity_count: frame.visible_entity_count as u32,
+            audible_event_count: frame.audible_event_count as u32,
+            message_count: frame.message_count as u32,
+            submitted_action_count: action_count(frame, ActionLifecycleStage::Submitted),
+            executed_action_count: action_count(frame, ActionLifecycleStage::Executed),
+            rejected_action_count: action_count(frame, ActionLifecycleStage::Rejected),
+            trajectory_start_x: trajectory
+                .as_ref()
+                .map(|value| value.start.position.x)
+                .unwrap_or_default(),
+            trajectory_start_y: trajectory
+                .as_ref()
+                .map(|value| value.start.position.y)
+                .unwrap_or_default(),
+            trajectory_end_x: trajectory
+                .as_ref()
+                .map(|value| value.end.position.x)
+                .unwrap_or_default(),
+            trajectory_end_y: trajectory
+                .as_ref()
+                .map(|value| value.end.position.y)
+                .unwrap_or_default(),
+            frame_json: document,
+        });
+    }
+}
+
+fn emit_agent_tick_rollups(ctx: &ReducerContext, current_tick: u64) {
+    if (current_tick + 1) % ROLLUP_WINDOW_TICKS != 0 {
+        return;
+    }
+
+    let window_start = current_tick.saturating_sub(ROLLUP_WINDOW_TICKS - 1);
+    let mut frames_by_agent: HashMap<u64, Vec<AgentTelemetryFrame>> = HashMap::new();
+
+    for row in ctx
+        .db
+        .agent_telemetry_tick()
+        .iter()
+        .filter(|row| row.tick >= window_start && row.tick <= current_tick)
+    {
+        let Ok(versioned) =
+            decode_toon_document::<VersionedTickTelemetry>(&row.frame_json, "versioned_tick_telemetry")
+        else {
+            continue;
+        };
+        for frame in versioned.payload.agents {
+            let Some(entity_id) = frame.entity_id else {
+                continue;
+            };
+            frames_by_agent.entry(entity_id.0).or_default().push(frame);
+        }
+    }
+
+    let mut agent_ids: Vec<u64> = frames_by_agent.keys().copied().collect();
+    agent_ids.sort_unstable();
+
+    for agent_entity_id in agent_ids {
+        let Some(frames) = frames_by_agent.get_mut(&agent_entity_id) else {
+            continue;
+        };
+        frames.sort_by_key(|frame| frame.tick);
+        let Some(rollup) = AgentTickRollup::from_agent_frames(agent_entity_id, frames) else {
+            continue;
+        };
+        ctx.db.agent_tick_rollup().insert(AgentTickRollupRow {
+            row_id: 0,
+            tick_start: rollup.tick_start,
+            tick_end: rollup.tick_end,
+            agent_entity_id,
+            total_distance: rollup.total_distance,
+            submitted_action_count: rollup.submitted_action_count,
+            executed_action_count: rollup.executed_action_count,
+            rejected_action_count: rollup.rejected_action_count,
+            tool_call_count: rollup.tool_call_count,
+            tool_error_count: rollup.tool_error_count,
+            rollup_json: rollup.to_toon_document(),
+        });
+    }
+}
+
+fn action_count(frame: &AgentTelemetryFrame, stage: ActionLifecycleStage) -> u32 {
+    frame.action_trace
+        .iter()
+        .filter(|trace| trace.stage == stage)
+        .count() as u32
+}
+
+fn stable_agent_id(entity_id: u64) -> CoreAgentId {
+    CoreAgentId(Uuid::from_u128(0x504f4453544442000000000000000000u128 | entity_id as u128))
+}
+
+fn core_agent_type(agent_type: &AgentType) -> CoreAgentType {
+    match agent_type {
+        AgentType::Human => CoreAgentType::Human,
+        AgentType::LlmAgent => CoreAgentType::LlmAgent,
+        AgentType::NeuralAgent => CoreAgentType::NeuralAgent,
+        AgentType::ScriptedNpc => CoreAgentType::ScriptedNpc,
+        AgentType::System => CoreAgentType::System,
+    }
+}
+
+fn submission_to_core_action(submission: &ActionSubmissionRow) -> CoreAction {
+    match submission.action_kind {
+        ActionKind::Move => CoreAction::Move {
+            direction: Vec2::new(
+                submission.direction_x.unwrap_or_default(),
+                submission.direction_y.unwrap_or_default(),
+            ),
+        },
+        ActionKind::Stop => CoreAction::Stop,
+        ActionKind::Rotate => CoreAction::Rotate {
+            angle: submission.angle.unwrap_or_default(),
+        },
+        ActionKind::LookAt => CoreAction::LookAt {
+            target: Vec2::new(
+                submission.target_x.unwrap_or_default(),
+                submission.target_y.unwrap_or_default(),
+            ),
+        },
+        ActionKind::Attack => CoreAction::Attack,
+        ActionKind::AttackTarget => CoreAction::AttackTarget {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+        },
+        ActionKind::UseAbility => CoreAction::UseAbility {
+            slot: submission.ability_slot.unwrap_or(0),
+            target: core_ability_target(submission),
+        },
+        ActionKind::CaptureCreature => CoreAction::CaptureCreature {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+            tool_slot: submission.ability_slot,
+        },
+        ActionKind::SummonCompanion => CoreAction::SummonCompanion {
+            slot: submission.ability_slot.unwrap_or(0),
+        },
+        ActionKind::CommandCompanion => CoreAction::CommandCompanion {
+            slot: submission.ability_slot.unwrap_or(0),
+            command: parse_companion_command(submission.signal_type.as_deref()),
+            target: submission.target_entity_id.map(CoreEntityId),
+        },
+        ActionKind::Interact => CoreAction::Interact,
+        ActionKind::InteractWith => CoreAction::InteractWith {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+        },
+        ActionKind::Pickup => CoreAction::Pickup {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+        },
+        ActionKind::Drop => CoreAction::Drop {
+            slot: submission.ability_slot.unwrap_or(0),
+        },
+        ActionKind::UseItem => CoreAction::UseItem {
+            slot: submission.ability_slot.unwrap_or(0),
+        },
+        ActionKind::GatherResource => CoreAction::GatherResource {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+            skill: parse_skill_kind(submission.signal_type.as_deref()),
+        },
+        ActionKind::Loot => CoreAction::Loot {
+            target: CoreEntityId(submission.target_entity_id.unwrap_or_default()),
+        },
+        ActionKind::Speak => CoreAction::Speak {
+            message: submission.message.clone().unwrap_or_default(),
+            volume: match submission.volume.as_ref().unwrap_or(&SpeakVolume::Normal) {
+                SpeakVolume::Whisper => CoreSpeakVolume::Whisper,
+                SpeakVolume::Normal => CoreSpeakVolume::Normal,
+                SpeakVolume::Shout => CoreSpeakVolume::Shout,
+            },
+        },
+        ActionKind::Signal => CoreAction::Signal {
+            signal_type: submission.signal_type.clone().unwrap_or_default(),
+            data: submission.signal_data.clone().unwrap_or_default(),
+        },
+        ActionKind::SetAutoRetaliate => CoreAction::SetAutoRetaliate {
+            enabled: submission.signal_data.as_deref() == Some("true"),
+        },
+        ActionKind::Idle => CoreAction::Idle,
+        ActionKind::Spawn => CoreAction::Spawn {
+            prefab: submission.prefab.clone().unwrap_or_default(),
+            position: Vec2::new(
+                submission.target_x.unwrap_or_default(),
+                submission.target_y.unwrap_or_default(),
+            ),
+        },
+    }
+}
+
+fn core_ability_target(submission: &ActionSubmissionRow) -> Option<CoreAbilityTarget> {
+    match submission.ability_target_kind {
+        Some(AbilityTargetKind::Position) => Some(CoreAbilityTarget::Position(Vec2::new(
+            submission.target_x.unwrap_or_default(),
+            submission.target_y.unwrap_or_default(),
+        ))),
+        Some(AbilityTargetKind::Entity) => Some(CoreAbilityTarget::Entity(CoreEntityId(
+            submission.target_entity_id.unwrap_or_default(),
+        ))),
+        Some(AbilityTargetKind::Direction) => Some(CoreAbilityTarget::Direction(Vec2::new(
+            submission.direction_x.unwrap_or_default(),
+            submission.direction_y.unwrap_or_default(),
+        ))),
+        Some(AbilityTargetKind::None) | None => None,
+    }
+}
+
+fn parse_companion_command(command: Option<&str>) -> CoreCompanionCommand {
+    match command.unwrap_or("follow").to_ascii_lowercase().as_str() {
+        "attack" => CoreCompanionCommand::Attack,
+        "guard" => CoreCompanionCommand::Guard,
+        "recall" => CoreCompanionCommand::Recall,
+        _ => CoreCompanionCommand::Follow,
+    }
+}
+
+fn parse_skill_kind(skill: Option<&str>) -> SkillKind {
+    match skill.unwrap_or("gather").to_ascii_lowercase().as_str() {
+        "attack" => SkillKind::Attack,
+        "strength" => SkillKind::Strength,
+        "defence" | "defense" => SkillKind::Defence,
+        "ranged" => SkillKind::Ranged,
+        "magic" => SkillKind::Magic,
+        "constitution" => SkillKind::Constitution,
+        "mining" => SkillKind::Mining,
+        "woodcutting" => SkillKind::Woodcutting,
+        "fishing" => SkillKind::Fishing,
+        "cooking" => SkillKind::Cooking,
+        "smithing" => SkillKind::Smithing,
+        "crafting" => SkillKind::Crafting,
+        "slayer" => SkillKind::Slayer,
+        "taming" => SkillKind::Taming,
+        "bonding" => SkillKind::Bonding,
+        _ => SkillKind::Mining,
+    }
 }
 
 const ATTACK_RANGE: f32 = 80.0;

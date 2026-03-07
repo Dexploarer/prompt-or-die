@@ -170,8 +170,15 @@ mod map {
 mod stats {
     use pod_core::action::Action;
     use pod_core::telemetry::ToolCallStatus;
-    use pod_core::{IncidentSeverity, ShardIncidentSummary};
+    use pod_core::{
+        AgentTickRollup, AgentToolCallEvent, IncidentSeverity, ShardIncidentSummary,
+        TelemetryArchive, TelemetryConfig, VersionedTickTelemetry,
+    };
+    use std::collections::{HashMap, VecDeque};
     use std::time::Instant;
+
+    const ROLLUP_WINDOW_TICKS: u64 = 60;
+    const INCIDENT_EMIT_INTERVAL_TICKS: u64 = 60;
 
     /// Server statistics tracker
     #[derive(Debug)]
@@ -444,27 +451,125 @@ mod stats {
         }
     }
 
+    /// Live TOON document stream emitted by the authoritative server runtime.
+    ///
+    /// This keeps browser/editor/ops consumers on the same document path as the
+    /// in-memory authoritative server loop rather than only the direct-connect
+    /// or synthetic test paths.
+    #[derive(Debug, Clone)]
+    pub struct ShardOpsDebugStream {
+        shard_id: String,
+        archive: TelemetryArchive,
+        pending_documents: VecDeque<String>,
+    }
+
+    impl ShardOpsDebugStream {
+        pub fn new(shard_id: impl Into<String>) -> Self {
+            Self {
+                shard_id: shard_id.into(),
+                archive: TelemetryArchive::with_capacity(
+                    TelemetryConfig::default().core_archive_ticks,
+                ),
+                pending_documents: VecDeque::new(),
+            }
+        }
+
+        pub fn record_tick(
+            &mut self,
+            tick_result: &pod_core::tick::TickResult,
+            stats: &ServerStats,
+        ) {
+            self.archive.record_tick(tick_result.telemetry.clone());
+            self.pending_documents.push_back(
+                VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document(),
+            );
+
+            for agent in &tick_result.telemetry.agents {
+                let Some(entity_id) = agent.entity_id else {
+                    continue;
+                };
+                for trace in &agent.tool_calls {
+                    self.pending_documents
+                        .push_back(AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document());
+                }
+            }
+
+            if (tick_result.tick + 1) % ROLLUP_WINDOW_TICKS == 0 {
+                for rollup in self.rollups_for_tick(tick_result.tick) {
+                    self.pending_documents
+                        .push_back(rollup.to_toon_document());
+                }
+            }
+
+            let incident = stats.incident_summary(self.shard_id.clone(), tick_result.tick);
+            let emit_incident = !matches!(incident.severity, IncidentSeverity::Healthy)
+                || (tick_result.tick + 1) % INCIDENT_EMIT_INTERVAL_TICKS == 0;
+            if emit_incident {
+                self.pending_documents
+                    .push_back(incident.to_toon_document());
+            }
+        }
+
+        pub fn drain_documents(&mut self) -> Vec<String> {
+            self.pending_documents.drain(..).collect()
+        }
+
+        fn rollups_for_tick(&self, tick_end: u64) -> Vec<AgentTickRollup> {
+            let tick_start = tick_end.saturating_sub(ROLLUP_WINDOW_TICKS - 1);
+            let mut frames_by_agent = HashMap::<u64, Vec<pod_core::AgentTelemetryFrame>>::new();
+
+            for frame in self
+                .archive
+                .frames()
+                .iter()
+                .filter(|frame| frame.tick >= tick_start && frame.tick <= tick_end)
+            {
+                for agent in &frame.agents {
+                    let Some(entity_id) = agent.entity_id else {
+                        continue;
+                    };
+                    frames_by_agent
+                        .entry(entity_id.0)
+                        .or_default()
+                        .push(agent.clone());
+                }
+            }
+
+            let mut entity_ids: Vec<u64> = frames_by_agent.keys().copied().collect();
+            entity_ids.sort_unstable();
+
+            entity_ids
+                .into_iter()
+                .filter_map(|entity_id| {
+                    frames_by_agent
+                        .get(&entity_id)
+                        .and_then(|frames| AgentTickRollup::from_agent_frames(entity_id, frames))
+                })
+                .collect()
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::ServerStats;
+        use super::{ServerStats, ShardOpsDebugStream};
         use glam::Vec2;
         use pod_core::acceptance::{run_flagship_mmo_acceptance, FlagshipMmoAcceptanceConfig};
         use pod_core::action::Action;
         use pod_core::agent::AgentType;
         use pod_core::contract::AgentRuntimeProfile;
-        use pod_core::id::AgentId;
+        use pod_core::id::{AgentId, EntityId};
         use pod_core::telemetry::{
             ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentToolCallTrace,
             TickTelemetryFrame, ToolCallStatus, TrajectorySample,
         };
         use pod_core::{decode_toon_value, IncidentSeverity};
 
-        fn sample_tick() -> pod_core::tick::TickResult {
+        fn sample_tick_at(tick: u64) -> pod_core::tick::TickResult {
             let agent_id = AgentId::new();
             let mut agent = AgentTelemetryFrame::new(
-                7,
+                tick,
                 agent_id,
-                None,
+                Some(EntityId(41)),
                 AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent),
                 3,
                 1,
@@ -472,11 +577,17 @@ mod stats {
                 4,
                 1,
                 None,
-                Some(TrajectorySample::new(7, 0.0, Vec2::ZERO, Vec2::ZERO, 0.0)),
+                Some(TrajectorySample::new(
+                    tick,
+                    tick as f32 / 60.0,
+                    Vec2::ZERO,
+                    Vec2::ZERO,
+                    0.0,
+                )),
             );
             agent.update_trajectory_end(TrajectorySample::new(
-                7,
-                1.0 / 60.0,
+                tick,
+                tick as f32 / 60.0 + 1.0 / 60.0,
                 Vec2::new(3.0, 4.0),
                 Vec2::ZERO,
                 0.0,
@@ -500,7 +611,7 @@ mod stats {
                 None,
             );
             agent.record_tool_call(AgentToolCallTrace::new(
-                7,
+                tick,
                 "llm.complete",
                 "mock",
                 ToolCallStatus::ParseError,
@@ -511,16 +622,20 @@ mod stats {
             ));
 
             pod_core::tick::TickResult {
-                tick: 7,
+                tick,
                 events: vec![],
                 entity_count: 12,
                 actions_processed: 3,
                 actions_rejected: 1,
                 telemetry: TickTelemetryFrame {
-                    tick: 7,
+                    tick,
                     agents: vec![agent],
                 },
             }
+        }
+
+        fn sample_tick() -> pod_core::tick::TickResult {
+            sample_tick_at(7)
         }
 
         #[test]
@@ -579,6 +694,40 @@ mod stats {
             assert_eq!(value["document_type"], "shard_incident_summary");
             assert_eq!(value["payload"]["shard_id"], "overworld-a");
             assert_eq!(value["payload"]["latest_tick"], 7);
+        }
+
+        #[test]
+        fn shard_ops_debug_stream_emits_live_toon_documents() {
+            let mut stats = ServerStats::new(60);
+            let mut stream = ShardOpsDebugStream::new("overworld-a");
+
+            for tick in 0..60 {
+                let tick_result = sample_tick_at(tick);
+                stats.record_tick(&tick_result, 5, false);
+                stream.record_tick(&tick_result, &stats);
+            }
+
+            let documents = stream.drain_documents();
+            assert!(documents
+                .iter()
+                .any(|document| decode_toon_value(document)
+                    .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                    .unwrap_or(false)));
+            assert!(documents
+                .iter()
+                .any(|document| decode_toon_value(document)
+                    .map(|value| value["document_type"] == "agent_tool_call_event")
+                    .unwrap_or(false)));
+            assert!(documents
+                .iter()
+                .any(|document| decode_toon_value(document)
+                    .map(|value| value["document_type"] == "agent_tick_rollup")
+                    .unwrap_or(false)));
+            assert!(documents
+                .iter()
+                .any(|document| decode_toon_value(document)
+                    .map(|value| value["document_type"] == "shard_incident_summary")
+                    .unwrap_or(false)));
         }
     }
 }
