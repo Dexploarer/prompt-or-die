@@ -53,20 +53,13 @@ pub enum ClientMessage {
     },
 
     /// Request to disconnect from the server
-    Disconnect {
-        reason: Option<String>,
-    },
+    Disconnect { reason: Option<String> },
 
     /// Batch of actions for a specific tick
-    ActionBatch {
-        tick: u64,
-        actions: Vec<Action>,
-    },
+    ActionBatch { tick: u64, actions: Vec<Action> },
 
     /// Ping request — measures round-trip time
-    Ping {
-        timestamp: u64,
-    },
+    Ping { timestamp: u64 },
 }
 
 impl ClientMessage {
@@ -93,31 +86,28 @@ pub enum ServerMessage {
         client_id: ClientId,
         reconnect_token: ReconnectToken,
         tick: u64,
+        controlled_entity: Option<u64>,
+        authoritative_digest: u64,
         snapshot: super::snapshot::WorldSnapshot,
     },
 
     /// Delta update — only changed state since last snapshot
     StateDelta {
         tick: u64,
+        acknowledged_action_tick: Option<u64>,
+        authoritative_digest: u64,
+        is_full_snapshot: bool,
         delta: super::snapshot::StateDelta,
     },
 
     /// Batch of game events
-    EventBatch {
-        tick: u64,
-        events: Vec<GameEvent>,
-    },
+    EventBatch { tick: u64, events: Vec<GameEvent> },
 
     /// Response to ping request
-    Pong {
-        client_ts: u64,
-        server_ts: u64,
-    },
+    Pong { client_ts: u64, server_ts: u64 },
 
     /// Connection rejected
-    Rejected {
-        reason: String,
-    },
+    Rejected { reason: String },
 }
 
 impl ServerMessage {
@@ -243,6 +233,8 @@ mod tests {
             client_id: ClientId::new(),
             reconnect_token: ReconnectToken::new(),
             tick: 100,
+            controlled_entity: Some(42),
+            authoritative_digest: snapshot.digest(),
             snapshot,
         };
 
@@ -250,8 +242,13 @@ mod tests {
         let decoded = ServerMessage::decode_json(&json).unwrap();
 
         match decoded {
-            ServerMessage::Welcome { tick, .. } => {
+            ServerMessage::Welcome {
+                tick,
+                controlled_entity,
+                ..
+            } => {
                 assert_eq!(tick, 100);
+                assert_eq!(controlled_entity, Some(42));
             }
             _ => panic!("Wrong message type"),
         }

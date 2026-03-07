@@ -389,5 +389,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --lib`
   - `cargo test -p pod-stdb --lib`
 
-**Last updated**: Iteration 48
-**Current focus**: Phase 1 MMO action validation and Phase 3 authority parity for the RuneScape-style MMO + companion-creature vertical slice
+### Iteration 49 — Shared Simulation Reconciliation Foundation
+
+- [x] Extended `pod-net` snapshots with deterministic authoritative digests, explicit full-snapshot recovery markers, and replayable predicted action batches so direct-connect clients can detect divergence and rebuild from a known-good baseline.
+- [x] Updated the direct-connect wire contract to include controlled-entity assignment on `Welcome` plus per-client acknowledged action ticks on authoritative state updates.
+- [x] Split native and web direct-connect clients into authoritative vs predicted snapshot tracking, preserving unacknowledged local action batches and replaying them after authoritative correction instead of patching deltas directly onto predicted state.
+- [x] Added deterministic `pod-net` tests for stable snapshot digests, predicted movement replay, and full-snapshot/baseline handling during authoritative update application.
+- [x] Validated touched crate:
+  - `cargo test -p pod-net --lib`
+
+**Last updated**: Iteration 49
+**Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice

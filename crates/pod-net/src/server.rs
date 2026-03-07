@@ -31,6 +31,7 @@ struct ClientSession {
     pending_actions: Vec<(u64, Action)>, // (tick, action)
     reconnect_token: ReconnectToken,
     last_action_tick: Option<u64>,
+    last_processed_action_tick: Option<u64>,
 }
 
 impl ClientSession {
@@ -42,6 +43,7 @@ impl ClientSession {
             pending_actions: Vec::new(),
             reconnect_token: ReconnectToken::new(),
             last_action_tick: None,
+            last_processed_action_tick: None,
         }
     }
 }
@@ -109,8 +111,8 @@ impl GameServer {
 
     /// Initialize the server (bind to network)
     pub async fn initialize(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let addr: SocketAddr = format!("{}:{}", self.config.bind_addr, self.config.bind_port)
-            .parse()?;
+        let addr: SocketAddr =
+            format!("{}:{}", self.config.bind_addr, self.config.bind_port).parse()?;
 
         // Generate self-signed certificate for QUIC (rcgen 0.13+ API)
         let cert_key = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
@@ -149,8 +151,7 @@ impl GameServer {
 
     /// Main server loop — step the world and handle client connections
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let tick_duration =
-            std::time::Duration::from_secs_f32(1.0 / self.config.tick_rate as f32);
+        let tick_duration = std::time::Duration::from_secs_f32(1.0 / self.config.tick_rate as f32);
 
         loop {
             let frame_start = std::time::Instant::now();
@@ -189,6 +190,7 @@ impl GameServer {
                     continue;
                 };
 
+                let mut last_processed_action_tick = None;
                 for (action_tick, action) in session.pending_actions.drain(..) {
                     let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
                     let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
@@ -196,6 +198,15 @@ impl GameServer {
                         continue;
                     }
                     self.world.submit_external_action(agent_id, action);
+                    last_processed_action_tick = Some(
+                        last_processed_action_tick
+                            .map(|current: u64| current.max(action_tick))
+                            .unwrap_or(action_tick),
+                    );
+                }
+
+                if last_processed_action_tick.is_some() {
+                    session.last_processed_action_tick = last_processed_action_tick;
                 }
             }
         }
@@ -203,8 +214,12 @@ impl GameServer {
         // Step the world
         self.world.step();
 
-        debug!("Tick {}: {} entities, {} agents", self.tick,
-               self.world.entity_count(), self.world.agent_count());
+        debug!(
+            "Tick {}: {} entities, {} agents",
+            self.tick,
+            self.world.entity_count(),
+            self.world.agent_count()
+        );
 
         Ok(())
     }
@@ -213,11 +228,12 @@ impl GameServer {
     async fn handle_connections(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(endpoint) = &self.endpoint {
             loop {
-                let incoming = match tokio::time::timeout(Duration::from_millis(1), endpoint.accept()).await {
-                    Ok(Some(incoming)) => incoming,
-                    Ok(None) => break,
-                    Err(_) => break,
-                };
+                let incoming =
+                    match tokio::time::timeout(Duration::from_millis(1), endpoint.accept()).await {
+                        Ok(Some(incoming)) => incoming,
+                        Ok(None) => break,
+                        Err(_) => break,
+                    };
 
                 let connection = match incoming.await {
                     Ok(conn) => conn,
@@ -315,64 +331,63 @@ impl GameServer {
 
         while let Ok(packet) = self.inbound_rx.try_recv() {
             match packet {
-                InboundPacket::Message { client_id, message } => {
-                    match message {
-                        ClientMessage::Connect {
-                            player_name,
-                            reconnect_token,
-                        } => {
-                            self.attach_remote_agent(client_id, player_name, reconnect_token)
-                                .await?;
-                        }
-                        ClientMessage::ActionBatch { tick, actions } => {
-                            let mut overflow = false;
-                            let mut unregistered = false;
-                            let mut stale_tick = false;
-                            let mut out_of_window = false;
-                            let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
-                            let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
-                            {
-                                let mut clients = self.clients.write().await;
-                                if let Some(session) = clients.get_mut(&client_id) {
-                                    if session.agent_id.is_none() {
-                                        unregistered = true;
-                                    }
+                InboundPacket::Message { client_id, message } => match message {
+                    ClientMessage::Connect {
+                        player_name,
+                        reconnect_token,
+                    } => {
+                        self.attach_remote_agent(client_id, player_name, reconnect_token)
+                            .await?;
+                    }
+                    ClientMessage::ActionBatch { tick, actions } => {
+                        let mut overflow = false;
+                        let mut unregistered = false;
+                        let mut stale_tick = false;
+                        let mut out_of_window = false;
+                        let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
+                        let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
+                        {
+                            let mut clients = self.clients.write().await;
+                            if let Some(session) = clients.get_mut(&client_id) {
+                                if session.agent_id.is_none() {
+                                    unregistered = true;
+                                }
 
-                                    if !unregistered {
-                                        if tick < min_tick || tick > max_tick {
-                                            out_of_window = true;
-                                        } else if session
-                                            .last_action_tick
-                                            .map(|last| tick < last)
-                                            .unwrap_or(false)
-                                        {
-                                            stale_tick = true;
-                                        } else {
-                                            let available = ACTION_QUEUE_MAX_DEPTH
-                                                .saturating_sub(session.pending_actions.len());
-                                            if actions.len() > available {
-                                                overflow = true;
-                                            }
-                                            for action in actions.into_iter().take(available) {
-                                                session.pending_actions.push((tick, action));
-                                            }
-                                            session.last_action_tick = Some(tick);
+                                if !unregistered {
+                                    if tick < min_tick || tick > max_tick {
+                                        out_of_window = true;
+                                    } else if session
+                                        .last_action_tick
+                                        .map(|last| tick < last)
+                                        .unwrap_or(false)
+                                    {
+                                        stale_tick = true;
+                                    } else {
+                                        let available = ACTION_QUEUE_MAX_DEPTH
+                                            .saturating_sub(session.pending_actions.len());
+                                        if actions.len() > available {
+                                            overflow = true;
                                         }
+                                        for action in actions.into_iter().take(available) {
+                                            session.pending_actions.push((tick, action));
+                                        }
+                                        session.last_action_tick = Some(tick);
                                     }
                                 }
                             }
-                            if unregistered {
-                                self.send_to_client(
-                                    client_id,
-                                    ServerMessage::Rejected {
-                                        reason: "client must send Connect before action batches".into(),
-                                    },
-                                )
-                                .await;
-                                continue;
-                            }
-                            if out_of_window {
-                                self.send_to_client(
+                        }
+                        if unregistered {
+                            self.send_to_client(
+                                client_id,
+                                ServerMessage::Rejected {
+                                    reason: "client must send Connect before action batches".into(),
+                                },
+                            )
+                            .await;
+                            continue;
+                        }
+                        if out_of_window {
+                            self.send_to_client(
                                     client_id,
                                     ServerMessage::Rejected {
                                         reason: format!(
@@ -381,10 +396,10 @@ impl GameServer {
                                     },
                                 )
                                 .await;
-                                continue;
-                            }
-                            if stale_tick {
-                                self.send_to_client(
+                            continue;
+                        }
+                        if stale_tick {
+                            self.send_to_client(
                                     client_id,
                                     ServerMessage::Rejected {
                                         reason: format!(
@@ -393,39 +408,38 @@ impl GameServer {
                                     },
                                 )
                                 .await;
-                                continue;
-                            }
-                            if overflow {
-                                self.send_to_client(
-                                    client_id,
-                                    ServerMessage::Rejected {
-                                        reason: format!(
-                                            "action queue full (max depth={ACTION_QUEUE_MAX_DEPTH})"
-                                        ),
-                                    },
-                                )
-                                .await;
-                            }
+                            continue;
                         }
-                        ClientMessage::Ping { timestamp } => {
+                        if overflow {
                             self.send_to_client(
                                 client_id,
-                                ServerMessage::Pong {
-                                    client_ts: timestamp,
-                                    server_ts: self.tick,
+                                ServerMessage::Rejected {
+                                    reason: format!(
+                                        "action queue full (max depth={ACTION_QUEUE_MAX_DEPTH})"
+                                    ),
                                 },
                             )
                             .await;
                         }
-                        ClientMessage::Disconnect { reason } => {
-                            self.disconnect_client(
-                                client_id,
-                                reason.as_deref().unwrap_or("client requested disconnect"),
-                            )
-                            .await;
-                        }
                     }
-                }
+                    ClientMessage::Ping { timestamp } => {
+                        self.send_to_client(
+                            client_id,
+                            ServerMessage::Pong {
+                                client_ts: timestamp,
+                                server_ts: self.tick,
+                            },
+                        )
+                        .await;
+                    }
+                    ClientMessage::Disconnect { reason } => {
+                        self.disconnect_client(
+                            client_id,
+                            reason.as_deref().unwrap_or("client requested disconnect"),
+                        )
+                        .await;
+                    }
+                },
                 InboundPacket::Disconnected { client_id, reason } => {
                     self.disconnect_client(client_id, &reason).await;
                 }
@@ -438,11 +452,13 @@ impl GameServer {
     /// Broadcast world updates to all connected clients
     async fn broadcast_updates(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Decide whether to send full snapshot or delta
-        let should_snapshot = (self.tick - self.last_snapshot_tick)
-            >= self.config.snapshot_interval;
+        let should_snapshot =
+            (self.tick - self.last_snapshot_tick) >= self.config.snapshot_interval;
         let current_snapshot = WorldSnapshot::capture(&self.world);
+        let authoritative_digest = current_snapshot.digest();
 
-        let delta = if should_snapshot || self.last_snapshot.is_none() {
+        let is_full_snapshot = should_snapshot || self.last_snapshot.is_none();
+        let delta = if is_full_snapshot {
             StateDelta {
                 tick: self.tick,
                 updated: current_snapshot.entities.clone(),
@@ -463,9 +479,12 @@ impl GameServer {
 
         let clients = self.clients.read().await;
 
-        for client_id in clients.keys() {
+        for (client_id, session) in clients.iter() {
             let msg = ServerMessage::StateDelta {
                 tick: self.tick,
+                acknowledged_action_tick: session.last_processed_action_tick,
+                authoritative_digest,
+                is_full_snapshot,
                 delta: delta.clone(),
             };
             if let Some(tx) = self.client_tx.read().await.get(client_id) {
@@ -475,7 +494,7 @@ impl GameServer {
             }
         }
 
-        if should_snapshot {
+        if is_full_snapshot {
             self.last_snapshot_tick = self.tick;
         }
         self.last_snapshot = Some(current_snapshot);
@@ -545,6 +564,7 @@ impl GameServer {
                         session.player_name = prev.player_name;
                         session.agent_id = prev.agent_id;
                         session.last_action_tick = prev.last_action_tick;
+                        session.last_processed_action_tick = prev.last_processed_action_tick;
                         session.pending_actions.clear();
                     } else if session.player_name.is_none() {
                         session.player_name = Some(player_name.clone());
@@ -584,12 +604,29 @@ impl GameServer {
 
         if already_attached {
             let snapshot = WorldSnapshot::capture(&self.world);
+            let authoritative_digest = snapshot.digest();
+            let controlled_entity = self
+                .clients
+                .read()
+                .await
+                .get(&client_id)
+                .and_then(|session| session.agent_id)
+                .and_then(|agent_id| {
+                    self.world
+                        .agents
+                        .iter()
+                        .find(|slot| slot.agent.id() == agent_id)
+                        .and_then(|slot| slot.entity_id)
+                        .map(|entity| entity.id() as u64)
+                });
             self.send_to_client(
                 client_id,
                 ServerMessage::Welcome {
                     client_id,
                     reconnect_token,
                     tick: self.tick,
+                    controlled_entity,
+                    authoritative_digest,
                     snapshot,
                 },
             )
@@ -613,12 +650,15 @@ impl GameServer {
         }
 
         let snapshot = WorldSnapshot::capture(&self.world);
+        let authoritative_digest = snapshot.digest();
         self.send_to_client(
             client_id,
             ServerMessage::Welcome {
                 client_id,
                 reconnect_token,
                 tick: self.tick,
+                controlled_entity: Some(entity.id() as u64),
+                authoritative_digest,
                 snapshot,
             },
         )

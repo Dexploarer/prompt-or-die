@@ -16,7 +16,9 @@ use pod_core::Action;
 use crate::protocol::{
     ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage,
 };
-use crate::snapshot::WorldSnapshot;
+use crate::snapshot::{
+    apply_authoritative_update, PredictedActionBatch, ReconciliationReport, WorldSnapshot,
+};
 
 // ============================================================
 // NATIVE CLIENT
@@ -35,16 +37,26 @@ pub struct NativeClient {
     reader_task: Option<tokio::task::JoinHandle<()>>,
     /// Buffered server updates
     pending_updates: Vec<ServerMessage>,
+    /// Authoritative world state as last confirmed by the server.
+    authoritative_snapshot: Option<WorldSnapshot>,
     /// Local prediction world state
     local_snapshot: Option<WorldSnapshot>,
+    /// Entity controlled by this client, if one has been assigned by the server.
+    controlled_entity: Option<u64>,
     /// Actions pending transmission
     pending_actions: Vec<Action>,
+    /// Sent but not yet acknowledged action batches.
+    prediction_history: Vec<PredictedActionBatch>,
     /// Highest server tick applied locally.
     last_server_tick: u64,
+    /// Highest action tick acknowledged by the server.
+    last_acknowledged_action_tick: Option<u64>,
     /// Highest event tick accepted from server.
     last_event_tick: u64,
     /// Reconnect token issued by server on first successful connect.
     reconnect_token: Option<ReconnectToken>,
+    /// Last authoritative reconciliation outcome.
+    last_reconciliation: Option<ReconciliationReport>,
 }
 
 impl NativeClient {
@@ -67,11 +79,14 @@ impl NativeClient {
         } else {
             let mut roots = rustls::RootCertStore::empty();
             if let Ok(path) = std::env::var("POD_TRUSTED_CERT_DER") {
-                let cert_der = std::fs::read(&path)
-                    .map_err(|e| ClientError::Config(format!("Failed reading POD_TRUSTED_CERT_DER: {e}")))?;
+                let cert_der = std::fs::read(&path).map_err(|e| {
+                    ClientError::Config(format!("Failed reading POD_TRUSTED_CERT_DER: {e}"))
+                })?;
                 roots
                     .add(rustls::pki_types::CertificateDer::from(cert_der))
-                    .map_err(|e| ClientError::Config(format!("Invalid trusted DER certificate: {e}")))?;
+                    .map_err(|e| {
+                        ClientError::Config(format!("Invalid trusted DER certificate: {e}"))
+                    })?;
             } else {
                 return Err(ClientError::Config(
                     "TLS verification requires POD_TRUSTED_CERT_DER to point to a trusted server certificate (DER).".into(),
@@ -117,11 +132,16 @@ impl NativeClient {
             tx,
             reader_task: None,
             pending_updates: Vec::new(),
+            authoritative_snapshot: None,
             local_snapshot: None,
+            controlled_entity: None,
             pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
             last_server_tick: 0,
+            last_acknowledged_action_tick: None,
             last_event_tick: 0,
             reconnect_token: None,
+            last_reconciliation: None,
         };
 
         // Send connect message
@@ -151,12 +171,32 @@ impl NativeClient {
             if let ServerMessage::Welcome {
                 client_id,
                 reconnect_token,
+                controlled_entity,
+                authoritative_digest,
                 snapshot,
                 ..
-            } = msg {
+            } = msg
+            {
                 self.client_id = Some(client_id);
+                self.controlled_entity = controlled_entity;
+                self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot);
                 self.reconnect_token = Some(reconnect_token);
+                self.prediction_history.clear();
+                self.last_acknowledged_action_tick = None;
+                self.last_reconciliation = Some(ReconciliationReport {
+                    authoritative_tick: self
+                        .local_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.tick)
+                        .unwrap_or_default(),
+                    authoritative_digest,
+                    acknowledged_action_tick: None,
+                    pending_action_batches: 0,
+                    replayed_action_count: 0,
+                    predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
+                    used_hard_resync: false,
+                });
                 debug!("Received welcome from server, client_id: {}", client_id.0);
                 Ok(())
             } else if let ServerMessage::Rejected { reason } = msg {
@@ -217,7 +257,8 @@ impl NativeClient {
             .as_ref()
             .ok_or_else(|| ClientError::NotConnected)?;
 
-        let bytes = msg.encode()
+        let bytes = msg
+            .encode()
             .map_err(|e| ClientError::Serialization(e.to_string()))?;
 
         let mut send = connection
@@ -256,8 +297,8 @@ impl NativeClient {
 
         buf.truncate(n);
 
-        let msg = ServerMessage::decode(&buf)
-            .map_err(|e| ClientError::Serialization(e.to_string()))?;
+        let msg =
+            ServerMessage::decode(&buf).map_err(|e| ClientError::Serialization(e.to_string()))?;
 
         Ok(msg)
     }
@@ -273,12 +314,21 @@ impl NativeClient {
             return Ok(());
         }
 
+        let actions = std::mem::take(&mut self.pending_actions);
         let msg = ClientMessage::ActionBatch {
             tick,
-            actions: std::mem::take(&mut self.pending_actions),
+            actions: actions.clone(),
         };
 
-        self.send_message(msg).await
+        if let Err(err) = self.send_message(msg).await {
+            self.pending_actions = actions;
+            return Err(err);
+        }
+
+        self.prediction_history
+            .push(PredictedActionBatch { tick, actions });
+        self.rebuild_predicted_snapshot();
+        Ok(())
     }
 
     /// Check for updates from the server (non-blocking)
@@ -298,32 +348,77 @@ impl NativeClient {
                 client_id,
                 reconnect_token,
                 tick,
+                controlled_entity,
+                authoritative_digest,
                 snapshot,
             } => {
                 self.client_id = Some(*client_id);
+                self.controlled_entity = *controlled_entity;
+                self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot.clone());
+                self.prediction_history.clear();
+                self.last_acknowledged_action_tick = None;
                 self.last_server_tick = *tick;
                 self.last_event_tick = *tick;
                 self.reconnect_token = Some(*reconnect_token);
+                self.last_reconciliation = Some(ReconciliationReport {
+                    authoritative_tick: *tick,
+                    authoritative_digest: *authoritative_digest,
+                    acknowledged_action_tick: None,
+                    pending_action_batches: 0,
+                    replayed_action_count: 0,
+                    predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
+                    used_hard_resync: false,
+                });
                 true
             }
-            ServerMessage::StateDelta { tick, delta } => {
+            ServerMessage::StateDelta {
+                tick,
+                acknowledged_action_tick,
+                authoritative_digest,
+                is_full_snapshot,
+                delta,
+            } => {
                 if *tick < self.last_server_tick {
                     return false;
                 }
 
-                if self.last_server_tick > 0 && *tick > self.last_server_tick + 1 {
+                let gap_detected = self.last_server_tick > 0 && *tick > self.last_server_tick + 1;
+                if gap_detected && !*is_full_snapshot {
+                    self.authoritative_snapshot = None;
                     self.local_snapshot = None;
+                    self.record_reconciliation(*tick, *authoritative_digest, true);
+                    return false;
                 }
 
-                self.local_snapshot = Some(match self.local_snapshot.take() {
-                    Some(snapshot) => delta.apply_to(&snapshot),
-                    None => WorldSnapshot {
-                        tick: *tick,
-                        entities: delta.updated.clone(),
-                    },
-                });
+                let previous = if *is_full_snapshot || gap_detected {
+                    None
+                } else {
+                    self.authoritative_snapshot.as_ref()
+                };
+
+                let authoritative_snapshot = match apply_authoritative_update(
+                    previous,
+                    *tick,
+                    *is_full_snapshot,
+                    delta,
+                    *authoritative_digest,
+                ) {
+                    Ok(snapshot) => snapshot,
+                    Err(err) => {
+                        error!("Authoritative update rejected at tick {}: {:?}", tick, err);
+                        self.authoritative_snapshot = None;
+                        self.local_snapshot = None;
+                        self.record_reconciliation(*tick, *authoritative_digest, true);
+                        return false;
+                    }
+                };
+
+                self.authoritative_snapshot = Some(authoritative_snapshot);
+                self.prune_acknowledged_predictions(*acknowledged_action_tick);
+                self.rebuild_predicted_snapshot();
                 self.last_server_tick = *tick;
+                self.record_reconciliation(*tick, *authoritative_digest, gap_detected);
                 true
             }
             ServerMessage::EventBatch { tick, .. } => {
@@ -382,6 +477,21 @@ impl NativeClient {
         self.local_snapshot.as_ref()
     }
 
+    /// Get the last authoritative world snapshot confirmed by the server.
+    pub fn authoritative_snapshot(&self) -> Option<&WorldSnapshot> {
+        self.authoritative_snapshot.as_ref()
+    }
+
+    /// Get the most recent reconciliation report.
+    pub fn last_reconciliation(&self) -> Option<&ReconciliationReport> {
+        self.last_reconciliation.as_ref()
+    }
+
+    /// Get the number of unacknowledged predicted action batches.
+    pub fn pending_prediction_batches(&self) -> usize {
+        self.prediction_history.len()
+    }
+
     /// Get the client ID
     pub fn client_id(&self) -> Option<ClientId> {
         self.client_id
@@ -390,6 +500,48 @@ impl NativeClient {
     /// Check if connected
     pub fn is_connected(&self) -> bool {
         self.connection.is_some() && self.client_id.is_some()
+    }
+
+    fn prune_acknowledged_predictions(&mut self, acknowledged_action_tick: Option<u64>) {
+        let Some(acknowledged_action_tick) = acknowledged_action_tick else {
+            return;
+        };
+
+        let acknowledged_action_tick = self
+            .last_acknowledged_action_tick
+            .map(|last| last.max(acknowledged_action_tick))
+            .unwrap_or(acknowledged_action_tick);
+        self.last_acknowledged_action_tick = Some(acknowledged_action_tick);
+        self.prediction_history
+            .retain(|batch| batch.tick > acknowledged_action_tick);
+    }
+
+    fn rebuild_predicted_snapshot(&mut self) {
+        self.local_snapshot = self.authoritative_snapshot.as_ref().map(|snapshot| {
+            snapshot.replay_predicted_actions(self.controlled_entity, &self.prediction_history)
+        });
+    }
+
+    fn record_reconciliation(
+        &mut self,
+        authoritative_tick: u64,
+        authoritative_digest: u64,
+        used_hard_resync: bool,
+    ) {
+        let replayed_action_count = self
+            .prediction_history
+            .iter()
+            .map(|batch| batch.actions.len())
+            .sum();
+        self.last_reconciliation = Some(ReconciliationReport {
+            authoritative_tick,
+            authoritative_digest,
+            acknowledged_action_tick: self.last_acknowledged_action_tick,
+            pending_action_batches: self.prediction_history.len(),
+            replayed_action_count,
+            predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
+            used_hard_resync,
+        });
     }
 }
 
