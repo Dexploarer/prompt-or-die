@@ -869,6 +869,7 @@ fn entity_to_snapshot(cached: &CachedEntity) -> EntitySnapshot {
         rotation: cached.rotation.unwrap_or(0.0),
         health: cached.health,
         max_health: cached.max_health,
+        movement_speed: cached.max_speed,
         label: cached.name.clone(),
     }
 }
@@ -1119,6 +1120,7 @@ mod tests {
         assert_eq!(snap.rotation, 0.0);
         assert!(snap.health.is_none());
         assert!(snap.max_health.is_none());
+        assert!(snap.movement_speed.is_none());
         assert!(snap.label.is_none());
     }
 
@@ -1132,6 +1134,7 @@ mod tests {
         cached.rotation = Some(1.57);
         cached.health = Some(80.0);
         cached.max_health = Some(100.0);
+        cached.max_speed = Some(240.0);
         cached.name = Some("Hero".into());
 
         let snap = entity_to_snapshot(&cached);
@@ -1142,6 +1145,7 @@ mod tests {
         assert!((snap.rotation - 1.57).abs() < f32::EPSILON);
         assert_eq!(snap.health, Some(80.0));
         assert_eq!(snap.max_health, Some(100.0));
+        assert_eq!(snap.movement_speed, Some(240.0));
         assert_eq!(snap.label.as_deref(), Some("Hero"));
     }
 
