@@ -19,6 +19,7 @@ use crate::observation::Observation;
 use crate::telemetry::{
     ActionLifecycleStage, AgentToolCallTrace, TickTelemetryFrame, ToolCallStatus,
 };
+use crate::toon::encode_toon_document;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -43,6 +44,12 @@ pub struct DecisionTrace {
     pub tool_calls: Vec<AgentToolCallTrace>,
     /// How long the API took to respond (ms)
     pub latency_ms: u32,
+}
+
+impl DecisionTrace {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("decision_trace", self)
+    }
 }
 
 /// A complete recording of one simulation run
@@ -98,6 +105,12 @@ pub struct ReplayTrainingSample {
     pub encounter_transition: Option<EncounterTransition>,
     pub tool_call_latency_ms: u32,
     pub tool_call_error_count: usize,
+}
+
+impl ReplayTrainingSample {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("replay_training_sample", self)
+    }
 }
 
 impl ReplayFile {
@@ -160,6 +173,30 @@ impl ReplayFile {
         }
 
         samples
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        #[derive(Serialize)]
+        struct ReplayExport<'a> {
+            header: &'a ReplayHeader,
+            traces: &'a [Vec<DecisionTrace>],
+            telemetry_windows: &'a [TickTelemetryFrame],
+            training_samples: Vec<ReplayTrainingSample>,
+        }
+
+        encode_toon_document(
+            "replay_file",
+            &ReplayExport {
+                header: &self.header,
+                traces: &self.traces,
+                telemetry_windows: &self.telemetry_windows,
+                training_samples: self.training_samples(),
+            },
+        )
+    }
+
+    pub fn training_samples_to_toon_document(&self) -> String {
+        encode_toon_document("replay_training_samples", &self.training_samples())
     }
 }
 
@@ -400,6 +437,7 @@ mod tests {
     use crate::telemetry::{
         ActionLifecycleStage, ActionSource, AgentTelemetryFrame, TrajectorySample,
     };
+    use crate::toon::decode_toon_value;
     use glam::Vec2;
 
     #[test]
@@ -634,5 +672,50 @@ mod tests {
                 in_combat: false
             })
         ));
+    }
+
+    #[test]
+    fn replay_exports_roundtrip_through_toon_documents() {
+        let agent_id = AgentId::new();
+        let file = ReplayFile {
+            header: ReplayHeader {
+                name: "toon-replay".into(),
+                timestamp: 0,
+                world_seed: 7,
+                tick_count: 1,
+                agent_count: 1,
+                notes: String::new(),
+            },
+            traces: vec![vec![DecisionTrace {
+                tick: 0,
+                agent_id,
+                observation_hash: 42,
+                prompt_sent: "observe".into(),
+                raw_response: "act".into(),
+                actions_taken: vec![Action::Idle],
+                tool_calls: vec![AgentToolCallTrace::success(
+                    0,
+                    "llm.complete",
+                    "qwen",
+                    25,
+                    90,
+                    18,
+                )],
+                latency_ms: 25,
+            }]],
+            telemetry_windows: vec![TickTelemetryFrame::empty(0)],
+        };
+
+        let replay_document = file.to_toon_document();
+        let replay_value =
+            decode_toon_value(&replay_document).expect("replay document should decode");
+        assert_eq!(replay_value["document_type"], "replay_file");
+        assert_eq!(replay_value["payload"]["header"]["name"], "toon-replay");
+        assert_eq!(replay_value["payload"]["telemetry_windows"][0]["tick"], 0);
+
+        let training_document = file.training_samples_to_toon_document();
+        let training_value =
+            decode_toon_value(&training_document).expect("training document should decode");
+        assert_eq!(training_value["document_type"], "replay_training_samples");
     }
 }

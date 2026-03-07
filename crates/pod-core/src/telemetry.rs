@@ -7,6 +7,7 @@ use crate::action::Action;
 use crate::component::EncounterState;
 use crate::contract::AgentRuntimeProfile;
 use crate::id::{AgentId, EntityId};
+use crate::toon::encode_toon_document;
 
 /// Shared retention defaults for telemetry consumers across runtime, browser,
 /// and editor tooling.
@@ -52,6 +53,10 @@ impl TrajectorySample {
             velocity,
             rotation,
         }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("trajectory_sample", self)
     }
 }
 
@@ -116,6 +121,10 @@ impl AgentActionTrace {
             action,
             rejection_reason,
         }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_action_trace", self)
     }
 }
 
@@ -207,6 +216,10 @@ impl AgentToolCallTrace {
             Some(error_message.into()),
         )
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_tool_call_trace", self)
+    }
 }
 
 /// Authoritative telemetry for one agent over one simulation tick.
@@ -285,6 +298,10 @@ impl AgentTelemetryFrame {
             self.trajectory = Some(AgentTrajectoryFrame::new(end, end));
         }
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_telemetry_frame", self)
+    }
 }
 
 /// Telemetry for the full authoritative tick.
@@ -300,6 +317,10 @@ impl TickTelemetryFrame {
             tick,
             agents: Vec::new(),
         }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tick_telemetry_frame", self)
     }
 }
 
@@ -357,6 +378,26 @@ impl TelemetryArchive {
         }
         samples
     }
+
+    pub fn to_toon_document(&self) -> String {
+        #[derive(Serialize)]
+        struct ArchiveExport<'a> {
+            max_frames: usize,
+            retained_frames: usize,
+            latest_tick: Option<u64>,
+            frames: &'a VecDeque<TickTelemetryFrame>,
+        }
+
+        encode_toon_document(
+            "telemetry_archive",
+            &ArchiveExport {
+                max_frames: self.max_frames,
+                retained_frames: self.frames.len(),
+                latest_tick: self.latest().map(|frame| frame.tick),
+                frames: &self.frames,
+            },
+        )
+    }
 }
 
 #[cfg(test)]
@@ -365,6 +406,8 @@ mod tests {
 
     use crate::agent::AgentType;
     use crate::contract::{AgentCapabilities, AgentRole};
+
+    use crate::toon::decode_toon_value;
 
     use super::{
         AgentTelemetryFrame, AgentToolCallTrace, TelemetryArchive, TelemetryConfig,
@@ -473,5 +516,23 @@ mod tests {
             .map(|frame| frame.tick)
             .collect::<Vec<_>>();
         assert_eq!(ticks, vec![2, 3]);
+    }
+
+    #[test]
+    fn telemetry_exports_roundtrip_through_toon_documents() {
+        let mut archive = TelemetryArchive::with_capacity(2);
+        archive.record_tick(TickTelemetryFrame::empty(7));
+
+        let frame_document = archive.latest().expect("frame recorded").to_toon_document();
+        let frame_value = decode_toon_value(&frame_document).expect("frame document should decode");
+        assert_eq!(frame_value["document_type"], "tick_telemetry_frame");
+        assert_eq!(frame_value["payload"]["tick"], 7);
+
+        let archive_document = archive.to_toon_document();
+        let archive_value =
+            decode_toon_value(&archive_document).expect("archive document should decode");
+        assert_eq!(archive_value["document_type"], "telemetry_archive");
+        assert_eq!(archive_value["payload"]["retained_frames"], 1);
+        assert_eq!(archive_value["payload"]["latest_tick"], 7);
     }
 }

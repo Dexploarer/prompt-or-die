@@ -42,10 +42,12 @@ pub mod event;
 pub mod id;
 pub mod observation;
 pub mod observation_filter;
+pub mod ops;
 pub mod orchestrator;
 pub mod replay;
 pub mod telemetry;
 pub mod tick;
+pub mod toon;
 pub mod world;
 
 pub use acceptance::{
@@ -75,6 +77,7 @@ pub use observation::*;
 pub use observation_filter::{
     FilteredObservation, ObservationFilter, ObservationHistory, SalienceScore,
 };
+pub use ops::{IncidentSeverity, ShardIncidentSummary};
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
 pub use replay::{
     ActionOutcomeSummary, DecisionTrace, EncounterTransition, ReplayFile, ReplayHeader,
@@ -85,6 +88,7 @@ pub use telemetry::{
     AgentTrajectoryFrame, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
     TrajectorySample,
 };
+pub use toon::{decode_toon_value, encode_toon_document, encode_toon_string};
 pub use world::World;
 
 /// Fixed tick rate — all agents operate on the same clock

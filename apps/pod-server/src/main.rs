@@ -170,6 +170,7 @@ mod map {
 mod stats {
     use pod_core::action::Action;
     use pod_core::telemetry::ToolCallStatus;
+    use pod_core::{IncidentSeverity, ShardIncidentSummary};
     use std::time::Instant;
 
     /// Server statistics tracker
@@ -306,6 +307,71 @@ mod stats {
             self.tick_budget_overruns as f32 / self.ticks_completed as f32
         }
 
+        pub fn incident_summary(
+            &self,
+            shard_id: impl Into<String>,
+            latest_tick: u64,
+        ) -> ShardIncidentSummary {
+            let shard_id = shard_id.into();
+            let tick_budget_overrun_rate = self.tick_budget_overrun_rate();
+            let action_rejection_rate = self.action_rejection_rate();
+            let tool_call_error_rate = self.tool_call_error_rate();
+            let average_tool_latency_ms = self.average_tool_latency_ms();
+            let average_trajectory_distance = self.average_trajectory_distance();
+
+            let mut notes = Vec::new();
+            if tick_budget_overrun_rate >= 0.05 {
+                notes.push("tick budget overruns exceed 5%".to_string());
+            }
+            if action_rejection_rate >= 0.15 {
+                notes.push("action rejection rate exceeds 15%".to_string());
+            }
+            if tool_call_error_rate >= 0.10 {
+                notes.push("tool-call error rate exceeds 10%".to_string());
+            }
+            if average_tool_latency_ms >= 750.0 {
+                notes.push("tool-call latency exceeds 750ms".to_string());
+            }
+
+            let sustained_critical = self.ticks_completed >= 10
+                && (tick_budget_overrun_rate >= 0.10
+                    || action_rejection_rate >= 0.25
+                    || tool_call_error_rate >= 0.20);
+
+            let severity = if sustained_critical {
+                IncidentSeverity::Critical
+            } else if !notes.is_empty() {
+                IncidentSeverity::Warning
+            } else {
+                IncidentSeverity::Healthy
+            };
+
+            let summary = if notes.is_empty() {
+                format!("Shard {shard_id} is healthy at tick {latest_tick}")
+            } else {
+                format!("Shard {shard_id} requires attention: {}", notes.join("; "))
+            };
+
+            ShardIncidentSummary {
+                shard_id,
+                latest_tick,
+                severity,
+                summary,
+                tick_budget_overrun_rate,
+                action_rejection_rate,
+                tool_call_error_rate,
+                average_tool_latency_ms,
+                average_trajectory_distance,
+                peak_entity_count: self.peak_entity_count,
+                peak_agent_count: self.peak_agent_count,
+                capture_actions: self.capture_actions,
+                summon_actions: self.summon_actions,
+                gather_actions: self.gather_actions,
+                loot_actions: self.loot_actions,
+                notes,
+            }
+        }
+
         /// Print periodic stats (called once per second)
         pub fn print_periodic(&mut self, world: &pod_core::World) {
             use log::info;
@@ -391,6 +457,7 @@ mod stats {
             ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentToolCallTrace,
             TickTelemetryFrame, ToolCallStatus, TrajectorySample,
         };
+        use pod_core::{decode_toon_value, IncidentSeverity};
 
         fn sample_tick() -> pod_core::tick::TickResult {
             let agent_id = AgentId::new();
@@ -497,6 +564,21 @@ mod stats {
             );
             assert_eq!(stats.ticks_completed, result.summary.ticks_completed);
             assert!(result.parity_passed());
+        }
+
+        #[test]
+        fn incident_summaries_export_to_toon_for_ops_agents() {
+            let mut stats = ServerStats::new(60);
+            let tick = sample_tick();
+            stats.record_tick(&tick, 5, true);
+            let summary = stats.incident_summary("overworld-a", tick.tick);
+            assert_eq!(summary.severity, IncidentSeverity::Warning);
+
+            let document = summary.to_toon_document();
+            let value = decode_toon_value(&document).expect("incident summary should decode");
+            assert_eq!(value["document_type"], "shard_incident_summary");
+            assert_eq!(value["payload"]["shard_id"], "overworld-a");
+            assert_eq!(value["payload"]["latest_tick"], 7);
         }
     }
 }
