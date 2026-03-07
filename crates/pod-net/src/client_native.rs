@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use tokio::sync::mpsc;
 
@@ -59,6 +59,8 @@ pub struct NativeClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Whether the client has already requested an immediate recovery snapshot.
+    awaiting_recovery_snapshot: bool,
     /// Authoritative history for presentation smoothing.
     render_buffer: SnapshotInterpolationBuffer,
     /// Presentation clock for interpolation/catch-up recovery.
@@ -148,6 +150,7 @@ impl NativeClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            awaiting_recovery_snapshot: false,
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
         };
@@ -193,6 +196,7 @@ impl NativeClient {
                 self.reconnect_token = Some(reconnect_token);
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
+                self.awaiting_recovery_snapshot = false;
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: self
                         .local_snapshot
@@ -368,6 +372,7 @@ impl NativeClient {
                 self.ingest_authoritative_snapshot();
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
+                self.awaiting_recovery_snapshot = false;
                 self.last_server_tick = *tick;
                 self.last_event_tick = *tick;
                 self.reconnect_token = Some(*reconnect_token);
@@ -395,6 +400,7 @@ impl NativeClient {
 
                 let gap_detected = self.last_server_tick > 0 && *tick > self.last_server_tick + 1;
                 if gap_detected && !*is_full_snapshot {
+                    self.request_full_snapshot();
                     self.authoritative_snapshot = None;
                     self.local_snapshot = None;
                     self.clear_presentation_state();
@@ -418,6 +424,7 @@ impl NativeClient {
                     Ok(snapshot) => snapshot,
                     Err(err) => {
                         error!("Authoritative update rejected at tick {}: {:?}", tick, err);
+                        self.request_full_snapshot();
                         self.authoritative_snapshot = None;
                         self.local_snapshot = None;
                         self.clear_presentation_state();
@@ -427,6 +434,9 @@ impl NativeClient {
                 };
 
                 self.authoritative_snapshot = Some(authoritative_snapshot);
+                if *is_full_snapshot {
+                    self.awaiting_recovery_snapshot = false;
+                }
                 self.ingest_authoritative_snapshot();
                 self.prune_acknowledged_predictions(*acknowledged_action_tick);
                 self.rebuild_predicted_snapshot();
@@ -480,6 +490,7 @@ impl NativeClient {
             quinn::VarInt::from_u32(0),
             reason.unwrap_or("Disconnect").as_bytes(),
         );
+        self.awaiting_recovery_snapshot = false;
         self.clear_presentation_state();
 
         info!("Disconnected from server");
@@ -597,6 +608,68 @@ impl NativeClient {
     fn clear_presentation_state(&mut self) {
         self.render_buffer.clear();
         self.render_clock.reset();
+    }
+
+    fn request_full_snapshot(&mut self) {
+        if self.awaiting_recovery_snapshot {
+            return;
+        }
+
+        let last_known_tick = self
+            .authoritative_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.tick)
+            .or(Some(self.last_server_tick).filter(|tick| *tick > 0));
+        let last_known_digest = self
+            .authoritative_snapshot
+            .as_ref()
+            .map(WorldSnapshot::digest);
+
+        let message = ClientMessage::RequestFullSnapshot {
+            last_known_tick,
+            last_known_digest,
+        };
+
+        let payload = match message.encode() {
+            Ok(payload) => payload,
+            Err(err) => {
+                warn!("Failed to encode full snapshot recovery request: {}", err);
+                return;
+            }
+        };
+
+        let Some(connection) = self.connection.as_ref().cloned() else {
+            warn!("Failed to request full snapshot recovery: not connected");
+            return;
+        };
+
+        self.awaiting_recovery_snapshot = true;
+        tokio::spawn(async move {
+            let mut send = match connection.open_uni().await {
+                Ok(send) => send,
+                Err(err) => {
+                    warn!("Failed to open recovery request stream: {}", err);
+                    return;
+                }
+            };
+
+            if let Err(err) = send.write_all(&payload).await {
+                warn!("Failed to write recovery request payload: {}", err);
+                return;
+            }
+
+            if let Err(err) = send.finish() {
+                warn!("Failed to finish recovery request stream: {}", err);
+            }
+        });
+    }
+
+    #[cfg(test)]
+    fn request_full_snapshot_without_connection_is_safe(&mut self) {
+        self.request_full_snapshot();
+        if self.connection.is_none() {
+            self.awaiting_recovery_snapshot = false;
+        }
     }
 
     fn record_reconciliation(
@@ -788,6 +861,7 @@ mod tests {
             last_event_tick: 20,
             reconnect_token: None,
             last_reconciliation: None,
+            awaiting_recovery_snapshot: false,
             render_buffer,
             render_clock,
         };
@@ -802,5 +876,42 @@ mod tests {
             client.rollback_preview(Some(20)).unwrap().replayed_batches,
             1
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_request_full_snapshot_without_connection_does_not_arm_recovery_flag() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            awaiting_recovery_snapshot: false,
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+        };
+
+        client.request_full_snapshot_without_connection_is_safe();
+        assert!(!client.awaiting_recovery_snapshot);
     }
 }

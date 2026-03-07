@@ -422,6 +422,16 @@ impl GameServer {
                             .await;
                         }
                     }
+                    ClientMessage::RequestFullSnapshot {
+                        last_known_tick,
+                        last_known_digest,
+                    } => {
+                        debug!(
+                            "Client {} requested full snapshot recovery (tick={:?}, digest={:?})",
+                            client_id.0, last_known_tick, last_known_digest
+                        );
+                        self.send_full_snapshot_to_client(client_id).await;
+                    }
                     ClientMessage::Ping { timestamp } => {
                         self.send_to_client(
                             client_id,
@@ -536,6 +546,36 @@ impl GameServer {
                 warn!("Failed to send message to {}: {}", client_id.0, err);
             }
         }
+    }
+
+    fn build_full_snapshot_message(&self, acknowledged_action_tick: Option<u64>) -> ServerMessage {
+        let snapshot = WorldSnapshot::capture(&self.world);
+        let authoritative_digest = snapshot.digest();
+        ServerMessage::StateDelta {
+            tick: self.tick,
+            acknowledged_action_tick,
+            authoritative_digest,
+            is_full_snapshot: true,
+            delta: StateDelta {
+                tick: self.tick,
+                updated: snapshot.entities,
+                destroyed: vec![],
+            },
+        }
+    }
+
+    async fn send_full_snapshot_to_client(&self, client_id: ClientId) {
+        let acknowledged_action_tick = self
+            .clients
+            .read()
+            .await
+            .get(&client_id)
+            .and_then(|session| session.last_processed_action_tick);
+        self.send_to_client(
+            client_id,
+            self.build_full_snapshot_message(acknowledged_action_tick),
+        )
+        .await;
     }
 
     async fn attach_remote_agent(
@@ -703,5 +743,34 @@ mod tests {
 
         assert_eq!(server.current_tick(), 0);
         assert_eq!(server.client_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_build_full_snapshot_message_marks_full_resync() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let server = GameServer::new(config, world);
+
+        let message = server.build_full_snapshot_message(Some(12));
+        match message {
+            ServerMessage::StateDelta {
+                tick,
+                acknowledged_action_tick,
+                authoritative_digest,
+                is_full_snapshot,
+                delta,
+            } => {
+                assert_eq!(tick, 0);
+                assert_eq!(acknowledged_action_tick, Some(12));
+                assert!(is_full_snapshot);
+                assert_eq!(delta.destroyed.len(), 0);
+                let snapshot = WorldSnapshot {
+                    tick,
+                    entities: delta.updated,
+                };
+                assert_eq!(snapshot.digest(), authoritative_digest);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
     }
 }

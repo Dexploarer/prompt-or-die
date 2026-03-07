@@ -441,5 +441,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
 
-**Last updated**: Iteration 53
+### Iteration 54 — Pod-Net Immediate Resync Recovery
+
+- [x] Added a direct-connect `RequestFullSnapshot` client message so drifted or gapped clients can explicitly request an immediate authoritative full snapshot instead of waiting for the next periodic broadcast.
+- [x] Added server-side full-resync response helpers that answer those requests with a full `StateDelta` snapshot including the latest acknowledged action tick for that client.
+- [x] Wired native QUIC and browser WebSocket clients to trigger a one-shot recovery request automatically when they detect a snapshot gap or reject an authoritative update due to baseline/digest failure.
+- [x] Added deterministic protocol and server coverage for full-snapshot request round-tripping and full-resync message construction.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+
+**Last updated**: Iteration 54
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice

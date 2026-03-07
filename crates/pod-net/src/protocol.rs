@@ -58,6 +58,13 @@ pub enum ClientMessage {
     /// Batch of actions for a specific tick
     ActionBatch { tick: u64, actions: Vec<Action> },
 
+    /// Request an immediate authoritative full snapshot after drift, gap, or
+    /// local baseline loss.
+    RequestFullSnapshot {
+        last_known_tick: Option<u64>,
+        last_known_digest: Option<u64>,
+    },
+
     /// Ping request — measures round-trip time
     Ping { timestamp: u64 },
 }
@@ -221,6 +228,28 @@ mod tests {
             assert_eq!(decoded_token, Some(reconnect_token));
         } else {
             panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_full_snapshot_request_roundtrip() {
+        let msg = ClientMessage::RequestFullSnapshot {
+            last_known_tick: Some(42),
+            last_known_digest: Some(99),
+        };
+
+        let encoded = msg.encode().unwrap();
+        let decoded = ClientMessage::decode(&encoded).unwrap();
+
+        match decoded {
+            ClientMessage::RequestFullSnapshot {
+                last_known_tick,
+                last_known_digest,
+            } => {
+                assert_eq!(last_known_tick, Some(42));
+                assert_eq!(last_known_digest, Some(99));
+            }
+            other => panic!("Wrong message type: {other:?}"),
         }
     }
 
