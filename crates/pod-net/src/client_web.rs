@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 use web_sys::WebSocket;
 
-use pod_core::Action;
+use pod_core::{decode_toon_value, Action};
 
 use crate::protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage};
 use crate::snapshot::{
@@ -60,6 +60,10 @@ pub struct WebClient {
     last_reconciliation: Option<ReconciliationReport>,
     /// Most recent debug telemetry payload received from the server.
     last_debug_telemetry_json: Option<String>,
+    /// Most recent debug document of any supported TOON kind.
+    last_debug_document: Option<String>,
+    /// Pending TOON debug documents gathered since the last drain.
+    pending_debug_documents: Vec<String>,
     /// Recovery request throttle/telemetry for full-snapshot resync.
     recovery_state: RecoveryRequestState,
     /// Authoritative history for presentation smoothing.
@@ -93,6 +97,8 @@ impl WebClient {
             reconnect_token: None,
             last_reconciliation: None,
             last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -381,7 +387,11 @@ impl WebClient {
             }
             ServerMessage::Pong { .. } => true,
             ServerMessage::TickTelemetry { frame_json } => {
-                self.last_debug_telemetry_json = Some(frame_json.clone());
+                self.record_debug_document(frame_json.clone());
+                true
+            }
+            ServerMessage::DebugDocument { document } => {
+                self.record_debug_document(document.clone());
                 true
             }
             ServerMessage::Rejected { reason } => {
@@ -443,6 +453,8 @@ impl WebClient {
         self.connected = false;
         self.recovery_state.clear();
         self.last_debug_telemetry_json = None;
+        self.last_debug_document = None;
+        self.pending_debug_documents.clear();
         self.clear_presentation_state();
         Ok(())
     }
@@ -488,6 +500,16 @@ impl WebClient {
 
     pub fn last_debug_telemetry_document(&self) -> Option<&str> {
         self.last_debug_telemetry_json()
+    }
+
+    pub fn last_debug_document(&self) -> Option<&str> {
+        self.last_debug_document
+            .as_deref()
+            .or_else(|| self.last_debug_telemetry_document())
+    }
+
+    pub fn drain_debug_documents(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_debug_documents)
     }
 
     /// Inspect the local rollback/replay path from a chosen authoritative tick.
@@ -644,6 +666,20 @@ impl WebClient {
             predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
             used_hard_resync,
         });
+    }
+
+    fn record_debug_document(&mut self, document: String) {
+        if decode_toon_value(&document)
+            .ok()
+            .and_then(|value| value["document_type"].as_str().map(str::to_owned))
+            .as_deref()
+            == Some("versioned_tick_telemetry")
+        {
+            self.last_debug_telemetry_json = Some(document.clone());
+        }
+
+        self.last_debug_document = Some(document.clone());
+        self.pending_debug_documents.push(document);
     }
 }
 

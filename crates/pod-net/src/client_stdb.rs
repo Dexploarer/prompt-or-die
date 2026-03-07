@@ -696,11 +696,14 @@ impl SpacetimeDBClient {
                 StdbEvent::AgentTelemetryTickReceived { frame_json, .. } => {
                     self.last_debug_telemetry_json = Some(frame_json.clone());
                     self.pending_debug_documents.push(frame_json.clone());
-                    messages.push(ServerMessage::TickTelemetry { frame_json });
+                    messages.push(ServerMessage::DebugDocument {
+                        document: frame_json,
+                    });
                 }
                 StdbEvent::AgentToolCallEventReceived { document, .. }
                 | StdbEvent::AgentTickRollupReceived { document, .. } => {
-                    self.pending_debug_documents.push(document);
+                    self.pending_debug_documents.push(document.clone());
+                    messages.push(ServerMessage::DebugDocument { document });
                 }
 
                 // ── Tick advancement ──
@@ -1599,7 +1602,7 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_updates_emits_tick_telemetry_from_stdb_events() {
+    fn test_poll_updates_emits_debug_documents_from_stdb_events() {
         let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
         client.inner_mut().receive_agent_telemetry_tick(
             12,
@@ -1610,8 +1613,8 @@ mod tests {
         let messages = client.poll_updates();
         assert!(messages.iter().any(|message| matches!(
             message,
-            ServerMessage::TickTelemetry { frame_json }
-                if frame_json.contains("versioned_tick_telemetry")
+            ServerMessage::DebugDocument { document }
+                if document.contains("versioned_tick_telemetry")
         )));
         assert!(client
             .last_debug_telemetry_document()
