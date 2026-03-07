@@ -58,7 +58,10 @@ use pod_stdb::types::{
 };
 
 use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
-use crate::snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
+use crate::snapshot::{
+    compose_presentation_snapshot, EntitySnapshot, InterpolatedSnapshot, RenderClock,
+    SnapshotInterpolationBuffer, StateDelta, WorldSnapshot,
+};
 
 // ============================================================
 // SUBSCRIPTION MANAGEMENT
@@ -384,6 +387,8 @@ pub struct SpacetimeDBClient {
     reconnect_token: ReconnectToken,
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
+    render_buffer: SnapshotInterpolationBuffer,
+    render_clock: RenderClock,
     welcome_sent: bool,
     last_emitted_tick: u64,
 }
@@ -398,6 +403,8 @@ impl SpacetimeDBClient {
             reconnect_token: ReconnectToken::new(),
             pending_actions: Vec::new(),
             local_snapshot: None,
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
             welcome_sent: false,
             last_emitted_tick: 0,
         }
@@ -503,6 +510,7 @@ impl SpacetimeDBClient {
                         let snapshot = self.build_world_snapshot();
                         let tick = self.current_tick_or_zero();
                         self.local_snapshot = Some(snapshot.clone());
+                        self.ingest_local_snapshot();
                         self.welcome_sent = true;
 
                         if let Some(client_id) = self.client_id {
@@ -527,6 +535,7 @@ impl SpacetimeDBClient {
                     log::info!("[pod-net stdb] Disconnected: {reason}");
                     self.client_id = None;
                     self.welcome_sent = false;
+                    self.clear_presentation_state();
                 }
 
                 // ── Entity lifecycle → StateDelta ──
@@ -539,6 +548,7 @@ impl SpacetimeDBClient {
                             continue;
                         }
                         self.upsert_local_snapshot(tick, &snap);
+                        self.ingest_local_snapshot();
                         let authoritative_digest = self
                             .local_snapshot
                             .as_ref()
@@ -568,6 +578,7 @@ impl SpacetimeDBClient {
                         local.tick = tick;
                         local.entities.retain(|e| e.id != entity_id);
                     }
+                    self.ingest_local_snapshot();
                     let authoritative_digest = self
                         .local_snapshot
                         .as_ref()
@@ -677,6 +688,7 @@ impl SpacetimeDBClient {
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = new_tick;
                     }
+                    self.ingest_local_snapshot();
                 }
 
                 StdbEvent::WorldStateUpdated { tick, .. } => {
@@ -684,6 +696,7 @@ impl SpacetimeDBClient {
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = tick;
                     }
+                    self.ingest_local_snapshot();
                 }
 
                 // ── Internal events (no ServerMessage equivalent) ──
@@ -703,6 +716,7 @@ impl SpacetimeDBClient {
         self.welcome_sent = false;
         self.last_emitted_tick = 0;
         self.subscriptions.reset_connection();
+        self.clear_presentation_state();
     }
 
     /// Configure subscriptions for spectator mode (all public tables + events).
@@ -794,6 +808,21 @@ impl SpacetimeDBClient {
         self.local_snapshot.as_ref()
     }
 
+    /// Sample a smoothed presentation snapshot for rendering.
+    pub fn presentation_snapshot(
+        &mut self,
+        frame_delta_seconds: f32,
+    ) -> Option<InterpolatedSnapshot> {
+        let latest_tick = self.render_buffer.latest_tick()?;
+        let target_tick = self.render_clock.advance(latest_tick, frame_delta_seconds);
+        let sampled = self.render_buffer.sample(target_tick)?;
+        Some(compose_presentation_snapshot(
+            sampled,
+            self.local_snapshot.as_ref(),
+            self.inner.controlled_entity(),
+        ))
+    }
+
     /// Get the assigned client ID (available after `Connected` event).
     pub fn client_id(&self) -> Option<ClientId> {
         self.client_id
@@ -802,6 +831,11 @@ impl SpacetimeDBClient {
     /// Whether the client is connected to SpacetimeDB.
     pub fn is_connected(&self) -> bool {
         self.inner.is_connected()
+    }
+
+    /// Current presentation tick after interpolation/catch-up correction.
+    pub fn presentation_tick(&self) -> Option<f32> {
+        self.render_clock.current_tick()
     }
 
     /// Access the underlying [`StdbClient`] for advanced operations
@@ -852,6 +886,18 @@ impl SpacetimeDBClient {
                 local.entities.push(snap.clone());
             }
         }
+    }
+
+    fn ingest_local_snapshot(&mut self) {
+        if let Some(snapshot) = self.local_snapshot.as_ref() {
+            self.render_buffer.push(snapshot.clone());
+        }
+    }
+
+    fn clear_presentation_state(&mut self) {
+        self.local_snapshot = None;
+        self.render_buffer.clear();
+        self.render_clock.reset();
     }
 }
 
@@ -1364,6 +1410,31 @@ mod tests {
         assert!(!client.is_connected());
         assert!(client.client_id().is_none());
         assert!(client.local_snapshot().is_none());
+    }
+
+    #[test]
+    fn test_presentation_snapshot_uses_local_snapshot_history() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.local_snapshot = Some(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 7,
+                position: Vec2::new(4.0, 2.0),
+                velocity: Vec2::new(60.0, 0.0),
+                rotation: 0.0,
+                health: Some(90.0),
+                max_health: Some(100.0),
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        });
+        client.ingest_local_snapshot();
+
+        let sampled = client.presentation_snapshot(1.0 / 60.0).unwrap();
+
+        assert_eq!(sampled.snapshot.entities.len(), 1);
+        assert!(sampled.snapshot.entities[0].position.x >= 4.0);
+        assert!(client.presentation_tick().is_some());
     }
 
     #[test]

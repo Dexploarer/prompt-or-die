@@ -419,5 +419,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git ls-files target`
   - `git status --short`
 
-**Last updated**: Iteration 51
+### Iteration 52 — Pod-Net Presentation Interpolation and Catch-Up Pass
+
+- [x] Added reusable `pod-net` snapshot interpolation primitives: bounded authoritative history, render-time drift correction, exact/interpolated/extrapolated sample modes, and local-player presentation overlay.
+- [x] Integrated the presentation pipeline into native QUIC, browser WebSocket, and SpacetimeDB clients so each adapter now exposes a smoothed `presentation_snapshot()` and `presentation_tick()` API on top of the existing authoritative/predicted state split.
+- [x] Preserved local input responsiveness by overlaying the currently predicted controlled entity onto interpolated authoritative snapshots while keeping remote entities on the smoothed authoritative timeline.
+- [x] Added deterministic coverage for interpolation replacement, shared-entity lerping, bounded extrapolation, render-clock catch-up snapping, local-player overlay composition, and SpacetimeDB adapter presentation sampling.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+
+**Last updated**: Iteration 52
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice

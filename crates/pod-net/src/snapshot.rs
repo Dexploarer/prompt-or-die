@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use pod_core::{Action, Health, Label, Movement, Transform, Velocity};
 
@@ -13,6 +13,9 @@ const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
 const DEFAULT_PREDICTION_MOVE_SPEED: f32 = 200.0;
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
+
+/// Default network tick rate used for client-side presentation smoothing.
+pub const DEFAULT_NETWORK_TICK_RATE: f32 = 60.0;
 
 /// A serializable snapshot of world state
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -85,6 +88,223 @@ pub enum SnapshotUpdateError {
         expected: u64,
         actual: u64,
     },
+}
+
+/// Configuration for rendering/interpolating authoritative snapshots between
+/// network updates while recovering smoothly from drift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterpolationConfig {
+    /// How many authoritative ticks behind the latest server tick the render
+    /// clock should target by default.
+    pub interpolation_delay_ticks: f32,
+    /// Maximum number of future ticks a client may extrapolate beyond the last
+    /// authoritative snapshot before clamping.
+    pub max_extrapolation_ticks: f32,
+    /// If the render clock drifts farther than this many ticks from the desired
+    /// delayed target, snap directly instead of correcting gradually.
+    pub snap_threshold_ticks: f32,
+    /// Maximum number of ticks per second the render clock may correct by while
+    /// catching up or slowing down toward the desired delayed target.
+    pub catch_up_rate_ticks_per_second: f32,
+    /// Maximum authoritative snapshots retained for interpolation history.
+    pub history_limit: usize,
+}
+
+impl Default for InterpolationConfig {
+    fn default() -> Self {
+        Self {
+            interpolation_delay_ticks: 2.0,
+            max_extrapolation_ticks: 2.0,
+            snap_threshold_ticks: 4.0,
+            catch_up_rate_ticks_per_second: 8.0,
+            history_limit: 32,
+        }
+    }
+}
+
+/// How a presentation snapshot was produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotSampleMode {
+    Exact,
+    Interpolated,
+    Extrapolated,
+    ClampedPast,
+    ClampedFuture,
+}
+
+/// A sampled world snapshot suitable for rendering/presentation.
+#[derive(Debug, Clone)]
+pub struct InterpolatedSnapshot {
+    pub target_tick: f32,
+    pub mode: SnapshotSampleMode,
+    pub snapshot: WorldSnapshot,
+}
+
+/// Bounded authoritative history for rendering/interpolating remote state.
+#[derive(Debug, Clone)]
+pub struct SnapshotInterpolationBuffer {
+    config: InterpolationConfig,
+    snapshots: VecDeque<WorldSnapshot>,
+}
+
+impl Default for SnapshotInterpolationBuffer {
+    fn default() -> Self {
+        Self::new(InterpolationConfig::default())
+    }
+}
+
+impl SnapshotInterpolationBuffer {
+    pub fn new(config: InterpolationConfig) -> Self {
+        Self {
+            config,
+            snapshots: VecDeque::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.snapshots.clear();
+    }
+
+    pub fn latest_tick(&self) -> Option<u64> {
+        self.snapshots.back().map(|snapshot| snapshot.tick)
+    }
+
+    pub fn push(&mut self, snapshot: WorldSnapshot) {
+        if let Some(existing) = self
+            .snapshots
+            .iter_mut()
+            .find(|existing| existing.tick == snapshot.tick)
+        {
+            *existing = snapshot;
+        } else if let Some(index) = self
+            .snapshots
+            .iter()
+            .position(|existing| existing.tick > snapshot.tick)
+        {
+            self.snapshots.insert(index, snapshot);
+        } else {
+            self.snapshots.push_back(snapshot);
+        }
+
+        while self.snapshots.len() > self.config.history_limit {
+            self.snapshots.pop_front();
+        }
+    }
+
+    pub fn sample(&self, target_tick: f32) -> Option<InterpolatedSnapshot> {
+        let first = self.snapshots.front()?;
+        let last = self.snapshots.back()?;
+
+        if let Some(exact) = self
+            .snapshots
+            .iter()
+            .find(|snapshot| (snapshot.tick as f32 - target_tick).abs() <= f32::EPSILON)
+        {
+            return Some(InterpolatedSnapshot {
+                target_tick,
+                mode: SnapshotSampleMode::Exact,
+                snapshot: exact.clone(),
+            });
+        }
+
+        if target_tick <= first.tick as f32 {
+            return Some(InterpolatedSnapshot {
+                target_tick,
+                mode: SnapshotSampleMode::ClampedPast,
+                snapshot: first.clone(),
+            });
+        }
+
+        let lower_index = self
+            .snapshots
+            .iter()
+            .rposition(|snapshot| (snapshot.tick as f32) < target_tick)?;
+
+        if let Some(upper) = self
+            .snapshots
+            .iter()
+            .skip(lower_index + 1)
+            .find(|snapshot| snapshot.tick as f32 > target_tick)
+        {
+            let lower = &self.snapshots[lower_index];
+            let factor =
+                (target_tick - lower.tick as f32) / (upper.tick as f32 - lower.tick as f32);
+
+            return Some(InterpolatedSnapshot {
+                target_tick,
+                mode: SnapshotSampleMode::Interpolated,
+                snapshot: interpolate_snapshots(lower, upper, factor, target_tick),
+            });
+        }
+
+        let clamped_tick =
+            target_tick.min(last.tick as f32 + self.config.max_extrapolation_ticks.max(0.0));
+        let mode = if clamped_tick < target_tick {
+            SnapshotSampleMode::ClampedFuture
+        } else {
+            SnapshotSampleMode::Extrapolated
+        };
+
+        Some(InterpolatedSnapshot {
+            target_tick,
+            mode,
+            snapshot: extrapolate_snapshot(last, clamped_tick),
+        })
+    }
+}
+
+/// Render-time clock that stays a few authoritative ticks behind the server and
+/// catches up smoothly as new snapshots arrive.
+#[derive(Debug, Clone)]
+pub struct RenderClock {
+    config: InterpolationConfig,
+    render_tick: Option<f32>,
+}
+
+impl Default for RenderClock {
+    fn default() -> Self {
+        Self::new(InterpolationConfig::default())
+    }
+}
+
+impl RenderClock {
+    pub fn new(config: InterpolationConfig) -> Self {
+        Self {
+            config,
+            render_tick: None,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.render_tick = None;
+    }
+
+    pub fn current_tick(&self) -> Option<f32> {
+        self.render_tick
+    }
+
+    pub fn advance(&mut self, latest_authoritative_tick: u64, frame_delta_seconds: f32) -> f32 {
+        let frame_delta_seconds = frame_delta_seconds.max(0.0);
+        let desired_tick =
+            latest_authoritative_tick as f32 - self.config.interpolation_delay_ticks.max(0.0);
+        let mut render_tick = self.render_tick.unwrap_or(desired_tick);
+        let drift = desired_tick - render_tick;
+
+        if drift.abs() > self.config.snap_threshold_ticks {
+            render_tick = desired_tick;
+        } else {
+            let max_correction =
+                self.config.catch_up_rate_ticks_per_second.max(0.0) * frame_delta_seconds;
+            render_tick += drift.clamp(-max_correction, max_correction);
+        }
+
+        render_tick += frame_delta_seconds * DEFAULT_NETWORK_TICK_RATE;
+        render_tick = render_tick
+            .min(latest_authoritative_tick as f32 + self.config.max_extrapolation_ticks.max(0.0));
+
+        self.render_tick = Some(render_tick);
+        render_tick
+    }
 }
 
 impl WorldSnapshot {
@@ -305,6 +525,119 @@ pub fn apply_authoritative_update(
     }
 
     Ok(snapshot)
+}
+
+/// Overlays the locally predicted controlled entity onto an interpolated
+/// authoritative snapshot, preserving responsive local control while still
+/// smoothing remote entities from authoritative history.
+pub fn compose_presentation_snapshot(
+    mut sampled: InterpolatedSnapshot,
+    predicted_local: Option<&WorldSnapshot>,
+    controlled_entity: Option<u64>,
+) -> InterpolatedSnapshot {
+    let Some(controlled_entity) = controlled_entity else {
+        return sampled;
+    };
+
+    let Some(predicted_entity) = predicted_local.and_then(|snapshot| {
+        snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == controlled_entity)
+    }) else {
+        return sampled;
+    };
+
+    if let Some(existing) = sampled
+        .snapshot
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id == controlled_entity)
+    {
+        *existing = predicted_entity.clone();
+    } else {
+        sampled.snapshot.entities.push(predicted_entity.clone());
+    }
+
+    sampled
+}
+
+fn interpolate_snapshots(
+    lower: &WorldSnapshot,
+    upper: &WorldSnapshot,
+    factor: f32,
+    target_tick: f32,
+) -> WorldSnapshot {
+    let factor = factor.clamp(0.0, 1.0);
+    let mut upper_entities = upper
+        .entities
+        .iter()
+        .map(|entity| (entity.id, entity))
+        .collect::<HashMap<_, _>>();
+    let mut entities = Vec::with_capacity(lower.entities.len());
+
+    for lower_entity in &lower.entities {
+        if let Some(upper_entity) = upper_entities.remove(&lower_entity.id) {
+            entities.push(interpolate_entity(lower_entity, upper_entity, factor));
+        } else {
+            // An entity that disappears in the upper snapshot remains visible
+            // until that authoritative tick is fully reached.
+            entities.push(lower_entity.clone());
+        }
+    }
+
+    WorldSnapshot {
+        tick: target_tick.floor().max(0.0) as u64,
+        entities,
+    }
+}
+
+fn interpolate_entity(
+    lower: &EntitySnapshot,
+    upper: &EntitySnapshot,
+    factor: f32,
+) -> EntitySnapshot {
+    EntitySnapshot {
+        id: lower.id,
+        position: lower.position.lerp(upper.position, factor),
+        velocity: lower.velocity.lerp(upper.velocity, factor),
+        rotation: lerp_f32(lower.rotation, upper.rotation, factor),
+        health: lerp_option_f32(lower.health, upper.health, factor),
+        max_health: lerp_option_f32(lower.max_health, upper.max_health, factor),
+        movement_speed: lerp_option_f32(lower.movement_speed, upper.movement_speed, factor),
+        label: if factor < 1.0 {
+            lower.label.clone()
+        } else {
+            upper.label.clone()
+        },
+    }
+}
+
+fn extrapolate_snapshot(snapshot: &WorldSnapshot, target_tick: f32) -> WorldSnapshot {
+    let dt_ticks = (target_tick - snapshot.tick as f32).max(0.0);
+    let dt_seconds = dt_ticks * FIXED_TICK_DURATION_SECS;
+    let mut extrapolated = snapshot.clone();
+    extrapolated.tick = target_tick.floor().max(0.0) as u64;
+
+    for entity in &mut extrapolated.entities {
+        entity.position += entity.velocity * dt_seconds;
+    }
+
+    extrapolated
+}
+
+fn lerp_f32(lower: f32, upper: f32, factor: f32) -> f32 {
+    lower + (upper - lower) * factor
+}
+
+fn lerp_option_f32(lower: Option<f32>, upper: Option<f32>, factor: f32) -> Option<f32> {
+    match (lower, upper) {
+        (Some(lower), Some(upper)) => Some(lerp_f32(lower, upper, factor)),
+        (Some(lower), None) => Some(lower),
+        (None, Some(upper)) if factor >= 1.0 => Some(upper),
+        (None, Some(_)) => None,
+        (None, None) => None,
+    }
 }
 
 fn apply_predicted_action(entity: &mut EntitySnapshot, action: &Action) {
@@ -635,6 +968,209 @@ mod tests {
         assert_eq!(predicted.tick, 12);
         assert!((entity.position.x - 2.0).abs() < 0.001);
         assert_eq!(entity.velocity, Vec2::ZERO);
+    }
+
+    #[test]
+    fn test_interpolation_buffer_replaces_same_tick_snapshot() {
+        let mut buffer = SnapshotInterpolationBuffer::default();
+
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::ZERO,
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: None,
+                label: Some("old".into()),
+            }],
+        });
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(5.0, 0.0),
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: None,
+                label: Some("new".into()),
+            }],
+        });
+
+        let sampled = buffer.sample(10.0).unwrap();
+        assert_eq!(sampled.mode, SnapshotSampleMode::Exact);
+        assert_eq!(sampled.snapshot.entities.len(), 1);
+        assert_eq!(sampled.snapshot.entities[0].label.as_deref(), Some("new"));
+        assert_eq!(sampled.snapshot.entities[0].position, Vec2::new(5.0, 0.0));
+    }
+
+    #[test]
+    fn test_interpolation_buffer_lerps_shared_entities() {
+        let mut buffer = SnapshotInterpolationBuffer::default();
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(0.0, 0.0),
+                velocity: Vec2::new(10.0, 0.0),
+                rotation: 0.0,
+                health: Some(80.0),
+                max_health: Some(100.0),
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        });
+        buffer.push(WorldSnapshot {
+            tick: 12,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(12.0, 0.0),
+                velocity: Vec2::new(14.0, 0.0),
+                rotation: 1.0,
+                health: Some(60.0),
+                max_health: Some(100.0),
+                movement_speed: Some(160.0),
+                label: Some("player".into()),
+            }],
+        });
+
+        let sampled = buffer.sample(11.0).unwrap();
+        let entity = &sampled.snapshot.entities[0];
+
+        assert_eq!(sampled.mode, SnapshotSampleMode::Interpolated);
+        assert!((entity.position.x - 6.0).abs() < 0.001);
+        assert!((entity.velocity.x - 12.0).abs() < 0.001);
+        assert!((entity.rotation - 0.5).abs() < 0.001);
+        assert!((entity.health.unwrap() - 70.0).abs() < 0.001);
+        assert!((entity.movement_speed.unwrap() - 140.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_interpolation_buffer_extrapolates_latest_snapshot() {
+        let mut buffer = SnapshotInterpolationBuffer::default();
+        buffer.push(WorldSnapshot {
+            tick: 5,
+            entities: vec![EntitySnapshot {
+                id: 9,
+                position: Vec2::new(1.0, 2.0),
+                velocity: Vec2::new(60.0, 0.0),
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(60.0),
+                label: Some("npc".into()),
+            }],
+        });
+
+        let sampled = buffer.sample(6.0).unwrap();
+        let entity = &sampled.snapshot.entities[0];
+
+        assert_eq!(sampled.mode, SnapshotSampleMode::Extrapolated);
+        assert!((entity.position.x - 2.0).abs() < 0.001);
+        assert!((entity.position.y - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_interpolation_buffer_clamps_past_and_future() {
+        let mut buffer = SnapshotInterpolationBuffer::new(InterpolationConfig {
+            max_extrapolation_ticks: 1.0,
+            ..InterpolationConfig::default()
+        });
+        buffer.push(WorldSnapshot {
+            tick: 10,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(5.0, 0.0),
+                velocity: Vec2::new(30.0, 0.0),
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: None,
+                label: None,
+            }],
+        });
+
+        let past = buffer.sample(9.0).unwrap();
+        assert_eq!(past.mode, SnapshotSampleMode::ClampedPast);
+        assert_eq!(past.snapshot.tick, 10);
+
+        let future = buffer.sample(13.0).unwrap();
+        let entity = &future.snapshot.entities[0];
+        assert_eq!(future.mode, SnapshotSampleMode::ClampedFuture);
+        assert!((entity.position.x - 5.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_render_clock_advances_and_snaps_on_large_drift() {
+        let mut clock = RenderClock::default();
+
+        let first = clock.advance(20, 1.0 / 60.0);
+        assert!((first - 19.0).abs() < 0.001);
+
+        let second = clock.advance(40, 0.0);
+        assert!((second - 38.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_compose_presentation_snapshot_overlays_predicted_controlled_entity() {
+        let sampled = InterpolatedSnapshot {
+            target_tick: 12.0,
+            mode: SnapshotSampleMode::Interpolated,
+            snapshot: WorldSnapshot {
+                tick: 12,
+                entities: vec![
+                    EntitySnapshot {
+                        id: 1,
+                        position: Vec2::new(5.0, 0.0),
+                        velocity: Vec2::new(1.0, 0.0),
+                        rotation: 0.0,
+                        health: None,
+                        max_health: None,
+                        movement_speed: Some(120.0),
+                        label: Some("player".into()),
+                    },
+                    EntitySnapshot {
+                        id: 2,
+                        position: Vec2::new(10.0, 0.0),
+                        velocity: Vec2::ZERO,
+                        rotation: 0.0,
+                        health: None,
+                        max_health: None,
+                        movement_speed: None,
+                        label: Some("npc".into()),
+                    },
+                ],
+            },
+        };
+        let predicted_local = WorldSnapshot {
+            tick: 13,
+            entities: vec![EntitySnapshot {
+                id: 1,
+                position: Vec2::new(8.0, 1.0),
+                velocity: Vec2::new(3.0, 0.0),
+                rotation: 1.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        };
+
+        let composed = compose_presentation_snapshot(sampled, Some(&predicted_local), Some(1));
+
+        assert_eq!(composed.snapshot.entities.len(), 2);
+        let controlled = composed
+            .snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == 1)
+            .unwrap();
+        assert_eq!(controlled.position, Vec2::new(8.0, 1.0));
+        assert_eq!(controlled.velocity, Vec2::new(3.0, 0.0));
     }
 
     #[test]

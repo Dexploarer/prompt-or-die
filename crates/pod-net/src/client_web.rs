@@ -15,7 +15,9 @@ use pod_core::Action;
 
 use crate::protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage};
 use crate::snapshot::{
-    apply_authoritative_update, PredictedActionBatch, ReconciliationReport, WorldSnapshot,
+    apply_authoritative_update, compose_presentation_snapshot, InterpolatedSnapshot,
+    PredictedActionBatch, ReconciliationReport, RenderClock, SnapshotInterpolationBuffer,
+    WorldSnapshot,
 };
 
 #[derive(Debug, Default)]
@@ -53,6 +55,10 @@ pub struct WebClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Authoritative history for presentation smoothing.
+    render_buffer: SnapshotInterpolationBuffer,
+    /// Presentation clock for interpolation/catch-up recovery.
+    render_clock: RenderClock,
     reconnect_attempts: u32,
     next_reconnect_at_ms: f64,
 }
@@ -79,6 +85,8 @@ impl WebClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
             reconnect_attempts: 0,
             next_reconnect_at_ms: 0.0,
         };
@@ -276,6 +284,7 @@ impl WebClient {
                 self.controlled_entity = *controlled_entity;
                 self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot.clone());
+                self.ingest_authoritative_snapshot();
                 self.prediction_history.clear();
                 self.connected = true;
                 self.last_server_tick = *tick;
@@ -308,6 +317,7 @@ impl WebClient {
                 if gap_detected && !*is_full_snapshot {
                     self.authoritative_snapshot = None;
                     self.local_snapshot = None;
+                    self.clear_presentation_state();
                     self.record_reconciliation(*tick, *authoritative_digest, true);
                     return false;
                 }
@@ -333,12 +343,14 @@ impl WebClient {
                         );
                         self.authoritative_snapshot = None;
                         self.local_snapshot = None;
+                        self.clear_presentation_state();
                         self.record_reconciliation(*tick, *authoritative_digest, true);
                         return false;
                     }
                 };
 
                 self.authoritative_snapshot = Some(authoritative_snapshot);
+                self.ingest_authoritative_snapshot();
                 self.prune_acknowledged_predictions(*acknowledged_action_tick);
                 self.rebuild_predicted_snapshot();
                 self.last_server_tick = *tick;
@@ -405,6 +417,7 @@ impl WebClient {
 
         self.websocket = None;
         self.connected = false;
+        self.clear_presentation_state();
         Ok(())
     }
 
@@ -413,9 +426,29 @@ impl WebClient {
         self.local_snapshot.as_ref()
     }
 
+    /// Sample a smoothed presentation snapshot for rendering.
+    pub fn presentation_snapshot(
+        &mut self,
+        frame_delta_seconds: f32,
+    ) -> Option<InterpolatedSnapshot> {
+        let latest_tick = self.render_buffer.latest_tick()?;
+        let target_tick = self.render_clock.advance(latest_tick, frame_delta_seconds);
+        let sampled = self.render_buffer.sample(target_tick)?;
+        Some(compose_presentation_snapshot(
+            sampled,
+            self.local_snapshot.as_ref(),
+            self.controlled_entity,
+        ))
+    }
+
     /// Get the last authoritative world snapshot confirmed by the server.
     pub fn authoritative_snapshot(&self) -> Option<&WorldSnapshot> {
         self.authoritative_snapshot.as_ref()
+    }
+
+    /// Current presentation tick after interpolation/catch-up correction.
+    pub fn presentation_tick(&self) -> Option<f32> {
+        self.render_clock.current_tick()
     }
 
     /// Get the most recent reconciliation report.
@@ -448,6 +481,7 @@ impl WebClient {
         self.client_id = Some(client_id);
         self.authoritative_snapshot = Some(snapshot.clone());
         self.local_snapshot = Some(snapshot);
+        self.ingest_authoritative_snapshot();
         self.connected = true;
     }
 
@@ -469,6 +503,17 @@ impl WebClient {
         self.local_snapshot = self.authoritative_snapshot.as_ref().map(|snapshot| {
             snapshot.replay_predicted_actions(self.controlled_entity, &self.prediction_history)
         });
+    }
+
+    fn ingest_authoritative_snapshot(&mut self) {
+        if let Some(snapshot) = self.authoritative_snapshot.as_ref() {
+            self.render_buffer.push(snapshot.clone());
+        }
+    }
+
+    fn clear_presentation_state(&mut self) {
+        self.render_buffer.clear();
+        self.render_clock.reset();
     }
 
     fn record_reconciliation(
