@@ -4,8 +4,12 @@ use crate::component::*;
 use crate::event::{Event, EventBus};
 use crate::id::EntityId;
 use crate::observation::*;
+use crate::telemetry::{
+    ActionLifecycleStage, ActionSource, AgentTelemetryFrame, TickTelemetryFrame, TrajectorySample,
+};
 use crate::TICK_DURATION_SECS;
 use glam::{Vec2, Vec3};
+use std::collections::HashMap;
 
 /// Result of a single tick
 #[derive(Debug, Clone)]
@@ -15,6 +19,7 @@ pub struct TickResult {
     pub entity_count: usize,
     pub actions_processed: usize,
     pub actions_rejected: usize,
+    pub telemetry: TickTelemetryFrame,
 }
 
 /// Execute one tick of the simulation
@@ -26,6 +31,11 @@ pub fn execute_tick(
     external_actions: Vec<AgentAction>,
     _next_entity_id: &mut u64,
 ) -> TickResult {
+    struct PendingAction {
+        agent_action: AgentAction,
+        source: ActionSource,
+    }
+
     let elapsed = tick as f32 * TICK_DURATION_SECS;
     let mut actions_processed = 0u32;
     let mut actions_rejected = 0u32;
@@ -43,28 +53,79 @@ pub fn execute_tick(
     // ========================================
     // PHASE 2: DELIVER OBSERVATIONS & COLLECT DECISIONS
     // ========================================
-    let mut all_actions: Vec<AgentAction> = Vec::new();
+    let mut all_actions: Vec<PendingAction> = Vec::new();
+    let mut telemetry_frames = Vec::<AgentTelemetryFrame>::new();
+    let mut telemetry_indices = HashMap::<crate::id::AgentId, usize>::new();
 
     for (slot, obs) in agents.iter_mut().zip(observations.into_iter()) {
         if !slot.connected {
             continue;
         }
+        let entity_id = slot.entity_id.map(|entity| EntityId(entity.id() as u64));
+        let trajectory_start = entity_id.map(|_| {
+            TrajectorySample::new(
+                tick,
+                elapsed,
+                obs.self_state.position,
+                obs.self_state.velocity,
+                obs.self_state.rotation,
+            )
+        });
+        let telemetry_index = telemetry_frames.len();
+        telemetry_frames.push(AgentTelemetryFrame::new(
+            tick,
+            slot.agent.id(),
+            entity_id,
+            slot.agent.runtime_profile(),
+            obs.visible_entities.len(),
+            obs.audible_events.len(),
+            obs.messages.len(),
+            obs.available_actions.len(),
+            obs.objectives.len(),
+            trajectory_start,
+        ));
+        telemetry_indices.insert(slot.agent.id(), telemetry_index);
         slot.agent.observe(obs);
         let decisions = slot.agent.decide();
         for action in decisions {
-            all_actions.push(AgentAction {
-                agent_id: slot.agent.id(),
-                tick,
-                action,
+            if let Some(index) = telemetry_indices.get(&slot.agent.id()).copied() {
+                telemetry_frames[index].record_action(
+                    ActionSource::AgentDecision,
+                    ActionLifecycleStage::Submitted,
+                    action.clone(),
+                    None,
+                );
+            }
+            all_actions.push(PendingAction {
+                agent_action: AgentAction {
+                    agent_id: slot.agent.id(),
+                    tick,
+                    action,
+                },
+                source: ActionSource::AgentDecision,
             });
         }
     }
-    all_actions.extend(external_actions);
+    for agent_action in external_actions {
+        if let Some(index) = telemetry_indices.get(&agent_action.agent_id).copied() {
+            telemetry_frames[index].record_action(
+                ActionSource::ExternalSubmission,
+                ActionLifecycleStage::Submitted,
+                agent_action.action.clone(),
+                None,
+            );
+        }
+        all_actions.push(PendingAction {
+            agent_action,
+            source: ActionSource::ExternalSubmission,
+        });
+    }
 
     // ========================================
     // PHASE 3: VALIDATE & EXECUTE ACTIONS
     // ========================================
-    for agent_action in &all_actions {
+    for pending in &all_actions {
+        let agent_action = &pending.agent_action;
         // Find the agent's constraints
         let constraints = agents
             .iter()
@@ -79,10 +140,26 @@ pub fn execute_tick(
             ActionResult::Valid => {
                 execute_action(ecs, agents, events, agent_action);
                 actions_processed += 1;
+                if let Some(index) = telemetry_indices.get(&agent_action.agent_id).copied() {
+                    telemetry_frames[index].record_action(
+                        pending.source,
+                        ActionLifecycleStage::Executed,
+                        agent_action.action.clone(),
+                        None,
+                    );
+                }
             }
             ActionResult::Rejected(reason) => {
                 log::debug!("Action rejected for {}: {}", agent_action.agent_id, reason);
                 actions_rejected += 1;
+                if let Some(index) = telemetry_indices.get(&agent_action.agent_id).copied() {
+                    telemetry_frames[index].record_action(
+                        pending.source,
+                        ActionLifecycleStage::Rejected,
+                        agent_action.action.clone(),
+                        Some(reason),
+                    );
+                }
             }
             ActionResult::Queued => {
                 log::debug!(
@@ -91,6 +168,14 @@ pub fn execute_tick(
                     tick
                 );
                 actions_rejected += 1;
+                if let Some(index) = telemetry_indices.get(&agent_action.agent_id).copied() {
+                    telemetry_frames[index].record_action(
+                        pending.source,
+                        ActionLifecycleStage::Queued,
+                        agent_action.action.clone(),
+                        None,
+                    );
+                }
             }
         }
     }
@@ -104,6 +189,29 @@ pub fn execute_tick(
     // ========================================
     // PHASE 5: FLUSH EVENTS
     // ========================================
+    for slot in agents.iter() {
+        let Some(index) = telemetry_indices.get(&slot.agent.id()).copied() else {
+            continue;
+        };
+        let Some(entity) = slot.entity_id else {
+            continue;
+        };
+        let Ok(transform) = ecs.get::<&Transform>(entity) else {
+            continue;
+        };
+        let velocity = ecs
+            .get::<&Velocity>(entity)
+            .map(|value| value.linear)
+            .unwrap_or(Vec2::ZERO);
+        telemetry_frames[index].update_trajectory_end(TrajectorySample::new(
+            tick,
+            elapsed + TICK_DURATION_SECS,
+            transform.position,
+            velocity,
+            transform.rotation,
+        ));
+    }
+
     let tick_events = events.current_events().to_vec();
     events.flush(tick + 1);
 
@@ -113,6 +221,10 @@ pub fn execute_tick(
         entity_count: ecs.len() as usize,
         actions_processed: actions_processed as usize,
         actions_rejected: actions_rejected as usize,
+        telemetry: TickTelemetryFrame {
+            tick,
+            agents: telemetry_frames,
+        },
     }
 }
 
@@ -1908,6 +2020,107 @@ mod tests {
                 .species_name,
             "Moss Turtle"
         );
+    }
+
+    #[test]
+    fn tick_result_records_authoritative_agent_trajectory_and_action_trace() {
+        let mut ecs = hecs::World::new();
+        let mover_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+
+        let observed_messages = Arc::new(Mutex::new(Vec::<Observation>::new()));
+        let (agent, agent_id) =
+            RecordingAgent::new(vec![Action::Move { direction: Vec2::X }], observed_messages);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(mover_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            3,
+            vec![],
+            &mut next_entity_id,
+        );
+
+        assert_eq!(result.telemetry.tick, 3);
+        assert_eq!(result.telemetry.agents.len(), 1);
+
+        let telemetry = &result.telemetry.agents[0];
+        assert_eq!(telemetry.agent_id, agent_id);
+        assert_eq!(telemetry.runtime_profile.agent_type, AgentType::ScriptedNpc);
+        let trajectory = telemetry.trajectory.as_ref().expect("trajectory frame");
+        assert_eq!(trajectory.start.position, Vec2::ZERO);
+        assert!(trajectory.end.position.x > 0.0);
+        assert!(trajectory.distance_travelled > 0.0);
+        assert!(telemetry.action_trace.iter().any(|trace| {
+            trace.stage == ActionLifecycleStage::Submitted
+                && matches!(trace.source, ActionSource::AgentDecision)
+                && matches!(trace.action, Action::Move { .. })
+        }));
+        assert!(telemetry.action_trace.iter().any(|trace| {
+            trace.stage == ActionLifecycleStage::Executed
+                && matches!(trace.source, ActionSource::AgentDecision)
+                && matches!(trace.action, Action::Move { .. })
+        }));
+    }
+
+    #[test]
+    fn rejected_external_actions_are_captured_in_tick_telemetry() {
+        let mut ecs = hecs::World::new();
+        let observer_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+
+        let observed_messages = Arc::new(Mutex::new(Vec::<Observation>::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], observed_messages);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(observer_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            4,
+            vec![AgentAction {
+                agent_id,
+                tick: 4,
+                action: Action::Move {
+                    direction: Vec2::splat(10.0),
+                },
+            }],
+            &mut next_entity_id,
+        );
+
+        let telemetry = &result.telemetry.agents[0];
+        assert!(telemetry.action_trace.iter().any(|trace| {
+            trace.stage == ActionLifecycleStage::Submitted
+                && matches!(trace.source, ActionSource::ExternalSubmission)
+        }));
+        let rejected = telemetry
+            .action_trace
+            .iter()
+            .find(|trace| trace.stage == ActionLifecycleStage::Rejected)
+            .expect("rejected action trace");
+        assert!(matches!(rejected.source, ActionSource::ExternalSubmission));
+        assert!(rejected
+            .rejection_reason
+            .as_deref()
+            .expect("rejection reason")
+            .contains("magnitude too large"));
     }
 
     #[test]

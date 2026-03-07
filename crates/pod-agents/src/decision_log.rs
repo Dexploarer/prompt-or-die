@@ -34,6 +34,7 @@
 //!     decision_method: DecisionMethod::Scripted { rule_name: "patrol".into() },
 //!     actions_produced: vec![],
 //!     timing: DecisionTiming { observe_us: 10, decide_us: 20, total_us: 30 },
+//!     tool_calls: vec![],
 //!     metadata: HashMap::new(),
 //! };
 //!
@@ -48,7 +49,7 @@ use serde::{Deserialize, Serialize};
 
 use pod_core::observation::Relationship;
 use pod_core::replay::{DecisionTrace, ReplayFile, ReplayHeader};
-use pod_core::{Action, AgentId, AgentType, Observation};
+use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ObservationSummary
@@ -221,6 +222,8 @@ pub struct DecisionEntry {
     pub actions_produced: Vec<Action>,
     /// Timing breakdown for this cycle.
     pub timing: DecisionTiming,
+    /// Tool/LLM side effects emitted while producing the decision.
+    pub tool_calls: Vec<AgentToolCallTrace>,
     /// Arbitrary key/value metadata (agent-specific diagnostics, test tags, …).
     pub metadata: HashMap<String, String>,
 }
@@ -627,7 +630,7 @@ impl DecisionLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::{Action, AgentId, AgentType, Observation};
+    use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation};
 
     // ── helpers ────────────────────────────────────────────────────────────
 
@@ -654,6 +657,7 @@ mod tests {
                 decide_us: 200,
                 total_us: 300,
             },
+            tool_calls: Vec::new(),
             metadata: HashMap::new(),
         }
     }
@@ -958,5 +962,23 @@ mod tests {
         assert!((summary.health_fraction.unwrap() - 0.5).abs() < f32::EPSILON);
         assert_eq!(summary.position, Vec2::new(3.0, 4.0));
         assert_eq!(summary.active_objectives, 1); // only the non-completed one
+    }
+
+    #[test]
+    fn decision_entries_preserve_tool_call_telemetry() {
+        let mut logger = DecisionLogger::new();
+        let agent_id = AgentId::new();
+        let mut entry = make_llm_entry(8, agent_id);
+        entry.tool_calls.push(AgentToolCallTrace::success(
+            8, "pathfind", "openai", 22, 144, 64,
+        ));
+
+        logger.log(entry);
+
+        let stored = logger.entries_for_agent(agent_id);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].tool_calls.len(), 1);
+        assert_eq!(stored[0].tool_calls[0].tool_name, "pathfind");
+        assert_eq!(stored[0].tool_calls[0].provider, "openai");
     }
 }

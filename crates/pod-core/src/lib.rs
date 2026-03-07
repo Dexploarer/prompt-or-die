@@ -14,6 +14,7 @@
 //! - **Orchestrator** (`orchestrator`): Efficiently batches many AI agents with priority scheduling
 //! - **Enhanced Constraints** (`constraint`): Production-grade validation with budgets and reaction gates
 //! - **Observation Filtering** (`observation_filter`): Compresses observations to fit LLM token budgets
+//! - **Telemetry** (`telemetry`): Authoritative per-tick trajectories, action traces, and tool-call primitives
 
 #![allow(clippy::assign_op_pattern)]
 #![allow(clippy::collapsible_if)]
@@ -41,6 +42,7 @@ pub mod observation;
 pub mod observation_filter;
 pub mod orchestrator;
 pub mod replay;
+pub mod telemetry;
 pub mod tick;
 pub mod world;
 
@@ -57,7 +59,8 @@ pub use constraint::{
 };
 pub use contract::{
     AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion,
-    VersionedAgentAction, VersionedObservation, RUNTIME_CONTRACT_VERSION_V1,
+    VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+    RUNTIME_CONTRACT_VERSION_V1,
 };
 pub use event::*;
 pub use id::*;
@@ -67,6 +70,10 @@ pub use observation_filter::{
 };
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
 pub use replay::{DecisionTrace, ReplayFile, ReplayHeader, ReplayPlayer, ReplayRecorder};
+pub use telemetry::{
+    ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentToolCallTrace,
+    AgentTrajectoryFrame, TelemetryArchive, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+};
 pub use world::World;
 
 /// Fixed tick rate — all agents operate on the same clock

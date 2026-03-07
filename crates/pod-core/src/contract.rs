@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::AgentAction;
 use crate::agent::AgentType;
 use crate::observation::Observation;
+use crate::telemetry::TickTelemetryFrame;
 
 pub const RUNTIME_CONTRACT_VERSION_V1: u16 = 1;
 
@@ -160,16 +161,33 @@ impl VersionedObservation {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionedTickTelemetry {
+    pub version: RuntimeContractVersion,
+    pub payload: TickTelemetryFrame,
+}
+
+impl VersionedTickTelemetry {
+    pub fn new(payload: TickTelemetryFrame) -> Self {
+        Self {
+            version: RuntimeContractVersion::V1,
+            payload,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::action::{Action, AgentAction};
     use crate::agent::AgentType;
     use crate::id::AgentId;
     use crate::observation::Observation;
+    use crate::telemetry::TickTelemetryFrame;
 
     use super::{
         AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion,
-        VersionedAgentAction, VersionedObservation, RUNTIME_CONTRACT_VERSION_V1,
+        VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+        RUNTIME_CONTRACT_VERSION_V1,
     };
 
     #[test]
@@ -213,5 +231,9 @@ mod tests {
         let observation = Observation::default();
         let versioned_observation = VersionedObservation::new(profile, observation.clone());
         assert_eq!(versioned_observation.payload.tick, observation.tick);
+
+        let telemetry = TickTelemetryFrame::empty(9);
+        let versioned_telemetry = VersionedTickTelemetry::new(telemetry.clone());
+        assert_eq!(versioned_telemetry.payload.tick, telemetry.tick);
     }
 }

@@ -3,6 +3,7 @@ use crate::agent::{Agent, AgentSlot};
 use crate::component::*;
 use crate::event::EventBus;
 use crate::id::AgentId;
+use crate::telemetry::TickTelemetryFrame;
 use crate::tick::{execute_tick, TickResult};
 use glam::Vec2;
 use rand::SeedableRng;
@@ -56,6 +57,7 @@ impl World {
                 entity_count: self.ecs.len() as usize,
                 actions_processed: 0,
                 actions_rejected: 0,
+                telemetry: TickTelemetryFrame::empty(self.tick),
             };
         }
 
