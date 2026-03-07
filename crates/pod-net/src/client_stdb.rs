@@ -60,8 +60,8 @@ use pod_stdb::types::{
 use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{
     build_catch_up_diagnostics, build_rollback_preview, compose_presentation_snapshot,
-    CatchUpDiagnostics, EntitySnapshot, InterpolatedSnapshot, RenderClock, RollbackPreview,
-    SnapshotInterpolationBuffer, StateDelta, WorldSnapshot,
+    CatchUpDiagnostics, EntitySnapshot, InterpolatedSnapshot, RecoveryRequestState, RenderClock,
+    RollbackPreview, SnapshotInterpolationBuffer, StateDelta, WorldSnapshot,
 };
 
 // ============================================================
@@ -869,6 +869,7 @@ impl SpacetimeDBClient {
             self.inner.controlled_entity(),
             &[],
             &self.render_clock,
+            &RecoveryRequestState::default(),
         )
     }
 
