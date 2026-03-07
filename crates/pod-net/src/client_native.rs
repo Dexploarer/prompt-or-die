@@ -19,8 +19,11 @@ use crate::protocol::{
 use crate::snapshot::{
     apply_authoritative_update, build_catch_up_diagnostics, build_rollback_preview,
     compose_presentation_snapshot, CatchUpDiagnostics, InterpolatedSnapshot, PredictedActionBatch,
-    ReconciliationReport, RenderClock, RollbackPreview, SnapshotInterpolationBuffer, WorldSnapshot,
+    ReconciliationReport, RecoveryRequestState, RenderClock, RollbackPreview,
+    SnapshotInterpolationBuffer, WorldSnapshot,
 };
+
+const RECOVERY_REQUEST_RETRY_TICKS: u64 = 5;
 
 // ============================================================
 // NATIVE CLIENT
@@ -59,8 +62,8 @@ pub struct NativeClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
-    /// Whether the client has already requested an immediate recovery snapshot.
-    awaiting_recovery_snapshot: bool,
+    /// Recovery request throttle/telemetry for full-snapshot resync.
+    recovery_state: RecoveryRequestState,
     /// Authoritative history for presentation smoothing.
     render_buffer: SnapshotInterpolationBuffer,
     /// Presentation clock for interpolation/catch-up recovery.
@@ -150,7 +153,7 @@ impl NativeClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
-            awaiting_recovery_snapshot: false,
+            recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
         };
@@ -196,7 +199,7 @@ impl NativeClient {
                 self.reconnect_token = Some(reconnect_token);
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
-                self.awaiting_recovery_snapshot = false;
+                self.recovery_state.clear();
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: self
                         .local_snapshot
@@ -372,7 +375,7 @@ impl NativeClient {
                 self.ingest_authoritative_snapshot();
                 self.prediction_history.clear();
                 self.last_acknowledged_action_tick = None;
-                self.awaiting_recovery_snapshot = false;
+                self.recovery_state.clear();
                 self.last_server_tick = *tick;
                 self.last_event_tick = *tick;
                 self.reconnect_token = Some(*reconnect_token);
@@ -400,7 +403,7 @@ impl NativeClient {
 
                 let gap_detected = self.last_server_tick > 0 && *tick > self.last_server_tick + 1;
                 if gap_detected && !*is_full_snapshot {
-                    self.request_full_snapshot();
+                    self.request_full_snapshot(*tick);
                     self.authoritative_snapshot = None;
                     self.local_snapshot = None;
                     self.clear_presentation_state();
@@ -424,7 +427,7 @@ impl NativeClient {
                     Ok(snapshot) => snapshot,
                     Err(err) => {
                         error!("Authoritative update rejected at tick {}: {:?}", tick, err);
-                        self.request_full_snapshot();
+                        self.request_full_snapshot(*tick);
                         self.authoritative_snapshot = None;
                         self.local_snapshot = None;
                         self.clear_presentation_state();
@@ -435,7 +438,7 @@ impl NativeClient {
 
                 self.authoritative_snapshot = Some(authoritative_snapshot);
                 if *is_full_snapshot {
-                    self.awaiting_recovery_snapshot = false;
+                    self.recovery_state.clear();
                 }
                 self.ingest_authoritative_snapshot();
                 self.prune_acknowledged_predictions(*acknowledged_action_tick);
@@ -490,7 +493,7 @@ impl NativeClient {
             quinn::VarInt::from_u32(0),
             reason.unwrap_or("Disconnect").as_bytes(),
         );
-        self.awaiting_recovery_snapshot = false;
+        self.recovery_state.clear();
         self.clear_presentation_state();
 
         info!("Disconnected from server");
@@ -561,6 +564,7 @@ impl NativeClient {
             self.controlled_entity,
             &self.prediction_history,
             &self.render_clock,
+            &self.recovery_state,
         )
     }
 
@@ -610,8 +614,17 @@ impl NativeClient {
         self.render_clock.reset();
     }
 
-    fn request_full_snapshot(&mut self) {
-        if self.awaiting_recovery_snapshot {
+    fn request_full_snapshot(&mut self, observed_server_tick: u64) {
+        let current_server_tick = observed_server_tick.max(
+            self.authoritative_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.tick)
+                .unwrap_or(self.last_server_tick),
+        );
+        if !self
+            .recovery_state
+            .can_request(current_server_tick, RECOVERY_REQUEST_RETRY_TICKS)
+        {
             return;
         }
 
@@ -643,7 +656,8 @@ impl NativeClient {
             return;
         };
 
-        self.awaiting_recovery_snapshot = true;
+        self.recovery_state
+            .record_request(current_server_tick, last_known_digest);
         tokio::spawn(async move {
             let mut send = match connection.open_uni().await {
                 Ok(send) => send,
@@ -666,9 +680,9 @@ impl NativeClient {
 
     #[cfg(test)]
     fn request_full_snapshot_without_connection_is_safe(&mut self) {
-        self.request_full_snapshot();
+        self.request_full_snapshot(self.last_server_tick);
         if self.connection.is_none() {
-            self.awaiting_recovery_snapshot = false;
+            self.recovery_state.clear();
         }
     }
 
@@ -861,7 +875,7 @@ mod tests {
             last_event_tick: 20,
             reconnect_token: None,
             last_reconciliation: None,
-            awaiting_recovery_snapshot: false,
+            recovery_state: RecoveryRequestState::default(),
             render_buffer,
             render_clock,
         };
@@ -906,12 +920,12 @@ mod tests {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
-            awaiting_recovery_snapshot: false,
+            recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
         };
 
         client.request_full_snapshot_without_connection_is_safe();
-        assert!(!client.awaiting_recovery_snapshot);
+        assert_eq!(client.recovery_state, RecoveryRequestState::default());
     }
 }

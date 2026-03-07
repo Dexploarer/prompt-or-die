@@ -122,6 +122,45 @@ pub struct CatchUpDiagnostics {
     pub pending_action_batches: usize,
     pub replayed_action_count: usize,
     pub controlled_entity_drift: Option<EntityDrift>,
+    pub recovery: RecoveryRequestState,
+}
+
+/// State for throttled full-snapshot recovery requests after drift or baseline
+/// loss.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecoveryRequestState {
+    pub awaiting_full_snapshot: bool,
+    pub request_attempts: u32,
+    pub last_request_server_tick: Option<u64>,
+    pub last_request_digest: Option<u64>,
+}
+
+impl RecoveryRequestState {
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn can_request(&self, current_server_tick: u64, retry_interval_ticks: u64) -> bool {
+        if !self.awaiting_full_snapshot {
+            return true;
+        }
+
+        self.last_request_server_tick
+            .map(|last_tick| current_server_tick >= last_tick.saturating_add(retry_interval_ticks))
+            .unwrap_or(true)
+    }
+
+    pub fn record_request(&mut self, current_server_tick: u64, digest: Option<u64>) {
+        self.awaiting_full_snapshot = true;
+        self.request_attempts = self.request_attempts.saturating_add(1);
+        self.last_request_server_tick = Some(current_server_tick);
+        self.last_request_digest = digest;
+    }
+
+    pub fn next_retry_tick(&self, retry_interval_ticks: u64) -> Option<u64> {
+        self.last_request_server_tick
+            .map(|tick| tick.saturating_add(retry_interval_ticks))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -678,6 +717,7 @@ pub fn build_catch_up_diagnostics(
     controlled_entity: Option<u64>,
     prediction_history: &[PredictedActionBatch],
     render_clock: &RenderClock,
+    recovery: &RecoveryRequestState,
 ) -> CatchUpDiagnostics {
     let latest_authoritative_tick = authoritative_history
         .latest_tick()
@@ -709,6 +749,7 @@ pub fn build_catch_up_diagnostics(
         controlled_entity_drift: controlled_entity.and_then(|entity_id| {
             entity_drift_between_snapshots(authoritative_snapshot?, predicted_snapshot?, entity_id)
         }),
+        recovery: recovery.clone(),
     }
 }
 
@@ -1444,6 +1485,9 @@ mod tests {
         let presentation_tick = clock.advance(12, 1.0 / 60.0);
         assert!((presentation_tick - 11.0).abs() < 0.001);
 
+        let mut recovery = RecoveryRequestState::default();
+        recovery.record_request(12, Some(authoritative.digest()));
+
         let diagnostics = build_catch_up_diagnostics(
             &buffer,
             Some(&authoritative),
@@ -1454,6 +1498,7 @@ mod tests {
                 actions: vec![Action::Move { direction: Vec2::X }],
             }],
             &clock,
+            &recovery,
         );
 
         assert_eq!(diagnostics.authoritative_tick, Some(12));
@@ -1474,6 +1519,23 @@ mod tests {
                 .position_error
                 > 1.9
         );
+        assert!(diagnostics.recovery.awaiting_full_snapshot);
+        assert_eq!(diagnostics.recovery.request_attempts, 1);
+        assert_eq!(diagnostics.recovery.last_request_server_tick, Some(12));
+    }
+
+    #[test]
+    fn test_recovery_request_state_throttles_retries() {
+        let mut recovery = RecoveryRequestState::default();
+        assert!(recovery.can_request(10, 5));
+
+        recovery.record_request(10, Some(99));
+        assert!(!recovery.can_request(12, 5));
+        assert!(recovery.can_request(15, 5));
+        assert_eq!(recovery.next_retry_tick(5), Some(15));
+
+        recovery.clear();
+        assert_eq!(recovery, RecoveryRequestState::default());
     }
 
     #[test]

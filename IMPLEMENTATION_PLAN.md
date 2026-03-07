@@ -451,5 +451,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
 
-**Last updated**: Iteration 54
+### Iteration 55 — Pod-Net Recovery Retry Telemetry
+
+- [x] Added shared `RecoveryRequestState` to `pod-net` diagnostics so tooling can inspect whether a client is awaiting a full snapshot, how many requests have been issued, and when the next retry becomes eligible.
+- [x] Replaced the direct-connect clients' one-bit recovery latch with throttled retry state, allowing native QUIC and browser WebSocket clients to re-request recovery snapshots after a bounded tick interval instead of getting stuck after one failed attempt.
+- [x] Threaded recovery telemetry through `CatchUpDiagnostics` for native, web, and SpacetimeDB-facing diagnostics surfaces.
+- [x] Added deterministic coverage for retry throttling and recovery telemetry in the snapshot-layer diagnostics tests.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+
+**Last updated**: Iteration 55
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice
