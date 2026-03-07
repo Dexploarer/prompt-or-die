@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 
 use pod_core::observation::Relationship;
 use pod_core::replay::{DecisionTrace, ReplayFile, ReplayHeader};
-use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation};
+use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation, TickTelemetryFrame};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ObservationSummary
@@ -489,6 +489,17 @@ impl DecisionLogger {
     /// LLM decisions. All other agent types produce a minimal trace so that the
     /// replay file is well-formed and all ticks are represented.
     pub fn to_replay_file(&self, name: &str, world_seed: u64) -> ReplayFile {
+        self.to_replay_file_with_telemetry(name, world_seed, Vec::new())
+    }
+
+    /// Convert the current buffer into a `ReplayFile` and embed authoritative
+    /// telemetry windows when the caller has them available.
+    pub fn to_replay_file_with_telemetry(
+        &self,
+        name: &str,
+        world_seed: u64,
+        telemetry_windows: Vec<TickTelemetryFrame>,
+    ) -> ReplayFile {
         let tick_count = self
             .entries
             .iter()
@@ -606,7 +617,7 @@ impl DecisionLogger {
         ReplayFile {
             header,
             traces,
-            telemetry_windows: vec![],
+            telemetry_windows,
         }
     }
 
@@ -635,7 +646,9 @@ impl DecisionLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation};
+    use pod_core::{
+        Action, AgentId, AgentToolCallTrace, AgentType, Observation, TickTelemetryFrame,
+    };
 
     // ── helpers ────────────────────────────────────────────────────────────
 
@@ -1013,5 +1026,20 @@ mod tests {
             replay.traces[2][0].tool_calls[0].status,
             pod_core::ToolCallStatus::ParseError
         );
+    }
+
+    #[test]
+    fn replay_conversion_can_embed_authoritative_telemetry_windows() {
+        let mut logger = DecisionLogger::new();
+        logger.log(make_llm_entry(0, AgentId::new()));
+
+        let replay = logger.to_replay_file_with_telemetry(
+            "telemetry",
+            9,
+            vec![TickTelemetryFrame::empty(0)],
+        );
+
+        assert_eq!(replay.telemetry_windows.len(), 1);
+        assert_eq!(replay.telemetry_windows[0].tick, 0);
     }
 }

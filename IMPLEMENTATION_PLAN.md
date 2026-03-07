@@ -527,5 +527,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-agents --lib`
   - `cargo test -p pod-server --bin pod-server`
 
-**Last updated**: Iteration 60
-**Current focus**: Iteration 61 training/export helpers plus flagship MMO acceptance harness on top of the authoritative telemetry and replay spine
+### Iteration 61 — Replay Training Samples and Encounter-Aware Telemetry
+
+- [x] Extended `AgentTelemetryFrame` with authoritative encounter snapshots so replay/debug artifacts can reason about combat/capture state transitions instead of only pathing and action traces.
+- [x] Added replay-side training/export primitives in `pod-core`: `ActionOutcomeSummary`, `EncounterTransition`, and `ReplayTrainingSample`, plus `ReplayFile::training_samples()` for deriving per-agent training rows from embedded telemetry windows.
+- [x] Added optional telemetry embedding to `DecisionLogger` via `to_replay_file_with_telemetry(...)` so authoritative tick windows can ride alongside decision traces in replay/debug exports.
+- [x] Added a neural-agent helper for extracting agent-specific authoritative training samples from replay artifacts.
+- [x] Added deterministic coverage for replay training sample derivation, encounter transition classification, telemetry-aware replay export, neural-agent replay filtering, and the updated editor/server/core telemetry call sites.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-agents --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cargo test -p pod-editor --lib`
+
+**Last updated**: Iteration 61
+**Current focus**: Iteration 62 flagship MMO acceptance harness and shard-scale parity validation on top of the authoritative replay/training telemetry spine

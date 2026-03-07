@@ -2539,6 +2539,7 @@ mod tests {
             1,
             4,
             1,
+            None,
             Some(TrajectorySample::new(
                 tick,
                 tick as f32 / 60.0,
