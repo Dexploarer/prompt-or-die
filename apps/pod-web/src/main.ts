@@ -1,10 +1,15 @@
 import {
+  parseLiveDebugDocument,
   parseRenderFrame,
   parseReplayFile,
   parseShardIncidentSummary,
   parseThreeJsWebGpuFrame,
   parseTickTelemetryEnvelope,
+  summarizeAgentTickRollup,
+  summarizeAgentToolCallEvent,
   summarizeReplayFile,
+  type TickRollupSummary,
+  type ToolCallEventSummary,
   type ReplaySummary,
   type ShardIncidentSummary
 } from "./contracts";
@@ -26,8 +31,11 @@ declare global {
       render: (frame: string) => void;
       renderThreeJsWebGpuFrame: (frame: string) => void;
       renderTickTelemetry: (frame: string) => void;
+      renderDebugDocument: (document: string) => void;
       renderReplayDocument: (document: string) => void;
       renderShardIncidentSummary: (document: string) => void;
+      streamReplayDocument: (document: string) => void;
+      streamShardIncidentSummary: (document: string) => void;
       resetTelemetry: () => void;
       resetDemo: () => void;
       getBackend: () => string;
@@ -58,6 +66,10 @@ const telemetrySummaryLabel =
 const replaySummaryLabel = document.querySelector<HTMLElement>("#replay-summary");
 const incidentSummaryLabel =
   document.querySelector<HTMLElement>("#incident-summary");
+const toolEventSummaryLabel =
+  document.querySelector<HTMLElement>("#tool-event-summary");
+const rollupSummaryLabel =
+  document.querySelector<HTMLElement>("#rollup-summary");
 const telemetryPanel = document.querySelector<HTMLElement>("#telemetry-panel");
 const telemetryPrev = document.querySelector<HTMLButtonElement>("#telemetry-prev");
 const telemetryNext = document.querySelector<HTMLButtonElement>("#telemetry-next");
@@ -77,6 +89,8 @@ if (
   !telemetrySummaryLabel ||
   !replaySummaryLabel ||
   !incidentSummaryLabel ||
+  !toolEventSummaryLabel ||
+  !rollupSummaryLabel ||
   !telemetryPanel ||
   !telemetryPrev ||
   !telemetryNext
@@ -93,6 +107,8 @@ const telemetryRecoveryNode = telemetryRecoveryLabel;
 const telemetrySummaryNode = telemetrySummaryLabel;
 const replaySummaryNode = replaySummaryLabel;
 const incidentSummaryNode = incidentSummaryLabel;
+const toolEventSummaryNode = toolEventSummaryLabel;
+const rollupSummaryNode = rollupSummaryLabel;
 const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
@@ -108,6 +124,10 @@ let latestFrameJson: string | null = null;
 let lastTelemetryRevision = -1;
 let latestReplaySummary: ReplaySummary | null = null;
 let latestIncidentSummary: ShardIncidentSummary | null = null;
+let latestToolEventSummary: ToolCallEventSummary | null = null;
+let latestRollupSummary: TickRollupSummary | null = null;
+let liveReplayDocuments = 0;
+let liveIncidentDocuments = 0;
 
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
@@ -133,11 +153,20 @@ window.podRender = {
   renderTickTelemetry(frame: string) {
     applyTickTelemetry(telemetryState, parseTickTelemetryEnvelope(frame));
   },
+  renderDebugDocument(document: string) {
+    applyLiveDebugDocument(document);
+  },
   renderReplayDocument(document: string) {
     latestReplaySummary = summarizeReplayFile(parseReplayFile(document));
   },
   renderShardIncidentSummary(document: string) {
     latestIncidentSummary = parseShardIncidentSummary(document);
+  },
+  streamReplayDocument(document: string) {
+    applyLiveDebugDocument(document);
+  },
+  streamShardIncidentSummary(document: string) {
+    applyLiveDebugDocument(document);
   },
   resetTelemetry() {
     resetTelemetry(telemetryState);
@@ -164,6 +193,30 @@ window.podRender = {
     return latestIncidentSummary;
   }
 };
+
+function applyLiveDebugDocument(document: string): void {
+  const parsed = parseLiveDebugDocument(document);
+
+  switch (parsed.kind) {
+    case "tickTelemetry":
+      applyTickTelemetry(telemetryState, parsed.payload);
+      break;
+    case "toolCallEvent":
+      latestToolEventSummary = summarizeAgentToolCallEvent(parsed.payload);
+      break;
+    case "tickRollup":
+      latestRollupSummary = summarizeAgentTickRollup(parsed.payload);
+      break;
+    case "replay":
+      latestReplaySummary = summarizeReplayFile(parsed.payload);
+      liveReplayDocuments += 1;
+      break;
+    case "incident":
+      latestIncidentSummary = parsed.payload;
+      liveIncidentDocuments += 1;
+      break;
+  }
+}
 
 async function tick(timestamp: number): Promise<void> {
   if (lastTelemetryRevision !== telemetryState.revision) {
@@ -225,8 +278,21 @@ function renderTelemetryHud(): void {
       )}u`
     : "No replay summary loaded";
   incidentSummaryNode.textContent = latestIncidentSummary
-    ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary}`
+    ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveIncidentDocuments}`
     : "No shard incident summary loaded";
+  toolEventSummaryNode.textContent = latestToolEventSummary
+    ? `E(${latestToolEventSummary.agentEntityId}) · ${latestToolEventSummary.toolName} · ${latestToolEventSummary.status} · ${latestToolEventSummary.latencyMs}ms`
+    : "No tool-call event loaded";
+  rollupSummaryNode.textContent = latestRollupSummary
+    ? `E(${latestRollupSummary.agentEntityId}) · ticks ${latestRollupSummary.tickStart}-${latestRollupSummary.tickEnd} · ${latestRollupSummary.totalDistance.toFixed(
+        2
+      )}u · ${latestRollupSummary.toolErrorCount} tool errors`
+    : "No telemetry rollup loaded";
+  if (latestReplaySummary) {
+    replaySummaryNode.textContent = `${latestReplaySummary.name} · ${latestReplaySummary.traceCount} traces · ${latestReplaySummary.trainingSampleCount} samples · ${latestReplaySummary.totalPathDistance.toFixed(
+      2
+    )}u · stream ${liveReplayDocuments}`;
+  }
 }
 
 void tick(performance.now());

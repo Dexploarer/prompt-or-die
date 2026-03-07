@@ -222,6 +222,30 @@ impl AgentToolCallTrace {
     }
 }
 
+/// Tool/provider side-effect event annotated with the authoritative entity that
+/// triggered it. This is the TOON-facing payload used by debug consumers and
+/// SpacetimeDB telemetry rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolCallEvent {
+    pub tick: u64,
+    pub agent_entity_id: u64,
+    pub trace: AgentToolCallTrace,
+}
+
+impl AgentToolCallEvent {
+    pub fn new(agent_entity_id: u64, trace: AgentToolCallTrace) -> Self {
+        Self {
+            tick: trace.tick,
+            agent_entity_id,
+            trace,
+        }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_tool_call_event", self)
+    }
+}
+
 /// Authoritative telemetry for one agent over one simulation tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTelemetryFrame {
@@ -324,6 +348,112 @@ impl TickTelemetryFrame {
     }
 }
 
+/// Aggregate telemetry rollup for one authoritative agent over a retained tick
+/// window. This mirrors the SpacetimeDB rollup row while keeping the detailed
+/// document transport TOON-native for debug tooling.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTickRollup {
+    pub tick_start: u64,
+    pub tick_end: u64,
+    pub agent_entity_id: u64,
+    pub total_distance: f32,
+    pub submitted_action_count: u32,
+    pub executed_action_count: u32,
+    pub rejected_action_count: u32,
+    pub tool_call_count: u32,
+    pub tool_error_count: u32,
+    pub visible_entity_count: u32,
+    pub audible_event_count: u32,
+    pub message_count: u32,
+    pub average_tool_latency_ms: f32,
+}
+
+impl AgentTickRollup {
+    pub fn from_agent_frames(agent_entity_id: u64, frames: &[AgentTelemetryFrame]) -> Option<Self> {
+        let tick_start = frames.first()?.tick;
+        let tick_end = frames.last()?.tick;
+
+        let total_distance = frames
+            .iter()
+            .map(|frame| {
+                frame
+                    .trajectory
+                    .as_ref()
+                    .map(|trajectory| trajectory.distance_travelled)
+                    .unwrap_or_default()
+            })
+            .sum::<f32>();
+        let submitted_action_count = frames
+            .iter()
+            .flat_map(|frame| frame.action_trace.iter())
+            .filter(|trace| trace.stage == ActionLifecycleStage::Submitted)
+            .count() as u32;
+        let executed_action_count = frames
+            .iter()
+            .flat_map(|frame| frame.action_trace.iter())
+            .filter(|trace| trace.stage == ActionLifecycleStage::Executed)
+            .count() as u32;
+        let rejected_action_count = frames
+            .iter()
+            .flat_map(|frame| frame.action_trace.iter())
+            .filter(|trace| trace.stage == ActionLifecycleStage::Rejected)
+            .count() as u32;
+        let tool_call_count = frames
+            .iter()
+            .map(|frame| frame.tool_calls.len())
+            .sum::<usize>() as u32;
+        let tool_error_count = frames
+            .iter()
+            .flat_map(|frame| frame.tool_calls.iter())
+            .filter(|trace| {
+                !matches!(
+                    trace.status,
+                    ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                )
+            })
+            .count() as u32;
+        let visible_entity_count = frames
+            .iter()
+            .map(|frame| frame.visible_entity_count as u32)
+            .sum();
+        let audible_event_count = frames
+            .iter()
+            .map(|frame| frame.audible_event_count as u32)
+            .sum();
+        let message_count = frames.iter().map(|frame| frame.message_count as u32).sum();
+        let average_tool_latency_ms = if tool_call_count == 0 {
+            0.0
+        } else {
+            frames
+                .iter()
+                .flat_map(|frame| frame.tool_calls.iter())
+                .map(|trace| trace.latency_ms as f32)
+                .sum::<f32>()
+                / tool_call_count as f32
+        };
+
+        Some(Self {
+            tick_start,
+            tick_end,
+            agent_entity_id,
+            total_distance,
+            submitted_action_count,
+            executed_action_count,
+            rejected_action_count,
+            tool_call_count,
+            tool_error_count,
+            visible_entity_count,
+            audible_event_count,
+            message_count,
+            average_tool_latency_ms,
+        })
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_tick_rollup", self)
+    }
+}
+
 /// Ring buffer retaining recent authoritative telemetry for tooling/debugging.
 #[derive(Debug, Clone)]
 pub struct TelemetryArchive {
@@ -410,8 +540,9 @@ mod tests {
     use crate::toon::decode_toon_value;
 
     use super::{
-        AgentTelemetryFrame, AgentToolCallTrace, TelemetryArchive, TelemetryConfig,
-        TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+        ActionLifecycleStage, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
+        AgentToolCallTrace, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
+        TrajectorySample,
     };
 
     #[test]
@@ -534,5 +665,66 @@ mod tests {
         assert_eq!(archive_value["document_type"], "telemetry_archive");
         assert_eq!(archive_value["payload"]["retained_frames"], 1);
         assert_eq!(archive_value["payload"]["latest_tick"], 7);
+    }
+
+    #[test]
+    fn tool_call_event_and_rollup_export_to_toon_documents() {
+        let trace = AgentToolCallTrace::success(9, "llm.complete", "qwen", 21, 40, 18);
+        let event = AgentToolCallEvent::new(144, trace.clone());
+        let event_document = event.to_toon_document();
+        let event_value =
+            decode_toon_value(&event_document).expect("tool-call event should decode");
+        assert_eq!(event_value["document_type"], "agent_tool_call_event");
+        assert_eq!(event_value["payload"]["agent_entity_id"], 144);
+        assert_eq!(event_value["payload"]["trace"]["tool_name"], "llm.complete");
+
+        let runtime_profile = crate::contract::AgentRuntimeProfile {
+            role: AgentRole::Player,
+            agent_type: AgentType::Human,
+            capabilities: AgentCapabilities::player_default(),
+        };
+        let mut frame = AgentTelemetryFrame::new(
+            9,
+            crate::id::AgentId::new(),
+            Some(crate::id::EntityId(144)),
+            runtime_profile,
+            5,
+            1,
+            2,
+            3,
+            1,
+            None,
+            Some(TrajectorySample::new(9, 0.15, Vec2::ZERO, Vec2::X, 0.0)),
+        );
+        frame.update_trajectory_end(TrajectorySample::new(
+            9,
+            0.166,
+            Vec2::new(3.0, 4.0),
+            Vec2::new(1.0, 0.5),
+            0.2,
+        ));
+        frame.record_action(
+            crate::telemetry::ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Submitted,
+            crate::action::Action::Idle,
+            None,
+        );
+        frame.record_action(
+            crate::telemetry::ActionSource::ExternalSubmission,
+            ActionLifecycleStage::Executed,
+            crate::action::Action::Idle,
+            None,
+        );
+        frame.record_tool_call(trace);
+
+        let rollup =
+            AgentTickRollup::from_agent_frames(144, &[frame]).expect("rollup should be built");
+        let rollup_document = rollup.to_toon_document();
+        let rollup_value =
+            decode_toon_value(&rollup_document).expect("rollup document should decode");
+        assert_eq!(rollup_value["document_type"], "agent_tick_rollup");
+        assert_eq!(rollup_value["payload"]["agent_entity_id"], 144);
+        assert_eq!(rollup_value["payload"]["tool_call_count"], 1);
+        assert_eq!(rollup_value["payload"]["visible_entity_count"], 5);
     }
 }

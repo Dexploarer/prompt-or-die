@@ -148,14 +148,14 @@ fn telemetry_events_are_constructible() {
         tool_name: "llm.complete".into(),
         provider: "qwen".into(),
         status: "Succeeded".into(),
-        data_json: AgentToolCallTrace::success(12, "llm.complete", "qwen", 18, 128, 64)
+        document: AgentToolCallTrace::success(12, "llm.complete", "qwen", 18, 128, 64)
             .to_toon_document(),
     };
     let rollup = StdbEvent::AgentTickRollupReceived {
         tick_start: 1,
         tick_end: 60,
         agent_entity_id: 7,
-        rollup_json: "{\"distance\":84.0}".into(),
+        document: "{\"distance\":84.0}".into(),
     };
 
     assert!(matches!(tick, StdbEvent::AgentTelemetryTickReceived { .. }));
@@ -927,14 +927,14 @@ fn stdb_event_all_18_variants_constructible() {
             tool_name: "llm.complete".into(),
             provider: "qwen".into(),
             status: "Succeeded".into(),
-            data_json: AgentToolCallTrace::success(1, "llm.complete", "qwen", 12, 42, 10)
+            document: AgentToolCallTrace::success(1, "llm.complete", "qwen", 12, 42, 10)
                 .to_toon_document(),
         },
         StdbEvent::AgentTickRollupReceived {
             tick_start: 1,
             tick_end: 60,
             agent_entity_id: 5,
-            rollup_json: "{\"distance\":128.0}".into(),
+            document: "{\"distance\":128.0}".into(),
         },
         // Reducer acknowledgments
         StdbEvent::ReducerCallSuccess {

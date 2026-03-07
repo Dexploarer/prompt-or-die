@@ -84,9 +84,9 @@ pub use replay::{
     ReplayPlayer, ReplayRecorder, ReplayTrainingSample,
 };
 pub use telemetry::{
-    ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentToolCallTrace,
-    AgentTrajectoryFrame, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
-    TrajectorySample,
+    ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentTickRollup,
+    AgentToolCallEvent, AgentToolCallTrace, AgentTrajectoryFrame, TelemetryArchive,
+    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
 };
 pub use toon::{
     decode_toon_document, decode_toon_string, decode_toon_value, encode_toon_document,

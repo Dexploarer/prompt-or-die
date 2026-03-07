@@ -155,6 +155,9 @@ pub struct AgentTelemetryTickRow {
 }
 
 /// Tool/provider telemetry event for embedded agent runtimes.
+///
+/// `data_json` stores the canonical `agent_tool_call_event` TOON document so
+/// browser/editor/debug consumers can ingest the same payload directly.
 #[spacetimedb::table(name = agent_tool_call_event, public)]
 pub struct AgentToolCallEventRow {
     #[primary_key]
@@ -172,6 +175,9 @@ pub struct AgentToolCallEventRow {
 }
 
 /// Durable aggregate telemetry rollup for dashboards and offline analytics.
+///
+/// `rollup_json` stores the canonical `agent_tick_rollup` TOON document so the
+/// flattened row can coexist with richer debug consumers.
 #[spacetimedb::table(name = agent_tick_rollup, public)]
 pub struct AgentTickRollupRow {
     #[primary_key]
