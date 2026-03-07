@@ -510,6 +510,8 @@ impl SpacetimeDBClient {
                                 client_id,
                                 reconnect_token: self.reconnect_token,
                                 tick,
+                                controlled_entity: None,
+                                authoritative_digest: snapshot.digest(),
                                 snapshot,
                             });
                         }
@@ -537,9 +539,17 @@ impl SpacetimeDBClient {
                             continue;
                         }
                         self.upsert_local_snapshot(tick, &snap);
+                        let authoritative_digest = self
+                            .local_snapshot
+                            .as_ref()
+                            .map(WorldSnapshot::digest)
+                            .unwrap_or_default();
 
                         messages.push(ServerMessage::StateDelta {
                             tick,
+                            acknowledged_action_tick: None,
+                            authoritative_digest,
+                            is_full_snapshot: false,
                             delta: StateDelta {
                                 tick,
                                 updated: vec![snap],
@@ -558,9 +568,17 @@ impl SpacetimeDBClient {
                         local.tick = tick;
                         local.entities.retain(|e| e.id != entity_id);
                     }
+                    let authoritative_digest = self
+                        .local_snapshot
+                        .as_ref()
+                        .map(WorldSnapshot::digest)
+                        .unwrap_or_default();
 
                     messages.push(ServerMessage::StateDelta {
                         tick,
+                        acknowledged_action_tick: None,
+                        authoritative_digest,
+                        is_full_snapshot: false,
                         delta: StateDelta {
                             tick,
                             updated: vec![],

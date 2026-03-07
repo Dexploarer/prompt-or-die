@@ -63,8 +63,13 @@ pub mod client_web;
 pub mod client_stdb;
 
 // Re-export common types
-pub use protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage};
-pub use snapshot::{EntitySnapshot, StateDelta, WorldSnapshot};
+pub use protocol::{
+    ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage,
+};
+pub use snapshot::{
+    apply_authoritative_update, EntitySnapshot, PredictedActionBatch, ReconciliationReport,
+    SnapshotUpdateError, StateDelta, WorldSnapshot,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use server::{GameServer, ServerError};
