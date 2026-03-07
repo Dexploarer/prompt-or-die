@@ -17,4 +17,5 @@ tokio.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
 rand.workspace = true
+toon-format = { version = "0.4.4", default-features = false }
 ort = { workspace = true, optional = true }
