@@ -409,5 +409,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --features spacetimedb --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
 
-**Last updated**: Iteration 50
+### Iteration 51 — Root Target De-Tracking Cleanup
+
+- [x] Backed up the unrelated non-`target/` working-tree source edits to `/Users/home/Desktop/prompt-or-die-backups/2026-03-07/unrelated-source-changes.patch` before cleaning the checkout for repo hygiene work.
+- [x] Added `/target/` to the root `.gitignore` so the legacy workspace build tree stops appearing in status once it is removed from version control.
+- [x] Removed the repository root `target/` tree from Git tracking, eliminating tens of thousands of generated build artifacts from the index while keeping the workspace on `.cargo-target/` for future builds.
+- [x] Validated repo hygiene state:
+  - `git diff --check`
+  - `git ls-files target`
+  - `git status --short`
+
+**Last updated**: Iteration 51
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice
