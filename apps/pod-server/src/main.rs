@@ -30,6 +30,10 @@ mod config {
     pub struct ServerConfig {
         /// Address to bind to (e.g., "0.0.0.0:7777")
         pub bind_address: String,
+        /// Whether to expose the WebSocket fallback for browser direct-connect clients.
+        pub enable_websocket: bool,
+        /// Port for the WebSocket fallback endpoint.
+        pub websocket_port: u16,
         /// Maximum number of concurrent clients
         pub max_clients: usize,
         /// Target tick rate in Hz (e.g., 60)
@@ -48,6 +52,11 @@ mod config {
             // For now, use defaults or simple environment variable override.
             let bind_address =
                 std::env::var("POD_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:7777".to_string());
+            let default_websocket_port = bind_address
+                .rsplit_once(':')
+                .and_then(|(_, port)| port.parse::<u16>().ok())
+                .and_then(|port| port.checked_add(1))
+                .unwrap_or(7778);
 
             let tick_rate = std::env::var("POD_TICK_RATE")
                 .ok()
@@ -67,9 +76,23 @@ mod config {
             let map_name = std::env::var("POD_MAP_NAME").unwrap_or_else(|_| "default".to_string());
             let runtime_mode =
                 std::env::var("POD_RUNTIME_MODE").unwrap_or_else(|_| "network".to_string());
+            let enable_websocket = std::env::var("POD_ENABLE_WEBSOCKET")
+                .ok()
+                .and_then(|value| match value.to_ascii_lowercase().as_str() {
+                    "1" | "true" | "yes" | "on" => Some(true),
+                    "0" | "false" | "no" | "off" => Some(false),
+                    _ => None,
+                })
+                .unwrap_or_else(|| runtime_mode.eq_ignore_ascii_case("network"));
+            let websocket_port = std::env::var("POD_WEBSOCKET_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(default_websocket_port);
 
             ServerConfig {
                 bind_address,
+                enable_websocket,
+                websocket_port,
                 tick_rate,
                 max_clients,
                 world_seed,
@@ -489,15 +512,15 @@ mod stats {
                     continue;
                 };
                 for trace in &agent.tool_calls {
-                    self.pending_documents
-                        .push_back(AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document());
+                    self.pending_documents.push_back(
+                        AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document(),
+                    );
                 }
             }
 
             if (tick_result.tick + 1) % ROLLUP_WINDOW_TICKS == 0 {
                 for rollup in self.rollups_for_tick(tick_result.tick) {
-                    self.pending_documents
-                        .push_back(rollup.to_toon_document());
+                    self.pending_documents.push_back(rollup.to_toon_document());
                 }
             }
 
@@ -708,26 +731,18 @@ mod stats {
             }
 
             let documents = stream.drain_documents();
-            assert!(documents
-                .iter()
-                .any(|document| decode_toon_value(document)
-                    .map(|value| value["document_type"] == "versioned_tick_telemetry")
-                    .unwrap_or(false)));
-            assert!(documents
-                .iter()
-                .any(|document| decode_toon_value(document)
-                    .map(|value| value["document_type"] == "agent_tool_call_event")
-                    .unwrap_or(false)));
-            assert!(documents
-                .iter()
-                .any(|document| decode_toon_value(document)
-                    .map(|value| value["document_type"] == "agent_tick_rollup")
-                    .unwrap_or(false)));
-            assert!(documents
-                .iter()
-                .any(|document| decode_toon_value(document)
-                    .map(|value| value["document_type"] == "shard_incident_summary")
-                    .unwrap_or(false)));
+            assert!(documents.iter().any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
+            assert!(documents.iter().any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "agent_tool_call_event")
+                .unwrap_or(false)));
+            assert!(documents.iter().any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "agent_tick_rollup")
+                .unwrap_or(false)));
+            assert!(documents.iter().any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "shard_incident_summary")
+                .unwrap_or(false)));
         }
     }
 }
@@ -892,8 +907,8 @@ async fn run_network_server(
         snapshot_interval: 10,
         bind_addr,
         bind_port,
-        enable_websocket: false,
-        websocket_port: 0,
+        enable_websocket: config.enable_websocket,
+        websocket_port: config.websocket_port,
     };
 
     let mut server = pod_net::GameServer::new(net_config, world);
@@ -938,6 +953,7 @@ fn print_banner(config: &ServerConfig) {
         r#"
 Configuration:
   Bind Address:   {}
+  WebSocket:      {}{}
   Tick Rate:      {} Hz
   Max Clients:    {}
   World Seed:     {}
@@ -946,10 +962,62 @@ Configuration:
 
 "#,
         config.bind_address,
+        if config.enable_websocket {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        if config.enable_websocket {
+            format!(" (port {})", config.websocket_port)
+        } else {
+            String::new()
+        },
         config.tick_rate,
         config.max_clients,
         config.world_seed,
         config.map_name,
         config.runtime_mode
     );
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::{config::ServerConfig, parse_bind_target};
+
+    #[test]
+    fn parse_bind_target_splits_host_and_port() {
+        let (host, port) = parse_bind_target("127.0.0.1:7000").expect("bind target should parse");
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 7000);
+    }
+
+    #[test]
+    fn server_config_defaults_websocket_to_bind_port_plus_one_in_network_mode() {
+        let original_bind = std::env::var_os("POD_BIND_ADDRESS");
+        let original_runtime = std::env::var_os("POD_RUNTIME_MODE");
+        let original_ws_enabled = std::env::var_os("POD_ENABLE_WEBSOCKET");
+        let original_ws_port = std::env::var_os("POD_WEBSOCKET_PORT");
+
+        std::env::set_var("POD_BIND_ADDRESS", "127.0.0.1:8123");
+        std::env::set_var("POD_RUNTIME_MODE", "network");
+        std::env::remove_var("POD_ENABLE_WEBSOCKET");
+        std::env::remove_var("POD_WEBSOCKET_PORT");
+
+        let config = ServerConfig::from_env();
+        assert!(config.enable_websocket);
+        assert_eq!(config.websocket_port, 8124);
+
+        restore_var("POD_BIND_ADDRESS", original_bind);
+        restore_var("POD_RUNTIME_MODE", original_runtime);
+        restore_var("POD_ENABLE_WEBSOCKET", original_ws_enabled);
+        restore_var("POD_WEBSOCKET_PORT", original_ws_port);
+    }
+
+    fn restore_var(key: &str, value: Option<std::ffi::OsString>) {
+        if let Some(value) = value {
+            std::env::set_var(key, value);
+        } else {
+            std::env::remove_var(key);
+        }
+    }
 }

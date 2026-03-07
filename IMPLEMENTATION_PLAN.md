@@ -626,5 +626,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-stdb --no-default-features --features client`
   - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
 
-**Last updated**: Iteration 68
-**Current focus**: Iteration 69 browser/editor live wiring for direct-connect shard debug streams plus MMO world/runtime slice completion beyond TOON telemetry parity
+### Iteration 69
+- [x] Implemented the missing direct-connect WebSocket server runtime in `pod-net::GameServer`, including browser-safe JSON message decode/encode on top of the existing authoritative world tick loop.
+- [x] Reused the same direct-connect session plumbing for QUIC and WebSocket clients so browser fallback clients receive `Welcome`, `StateDelta`, and live TOON `DebugDocument` messages over one authoritative runtime path.
+- [x] Wired `apps/pod-server` network mode to expose the WebSocket fallback by default in network runtime, with `POD_ENABLE_WEBSOCKET` and `POD_WEBSOCKET_PORT` overrides plus banner/runtime visibility for browser-first deployment.
+- [x] Added deterministic integration coverage for real `ws://` handshake, `Connect -> Welcome`, and debug-telemetry subscription delivery over the WebSocket fallback path.
+- [x] Added dedicated `pod-server` runtime coverage for bind parsing and default WebSocket port derivation from the bind address.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `git diff --check`
+
+**Last updated**: Iteration 69
+**Current focus**: Iteration 70 browser/world vertical-slice completion on top of the real WebSocket direct-connect path, starting with streamed world payloads and the pod-web runtime hook-up for authoritative shard debug streams

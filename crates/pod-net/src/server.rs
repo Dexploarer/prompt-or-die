@@ -9,9 +9,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use quinn::Endpoint;
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, RwLock};
+use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
     Action, AgentTickRollup, AgentToolCallEvent, IdleAgent, TelemetryArchive, TelemetryConfig,
@@ -88,6 +91,8 @@ pub struct GameServer {
     inbound_rx: mpsc::Receiver<InboundPacket>,
     /// QUIC endpoint
     endpoint: Option<Endpoint>,
+    /// Optional WebSocket fallback listener for browser clients.
+    websocket_listener: Option<TcpListener>,
     /// Current tick counter
     tick: u64,
     /// Last tick when snapshot was sent
@@ -114,6 +119,7 @@ impl GameServer {
             inbound_tx,
             inbound_rx,
             endpoint: None,
+            websocket_listener: None,
             tick: 0,
             last_snapshot_tick: 0,
             last_snapshot: None,
@@ -156,6 +162,17 @@ impl GameServer {
         let endpoint = Endpoint::server(server_config, addr)?;
 
         self.endpoint = Some(endpoint);
+
+        if self.config.enable_websocket {
+            let websocket_addr: SocketAddr =
+                format!("{}:{}", self.config.bind_addr, self.config.websocket_port).parse()?;
+            let listener = TcpListener::bind(websocket_addr).await?;
+            self.websocket_listener = Some(listener);
+            info!(
+                "WebSocket fallback initialized on {}:{}",
+                self.config.bind_addr, self.config.websocket_port
+            );
+        }
 
         info!(
             "GameServer initialized on {}:{}",
@@ -264,16 +281,160 @@ impl GameServer {
         Ok(())
     }
 
+    async fn register_pending_client(
+        &mut self,
+        client_id: ClientId,
+    ) -> mpsc::Receiver<ServerMessage> {
+        let (outbound_tx, outbound_rx) = mpsc::channel::<ServerMessage>(256);
+        self.client_tx.write().await.insert(client_id, outbound_tx);
+        self.clients
+            .write()
+            .await
+            .insert(client_id, ClientSession::new("pending".into()));
+        outbound_rx
+    }
+
     /// Accept incoming client connections
     async fn handle_connections(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(endpoint) = &self.endpoint {
+        loop {
+            let websocket_accepted = {
+                let Some(listener) = self.websocket_listener.as_ref() else {
+                    break;
+                };
+                match tokio::time::timeout(Duration::from_millis(1), listener.accept()).await {
+                    Ok(Ok(accepted)) => accepted,
+                    Ok(Err(err)) => {
+                        warn!("Failed to accept websocket client: {err}");
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            };
+
+            let (stream, _remote_addr) = websocket_accepted;
+
+            let websocket = match accept_async(stream).await {
+                Ok(websocket) => websocket,
+                Err(err) => {
+                    warn!("Failed to complete websocket handshake: {err}");
+                    continue;
+                }
+            };
+
+            let client_id = ClientId::new();
+            info!("Accepted new websocket client connection: {}", client_id.0);
+
+            let mut outbound_rx = self.register_pending_client(client_id).await;
+            let inbound_tx = self.inbound_tx.clone();
+            let (mut ws_write, mut ws_read) = websocket.split();
+
+            tokio::spawn(async move {
+                while let Some(message) = ws_read.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            let message = match ClientMessage::decode_json(text.as_ref()) {
+                                Ok(message) => message,
+                                Err(err) => {
+                                    warn!(
+                                        "WebSocket client {} sent invalid JSON message: {}",
+                                        client_id.0, err
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            if inbound_tx
+                                .send(InboundPacket::Message { client_id, message })
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(Message::Binary(bytes)) => {
+                            let text = match String::from_utf8(bytes.to_vec()) {
+                                Ok(text) => text,
+                                Err(err) => {
+                                    warn!(
+                                        "WebSocket client {} sent non-UTF8 binary payload: {}",
+                                        client_id.0, err
+                                    );
+                                    continue;
+                                }
+                            };
+                            let message = match ClientMessage::decode_json(&text) {
+                                Ok(message) => message,
+                                Err(err) => {
+                                    warn!(
+                                        "WebSocket client {} sent invalid binary JSON message: {}",
+                                        client_id.0, err
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            if inbound_tx
+                                .send(InboundPacket::Message { client_id, message })
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(Message::Close(frame)) => {
+                            let reason = frame
+                                .map(|frame| frame.reason.to_string())
+                                .unwrap_or_else(|| "websocket closed".to_string());
+                            let _ = inbound_tx
+                                .send(InboundPacket::Disconnected { client_id, reason })
+                                .await;
+                            break;
+                        }
+                        Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+                        Ok(Message::Frame(_)) => {}
+                        Err(err) => {
+                            let _ = inbound_tx
+                                .send(InboundPacket::Disconnected {
+                                    client_id,
+                                    reason: format!("websocket receive failed: {err}"),
+                                })
+                                .await;
+                            break;
+                        }
+                    }
+                }
+            });
+
+            tokio::spawn(async move {
+                while let Some(message) = outbound_rx.recv().await {
+                    let payload = match message.encode_json() {
+                        Ok(payload) => payload,
+                        Err(err) => {
+                            error!("Failed to encode websocket outbound message: {}", err);
+                            continue;
+                        }
+                    };
+
+                    if let Err(err) = ws_write.send(Message::Text(payload.into())).await {
+                        error!("Failed to send websocket outbound message: {}", err);
+                        break;
+                    }
+                }
+
+                let _ = ws_write.close().await;
+            });
+        }
+
+        if self.endpoint.is_some() {
             loop {
-                let incoming =
+                let incoming = {
+                    let endpoint = self.endpoint.as_ref().expect("checked above");
                     match tokio::time::timeout(Duration::from_millis(1), endpoint.accept()).await {
                         Ok(Some(incoming)) => incoming,
                         Ok(None) => break,
                         Err(_) => break,
-                    };
+                    }
+                };
 
                 let connection = match incoming.await {
                     Ok(conn) => conn,
@@ -286,12 +447,7 @@ impl GameServer {
                 let client_id = ClientId::new();
                 info!("Accepted new client connection: {}", client_id.0);
 
-                let (outbound_tx, mut outbound_rx) = mpsc::channel::<ServerMessage>(256);
-                self.client_tx.write().await.insert(client_id, outbound_tx);
-                self.clients
-                    .write()
-                    .await
-                    .insert(client_id, ClientSession::new("pending".into()));
+                let mut outbound_rx = self.register_pending_client(client_id).await;
 
                 let read_conn = connection.clone();
                 let write_conn = connection.clone();
@@ -845,6 +1001,25 @@ impl std::error::Error for ServerError {}
 mod tests {
     use super::*;
     use pod_core::decode_toon_value;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    fn next_available_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("ephemeral port bind")
+            .local_addr()
+            .expect("local addr")
+            .port()
+    }
+
+    async fn drive_server_for(mut server: GameServer, iterations: usize) {
+        for _ in 0..iterations {
+            server.handle_connections().await.unwrap();
+            server.step_tick().await.unwrap();
+            server.broadcast_updates().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            server.tick += 1;
+        }
+    }
 
     #[tokio::test]
     async fn test_server_creation() {
@@ -923,5 +1098,141 @@ mod tests {
         }
 
         assert!(saw_tick_telemetry);
+    }
+
+    #[tokio::test]
+    async fn test_websocket_connect_receives_welcome() {
+        let bind_port = next_available_port();
+        let websocket_port = next_available_port();
+        let config = ProtoServerConfig {
+            bind_addr: "127.0.0.1".into(),
+            bind_port,
+            enable_websocket: true,
+            websocket_port,
+            ..ProtoServerConfig::default()
+        };
+
+        let mut server = GameServer::new(config, World::new(42));
+        server.initialize().await.unwrap();
+        let client_task = async move {
+            let (mut websocket, _) = connect_async(format!("ws://127.0.0.1:{websocket_port}"))
+                .await
+                .expect("websocket connection");
+            websocket
+                .send(Message::Text(
+                    ClientMessage::Connect {
+                        player_name: "WebPlayer".into(),
+                        reconnect_token: None,
+                    }
+                    .encode_json()
+                    .unwrap()
+                    .into(),
+                ))
+                .await
+                .expect("send connect");
+
+            let mut welcome = None;
+            for _ in 0..40 {
+                let next_message =
+                    tokio::time::timeout(Duration::from_millis(50), websocket.next()).await;
+                if let Ok(Some(message)) = next_message {
+                    let message = message.expect("websocket message");
+                    if let Message::Text(text) = message {
+                        if let Ok(ServerMessage::Welcome { .. }) =
+                            ServerMessage::decode_json(text.as_ref())
+                        {
+                            welcome = Some(text.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            welcome.expect("welcome message")
+        };
+
+        let (_, welcome) = tokio::join!(drive_server_for(server, 200), client_task);
+        match ServerMessage::decode_json(&welcome).unwrap() {
+            ServerMessage::Welcome {
+                controlled_entity,
+                snapshot,
+                ..
+            } => {
+                assert!(controlled_entity.is_some());
+                assert!(!snapshot.entities.is_empty());
+            }
+            other => panic!("unexpected websocket server message: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_debug_subscriber_receives_debug_document() {
+        let bind_port = next_available_port();
+        let websocket_port = next_available_port();
+        let config = ProtoServerConfig {
+            bind_addr: "127.0.0.1".into(),
+            bind_port,
+            enable_websocket: true,
+            websocket_port,
+            ..ProtoServerConfig::default()
+        };
+
+        let mut server = GameServer::new(config, World::new(42));
+        server.initialize().await.unwrap();
+        let client_task = async move {
+            let (mut websocket, _) = connect_async(format!("ws://127.0.0.1:{websocket_port}"))
+                .await
+                .expect("websocket connection");
+
+            websocket
+                .send(Message::Text(
+                    ClientMessage::Connect {
+                        player_name: "DebugPlayer".into(),
+                        reconnect_token: None,
+                    }
+                    .encode_json()
+                    .unwrap()
+                    .into(),
+                ))
+                .await
+                .expect("send connect");
+
+            websocket
+                .send(Message::Text(
+                    ClientMessage::SetDebugTelemetry { enabled: true }
+                        .encode_json()
+                        .unwrap()
+                        .into(),
+                ))
+                .await
+                .expect("enable debug telemetry");
+
+            let mut documents = Vec::new();
+            for _ in 0..16 {
+                let next_message =
+                    tokio::time::timeout(Duration::from_millis(50), websocket.next()).await;
+                if let Ok(Some(message)) = next_message {
+                    let message = message.expect("websocket message");
+                    if let Message::Text(text) = message {
+                        documents.push(text.to_string());
+                    }
+                }
+            }
+            documents
+        };
+
+        let (_, documents) = tokio::join!(drive_server_for(server, 200), client_task);
+
+        let decoded: Vec<ServerMessage> = documents
+            .iter()
+            .filter_map(|document| ServerMessage::decode_json(document).ok())
+            .collect();
+        assert!(decoded.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document }
+            if decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)
+        )));
     }
 }
