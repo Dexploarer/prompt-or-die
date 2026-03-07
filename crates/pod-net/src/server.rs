@@ -14,6 +14,7 @@ use quinn::Endpoint;
 use tokio::sync::{mpsc, RwLock};
 
 use pod_core::{Action, IdleAgent, World};
+use serde_json::json;
 
 use crate::protocol::{
     ClientId, ClientMessage, ReconnectToken, ServerConfig as ProtoServerConfig, ServerMessage,
@@ -32,6 +33,7 @@ struct ClientSession {
     reconnect_token: ReconnectToken,
     last_action_tick: Option<u64>,
     last_processed_action_tick: Option<u64>,
+    debug_telemetry_enabled: bool,
 }
 
 impl ClientSession {
@@ -44,6 +46,7 @@ impl ClientSession {
             reconnect_token: ReconnectToken::new(),
             last_action_tick: None,
             last_processed_action_tick: None,
+            debug_telemetry_enabled: false,
         }
     }
 }
@@ -89,6 +92,8 @@ pub struct GameServer {
     last_snapshot_tick: u64,
     /// Last full snapshot for delta computation.
     last_snapshot: Option<WorldSnapshot>,
+    /// Latest authoritative telemetry payload for debug/editor clients.
+    last_tick_telemetry_json: Option<String>,
 }
 
 impl GameServer {
@@ -106,6 +111,7 @@ impl GameServer {
             tick: 0,
             last_snapshot_tick: 0,
             last_snapshot: None,
+            last_tick_telemetry_json: None,
         }
     }
 
@@ -212,7 +218,11 @@ impl GameServer {
         }
 
         // Step the world
-        self.world.step();
+        let tick_result = self.world.step();
+        self.last_tick_telemetry_json = Some(
+            serde_json::to_string(&json!({ "tick_telemetry": tick_result.telemetry }))
+                .expect("tick telemetry should serialize"),
+        );
 
         debug!(
             "Tick {}: {} entities, {} agents",
@@ -432,6 +442,12 @@ impl GameServer {
                         );
                         self.send_full_snapshot_to_client(client_id).await;
                     }
+                    ClientMessage::SetDebugTelemetry { enabled } => {
+                        let mut clients = self.clients.write().await;
+                        if let Some(session) = clients.get_mut(&client_id) {
+                            session.debug_telemetry_enabled = enabled;
+                        }
+                    }
                     ClientMessage::Ping { timestamp } => {
                         self.send_to_client(
                             client_id,
@@ -483,31 +499,57 @@ impl GameServer {
             )
         };
 
-        if !should_snapshot && delta.change_count() == 0 {
+        let has_state_update = should_snapshot || delta.change_count() > 0;
+        let clients = self.clients.read().await;
+        let has_debug_subscribers = clients
+            .values()
+            .any(|session| session.debug_telemetry_enabled);
+
+        if !has_state_update && !has_debug_subscribers {
             return Ok(());
         }
 
-        let clients = self.clients.read().await;
-
         for (client_id, session) in clients.iter() {
-            let msg = ServerMessage::StateDelta {
-                tick: self.tick,
-                acknowledged_action_tick: session.last_processed_action_tick,
-                authoritative_digest,
-                is_full_snapshot,
-                delta: delta.clone(),
-            };
-            if let Some(tx) = self.client_tx.read().await.get(client_id) {
-                if let Err(e) = tx.send(msg).await {
-                    error!("Failed to send update to client {}: {}", client_id.0, e);
+            if has_state_update {
+                let msg = ServerMessage::StateDelta {
+                    tick: self.tick,
+                    acknowledged_action_tick: session.last_processed_action_tick,
+                    authoritative_digest,
+                    is_full_snapshot,
+                    delta: delta.clone(),
+                };
+                if let Some(tx) = self.client_tx.read().await.get(client_id) {
+                    if let Err(e) = tx.send(msg).await {
+                        error!("Failed to send update to client {}: {}", client_id.0, e);
+                    }
+                }
+            }
+
+            if session.debug_telemetry_enabled {
+                if let Some(frame_json) = &self.last_tick_telemetry_json {
+                    if let Some(tx) = self.client_tx.read().await.get(client_id) {
+                        if let Err(e) = tx
+                            .send(ServerMessage::TickTelemetry {
+                                frame_json: frame_json.clone(),
+                            })
+                            .await
+                        {
+                            error!(
+                                "Failed to send debug telemetry to client {}: {}",
+                                client_id.0, e
+                            );
+                        }
+                    }
                 }
             }
         }
 
-        if is_full_snapshot {
+        if has_state_update && is_full_snapshot {
             self.last_snapshot_tick = self.tick;
         }
-        self.last_snapshot = Some(current_snapshot);
+        if has_state_update {
+            self.last_snapshot = Some(current_snapshot);
+        }
 
         Ok(())
     }
@@ -605,6 +647,7 @@ impl GameServer {
                         session.agent_id = prev.agent_id;
                         session.last_action_tick = prev.last_action_tick;
                         session.last_processed_action_tick = prev.last_processed_action_tick;
+                        session.debug_telemetry_enabled = prev.debug_telemetry_enabled;
                         session.pending_actions.clear();
                     } else if session.player_name.is_none() {
                         session.player_name = Some(player_name.clone());
@@ -772,5 +815,43 @@ mod tests {
             }
             other => panic!("unexpected message: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_emits_tick_telemetry_for_debug_clients_only() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: true,
+            },
+        );
+
+        server.step_tick().await.unwrap();
+        server.broadcast_updates().await.unwrap();
+
+        let mut saw_tick_telemetry = false;
+        while let Ok(message) = rx.try_recv() {
+            match message {
+                ServerMessage::TickTelemetry { frame_json } => {
+                    saw_tick_telemetry = true;
+                    assert!(frame_json.contains("\"tick_telemetry\""));
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_tick_telemetry);
     }
 }

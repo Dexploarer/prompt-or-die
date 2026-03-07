@@ -494,5 +494,22 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `bun run typecheck`
   - `bun run build`
 
-**Last updated**: Iteration 58
-**Current focus**: Iteration 59 authority export for direct-connect and SpacetimeDB telemetry, then provider/tool-call instrumentation for embedded agents
+### Iteration 59 — Authority Telemetry Export and Toon Lookup Correction
+
+- [x] Added opt-in direct-connect telemetry protocol support in `pod-net` with `ClientMessage::SetDebugTelemetry { enabled }` and `ServerMessage::TickTelemetry { frame_json }`.
+- [x] Extended the native QUIC and browser WebSocket clients with debug telemetry toggles plus cached access to the most recent authoritative telemetry payload.
+- [x] Decoupled debug telemetry delivery from gameplay state-delta emission so debug/editor clients still receive per-tick telemetry on idle world ticks with no replicated state changes.
+- [x] Added SpacetimeDB telemetry subscription surfaces, event variants, and adapter bridging so editor/debug consumers can subscribe to `agent_telemetry_tick`, `agent_tool_call_event`, and `agent_tick_rollup`, while `pod-net` emits `TickTelemetry` messages from those rows.
+- [x] Added initial SpacetimeDB telemetry table definitions for transient per-agent tick rows, tool/provider event rows, and aggregate rollups.
+- [x] Corrected the Three.js toon lookup texture path to keep the gradient map in a non-color data space instead of sRGB color-managed sampling.
+- [x] Added deterministic coverage for direct-connect debug telemetry round-tripping, SpacetimeDB telemetry subscription helpers/events, adapter forwarding of telemetry rows, and the toon gradient lookup color-space contract.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `bun test`
+  - `bun run typecheck`
+
+**Last updated**: Iteration 59
+**Current focus**: Iteration 60 embedded-agent tool/runtime instrumentation, replay/training export, and MMO operational telemetry on top of the new authority export path

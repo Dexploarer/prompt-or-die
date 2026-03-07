@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { NoColorSpace } from "three";
 
 import { createMeshMaterial } from "./assets";
 import type { ThreeJsMeshBatch } from "./contracts";
@@ -36,6 +37,9 @@ describe("createMeshMaterial", () => {
   test("uses toon shading for stylized opaque world geometry", () => {
     const material = createMeshMaterial(meshBatch(), 0, QUALITY);
     expect(material.type).toBe("MeshToonMaterial");
+    expect((material as { gradientMap?: { colorSpace?: string } }).gradientMap?.colorSpace).toBe(
+      NoColorSpace
+    );
   });
 
   test("keeps transparent glass surfaces on the standard material path", () => {

@@ -65,6 +65,9 @@ pub enum ClientMessage {
         last_known_digest: Option<u64>,
     },
 
+    /// Enable or disable debug-only cross-agent telemetry streaming.
+    SetDebugTelemetry { enabled: bool },
+
     /// Ping request — measures round-trip time
     Ping { timestamp: u64 },
 }
@@ -109,6 +112,9 @@ pub enum ServerMessage {
 
     /// Batch of game events
     EventBatch { tick: u64, events: Vec<GameEvent> },
+
+    /// Raw authoritative telemetry payload for debug/editor consumers.
+    TickTelemetry { frame_json: String },
 
     /// Response to ping request
     Pong { client_ts: u64, server_ts: u64 },
@@ -254,6 +260,18 @@ mod tests {
     }
 
     #[test]
+    fn test_set_debug_telemetry_roundtrip() {
+        let msg = ClientMessage::SetDebugTelemetry { enabled: true };
+        let encoded = msg.encode().unwrap();
+        let decoded = ClientMessage::decode(&encoded).unwrap();
+
+        match decoded {
+            ClientMessage::SetDebugTelemetry { enabled } => assert!(enabled),
+            other => panic!("Wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_server_message_json() {
         let _config = ServerConfig::default();
         let snapshot = crate::WorldSnapshot::default();
@@ -280,6 +298,22 @@ mod tests {
                 assert_eq!(controlled_entity, Some(42));
             }
             _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_tick_telemetry_json_roundtrip() {
+        let msg = ServerMessage::TickTelemetry {
+            frame_json: "{\"tick_telemetry\":{\"tick\":7,\"agents\":[]}}".into(),
+        };
+        let json = msg.encode_json().unwrap();
+        let decoded = ServerMessage::decode_json(&json).unwrap();
+
+        match decoded {
+            ServerMessage::TickTelemetry { frame_json } => {
+                assert!(frame_json.contains("\"tick\":7"));
+            }
+            other => panic!("Wrong message type: {other:?}"),
         }
     }
 }

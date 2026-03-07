@@ -9,8 +9,8 @@
 //! Events are cleared at the start of each tick before new events are generated.
 //! Clients subscribe to these tables to receive real-time game events.
 
-use spacetimedb::Identity;
 use crate::types::*;
+use spacetimedb::Identity;
 
 // ============================================================
 // ROW-LEVEL SECURITY — OBSERVATION VISIBILITY
@@ -34,7 +34,7 @@ mod rls {
 
     #[client_visibility_filter]
     const OBSERVATION_FILTER: Filter = Filter::Sql(
-        "SELECT * FROM observation_event WHERE observation_event.owner_identity = :sender"
+        "SELECT * FROM observation_event WHERE observation_event.owner_identity = :sender",
     );
 }
 
@@ -122,4 +122,68 @@ pub struct WorldEventRow {
     pub secondary_entity_id: Option<u64>,
     /// JSON-encoded event-specific data for extensibility
     pub data_json: String,
+}
+
+// ============================================================
+// DEBUG TELEMETRY EVENTS
+// ============================================================
+
+/// Per-agent authoritative telemetry row for editor/debug consumers.
+///
+/// These rows are transient and intended for short-lived tooling subscriptions.
+/// The detailed payload stays JSON-encoded so client tooling can evolve without
+/// forcing a second flattened schema for every new telemetry field.
+#[spacetimedb::table(name = agent_telemetry_tick, public)]
+pub struct AgentTelemetryTickRow {
+    #[primary_key]
+    #[auto_inc]
+    pub row_id: u64,
+    pub tick: u64,
+    pub agent_entity_id: u64,
+    pub visible_entity_count: u32,
+    pub audible_event_count: u32,
+    pub message_count: u32,
+    pub submitted_action_count: u32,
+    pub executed_action_count: u32,
+    pub rejected_action_count: u32,
+    pub trajectory_start_x: f32,
+    pub trajectory_start_y: f32,
+    pub trajectory_end_x: f32,
+    pub trajectory_end_y: f32,
+    pub frame_json: String,
+}
+
+/// Tool/provider telemetry event for embedded agent runtimes.
+#[spacetimedb::table(name = agent_tool_call_event, public)]
+pub struct AgentToolCallEventRow {
+    #[primary_key]
+    #[auto_inc]
+    pub row_id: u64,
+    pub tick: u64,
+    pub agent_entity_id: u64,
+    pub tool_name: String,
+    pub provider: String,
+    pub status: String,
+    pub latency_ms: u32,
+    pub request_units: u32,
+    pub response_units: u32,
+    pub data_json: String,
+}
+
+/// Durable aggregate telemetry rollup for dashboards and offline analytics.
+#[spacetimedb::table(name = agent_tick_rollup, public)]
+pub struct AgentTickRollupRow {
+    #[primary_key]
+    #[auto_inc]
+    pub row_id: u64,
+    pub tick_start: u64,
+    pub tick_end: u64,
+    pub agent_entity_id: u64,
+    pub total_distance: f32,
+    pub submitted_action_count: u32,
+    pub executed_action_count: u32,
+    pub rejected_action_count: u32,
+    pub tool_call_count: u32,
+    pub tool_error_count: u32,
+    pub rollup_json: String,
 }

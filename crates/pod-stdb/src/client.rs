@@ -226,6 +226,28 @@ pub enum StdbEvent {
         secondary_entity_id: Option<u64>,
         data_json: String,
     },
+    /// Per-agent authoritative telemetry row received for debug/editor consumers.
+    AgentTelemetryTickReceived {
+        tick: u64,
+        agent_entity_id: u64,
+        frame_json: String,
+    },
+    /// Detailed tool/provider side-effect row received for debug/editor consumers.
+    AgentToolCallEventReceived {
+        tick: u64,
+        agent_entity_id: u64,
+        tool_name: String,
+        provider: String,
+        status: String,
+        data_json: String,
+    },
+    /// Durable aggregate telemetry rollup received for dashboards/analytics.
+    AgentTickRollupReceived {
+        tick_start: u64,
+        tick_end: u64,
+        agent_entity_id: u64,
+        rollup_json: String,
+    },
 
     // ── Reducer acknowledgments ──
     /// A reducer call was acknowledged by the server.
@@ -573,6 +595,9 @@ impl Subscriptions {
             "SELECT * FROM combat_event",
             "SELECT * FROM speech_event",
             "SELECT * FROM world_event",
+            "SELECT * FROM agent_telemetry_tick",
+            "SELECT * FROM agent_tool_call_event",
+            "SELECT * FROM agent_tick_rollup",
             "SELECT * FROM match_queue",
             "SELECT * FROM game_match",
             "SELECT * FROM match_participant",
@@ -640,6 +665,27 @@ impl Subscriptions {
             "SELECT * FROM script",
             "SELECT * FROM connected_agent",
         ]
+    }
+
+    /// Subscribe to debug-only telemetry tables.
+    pub fn debug_telemetry() -> Vec<&'static str> {
+        vec![
+            "SELECT * FROM agent_telemetry_tick",
+            "SELECT * FROM agent_tool_call_event",
+            "SELECT * FROM agent_tick_rollup",
+        ]
+    }
+
+    /// Subscribe to editor world state plus debug telemetry streams.
+    pub fn editor_with_debug_telemetry() -> Vec<String> {
+        let mut queries = Self::editor()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<String>>();
+        queries.extend(Self::debug_telemetry().into_iter().map(str::to_string));
+        queries.sort_unstable();
+        queries.dedup();
+        queries
     }
 
     /// Subscribe to lobby tables only.
@@ -1807,6 +1853,61 @@ impl StdbClient {
         });
         self.events_received += 1;
     }
+
+    /// Store a received per-agent telemetry row for debug/editor subscriptions.
+    pub fn receive_agent_telemetry_tick(
+        &mut self,
+        tick: u64,
+        agent_entity_id: u64,
+        frame_json: String,
+    ) {
+        self.events
+            .push_back(StdbEvent::AgentTelemetryTickReceived {
+                tick,
+                agent_entity_id,
+                frame_json,
+            });
+        self.events_received += 1;
+    }
+
+    /// Store a received tool/provider telemetry row for debug/editor subscriptions.
+    pub fn receive_agent_tool_call_event(
+        &mut self,
+        tick: u64,
+        agent_entity_id: u64,
+        tool_name: String,
+        provider: String,
+        status: String,
+        data_json: String,
+    ) {
+        self.events
+            .push_back(StdbEvent::AgentToolCallEventReceived {
+                tick,
+                agent_entity_id,
+                tool_name,
+                provider,
+                status,
+                data_json,
+            });
+        self.events_received += 1;
+    }
+
+    /// Store a received aggregate telemetry rollup for debug/editor subscriptions.
+    pub fn receive_agent_tick_rollup(
+        &mut self,
+        tick_start: u64,
+        tick_end: u64,
+        agent_entity_id: u64,
+        rollup_json: String,
+    ) {
+        self.events.push_back(StdbEvent::AgentTickRollupReceived {
+            tick_start,
+            tick_end,
+            agent_entity_id,
+            rollup_json,
+        });
+        self.events_received += 1;
+    }
 }
 
 impl std::fmt::Debug for StdbClient {
@@ -1973,6 +2074,7 @@ mod tests {
     fn test_subscription_queries() {
         let all = Subscriptions::all_tables();
         assert!(all.len() >= 15);
+        assert!(all.iter().any(|q| q.contains("agent_telemetry_tick")));
 
         let player = Subscriptions::player_agent(42);
         assert!(player.iter().any(|q| q.contains("observation_event")));
@@ -1983,6 +2085,57 @@ mod tests {
 
         let editor = Subscriptions::editor();
         assert!(editor.iter().any(|q| q.contains("agent_constraints")));
+
+        let editor_debug = Subscriptions::editor_with_debug_telemetry();
+        assert!(editor_debug
+            .iter()
+            .any(|q| q.contains("agent_telemetry_tick")));
+        assert!(editor_debug
+            .iter()
+            .any(|q| q.contains("agent_tool_call_event")));
+        assert!(editor_debug.iter().any(|q| q.contains("agent_tick_rollup")));
+    }
+
+    #[test]
+    fn test_receive_debug_telemetry_events() {
+        let mut client = StdbClient::new(StdbClientConfig::default());
+        client.receive_agent_telemetry_tick(8, 41, "{\"tick_telemetry\":{\"tick\":8}}".into());
+        client.receive_agent_tool_call_event(
+            8,
+            41,
+            "llm.complete".into(),
+            "qwen".into(),
+            "Succeeded".into(),
+            "{\"latency_ms\":12}".into(),
+        );
+        client.receive_agent_tick_rollup(1, 60, 41, "{\"distance\":42.0}".into());
+
+        let events: Vec<StdbEvent> = client.drain_events().collect();
+        assert!(matches!(
+            &events[0],
+            StdbEvent::AgentTelemetryTickReceived {
+                tick: 8,
+                agent_entity_id: 41,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &events[1],
+            StdbEvent::AgentToolCallEventReceived {
+                tick: 8,
+                agent_entity_id: 41,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &events[2],
+            StdbEvent::AgentTickRollupReceived {
+                tick_start: 1,
+                tick_end: 60,
+                agent_entity_id: 41,
+                ..
+            }
+        ));
     }
 
     #[test]

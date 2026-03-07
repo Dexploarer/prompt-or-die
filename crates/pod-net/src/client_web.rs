@@ -58,6 +58,8 @@ pub struct WebClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Most recent debug telemetry payload received from the server.
+    last_debug_telemetry_json: Option<String>,
     /// Recovery request throttle/telemetry for full-snapshot resync.
     recovery_state: RecoveryRequestState,
     /// Authoritative history for presentation smoothing.
@@ -90,6 +92,7 @@ impl WebClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            last_debug_telemetry_json: None,
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -377,6 +380,10 @@ impl WebClient {
                 true
             }
             ServerMessage::Pong { .. } => true,
+            ServerMessage::TickTelemetry { frame_json } => {
+                self.last_debug_telemetry_json = Some(frame_json.clone());
+                true
+            }
             ServerMessage::Rejected { reason } => {
                 web_sys::console::error_1(&format!("Server rejected request: {reason}").into());
                 true
@@ -414,6 +421,11 @@ impl WebClient {
         self.send_message(ClientMessage::Ping { timestamp })
     }
 
+    /// Opt-in to raw debug telemetry from the authoritative server.
+    pub fn set_debug_telemetry_enabled(&self, enabled: bool) -> Result<(), ClientError> {
+        self.send_message(ClientMessage::SetDebugTelemetry { enabled })
+    }
+
     /// Disconnect from the server
     pub fn disconnect(&mut self, reason: Option<&str>) -> Result<(), ClientError> {
         let msg = ClientMessage::Disconnect {
@@ -430,6 +442,7 @@ impl WebClient {
         self.websocket = None;
         self.connected = false;
         self.recovery_state.clear();
+        self.last_debug_telemetry_json = None;
         self.clear_presentation_state();
         Ok(())
     }
@@ -467,6 +480,10 @@ impl WebClient {
     /// Get the most recent reconciliation report.
     pub fn last_reconciliation(&self) -> Option<&ReconciliationReport> {
         self.last_reconciliation.as_ref()
+    }
+
+    pub fn last_debug_telemetry_json(&self) -> Option<&str> {
+        self.last_debug_telemetry_json.as_deref()
     }
 
     /// Inspect the local rollback/replay path from a chosen authoritative tick.

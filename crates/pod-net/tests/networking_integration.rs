@@ -16,9 +16,18 @@ fn integration_connect_stages_default_subscriptions_without_network() {
     let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
 
     assert!(!client.is_connected());
-    assert!(!client.subscribe_as_spectator().expect("staging spectator subscriptions"));
-    assert!(!client.subscribe_as_editor().expect("staging editor subscriptions"));
-    assert!(!client.subscribe_for_player(7).expect("staging player subscriptions"));
+    assert!(!client
+        .subscribe_as_spectator()
+        .expect("staging spectator subscriptions"));
+    assert!(!client
+        .subscribe_as_editor()
+        .expect("staging editor subscriptions"));
+    assert!(!client
+        .subscribe_as_editor_with_debug_telemetry()
+        .expect("staging editor debug telemetry subscriptions"));
+    assert!(!client
+        .subscribe_for_player(7)
+        .expect("staging player subscriptions"));
     assert!(!client
         .subscribe_for_player_with_interest(7, 100.0, 200.0, 50.0)
         .expect("staging interest query subscriptions"));
@@ -34,11 +43,16 @@ fn integration_connect_stages_default_subscriptions_without_network() {
 fn integration_connect_guard_and_rejects_duplicate_connect_attempt() {
     let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
 
-    client.connect().expect("initial connect should move to connecting");
+    client
+        .connect()
+        .expect("initial connect should move to connecting");
     assert!(!client.is_connected());
 
     let second_connect = client.connect();
-    assert!(matches!(second_connect, Err(StdbClientError::InvalidState(_))));
+    assert!(matches!(
+        second_connect,
+        Err(StdbClientError::InvalidState(_))
+    ));
 
     // Connection is asynchronous in this layer, so polling should not panic and should
     // not emit any synthetic server messages in stub mode.
@@ -49,7 +63,9 @@ fn integration_connect_guard_and_rejects_duplicate_connect_attempt() {
 fn integration_send_actions_guarded_by_connection_and_spectator_profile() {
     let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
 
-    client.subscribe_as_spectator().expect("staging spectator profile");
+    client
+        .subscribe_as_spectator()
+        .expect("staging spectator profile");
     client.queue_action(Action::Move {
         direction: Vec2::new(1.0, 0.0),
     });
