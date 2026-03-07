@@ -12,8 +12,8 @@
 use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
-    ActionLifecycleStage, AgentTelemetryFrame, AgentType, TelemetryConfig, TickTelemetryFrame,
-    ToolCallStatus, TrajectorySample,
+    encode_toon_document, ActionLifecycleStage, AgentTelemetryFrame, AgentType, CreatureIdentity,
+    CreatureTemperament, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -676,6 +676,10 @@ impl SpacetimeDashboardState {
             })
             .collect();
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("editor_spacetime_dashboard", self)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -750,6 +754,10 @@ impl TelemetryPanelState {
                     .unwrap_or_default()
             })
             .sum()
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("editor_telemetry_panel", self)
     }
 }
 
@@ -1000,6 +1008,286 @@ impl AssetBrowserState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CreatorNodeKind {
+    Model,
+    Object,
+    Monster,
+    Entity,
+    BehaviorTree,
+    StateMachine,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CreatorAssociationKind {
+    VisualModel,
+    SceneEntity,
+    EncounterTrigger,
+    CompanionBond,
+    BehaviorSource,
+    StateSource,
+    DependsOn,
+}
+
+impl CreatorAssociationKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::VisualModel => "visual-model",
+            Self::SceneEntity => "scene-entity",
+            Self::EncounterTrigger => "encounter-trigger",
+            Self::CompanionBond => "companion-bond",
+            Self::BehaviorSource => "behavior-source",
+            Self::StateSource => "state-source",
+            Self::DependsOn => "depends-on",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatorEntityDefinition {
+    pub id: String,
+    pub name: String,
+    pub entity_id: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatorModelDefinition {
+    pub id: String,
+    pub name: String,
+    pub asset_id: String,
+    pub asset_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatorObjectDefinition {
+    pub id: String,
+    pub name: String,
+    pub entity_id: Option<u64>,
+    pub model_id: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatorMonsterDefinition {
+    pub id: String,
+    pub name: String,
+    pub entity_id: Option<u64>,
+    pub model_id: Option<String>,
+    pub creature: CreatureIdentity,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatorAssociation {
+    pub from_id: String,
+    pub from_kind: CreatorNodeKind,
+    pub to_id: String,
+    pub to_kind: CreatorNodeKind,
+    pub relation: CreatorAssociationKind,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CreatorCatalog {
+    pub entities: Vec<CreatorEntityDefinition>,
+    pub models: Vec<CreatorModelDefinition>,
+    pub objects: Vec<CreatorObjectDefinition>,
+    pub monsters: Vec<CreatorMonsterDefinition>,
+    pub associations: Vec<CreatorAssociation>,
+}
+
+fn creator_slug(value: &str) -> String {
+    let slug = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let compact = slug
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if compact.is_empty() {
+        "entry".to_string()
+    } else {
+        compact
+    }
+}
+
+impl CreatorCatalog {
+    fn ensure_entity(&mut self, entity_id: u64, name: impl Into<String>) -> String {
+        let id = format!("entity:{entity_id}");
+        if !self.entities.iter().any(|entity| entity.id == id) {
+            self.entities.push(CreatorEntityDefinition {
+                id: id.clone(),
+                name: name.into(),
+                entity_id,
+            });
+        }
+        id
+    }
+
+    fn ensure_model_for_asset(&mut self, asset: &EditorAsset) -> String {
+        let id = format!("model:{}", asset.id);
+        if !self.models.iter().any(|model| model.id == id) {
+            self.models.push(CreatorModelDefinition {
+                id: id.clone(),
+                name: asset.label.clone(),
+                asset_id: asset.id.clone(),
+                asset_path: asset.path.clone(),
+            });
+        }
+        id
+    }
+
+    fn associate(
+        &mut self,
+        from_id: impl Into<String>,
+        from_kind: CreatorNodeKind,
+        to_id: impl Into<String>,
+        to_kind: CreatorNodeKind,
+        relation: CreatorAssociationKind,
+        label: impl Into<String>,
+    ) {
+        let association = CreatorAssociation {
+            from_id: from_id.into(),
+            from_kind,
+            to_id: to_id.into(),
+            to_kind,
+            relation,
+            label: label.into(),
+        };
+
+        if self.associations.iter().any(|existing| {
+            existing.from_id == association.from_id
+                && existing.from_kind == association.from_kind
+                && existing.to_id == association.to_id
+                && existing.to_kind == association.to_kind
+                && existing.relation == association.relation
+        }) {
+            return;
+        }
+
+        self.associations.push(association);
+    }
+
+    fn create_object(
+        &mut self,
+        name: impl Into<String>,
+        entity_id: Option<u64>,
+        entity_label: Option<&str>,
+        asset: Option<&EditorAsset>,
+    ) -> String {
+        let name = name.into();
+        let id = format!("object:{}", creator_slug(&name));
+        let model_id = asset.map(|asset| self.ensure_model_for_asset(asset));
+
+        if let Some(existing) = self.objects.iter_mut().find(|object| object.id == id) {
+            existing.entity_id = entity_id.or(existing.entity_id);
+            if model_id.is_some() {
+                existing.model_id = model_id.clone();
+            }
+        } else {
+            self.objects.push(CreatorObjectDefinition {
+                id: id.clone(),
+                name: name.clone(),
+                entity_id,
+                model_id: model_id.clone(),
+                tags: vec!["object".to_string()],
+            });
+        }
+
+        if let Some(asset) = asset {
+            let model_id = model_id.expect("model id should exist when asset is present");
+            self.associate(
+                id.clone(),
+                CreatorNodeKind::Object,
+                model_id,
+                CreatorNodeKind::Model,
+                CreatorAssociationKind::VisualModel,
+                format!("{name} uses {}", asset.label),
+            );
+        }
+
+        if let Some(entity_id) = entity_id {
+            let entity_name = entity_label.unwrap_or("Entity");
+            let entity_ref = self.ensure_entity(entity_id, entity_name.to_string());
+            self.associate(
+                id.clone(),
+                CreatorNodeKind::Object,
+                entity_ref,
+                CreatorNodeKind::Entity,
+                CreatorAssociationKind::SceneEntity,
+                format!("{name} is placed on entity #{entity_id}"),
+            );
+        }
+
+        id
+    }
+
+    fn create_monster(
+        &mut self,
+        name: impl Into<String>,
+        entity_id: Option<u64>,
+        entity_label: Option<&str>,
+        asset: Option<&EditorAsset>,
+        creature: CreatureIdentity,
+    ) -> String {
+        let name = name.into();
+        let id = format!("monster:{}", creator_slug(&name));
+        let model_id = asset.map(|asset| self.ensure_model_for_asset(asset));
+
+        if let Some(existing) = self.monsters.iter_mut().find(|monster| monster.id == id) {
+            existing.entity_id = entity_id.or(existing.entity_id);
+            if model_id.is_some() {
+                existing.model_id = model_id.clone();
+            }
+            existing.creature = creature.clone();
+        } else {
+            self.monsters.push(CreatorMonsterDefinition {
+                id: id.clone(),
+                name: name.clone(),
+                entity_id,
+                model_id: model_id.clone(),
+                creature,
+                tags: vec!["monster".to_string(), "creature".to_string()],
+            });
+        }
+
+        if let Some(asset) = asset {
+            let model_id = model_id.expect("model id should exist when asset is present");
+            self.associate(
+                id.clone(),
+                CreatorNodeKind::Monster,
+                model_id,
+                CreatorNodeKind::Model,
+                CreatorAssociationKind::VisualModel,
+                format!("{name} uses {}", asset.label),
+            );
+        }
+
+        if let Some(entity_id) = entity_id {
+            let entity_name = entity_label.unwrap_or("Entity");
+            let entity_ref = self.ensure_entity(entity_id, entity_name.to_string());
+            self.associate(
+                id.clone(),
+                CreatorNodeKind::Monster,
+                entity_ref,
+                CreatorNodeKind::Entity,
+                CreatorAssociationKind::SceneEntity,
+                format!("{name} is bound to entity #{entity_id}"),
+            );
+        }
+
+        id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PlayState {
     Stopped,
     Playing,
@@ -1096,6 +1384,26 @@ impl SceneHierarchy {
         self.roots
             .iter()
             .any(|node| node.contains_entity(entity_id))
+    }
+
+    pub fn entity_label(&self, entity_id: u64) -> Option<&str> {
+        fn find_label(node: &HierarchyNode, entity_id: u64) -> Option<&str> {
+            if node.entity_id == entity_id {
+                return Some(node.label.as_str());
+            }
+
+            for child in &node.children {
+                if let Some(label) = find_label(child, entity_id) {
+                    return Some(label);
+                }
+            }
+
+            None
+        }
+
+        self.roots
+            .iter()
+            .find_map(|node| find_label(node, entity_id))
     }
 
     pub fn render(&mut self, ui: &mut Ui, selected_entity: &mut Option<u64>) {
@@ -1226,6 +1534,7 @@ pub struct EditorState {
     pub llm_agent_config: LlmAgentConfig,
     pub telemetry: TelemetryPanelState,
     pub spacetime_dashboard: SpacetimeDashboardState,
+    pub creator_catalog: CreatorCatalog,
 }
 
 impl Default for EditorState {
@@ -1237,6 +1546,22 @@ impl Default for EditorState {
             transforms_2d.insert(entity_id, Transform2D::with_defaults(entity_id));
         }
 
+        let hierarchy = SceneHierarchy::default();
+        let asset_browser = AssetBrowserState::default();
+        let mut creator_catalog = CreatorCatalog::default();
+        if let Some(asset) = asset_browser
+            .assets
+            .iter()
+            .find(|asset| asset.id == "hero_character")
+        {
+            creator_catalog.create_object(
+                "player-avatar",
+                Some(1001),
+                hierarchy.entity_label(1001),
+                Some(asset),
+            );
+        }
+
         Self {
             project_name: "Unnamed Project".to_string(),
             active_panel: EditorPanel::Viewport,
@@ -1245,20 +1570,77 @@ impl Default for EditorState {
             run_state: PlayState::Stopped,
             viewport_mode: ViewportMode::TwoD,
             viewport_3d: Viewport3DState::default(),
-            hierarchy: SceneHierarchy::default(),
+            hierarchy,
             inspector_data,
             transforms_2d,
             console_output: vec![
                 "prompt-or-die editor launched".to_string(),
                 "dock: hierarchy(left), inspector(right), console(bottom)".to_string(),
             ],
-            asset_browser: AssetBrowserState::default(),
+            asset_browser,
             behavior_tree: BehaviorTree::default(),
             fsm: FiniteStateMachine::default(),
             llm_agent_config: LlmAgentConfig::default(),
             telemetry: TelemetryPanelState::default(),
             spacetime_dashboard: SpacetimeDashboardState::default(),
+            creator_catalog,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EditorSnapshotExport {
+    pub project_name: String,
+    pub active_panel: EditorPanel,
+    pub selected_entity: Option<u64>,
+    pub selected_asset: Option<String>,
+    pub hierarchy: SceneHierarchy,
+    pub selected_entity_properties: Option<HashMap<String, String>>,
+    pub selected_entity_transform: Option<Transform2D>,
+    pub selected_entity_trajectory: Vec<TrajectorySample>,
+    pub assets: Vec<EditorAsset>,
+    pub creator_catalog: CreatorCatalog,
+    pub behavior_tree: BehaviorTree,
+    pub fsm: FiniteStateMachine,
+    pub latest_tick_telemetry: Option<TickTelemetryFrame>,
+    pub spacetime_dashboard: SpacetimeDashboardState,
+}
+
+impl EditorSnapshotExport {
+    fn from_state(state: &EditorState) -> Self {
+        let selected_entity_properties = state
+            .selected_entity
+            .and_then(|entity_id| state.inspector_data.get(&entity_id))
+            .map(|properties| properties.entries.clone());
+        let selected_entity_transform = state
+            .selected_entity
+            .and_then(|entity_id| state.transforms_2d.get(&entity_id))
+            .cloned();
+        let selected_entity_trajectory = state
+            .selected_entity
+            .map(|entity_id| state.telemetry.trajectory_for_entity(entity_id))
+            .unwrap_or_default();
+
+        Self {
+            project_name: state.project_name.clone(),
+            active_panel: state.active_panel,
+            selected_entity: state.selected_entity,
+            selected_asset: state.asset_browser.selected.clone(),
+            hierarchy: state.hierarchy.clone(),
+            selected_entity_properties,
+            selected_entity_transform,
+            selected_entity_trajectory,
+            assets: state.asset_browser.assets.clone(),
+            creator_catalog: state.creator_catalog.clone(),
+            behavior_tree: state.behavior_tree.clone(),
+            fsm: state.fsm.clone(),
+            latest_tick_telemetry: state.telemetry.latest().cloned(),
+            spacetime_dashboard: state.spacetime_dashboard.clone(),
+        }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("editor_world_snapshot", self)
     }
 }
 
@@ -1405,6 +1787,143 @@ impl PodEditorApp {
 
     pub fn selected_asset_label(&self) -> Option<&str> {
         self.state.asset_browser.selected.as_deref()
+    }
+
+    fn selected_asset(&self) -> Option<&EditorAsset> {
+        let selected = self.state.asset_browser.selected.as_deref()?;
+        self.state
+            .asset_browser
+            .assets
+            .iter()
+            .find(|asset| asset.id == selected)
+    }
+
+    pub fn set_selected_asset(&mut self, asset_id: impl Into<String>) -> bool {
+        let asset_id = asset_id.into();
+        if !self
+            .state
+            .asset_browser
+            .assets
+            .iter()
+            .any(|asset| asset.id == asset_id)
+        {
+            return false;
+        }
+
+        self.history.remember(self.state.clone());
+        self.state.asset_browser.select(asset_id.clone());
+        self.push_console(format!("Selected asset {asset_id}"));
+        true
+    }
+
+    pub fn create_model_from_asset_id(&mut self, asset_id: &str) -> Option<String> {
+        let asset = self
+            .state
+            .asset_browser
+            .assets
+            .iter()
+            .find(|asset| asset.id == asset_id)
+            .cloned()?;
+
+        self.history.remember(self.state.clone());
+        let model_id = self.state.creator_catalog.ensure_model_for_asset(&asset);
+        self.push_console(format!("Created model {model_id} from {}", asset.label));
+        Some(model_id)
+    }
+
+    pub fn create_object_from_selection(&mut self, name: impl Into<String>) -> Option<String> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return None;
+        }
+
+        let selected_entity = self.state.selected_entity;
+        let entity_label = selected_entity.and_then(|entity_id| {
+            self.state
+                .hierarchy
+                .entity_label(entity_id)
+                .map(str::to_string)
+        });
+        let selected_asset = self.selected_asset().cloned();
+
+        self.history.remember(self.state.clone());
+        let object_id = self.state.creator_catalog.create_object(
+            name.clone(),
+            selected_entity,
+            entity_label.as_deref(),
+            selected_asset.as_ref(),
+        );
+        self.push_console(format!("Created object {name} ({object_id})"));
+        Some(object_id)
+    }
+
+    pub fn create_monster_from_selection(
+        &mut self,
+        name: impl Into<String>,
+        temperament: CreatureTemperament,
+    ) -> Option<String> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return None;
+        }
+
+        let selected_entity = self.state.selected_entity;
+        let entity_label = selected_entity.and_then(|entity_id| {
+            self.state
+                .hierarchy
+                .entity_label(entity_id)
+                .map(str::to_string)
+        });
+        let selected_asset = self.selected_asset().cloned();
+        let creature = CreatureIdentity {
+            species_id: creator_slug(&name),
+            species_name: name.clone(),
+            temperament,
+            ..CreatureIdentity::default()
+        };
+
+        self.history.remember(self.state.clone());
+        let monster_id = self.state.creator_catalog.create_monster(
+            name.clone(),
+            selected_entity,
+            entity_label.as_deref(),
+            selected_asset.as_ref(),
+            creature,
+        );
+        self.push_console(format!("Created monster {name} ({monster_id})"));
+        Some(monster_id)
+    }
+
+    pub fn associate_creator_content(
+        &mut self,
+        from_id: impl Into<String>,
+        from_kind: CreatorNodeKind,
+        to_id: impl Into<String>,
+        to_kind: CreatorNodeKind,
+        relation: CreatorAssociationKind,
+        label: impl Into<String>,
+    ) {
+        let from_id = from_id.into();
+        let to_id = to_id.into();
+        let label = label.into();
+
+        self.history.remember(self.state.clone());
+        self.state.creator_catalog.associate(
+            from_id.clone(),
+            from_kind,
+            to_id.clone(),
+            to_kind,
+            relation,
+            label.clone(),
+        );
+        self.push_console(format!(
+            "Associated {from_id} -> {to_id} ({})",
+            relation.label()
+        ));
+    }
+
+    pub fn export_snapshot_toon_document(&self) -> String {
+        EditorSnapshotExport::from_state(&self.state).to_toon_document()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -1573,9 +2092,8 @@ impl PodEditorApp {
 
     fn build_dock_toolbar(&mut self, ui: &mut Ui) {
         if ui.button("Project").clicked() {
-            let snapshot = serde_json::to_string_pretty(&self.state)
-                .unwrap_or_else(|_| "serialization failed".to_string());
-            self.push_console(format!("Project snapshot {snapshot}"));
+            let snapshot = self.export_snapshot_toon_document();
+            self.push_console(format!("Project TOON snapshot {snapshot}"));
         }
         ui.separator();
         if ui
@@ -2518,9 +3036,9 @@ pub fn launch_headless_editor() -> Result<(), eframe::Error> {
 mod tests {
     use super::*;
     use pod_core::{
-        Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId, AgentRole,
-        AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace, EntityId, TickTelemetryFrame,
-        ToolCallStatus,
+        decode_toon_value, Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId,
+        AgentRole, AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace,
+        CreatureTemperament, EntityId, TickTelemetryFrame, ToolCallStatus,
     };
 
     fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {
@@ -2855,6 +3373,103 @@ mod tests {
             app.state.spacetime_dashboard.agent_summaries[0].entity_id,
             Some(1001)
         );
+    }
+
+    #[test]
+    fn creator_catalog_links_models_objects_and_monsters() {
+        let mut app = PodEditorApp::default();
+        assert!(app
+            .state
+            .creator_catalog
+            .objects
+            .iter()
+            .any(|object| object.id == "object:player-avatar"));
+
+        assert!(app.set_selected_asset("hero_character"));
+        let object_id = app
+            .create_object_from_selection("oak-crate")
+            .expect("object should be created");
+        let monster_id = app
+            .create_monster_from_selection("ember-fox", CreatureTemperament::Aggressive)
+            .expect("monster should be created");
+        app.associate_creator_content(
+            monster_id.clone(),
+            CreatorNodeKind::Monster,
+            object_id.clone(),
+            CreatorNodeKind::Object,
+            CreatorAssociationKind::EncounterTrigger,
+            "ember-fox guards the oak-crate",
+        );
+
+        assert!(app
+            .state
+            .creator_catalog
+            .associations
+            .iter()
+            .any(|association| {
+                association.from_id == object_id
+                    && association.relation == CreatorAssociationKind::VisualModel
+            }));
+        assert!(app
+            .state
+            .creator_catalog
+            .associations
+            .iter()
+            .any(|association| {
+                association.from_id == monster_id
+                    && association.relation == CreatorAssociationKind::VisualModel
+            }));
+        assert!(app
+            .state
+            .creator_catalog
+            .associations
+            .iter()
+            .any(|association| {
+                association.from_id == monster_id
+                    && association.to_id == object_id
+                    && association.relation == CreatorAssociationKind::EncounterTrigger
+            }));
+    }
+
+    #[test]
+    fn editor_snapshot_exports_to_toon_for_world_building_agents() {
+        let mut app = PodEditorApp::default();
+        assert!(app.set_selected_asset("hero_character"));
+        let monster_id = app
+            .create_monster_from_selection("storm-lark", CreatureTemperament::Loyal)
+            .expect("monster should be created");
+        app.record_tick_telemetry(sample_tick_telemetry(13, 1001));
+
+        let snapshot = app.export_snapshot_toon_document();
+        let value = decode_toon_value(&snapshot).expect("snapshot should decode");
+        assert_eq!(value["document_type"], "editor_world_snapshot");
+        assert_eq!(value["payload"]["selected_entity"], 1001);
+        assert_eq!(
+            value["payload"]["creator_catalog"]["monsters"][0]["id"],
+            monster_id
+        );
+        assert_eq!(value["payload"]["latest_tick_telemetry"]["tick"], 13);
+    }
+
+    #[test]
+    fn editor_telemetry_surfaces_export_to_toon_documents() {
+        let mut app = PodEditorApp::default();
+        app.record_tick_telemetry(sample_tick_telemetry(14, 1001));
+
+        let telemetry_document = app.state.telemetry.to_toon_document();
+        let telemetry_value =
+            decode_toon_value(&telemetry_document).expect("telemetry document should decode");
+        assert_eq!(telemetry_value["document_type"], "editor_telemetry_panel");
+        assert_eq!(telemetry_value["payload"]["timeline"][0]["tick"], 14);
+
+        let dashboard_document = app.state.spacetime_dashboard.to_toon_document();
+        let dashboard_value =
+            decode_toon_value(&dashboard_document).expect("dashboard document should decode");
+        assert_eq!(
+            dashboard_value["document_type"],
+            "editor_spacetime_dashboard"
+        );
+        assert_eq!(dashboard_value["payload"]["latest_tick"], 14);
     }
 
     #[test]

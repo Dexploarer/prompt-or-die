@@ -49,7 +49,10 @@ use serde::{Deserialize, Serialize};
 
 use pod_core::observation::Relationship;
 use pod_core::replay::{DecisionTrace, ReplayFile, ReplayHeader};
-use pod_core::{Action, AgentId, AgentToolCallTrace, AgentType, Observation, TickTelemetryFrame};
+use pod_core::{
+    encode_toon_document, Action, AgentId, AgentToolCallTrace, AgentType, Observation,
+    TickTelemetryFrame,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ObservationSummary
@@ -226,6 +229,12 @@ pub struct DecisionEntry {
     pub tool_calls: Vec<AgentToolCallTrace>,
     /// Arbitrary key/value metadata (agent-specific diagnostics, test tags, …).
     pub metadata: HashMap<String, String>,
+}
+
+impl DecisionEntry {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_decision_entry", self)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -621,6 +630,64 @@ impl DecisionLogger {
         }
     }
 
+    pub fn to_toon_document(&self) -> String {
+        #[derive(Serialize)]
+        struct DecisionLogExport<'a> {
+            total_entries: usize,
+            entries: Vec<&'a DecisionEntry>,
+        }
+
+        encode_toon_document(
+            "agent_decision_log",
+            &DecisionLogExport {
+                total_entries: self.entries.len(),
+                entries: self.entries.iter().collect(),
+            },
+        )
+    }
+
+    pub fn tool_calls_to_toon_document(&self) -> String {
+        #[derive(Clone, Serialize)]
+        struct ToolCallEntry {
+            tick: u64,
+            agent_id: AgentId,
+            agent_type: AgentType,
+            decision_method: DecisionMethod,
+            tool_calls: Vec<AgentToolCallTrace>,
+            metadata: HashMap<String, String>,
+        }
+
+        #[derive(Serialize)]
+        struct ToolCallExport {
+            total_entries: usize,
+            entries_with_tool_calls: usize,
+            tool_call_entries: Vec<ToolCallEntry>,
+        }
+
+        let tool_call_entries = self
+            .entries
+            .iter()
+            .filter(|entry| !entry.tool_calls.is_empty())
+            .map(|entry| ToolCallEntry {
+                tick: entry.tick,
+                agent_id: entry.agent_id,
+                agent_type: entry.agent_type,
+                decision_method: entry.decision_method.clone(),
+                tool_calls: entry.tool_calls.clone(),
+                metadata: entry.metadata.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        encode_toon_document(
+            "agent_tool_call_log",
+            &ToolCallExport {
+                total_entries: self.entries.len(),
+                entries_with_tool_calls: tool_call_entries.len(),
+                tool_call_entries,
+            },
+        )
+    }
+
     // ── Utility ───────────────────────────────────────────────────────────────
 
     /// Number of entries currently held in the buffer.
@@ -647,7 +714,8 @@ impl DecisionLogger {
 mod tests {
     use super::*;
     use pod_core::{
-        Action, AgentId, AgentToolCallTrace, AgentType, Observation, TickTelemetryFrame,
+        decode_toon_value, Action, AgentId, AgentToolCallTrace, AgentType, Observation,
+        TickTelemetryFrame,
     };
 
     // ── helpers ────────────────────────────────────────────────────────────
@@ -1041,5 +1109,29 @@ mod tests {
 
         assert_eq!(replay.telemetry_windows.len(), 1);
         assert_eq!(replay.telemetry_windows[0].tick, 0);
+    }
+
+    #[test]
+    fn decision_logs_export_tool_calls_to_toon() {
+        let mut logger = DecisionLogger::new();
+        let mut entry = make_llm_entry(3, AgentId::new());
+        entry.tool_calls.push(AgentToolCallTrace::success(
+            3,
+            "llm.complete",
+            "qwen",
+            21,
+            90,
+            24,
+        ));
+        logger.log(entry);
+
+        let document = logger.tool_calls_to_toon_document();
+        let value = decode_toon_value(&document).expect("TOON document should decode");
+        assert_eq!(value["document_type"], "agent_tool_call_log");
+        assert_eq!(value["payload"]["entries_with_tool_calls"], 1);
+        assert_eq!(
+            value["payload"]["tool_call_entries"][0]["tool_calls"][0]["provider"],
+            "qwen"
+        );
     }
 }

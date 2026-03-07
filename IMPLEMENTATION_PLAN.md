@@ -561,5 +561,20 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-agents --lib`
   - `cargo test -p pod-agents --features agent_sdk_integration_tests`
 
-**Last updated**: Iteration 63
-**Current focus**: Iteration 64 browser/editor acceptance consumption and flagship-world render/debug validation on top of the deterministic MMO acceptance harness, with TOON used at structured agent I/O boundaries
+### Iteration 64 — TOON Replay, Telemetry, World-Building Snapshots, and Ops Summaries
+
+- [x] Added shared TOON document helpers to `pod-core` plus reusable typed export methods for replay, telemetry, tool/runtime contracts, and shard incident summaries.
+- [x] Extended `ReplayFile`, `ReplayTrainingSample`, `DecisionTrace`, `TelemetryArchive`, `TickTelemetryFrame`, `AgentTelemetryFrame`, `AgentToolCallTrace`, `ToolInvocationRequest`, `ToolInvocationResult`, and `VersionedTickTelemetry` with TOON export surfaces for debugging and training workflows.
+- [x] Extended `pod-agents::DecisionLogger` and `DecisionEntry` with TOON exports, including a dedicated embedded-tool trace export for LLM/runtime side effects.
+- [x] Added `ShardIncidentSummary` in `pod-core` and wired `pod-server` stats to emit TOON-ready incident summaries for ops agents with damped severity thresholds.
+- [x] Added creator-facing authoring associations in `pod-editor` for models, objects, monsters, and scene entities, with convenience creation APIs and TOON world-snapshot export for world-building agents.
+- [x] Switched the editor’s project snapshot action to emit TOON instead of raw JSON so the authoring/debug surface uses the same structured interchange format as agents and ops tooling.
+- [x] Added deterministic coverage for TOON document round-tripping across replay/telemetry/contracts, decision-log tool traces, editor world snapshots/creator associations, and server incident summaries.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-agents --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+
+**Last updated**: Iteration 64
+**Current focus**: Iteration 65 TOON-backed direct-connect and SpacetimeDB telemetry export parity, plus browser/editor consumption of replay and incident summaries for live debugging, training, and shard operations

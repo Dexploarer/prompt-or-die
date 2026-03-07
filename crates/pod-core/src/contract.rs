@@ -5,6 +5,7 @@ use crate::agent::AgentType;
 use crate::id::AgentId;
 use crate::observation::Observation;
 use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
+use crate::toon::encode_toon_document;
 
 pub const RUNTIME_CONTRACT_VERSION_V1: u16 = 1;
 
@@ -222,6 +223,10 @@ impl ToolCatalog {
             tools,
         }
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_catalog", self)
+    }
 }
 
 /// Request emitted by an embedded tool runtime before a side effect occurs.
@@ -265,6 +270,10 @@ impl VersionedAgentAction {
             payload,
         }
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("versioned_agent_action", self)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +291,10 @@ impl VersionedObservation {
             payload,
         }
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("versioned_observation", self)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,6 +310,40 @@ impl VersionedTickTelemetry {
             payload,
         }
     }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("versioned_tick_telemetry", self)
+    }
+}
+
+impl ToolDefinition {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_definition", self)
+    }
+}
+
+impl ToolBudget {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_budget", self)
+    }
+}
+
+impl ToolPolicy {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_policy", self)
+    }
+}
+
+impl ToolInvocationRequest {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_invocation_request", self)
+    }
+}
+
+impl ToolInvocationResult {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tool_invocation_result", self)
+    }
 }
 
 #[cfg(test)]
@@ -306,6 +353,7 @@ mod tests {
     use crate::id::AgentId;
     use crate::observation::Observation;
     use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
+    use crate::toon::decode_toon_value;
 
     use super::{
         AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion, ToolBudget,
@@ -410,5 +458,29 @@ mod tests {
         assert_eq!(decoded.status, ToolCallStatus::RateLimited);
         assert_eq!(decoded.request_units, 320);
         assert!(decoded.output_json.is_none());
+    }
+
+    #[test]
+    fn tool_contracts_export_to_toon_documents() {
+        let request = ToolInvocationRequest {
+            tick: 12,
+            agent_id: AgentId::new(),
+            tool_name: "llm.complete".into(),
+            provider: "qwen".into(),
+            request_units: 320,
+            arguments_json: "{\"prompt\":\"hi\"}".into(),
+        };
+        let request_document = request.to_toon_document();
+        let request_value =
+            decode_toon_value(&request_document).expect("request document should decode");
+        assert_eq!(request_value["document_type"], "tool_invocation_request");
+        assert_eq!(request_value["payload"]["provider"], "qwen");
+
+        let telemetry = VersionedTickTelemetry::new(TickTelemetryFrame::empty(9));
+        let telemetry_document = telemetry.to_toon_document();
+        let telemetry_value =
+            decode_toon_value(&telemetry_document).expect("telemetry document should decode");
+        assert_eq!(telemetry_value["document_type"], "versioned_tick_telemetry");
+        assert_eq!(telemetry_value["payload"]["payload"]["tick"], 9);
     }
 }
