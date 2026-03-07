@@ -398,5 +398,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Validated touched crate:
   - `cargo test -p pod-net --lib`
 
-**Last updated**: Iteration 49
+### Iteration 50 — Pod-Net Build Hygiene and Target Split
+
+- [x] Moved `pod-net`'s native transport dependencies (`tokio`, `quinn`, and Criterion benches) behind non-wasm target gates so the browser client no longer pulls native-only networking code into `wasm32` builds.
+- [x] Enabled the specific `web-sys` DOM bindings used by `client_web.rs` (`Window`, `Location`, `Event`, and `console`) so the browser transport compiles under the workspace's wasm target again.
+- [x] Fixed the SpacetimeDB snapshot conversion path to populate `EntitySnapshot.movement_speed` from cached authority state and added deterministic coverage for that mapping.
+- [x] Moved the workspace's default Cargo target output to `.cargo-target/` and ignored it so normal checks stop inheriting stale tracked artifacts from the repository root `target/` tree.
+- [x] Validated touched targets:
+  - `cargo check -p pod-net --lib`
+  - `cargo check -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+
+**Last updated**: Iteration 50
 **Current focus**: Phase 3 authority parity and shared-simulation recovery for the RuneScape-style MMO + companion-creature vertical slice

@@ -18,20 +18,20 @@ serde.workspace = true
 serde_json.workspace = true
 bincode.workspace = true
 log.workspace = true
-tokio.workspace = true
-quinn.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "ErrorEvent", "CloseEvent", "BinaryType"] }
+web-sys = { version = "0.3", features = ["BinaryType", "CloseEvent", "ErrorEvent", "Event", "Location", "MessageEvent", "WebSocket", "Window", "console"] }
 js-sys = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
+quinn.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = "0.13"
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
