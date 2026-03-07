@@ -46,8 +46,8 @@ mod config {
         pub fn from_env() -> Self {
             // In a real application, you'd parse command-line args or env vars.
             // For now, use defaults or simple environment variable override.
-            let bind_address = std::env::var("POD_BIND_ADDRESS")
-                .unwrap_or_else(|_| "0.0.0.0:7777".to_string());
+            let bind_address =
+                std::env::var("POD_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:7777".to_string());
 
             let tick_rate = std::env::var("POD_TICK_RATE")
                 .ok()
@@ -64,10 +64,9 @@ mod config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(42);
 
-            let map_name = std::env::var("POD_MAP_NAME")
-                .unwrap_or_else(|_| "default".to_string());
-            let runtime_mode = std::env::var("POD_RUNTIME_MODE")
-                .unwrap_or_else(|_| "network".to_string());
+            let map_name = std::env::var("POD_MAP_NAME").unwrap_or_else(|_| "default".to_string());
+            let runtime_mode =
+                std::env::var("POD_RUNTIME_MODE").unwrap_or_else(|_| "network".to_string());
 
             ServerConfig {
                 bind_address,
@@ -169,6 +168,8 @@ mod map {
 
 #[allow(dead_code)]
 mod stats {
+    use pod_core::action::Action;
+    use pod_core::telemetry::ToolCallStatus;
     use std::time::Instant;
 
     /// Server statistics tracker
@@ -179,8 +180,19 @@ mod stats {
         pub last_second_start: Instant,
         pub ticks_this_second: u32,
         pub total_actions: usize,
+        pub total_actions_rejected: usize,
         pub peak_entity_count: usize,
         pub peak_agent_count: usize,
+        pub tick_budget_overruns: u64,
+        pub total_tool_calls: usize,
+        pub total_tool_call_errors: usize,
+        pub total_tool_latency_ms: u64,
+        pub total_trajectory_distance: f32,
+        pub total_agents_sampled: usize,
+        pub capture_actions: usize,
+        pub summon_actions: usize,
+        pub gather_actions: usize,
+        pub loot_actions: usize,
     }
 
     impl ServerStats {
@@ -192,21 +204,110 @@ mod stats {
                 last_second_start: Instant::now(),
                 ticks_this_second: 0,
                 total_actions: 0,
+                total_actions_rejected: 0,
                 peak_entity_count: 0,
                 peak_agent_count: 0,
+                tick_budget_overruns: 0,
+                total_tool_calls: 0,
+                total_tool_call_errors: 0,
+                total_tool_latency_ms: 0,
+                total_trajectory_distance: 0.0,
+                total_agents_sampled: 0,
+                capture_actions: 0,
+                summon_actions: 0,
+                gather_actions: 0,
+                loot_actions: 0,
             }
         }
 
         /// Record a completed tick
-        pub fn record_tick(&mut self, entity_count: usize, actions_processed: usize) {
+        pub fn record_tick(
+            &mut self,
+            tick_result: &pod_core::tick::TickResult,
+            agent_count: usize,
+            tick_over_budget: bool,
+        ) {
             self.ticks_completed += 1;
             self.ticks_this_second += 1;
-            self.total_actions += actions_processed;
-            self.peak_entity_count = self.peak_entity_count.max(entity_count);
+            self.total_actions += tick_result.actions_processed;
+            self.total_actions_rejected += tick_result.actions_rejected;
+            self.peak_entity_count = self.peak_entity_count.max(tick_result.entity_count);
+            self.peak_agent_count = self.peak_agent_count.max(agent_count);
+            if tick_over_budget {
+                self.tick_budget_overruns += 1;
+            }
+
+            for agent in &tick_result.telemetry.agents {
+                self.total_agents_sampled += 1;
+                if let Some(trajectory) = &agent.trajectory {
+                    self.total_trajectory_distance += trajectory.distance_travelled;
+                }
+
+                for trace in &agent.tool_calls {
+                    self.total_tool_calls += 1;
+                    self.total_tool_latency_ms += trace.latency_ms as u64;
+                    if !matches!(
+                        trace.status,
+                        ToolCallStatus::Succeeded | ToolCallStatus::Requested
+                    ) {
+                        self.total_tool_call_errors += 1;
+                    }
+                }
+
+                for trace in &agent.action_trace {
+                    if !matches!(trace.stage, pod_core::ActionLifecycleStage::Executed) {
+                        continue;
+                    }
+
+                    match &trace.action {
+                        Action::CaptureCreature { .. } => self.capture_actions += 1,
+                        Action::SummonCompanion { .. } => self.summon_actions += 1,
+                        Action::GatherResource { .. } => self.gather_actions += 1,
+                        Action::Loot { .. } => self.loot_actions += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        pub fn action_rejection_rate(&self) -> f32 {
+            let total = self.total_actions + self.total_actions_rejected;
+            if total == 0 {
+                return 0.0;
+            }
+            self.total_actions_rejected as f32 / total as f32
+        }
+
+        pub fn tool_call_error_rate(&self) -> f32 {
+            if self.total_tool_calls == 0 {
+                return 0.0;
+            }
+            self.total_tool_call_errors as f32 / self.total_tool_calls as f32
+        }
+
+        pub fn average_tool_latency_ms(&self) -> f32 {
+            if self.total_tool_calls == 0 {
+                return 0.0;
+            }
+            self.total_tool_latency_ms as f32 / self.total_tool_calls as f32
+        }
+
+        pub fn average_trajectory_distance(&self) -> f32 {
+            if self.total_agents_sampled == 0 {
+                return 0.0;
+            }
+            self.total_trajectory_distance / self.total_agents_sampled as f32
+        }
+
+        pub fn tick_budget_overrun_rate(&self) -> f32 {
+            if self.ticks_completed == 0 {
+                return 0.0;
+            }
+            self.tick_budget_overruns as f32 / self.ticks_completed as f32
         }
 
         /// Print periodic stats (called once per second)
-        pub fn print_periodic(&self, world: &pod_core::World) {
+        pub fn print_periodic(&mut self, world: &pod_core::World) {
             use log::info;
 
             let elapsed = self.last_second_start.elapsed().as_secs_f32();
@@ -215,15 +316,26 @@ mod stats {
             let efficiency = (tps / target * 100.0).min(100.0);
 
             info!(
-                "[STATS] Tick: {:<10} | TPS: {:.1}/{:.0} ({:.0}%) | Entities: {:<4} | Agents: {:<2} | Actions: {:<5}",
+                "[STATS] Tick: {:<10} | TPS: {:.1}/{:.0} ({:.0}%) | Entities: {:<4} | Agents: {:<2} | Actions: {:<5} | Reject: {:.1}% | ToolErr: {:.1}% | ToolMs: {:.1} | Path: {:.2} | MMO C/S/G/L: {}/{}/{}/{}",
                 world.tick,
                 tps,
                 target,
                 efficiency,
                 world.entity_count(),
                 world.agent_count(),
-                self.total_actions
+                self.total_actions,
+                self.action_rejection_rate() * 100.0,
+                self.tool_call_error_rate() * 100.0,
+                self.average_tool_latency_ms(),
+                self.average_trajectory_distance(),
+                self.capture_actions,
+                self.summon_actions,
+                self.gather_actions,
+                self.loot_actions,
             );
+
+            self.last_second_start = Instant::now();
+            self.ticks_this_second = 0;
         }
 
         /// Print final shutdown stats
@@ -235,10 +347,131 @@ mod stats {
             info!("═══════════════════════════════════════════════════════════");
             info!("Total ticks:          {}", self.ticks_completed);
             info!("Total actions:        {}", self.total_actions);
+            info!("Rejected actions:     {}", self.total_actions_rejected);
             info!("Peak entity count:    {}", self.peak_entity_count);
             info!("Peak agent count:     {}", self.peak_agent_count);
             info!("Target tick rate:     {} Hz", self.target_tick_rate);
+            info!(
+                "Tick overruns:        {} ({:.1}%)",
+                self.tick_budget_overruns,
+                self.tick_budget_overrun_rate() * 100.0
+            );
+            info!(
+                "Tool calls/errors:    {}/{} ({:.1}%)",
+                self.total_tool_calls,
+                self.total_tool_call_errors,
+                self.tool_call_error_rate() * 100.0
+            );
+            info!(
+                "Avg tool latency:     {:.1} ms",
+                self.average_tool_latency_ms()
+            );
+            info!(
+                "Avg path distance:    {:.2}",
+                self.average_trajectory_distance()
+            );
+            info!(
+                "MMO loop C/S/G/L:     {}/{}/{}/{}",
+                self.capture_actions, self.summon_actions, self.gather_actions, self.loot_actions
+            );
             info!("═══════════════════════════════════════════════════════════");
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::ServerStats;
+        use glam::Vec2;
+        use pod_core::action::Action;
+        use pod_core::agent::AgentType;
+        use pod_core::contract::AgentRuntimeProfile;
+        use pod_core::id::AgentId;
+        use pod_core::telemetry::{
+            ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentToolCallTrace,
+            TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+        };
+
+        fn sample_tick() -> pod_core::tick::TickResult {
+            let agent_id = AgentId::new();
+            let mut agent = AgentTelemetryFrame::new(
+                7,
+                agent_id,
+                None,
+                AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent),
+                3,
+                1,
+                2,
+                4,
+                1,
+                Some(TrajectorySample::new(7, 0.0, Vec2::ZERO, Vec2::ZERO, 0.0)),
+            );
+            agent.update_trajectory_end(TrajectorySample::new(
+                7,
+                1.0 / 60.0,
+                Vec2::new(3.0, 4.0),
+                Vec2::ZERO,
+                0.0,
+            ));
+            agent.record_action(
+                ActionSource::AgentDecision,
+                ActionLifecycleStage::Executed,
+                Action::CaptureCreature {
+                    target: pod_core::EntityId(9),
+                    tool_slot: Some(0),
+                },
+                None,
+            );
+            agent.record_action(
+                ActionSource::AgentDecision,
+                ActionLifecycleStage::Executed,
+                Action::GatherResource {
+                    target: pod_core::EntityId(10),
+                    skill: pod_core::component::SkillKind::Mining,
+                },
+                None,
+            );
+            agent.record_tool_call(AgentToolCallTrace::new(
+                7,
+                "llm.complete",
+                "mock",
+                ToolCallStatus::ParseError,
+                42,
+                120,
+                0,
+                Some("bad json".into()),
+            ));
+
+            pod_core::tick::TickResult {
+                tick: 7,
+                events: vec![],
+                entity_count: 12,
+                actions_processed: 3,
+                actions_rejected: 1,
+                telemetry: TickTelemetryFrame {
+                    tick: 7,
+                    agents: vec![agent],
+                },
+            }
+        }
+
+        #[test]
+        fn record_tick_accumulates_mmo_and_tool_metrics() {
+            let mut stats = ServerStats::new(60);
+            let tick = sample_tick();
+            stats.record_tick(&tick, 5, true);
+
+            assert_eq!(stats.total_actions, 3);
+            assert_eq!(stats.total_actions_rejected, 1);
+            assert_eq!(stats.peak_entity_count, 12);
+            assert_eq!(stats.peak_agent_count, 5);
+            assert_eq!(stats.tick_budget_overruns, 1);
+            assert_eq!(stats.total_tool_calls, 1);
+            assert_eq!(stats.total_tool_call_errors, 1);
+            assert_eq!(stats.capture_actions, 1);
+            assert_eq!(stats.gather_actions, 1);
+            assert!((stats.average_trajectory_distance() - 5.0).abs() < f32::EPSILON);
+            assert!(stats.action_rejection_rate() > 0.0);
+            assert!(stats.tool_call_error_rate() > 0.0);
         }
     }
 }
@@ -358,7 +591,9 @@ async fn run_game_loop(
         broadcast_local_tick_update(&tick_result);
 
         // ====== PHASE 4: RECORD STATS ======
-        stats.record_tick(tick_result.entity_count, tick_result.actions_processed);
+        let tick_elapsed = tick_start.elapsed();
+        let tick_over_budget = tick_elapsed > tick_duration;
+        stats.record_tick(&tick_result, world.agent_count(), tick_over_budget);
 
         // ====== PHASE 5: PERIODIC LOGGING ======
         if last_stats_print.elapsed() >= Duration::from_secs(1) {
@@ -367,15 +602,14 @@ async fn run_game_loop(
         }
 
         // ====== PHASE 6: SLEEP TO MAINTAIN TICK RATE ======
-        let elapsed = tick_start.elapsed();
-        if elapsed < tick_duration {
-            tokio::time::sleep(tick_duration - elapsed).await;
+        if tick_elapsed < tick_duration {
+            tokio::time::sleep(tick_duration - tick_elapsed).await;
         } else {
             warn!(
                 "Tick {} took {:.2}ms (over budget by {:.2}ms)",
                 world.tick,
-                elapsed.as_secs_f32() * 1000.0,
-                (elapsed - tick_duration).as_secs_f32() * 1000.0
+                tick_elapsed.as_secs_f32() * 1000.0,
+                (tick_elapsed - tick_duration).as_secs_f32() * 1000.0
             );
         }
     }
@@ -418,7 +652,9 @@ async fn run_network_server(
     Ok(())
 }
 
-fn parse_bind_target(bind: &str) -> Result<(String, u16), Box<dyn std::error::Error + Send + Sync>> {
+fn parse_bind_target(
+    bind: &str,
+) -> Result<(String, u16), Box<dyn std::error::Error + Send + Sync>> {
     let mut parts = bind.split(':');
     let host = parts.next().unwrap_or("0.0.0.0").to_string();
     let port = parts

@@ -124,6 +124,10 @@ pub enum ToolCallStatus {
     Succeeded,
     Failed,
     TimedOut,
+    RateLimited,
+    ParseError,
+    ApiError,
+    BudgetExceeded,
     Rejected,
 }
 
@@ -141,6 +145,28 @@ pub struct AgentToolCallTrace {
 }
 
 impl AgentToolCallTrace {
+    pub fn new(
+        tick: u64,
+        tool_name: impl Into<String>,
+        provider: impl Into<String>,
+        status: ToolCallStatus,
+        latency_ms: u32,
+        request_units: u32,
+        response_units: u32,
+        error_message: Option<String>,
+    ) -> Self {
+        Self {
+            tick,
+            tool_name: tool_name.into(),
+            provider: provider.into(),
+            status,
+            latency_ms,
+            request_units,
+            response_units,
+            error_message,
+        }
+    }
+
     pub fn success(
         tick: u64,
         tool_name: impl Into<String>,
@@ -149,16 +175,16 @@ impl AgentToolCallTrace {
         request_units: u32,
         response_units: u32,
     ) -> Self {
-        Self {
+        Self::new(
             tick,
-            tool_name: tool_name.into(),
-            provider: provider.into(),
-            status: ToolCallStatus::Succeeded,
+            tool_name,
+            provider,
+            ToolCallStatus::Succeeded,
             latency_ms,
             request_units,
             response_units,
-            error_message: None,
-        }
+            None,
+        )
     }
 
     pub fn failure(
@@ -169,16 +195,16 @@ impl AgentToolCallTrace {
         latency_ms: u32,
         error_message: impl Into<String>,
     ) -> Self {
-        Self {
+        Self::new(
             tick,
-            tool_name: tool_name.into(),
-            provider: provider.into(),
+            tool_name,
+            provider,
             status,
             latency_ms,
-            request_units: 0,
-            response_units: 0,
-            error_message: Some(error_message.into()),
-        }
+            0,
+            0,
+            Some(error_message.into()),
+        )
     }
 }
 

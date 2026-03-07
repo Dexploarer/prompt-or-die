@@ -51,8 +51,11 @@
 
 use glam::Vec2;
 use log::{debug, info, warn};
+use pod_core::{AgentToolCallTrace, ToolCallStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentIntrospection, AgentType};
@@ -60,7 +63,10 @@ use pod_core::id::AgentId;
 use pod_core::observation::{Observation, Relationship};
 
 use crate::conversation_memory::{ConversationMemory, MemoryConfig};
-use crate::llm_provider::{CompletionRequest, LlmProvider, MockProvider, TokenBudget};
+use crate::llm_provider::{
+    failed_tool_call_trace, success_tool_call_trace, CompletionRequest, LlmProvider, MockProvider,
+    TokenBudget, LLM_COMPLETE_TOOL_NAME,
+};
 use crate::scripted_agent::{
     attack_nearest as _attack_nearest, chase_nearest_hostile as _chase_nearest_hostile,
     flee_from as _flee_from, guard as _guard, patrol as _patrol, wander as _wander, BehaviorNode,
@@ -281,6 +287,7 @@ Respond ONLY with the JSON object, no other text."#
 struct StrategyResult {
     directive: StrategyDirective,
     tick: u64,
+    tool_calls: Vec<AgentToolCallTrace>,
 }
 
 // ============================================================
@@ -316,6 +323,7 @@ pub struct HybridAgent {
 
     // --- Current observation cache ---
     last_observation: Option<Observation>,
+    recent_tool_calls: VecDeque<AgentToolCallTrace>,
 }
 
 impl HybridAgent {
@@ -341,6 +349,7 @@ impl HybridAgent {
             last_hostile_count: 0,
             last_health_fraction: 1.0,
             last_observation: None,
+            recent_tool_calls: VecDeque::new(),
         }
     }
 
@@ -370,6 +379,10 @@ impl HybridAgent {
     /// Access the behavior tree blackboard (read-only).
     pub fn blackboard(&self) -> &Blackboard {
         &self.tree.blackboard
+    }
+
+    pub fn recent_tool_calls(&self) -> &VecDeque<AgentToolCallTrace> {
+        &self.recent_tool_calls
     }
 
     // ----------------------------------------------------------------
@@ -458,6 +471,18 @@ impl HybridAgent {
                 "HybridAgent {}: token budget exceeded, skipping strategy re-plan",
                 self.id
             );
+            self.recent_tool_calls.push_back(AgentToolCallTrace::new(
+                obs.tick,
+                LLM_COMPLETE_TOOL_NAME,
+                self.provider.name(),
+                ToolCallStatus::BudgetExceeded,
+                0,
+                estimated,
+                0,
+                Some(format!(
+                    "Token budget exceeded before provider call (estimated {estimated} units)"
+                )),
+            ));
             return;
         }
 
@@ -477,27 +502,45 @@ impl HybridAgent {
         self.strategy_in_flight = true;
         self.ticks_since_strategy = 0;
 
-        std::thread::spawn(move || match provider.complete(&request) {
-            Ok(completion) => {
-                let directive = StrategyDirective::parse(&completion.content);
-                debug!(
-                    "HybridAgent {}: new strategy = {:?}",
-                    agent_id, directive.strategy
-                );
-                let _ = tx.send(StrategyResult { directive, tick });
-            }
-            Err(e) => {
-                warn!(
-                    "HybridAgent {}: LLM error: {}, keeping current strategy",
-                    agent_id, e
-                );
-                let _ = tx.send(StrategyResult {
-                    directive: StrategyDirective {
-                        reasoning: format!("LLM error: {}", e),
-                        ..Default::default()
-                    },
-                    tick,
-                });
+        std::thread::spawn(move || {
+            let started_at = Instant::now();
+            match provider.complete(&request) {
+                Ok(completion) => {
+                    let directive = StrategyDirective::parse(&completion.content);
+                    debug!(
+                        "HybridAgent {}: new strategy = {:?}",
+                        agent_id, directive.strategy
+                    );
+                    let _ = tx.send(StrategyResult {
+                        directive,
+                        tick,
+                        tool_calls: vec![success_tool_call_trace(
+                            tick,
+                            provider.name(),
+                            started_at.elapsed(),
+                            &completion.usage,
+                        )],
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        "HybridAgent {}: LLM error: {}, keeping current strategy",
+                        agent_id, e
+                    );
+                    let _ = tx.send(StrategyResult {
+                        directive: StrategyDirective {
+                            reasoning: format!("LLM error: {}", e),
+                            ..Default::default()
+                        },
+                        tick,
+                        tool_calls: vec![failed_tool_call_trace(
+                            tick,
+                            provider.name(),
+                            started_at.elapsed(),
+                            &e,
+                        )],
+                    });
+                }
             }
         });
     }
@@ -573,6 +616,7 @@ impl Agent for HybridAgent {
         if self.strategy_in_flight {
             if let Ok(result) = self.strategy_rx.try_recv() {
                 self.strategy_in_flight = false;
+                self.recent_tool_calls.extend(result.tool_calls);
                 if self.config.debug_logging {
                     info!(
                         "HybridAgent {} [tick {}]: strategy = {} (urgency={:.2}): {}",
@@ -639,6 +683,10 @@ impl Agent for HybridAgent {
     }
     fn constraints_mut(&mut self) -> &mut AgentConstraints {
         &mut self.constraints
+    }
+
+    fn drain_tool_calls(&mut self) -> Vec<AgentToolCallTrace> {
+        self.recent_tool_calls.drain(..).collect()
     }
 
     fn introspect(&self) -> AgentIntrospection {
@@ -878,6 +926,7 @@ mod tests {
     use super::*;
     use glam::Vec2;
     use pod_core::observation::{Observation, SelfState, VisibleEntity};
+    use std::time::Duration;
 
     fn make_obs_with_hostile(health_pct: f32, hostile_distance: Option<f32>) -> Observation {
         let mut obs = Observation::default();
@@ -1085,5 +1134,38 @@ mod tests {
         let s = format_observation_for_strategy(&obs);
         assert!(s.contains("hp="));
         assert!(s.contains("enemies=1"));
+    }
+
+    #[test]
+    fn successful_strategy_requests_emit_tool_call_traces() {
+        let mut agent = HybridAgent::new(HybridAgentConfig {
+            strategy_interval_ticks: 0,
+            ..Default::default()
+        });
+        agent.observe(make_obs_with_hostile(1.0, Some(80.0)));
+        std::thread::sleep(Duration::from_millis(50));
+        agent.observe(make_obs_with_hostile(1.0, Some(80.0)));
+
+        let tool_calls = agent.drain_tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].tool_name, LLM_COMPLETE_TOOL_NAME);
+        assert_eq!(tool_calls[0].status, ToolCallStatus::Succeeded);
+    }
+
+    #[test]
+    fn budget_exceeded_strategy_request_emits_tool_trace_immediately() {
+        let mut agent =
+            HybridAgent::new(HybridAgentConfig::default()).with_budget(TokenBudget::new(1, 1));
+        agent.budget.record_usage(&crate::llm_provider::TokenUsage {
+            prompt_tokens: 1,
+            completion_tokens: 0,
+            total_tokens: 1,
+        });
+
+        agent.spawn_strategy_request(&make_obs_with_hostile(1.0, Some(40.0)));
+
+        let tool_calls = agent.drain_tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].status, ToolCallStatus::BudgetExceeded);
     }
 }

@@ -58,7 +58,8 @@ pub use constraint::{
     ValidationPipeline,
 };
 pub use contract::{
-    AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion,
+    AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion, ToolBudget,
+    ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
     VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
     RUNTIME_CONTRACT_VERSION_V1,
 };

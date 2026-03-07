@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::AgentAction;
 use crate::agent::AgentType;
+use crate::id::AgentId;
 use crate::observation::Observation;
-use crate::telemetry::TickTelemetryFrame;
+use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
 
 pub const RUNTIME_CONTRACT_VERSION_V1: u16 = 1;
 
@@ -127,6 +128,128 @@ impl AgentRuntimeProfile {
     }
 }
 
+/// Versioned description of an embedded tool that an agent may call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub read_only: bool,
+    pub budget: ToolBudget,
+}
+
+/// Fixed limits applied to tool invocations independent of gameplay actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolBudget {
+    pub max_calls_per_tick: u32,
+    pub max_calls_per_minute: u32,
+    pub max_request_units_per_tick: u32,
+    pub max_response_units_per_tick: u32,
+}
+
+impl ToolBudget {
+    pub fn disabled() -> Self {
+        Self {
+            max_calls_per_tick: 0,
+            max_calls_per_minute: 0,
+            max_request_units_per_tick: 0,
+            max_response_units_per_tick: 0,
+        }
+    }
+
+    pub fn read_only_default() -> Self {
+        Self {
+            max_calls_per_tick: 1,
+            max_calls_per_minute: 30,
+            max_request_units_per_tick: 8_000,
+            max_response_units_per_tick: 4_000,
+        }
+    }
+}
+
+impl Default for ToolBudget {
+    fn default() -> Self {
+        Self::read_only_default()
+    }
+}
+
+/// Runtime policy for agent-side tool access. Tools may gather data, but any
+/// gameplay mutation must still become a normal validated `Action`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolPolicy {
+    pub enabled: bool,
+    pub allow_external_network: bool,
+    pub allow_write_tools: bool,
+    pub budget: ToolBudget,
+}
+
+impl ToolPolicy {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            allow_external_network: false,
+            allow_write_tools: false,
+            budget: ToolBudget::disabled(),
+        }
+    }
+
+    pub fn read_only_default() -> Self {
+        Self {
+            enabled: true,
+            allow_external_network: true,
+            allow_write_tools: false,
+            budget: ToolBudget::read_only_default(),
+        }
+    }
+}
+
+impl Default for ToolPolicy {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+/// Catalog of embedded tools available to a runtime profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCatalog {
+    pub version: RuntimeContractVersion,
+    pub tools: Vec<ToolDefinition>,
+}
+
+impl ToolCatalog {
+    pub fn new(tools: Vec<ToolDefinition>) -> Self {
+        Self {
+            version: RuntimeContractVersion::V1,
+            tools,
+        }
+    }
+}
+
+/// Request emitted by an embedded tool runtime before a side effect occurs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolInvocationRequest {
+    pub tick: u64,
+    pub agent_id: AgentId,
+    pub tool_name: String,
+    pub provider: String,
+    pub request_units: u32,
+    pub arguments_json: String,
+}
+
+/// Result emitted by the embedded tool runtime after completion or failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolInvocationResult {
+    pub tick: u64,
+    pub agent_id: AgentId,
+    pub tool_name: String,
+    pub provider: String,
+    pub status: ToolCallStatus,
+    pub latency_ms: u32,
+    pub request_units: u32,
+    pub response_units: u32,
+    pub output_json: Option<String>,
+    pub error_message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionedAgentAction {
     pub version: RuntimeContractVersion,
@@ -182,10 +305,11 @@ mod tests {
     use crate::agent::AgentType;
     use crate::id::AgentId;
     use crate::observation::Observation;
-    use crate::telemetry::TickTelemetryFrame;
+    use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
 
     use super::{
-        AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion,
+        AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion, ToolBudget,
+        ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
         VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
         RUNTIME_CONTRACT_VERSION_V1,
     };
@@ -235,5 +359,56 @@ mod tests {
         let telemetry = TickTelemetryFrame::empty(9);
         let versioned_telemetry = VersionedTickTelemetry::new(telemetry.clone());
         assert_eq!(versioned_telemetry.payload.tick, telemetry.tick);
+    }
+
+    #[test]
+    fn tool_contract_defaults_are_read_only_and_disabled_by_default() {
+        let budget = ToolBudget::default();
+        assert_eq!(budget.max_calls_per_tick, 1);
+        assert_eq!(budget.max_calls_per_minute, 30);
+
+        let policy = ToolPolicy::default();
+        assert!(!policy.enabled);
+        assert_eq!(policy.budget, ToolBudget::disabled());
+    }
+
+    #[test]
+    fn tool_contracts_serialize_runtime_invocations_without_losing_status() {
+        let catalog = ToolCatalog::new(vec![ToolDefinition {
+            name: "llm.complete".into(),
+            description: "Request a provider completion".into(),
+            read_only: true,
+            budget: ToolBudget::read_only_default(),
+        }]);
+        assert_eq!(catalog.version, RuntimeContractVersion::V1);
+        assert_eq!(catalog.tools.len(), 1);
+
+        let request = ToolInvocationRequest {
+            tick: 12,
+            agent_id: AgentId::new(),
+            tool_name: "llm.complete".into(),
+            provider: "openai-compatible".into(),
+            request_units: 320,
+            arguments_json: "{\"prompt\":\"hi\"}".into(),
+        };
+        let result = ToolInvocationResult {
+            tick: request.tick,
+            agent_id: request.agent_id,
+            tool_name: request.tool_name.clone(),
+            provider: request.provider.clone(),
+            status: ToolCallStatus::RateLimited,
+            latency_ms: 1500,
+            request_units: request.request_units,
+            response_units: 0,
+            output_json: None,
+            error_message: Some("retry after 1000ms".into()),
+        };
+
+        let encoded = serde_json::to_string(&result).expect("tool result should serialize");
+        let decoded: ToolInvocationResult =
+            serde_json::from_str(&encoded).expect("tool result should deserialize");
+        assert_eq!(decoded.status, ToolCallStatus::RateLimited);
+        assert_eq!(decoded.request_units, 320);
+        assert!(decoded.output_json.is_none());
     }
 }

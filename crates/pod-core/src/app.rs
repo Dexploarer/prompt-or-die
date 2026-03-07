@@ -7,7 +7,10 @@ use crate::component::{
     Health, Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook,
     Sprite, Transform, Transform3D, Velocity,
 };
-use crate::contract::{VersionedAgentAction, VersionedObservation, VersionedTickTelemetry};
+use crate::contract::{
+    ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
+    ToolPolicy, VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+};
 use crate::observation::Observation;
 use crate::telemetry::{TelemetryArchive, TelemetryConfig, TickTelemetryFrame};
 use crate::tick::TickResult;
@@ -309,6 +312,15 @@ impl App {
             .register_component::<LootContainer>("LootContainer");
         self.types.register_contract::<Observation>("Observation");
         self.types.register_contract::<AgentAction>("AgentAction");
+        self.types
+            .register_contract::<ToolDefinition>("ToolDefinition");
+        self.types.register_contract::<ToolCatalog>("ToolCatalog");
+        self.types.register_contract::<ToolPolicy>("ToolPolicy");
+        self.types.register_contract::<ToolBudget>("ToolBudget");
+        self.types
+            .register_contract::<ToolInvocationRequest>("ToolInvocationRequest");
+        self.types
+            .register_contract::<ToolInvocationResult>("ToolInvocationResult");
         self.types
             .register_contract::<TickTelemetryFrame>("TickTelemetryFrame");
         self.types
