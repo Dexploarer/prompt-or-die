@@ -15,9 +15,9 @@ use pod_core::Action;
 
 use crate::protocol::{ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage};
 use crate::snapshot::{
-    apply_authoritative_update, compose_presentation_snapshot, InterpolatedSnapshot,
-    PredictedActionBatch, ReconciliationReport, RenderClock, SnapshotInterpolationBuffer,
-    WorldSnapshot,
+    apply_authoritative_update, build_catch_up_diagnostics, build_rollback_preview,
+    compose_presentation_snapshot, CatchUpDiagnostics, InterpolatedSnapshot, PredictedActionBatch,
+    ReconciliationReport, RenderClock, RollbackPreview, SnapshotInterpolationBuffer, WorldSnapshot,
 };
 
 #[derive(Debug, Default)]
@@ -454,6 +454,38 @@ impl WebClient {
     /// Get the most recent reconciliation report.
     pub fn last_reconciliation(&self) -> Option<&ReconciliationReport> {
         self.last_reconciliation.as_ref()
+    }
+
+    /// Inspect the local rollback/replay path from a chosen authoritative tick.
+    pub fn rollback_preview(&self, rewind_tick: Option<u64>) -> Option<RollbackPreview> {
+        let rewind_tick = rewind_tick.or_else(|| {
+            self.authoritative_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.tick)
+        })?;
+        build_rollback_preview(
+            &self.render_buffer,
+            rewind_tick,
+            self.controlled_entity,
+            &self.prediction_history,
+        )
+    }
+
+    /// Rewind to the newest retained authoritative snapshot at or before `tick`.
+    pub fn rewind_authoritative_snapshot(&self, tick: u64) -> Option<WorldSnapshot> {
+        self.render_buffer.rewind_to(tick)
+    }
+
+    /// Summarize current presentation drift and prediction recovery state.
+    pub fn catch_up_diagnostics(&self) -> CatchUpDiagnostics {
+        build_catch_up_diagnostics(
+            &self.render_buffer,
+            self.authoritative_snapshot.as_ref(),
+            self.local_snapshot.as_ref(),
+            self.controlled_entity,
+            &self.prediction_history,
+            &self.render_clock,
+        )
     }
 
     /// Get the number of unacknowledged predicted action batches.

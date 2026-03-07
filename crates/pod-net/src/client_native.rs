@@ -17,9 +17,9 @@ use crate::protocol::{
     ClientConfig as ProtoClientConfig, ClientId, ClientMessage, ReconnectToken, ServerMessage,
 };
 use crate::snapshot::{
-    apply_authoritative_update, compose_presentation_snapshot, InterpolatedSnapshot,
-    PredictedActionBatch, ReconciliationReport, RenderClock, SnapshotInterpolationBuffer,
-    WorldSnapshot,
+    apply_authoritative_update, build_catch_up_diagnostics, build_rollback_preview,
+    compose_presentation_snapshot, CatchUpDiagnostics, InterpolatedSnapshot, PredictedActionBatch,
+    ReconciliationReport, RenderClock, RollbackPreview, SnapshotInterpolationBuffer, WorldSnapshot,
 };
 
 // ============================================================
@@ -521,6 +521,38 @@ impl NativeClient {
         self.last_reconciliation.as_ref()
     }
 
+    /// Inspect the local rollback/replay path from a chosen authoritative tick.
+    pub fn rollback_preview(&self, rewind_tick: Option<u64>) -> Option<RollbackPreview> {
+        let rewind_tick = rewind_tick.or_else(|| {
+            self.authoritative_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.tick)
+        })?;
+        build_rollback_preview(
+            &self.render_buffer,
+            rewind_tick,
+            self.controlled_entity,
+            &self.prediction_history,
+        )
+    }
+
+    /// Rewind to the newest retained authoritative snapshot at or before `tick`.
+    pub fn rewind_authoritative_snapshot(&self, tick: u64) -> Option<WorldSnapshot> {
+        self.render_buffer.rewind_to(tick)
+    }
+
+    /// Summarize current presentation drift and prediction recovery state.
+    pub fn catch_up_diagnostics(&self) -> CatchUpDiagnostics {
+        build_catch_up_diagnostics(
+            &self.render_buffer,
+            self.authoritative_snapshot.as_ref(),
+            self.local_snapshot.as_ref(),
+            self.controlled_entity,
+            &self.prediction_history,
+            &self.render_clock,
+        )
+    }
+
     /// Get the number of unacknowledged predicted action batches.
     pub fn pending_prediction_batches(&self) -> usize {
         self.prediction_history.len()
@@ -690,5 +722,85 @@ mod tests {
         // This just tests configuration
         assert_eq!(config.player_name, "TestPlayer");
         assert_eq!(config.server_addr, "localhost");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_catch_up_diagnostics_uses_replay_history() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let authoritative = WorldSnapshot {
+            tick: 20,
+            entities: vec![crate::snapshot::EntitySnapshot {
+                id: 9,
+                position: glam::Vec2::new(10.0, 0.0),
+                velocity: glam::Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        };
+        let predicted = WorldSnapshot {
+            tick: 21,
+            entities: vec![crate::snapshot::EntitySnapshot {
+                id: 9,
+                position: glam::Vec2::new(12.0, 0.0),
+                velocity: glam::Vec2::new(120.0, 0.0),
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+            }],
+        };
+        let mut render_buffer = SnapshotInterpolationBuffer::default();
+        render_buffer.push(authoritative.clone());
+        let mut render_clock = RenderClock::default();
+        render_clock.advance(20, 1.0 / 60.0);
+
+        let client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: Some(authoritative),
+            local_snapshot: Some(predicted),
+            controlled_entity: Some(9),
+            pending_actions: Vec::new(),
+            prediction_history: vec![PredictedActionBatch {
+                tick: 21,
+                actions: vec![Action::Move {
+                    direction: glam::Vec2::X,
+                }],
+            }],
+            last_server_tick: 20,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 20,
+            reconnect_token: None,
+            last_reconciliation: None,
+            render_buffer,
+            render_clock,
+        };
+
+        let diagnostics = client.catch_up_diagnostics();
+        assert_eq!(diagnostics.authoritative_tick, Some(20));
+        assert_eq!(diagnostics.predicted_tick, Some(21));
+        assert_eq!(diagnostics.pending_action_batches, 1);
+        assert!(diagnostics.controlled_entity_drift.is_some());
+        assert_eq!(client.rewind_authoritative_snapshot(18).unwrap().tick, 20);
+        assert_eq!(
+            client.rollback_preview(Some(20)).unwrap().replayed_batches,
+            1
+        );
     }
 }
