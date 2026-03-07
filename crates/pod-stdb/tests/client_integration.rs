@@ -37,9 +37,15 @@ fn default_config_has_expected_values() {
     assert!(config.auth_token.is_none());
     assert_eq!(config.player_name, "Player");
     #[cfg(debug_assertions)]
-    assert!(matches!(config.connection_mode, StdbConnectionMode::Emulated));
+    assert!(matches!(
+        config.connection_mode,
+        StdbConnectionMode::Emulated
+    ));
     #[cfg(not(debug_assertions))]
-    assert!(matches!(config.connection_mode, StdbConnectionMode::Generated));
+    assert!(matches!(
+        config.connection_mode,
+        StdbConnectionMode::Generated
+    ));
 }
 
 #[test]
@@ -115,6 +121,47 @@ fn new_client_has_no_events() {
 }
 
 #[test]
+fn telemetry_subscription_helpers_include_debug_queries() {
+    let queries = Subscriptions::editor_with_debug_telemetry();
+    assert!(queries
+        .iter()
+        .any(|query| query.contains("agent_telemetry_tick")));
+    assert!(queries
+        .iter()
+        .any(|query| query.contains("agent_tool_call_event")));
+    assert!(queries
+        .iter()
+        .any(|query| query.contains("agent_tick_rollup")));
+}
+
+#[test]
+fn telemetry_events_are_constructible() {
+    let tick = StdbEvent::AgentTelemetryTickReceived {
+        tick: 12,
+        agent_entity_id: 7,
+        frame_json: "{\"tick_telemetry\":{\"tick\":12}}".into(),
+    };
+    let tool = StdbEvent::AgentToolCallEventReceived {
+        tick: 12,
+        agent_entity_id: 7,
+        tool_name: "llm.complete".into(),
+        provider: "qwen".into(),
+        status: "Succeeded".into(),
+        data_json: "{\"request_units\":128}".into(),
+    };
+    let rollup = StdbEvent::AgentTickRollupReceived {
+        tick_start: 1,
+        tick_end: 60,
+        agent_entity_id: 7,
+        rollup_json: "{\"distance\":84.0}".into(),
+    };
+
+    assert!(matches!(tick, StdbEvent::AgentTelemetryTickReceived { .. }));
+    assert!(matches!(tool, StdbEvent::AgentToolCallEventReceived { .. }));
+    assert!(matches!(rollup, StdbEvent::AgentTickRollupReceived { .. }));
+}
+
+#[test]
 fn config_accessor_returns_original_config() {
     let config = StdbClientConfig {
         host: "http://test:1234".into(),
@@ -165,7 +212,9 @@ fn connect_generated_mode_requires_runtime_bindings() {
         connection_mode: StdbConnectionMode::Generated,
         ..StdbClientConfig::default()
     });
-    let err = client.connect().expect_err("generated mode should require runtime");
+    let err = client
+        .connect()
+        .expect_err("generated mode should require runtime");
     assert!(matches!(err, StdbError::ConnectionFailed(_)));
 }
 
@@ -316,7 +365,9 @@ fn all_reducers_fail_when_only_connecting() {
     assert!(client
         .call_connect_agent(1, AgentType::LlmAgent, "Bot".into())
         .is_err());
-    assert!(client.call_submit_action(&SubmittedAction::idle(1)).is_err());
+    assert!(client
+        .call_submit_action(&SubmittedAction::idle(1))
+        .is_err());
     assert!(client
         .call_create_lobby("arena".into(), 1, 4, false)
         .is_err());
@@ -624,9 +675,9 @@ fn action_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn subscription_all_tables_has_25_queries() {
+fn subscription_all_tables_has_28_queries() {
     let queries = Subscriptions::all_tables();
-    assert_eq!(queries.len(), 25);
+    assert_eq!(queries.len(), 28);
 }
 
 #[test]
@@ -805,7 +856,7 @@ fn stdb_error_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn stdb_event_all_15_variants_constructible() {
+fn stdb_event_all_18_variants_constructible() {
     // Verify all StdbEvent variants can be created without panicking.
     // This ensures the public API surface matches our expectations.
     let events: Vec<StdbEvent> = vec![
@@ -862,6 +913,25 @@ fn stdb_event_all_15_variants_constructible() {
             secondary_entity_id: None,
             data_json: "{}".into(),
         },
+        StdbEvent::AgentTelemetryTickReceived {
+            tick: 1,
+            agent_entity_id: 5,
+            frame_json: "{\"tick_telemetry\":{\"tick\":1}}".into(),
+        },
+        StdbEvent::AgentToolCallEventReceived {
+            tick: 1,
+            agent_entity_id: 5,
+            tool_name: "llm.complete".into(),
+            provider: "qwen".into(),
+            status: "Succeeded".into(),
+            data_json: "{\"request_units\":42}".into(),
+        },
+        StdbEvent::AgentTickRollupReceived {
+            tick_start: 1,
+            tick_end: 60,
+            agent_entity_id: 5,
+            rollup_json: "{\"distance\":128.0}".into(),
+        },
         // Reducer acknowledgments
         StdbEvent::ReducerCallSuccess {
             reducer_name: "create_world".into(),
@@ -872,7 +942,7 @@ fn stdb_event_all_15_variants_constructible() {
         },
     ];
 
-    assert_eq!(events.len(), 15);
+    assert_eq!(events.len(), 18);
 }
 
 #[test]

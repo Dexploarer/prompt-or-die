@@ -74,6 +74,8 @@ enum SubscriptionProfile {
     Spectator,
     /// Editor/dashboards: all world state without transient events.
     Editor,
+    /// Editor/dashboards with debug telemetry streams enabled.
+    EditorDebug,
     /// Player mode for a single controlled entity + public events.
     Player(u64),
     /// Caller-supplied custom query set.
@@ -102,6 +104,10 @@ impl SpacetimeSubscriptionManager {
 
     fn set_editor(&mut self) -> bool {
         self.set_profile(SubscriptionProfile::Editor)
+    }
+
+    fn set_editor_debug(&mut self) -> bool {
+        self.set_profile(SubscriptionProfile::EditorDebug)
     }
 
     fn set_player(&mut self, entity_id: u64) -> bool {
@@ -161,6 +167,7 @@ impl SpacetimeSubscriptionManager {
                 .into_iter()
                 .map(ToString::to_string)
                 .collect(),
+            SubscriptionProfile::EditorDebug => Subscriptions::editor_with_debug_telemetry(),
             SubscriptionProfile::Player(entity_id) => Subscriptions::player_agent(*entity_id)
                 .into_iter()
                 .collect(),
@@ -388,6 +395,7 @@ pub struct SpacetimeDBClient {
     reconnect_token: ReconnectToken,
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
+    last_debug_telemetry_json: Option<String>,
     render_buffer: SnapshotInterpolationBuffer,
     render_clock: RenderClock,
     welcome_sent: bool,
@@ -404,6 +412,7 @@ impl SpacetimeDBClient {
             reconnect_token: ReconnectToken::new(),
             pending_actions: Vec::new(),
             local_snapshot: None,
+            last_debug_telemetry_json: None,
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
             welcome_sent: false,
@@ -682,6 +691,10 @@ impl SpacetimeDBClient {
                         });
                     }
                 }
+                StdbEvent::AgentTelemetryTickReceived { frame_json, .. } => {
+                    self.last_debug_telemetry_json = Some(frame_json.clone());
+                    messages.push(ServerMessage::TickTelemetry { frame_json });
+                }
 
                 // ── Tick advancement ──
                 StdbEvent::TickAdvanced { new_tick, .. } => {
@@ -702,6 +715,8 @@ impl SpacetimeDBClient {
 
                 // ── Internal events (no ServerMessage equivalent) ──
                 StdbEvent::ObservationReceived { .. }
+                | StdbEvent::AgentToolCallEventReceived { .. }
+                | StdbEvent::AgentTickRollupReceived { .. }
                 | StdbEvent::ReducerCallSuccess { .. }
                 | StdbEvent::ReducerCallError { .. } => {}
             }
@@ -716,6 +731,7 @@ impl SpacetimeDBClient {
         self.client_id = None;
         self.welcome_sent = false;
         self.last_emitted_tick = 0;
+        self.last_debug_telemetry_json = None;
         self.subscriptions.reset_connection();
         self.clear_presentation_state();
     }
@@ -736,6 +752,13 @@ impl SpacetimeDBClient {
     /// applied once a connection is established.
     pub fn subscribe_as_editor(&mut self) -> Result<bool, StdbClientError> {
         self.subscriptions.set_editor();
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure subscriptions for editor dashboards with raw debug telemetry.
+    pub fn subscribe_as_editor_with_debug_telemetry(&mut self) -> Result<bool, StdbClientError> {
+        self.subscriptions.set_editor_debug();
         self.subscriptions
             .ensure_subscriptions_applied(&mut self.inner)
     }
@@ -837,6 +860,10 @@ impl SpacetimeDBClient {
     /// Current presentation tick after interpolation/catch-up correction.
     pub fn presentation_tick(&self) -> Option<f32> {
         self.render_clock.current_tick()
+    }
+
+    pub fn last_debug_telemetry_json(&self) -> Option<&str> {
+        self.last_debug_telemetry_json.as_deref()
     }
 
     /// Inspect the local rollback/replay path from a chosen retained tick.
@@ -1517,6 +1544,44 @@ mod tests {
         assert!(queries.iter().any(|query| query.contains("FROM entity")));
         assert!(queries.iter().any(|query| query.contains("combat_event")));
         assert!(client.subscriptions.active_queries().is_empty());
+    }
+
+    #[test]
+    fn test_editor_debug_profile_includes_telemetry_queries() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.subscriptions.set_editor_debug();
+        let queries = client.subscriptions.queries_for_profile();
+
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("agent_telemetry_tick")));
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("agent_tool_call_event")));
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("agent_tick_rollup")));
+    }
+
+    #[test]
+    fn test_poll_updates_emits_tick_telemetry_from_stdb_events() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.inner_mut().receive_agent_telemetry_tick(
+            12,
+            44,
+            "{\"tick_telemetry\":{\"tick\":12,\"agents\":[]}}".into(),
+        );
+
+        let messages = client.poll_updates();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::TickTelemetry { frame_json }
+                if frame_json.contains("\"tick\":12")
+        )));
+        assert_eq!(
+            client.last_debug_telemetry_json(),
+            Some("{\"tick_telemetry\":{\"tick\":12,\"agents\":[]}}")
+        );
     }
 
     #[test]

@@ -62,6 +62,8 @@ pub struct NativeClient {
     reconnect_token: Option<ReconnectToken>,
     /// Last authoritative reconciliation outcome.
     last_reconciliation: Option<ReconciliationReport>,
+    /// Most recent debug telemetry payload received from the server.
+    last_debug_telemetry_json: Option<String>,
     /// Recovery request throttle/telemetry for full-snapshot resync.
     recovery_state: RecoveryRequestState,
     /// Authoritative history for presentation smoothing.
@@ -153,6 +155,7 @@ impl NativeClient {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            last_debug_telemetry_json: None,
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -455,6 +458,10 @@ impl NativeClient {
                 true
             }
             ServerMessage::Pong { .. } => true,
+            ServerMessage::TickTelemetry { frame_json } => {
+                self.last_debug_telemetry_json = Some(frame_json.clone());
+                true
+            }
             ServerMessage::Rejected { reason } => {
                 error!("Server rejected request: {}", reason);
                 true
@@ -470,6 +477,12 @@ impl NativeClient {
             .as_millis() as u64;
 
         self.send_message(ClientMessage::Ping { timestamp }).await
+    }
+
+    /// Opt-in to raw debug telemetry from the authoritative server.
+    pub async fn set_debug_telemetry_enabled(&mut self, enabled: bool) -> Result<(), ClientError> {
+        self.send_message(ClientMessage::SetDebugTelemetry { enabled })
+            .await
     }
 
     /// Disconnect from the server
@@ -494,6 +507,7 @@ impl NativeClient {
             reason.unwrap_or("Disconnect").as_bytes(),
         );
         self.recovery_state.clear();
+        self.last_debug_telemetry_json = None;
         self.clear_presentation_state();
 
         info!("Disconnected from server");
@@ -533,6 +547,10 @@ impl NativeClient {
     /// Get the most recent reconciliation report.
     pub fn last_reconciliation(&self) -> Option<&ReconciliationReport> {
         self.last_reconciliation.as_ref()
+    }
+
+    pub fn last_debug_telemetry_json(&self) -> Option<&str> {
+        self.last_debug_telemetry_json.as_deref()
     }
 
     /// Inspect the local rollback/replay path from a chosen authoritative tick.
@@ -875,6 +893,7 @@ mod tests {
             last_event_tick: 20,
             reconnect_token: None,
             last_reconciliation: None,
+            last_debug_telemetry_json: None,
             recovery_state: RecoveryRequestState::default(),
             render_buffer,
             render_clock,
@@ -920,6 +939,7 @@ mod tests {
             last_event_tick: 0,
             reconnect_token: None,
             last_reconciliation: None,
+            last_debug_telemetry_json: None,
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
@@ -927,5 +947,49 @@ mod tests {
 
         client.request_full_snapshot_without_connection_is_safe();
         assert_eq!(client.recovery_state, RecoveryRequestState::default());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_tick_telemetry_updates_debug_cache() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+        };
+
+        let message = ServerMessage::TickTelemetry {
+            frame_json: "{\"tick_telemetry\":{\"tick\":4,\"agents\":[]}}".into(),
+        };
+        assert!(client.apply_server_message(&message));
+        assert_eq!(
+            client.last_debug_telemetry_json(),
+            Some("{\"tick_telemetry\":{\"tick\":4,\"agents\":[]}}")
+        );
     }
 }

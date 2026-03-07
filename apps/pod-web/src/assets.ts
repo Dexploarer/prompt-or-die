@@ -10,6 +10,7 @@ import {
   MeshToonMaterial,
   MeshStandardMaterial,
   NearestFilter,
+  NoColorSpace,
   PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
@@ -236,7 +237,7 @@ function getToonGradientMap(): Texture {
   ]);
   const texture = new DataTexture(gradient, 4, 1);
   texture.needsUpdate = true;
-  texture.colorSpace = SRGBColorSpace;
+  texture.colorSpace = NoColorSpace;
   texture.minFilter = NearestFilter;
   texture.magFilter = NearestFilter;
   texture.generateMipmaps = false;
