@@ -239,14 +239,14 @@ pub enum StdbEvent {
         tool_name: String,
         provider: String,
         status: String,
-        data_json: String,
+        document: String,
     },
     /// Durable aggregate telemetry rollup received for dashboards/analytics.
     AgentTickRollupReceived {
         tick_start: u64,
         tick_end: u64,
         agent_entity_id: u64,
-        rollup_json: String,
+        document: String,
     },
 
     // ── Reducer acknowledgments ──
@@ -1878,7 +1878,7 @@ impl StdbClient {
         tool_name: String,
         provider: String,
         status: String,
-        data_json: String,
+        document: String,
     ) {
         self.events
             .push_back(StdbEvent::AgentToolCallEventReceived {
@@ -1887,7 +1887,7 @@ impl StdbClient {
                 tool_name,
                 provider,
                 status,
-                data_json,
+                document,
             });
         self.events_received += 1;
     }
@@ -1898,13 +1898,13 @@ impl StdbClient {
         tick_start: u64,
         tick_end: u64,
         agent_entity_id: u64,
-        rollup_json: String,
+        document: String,
     ) {
         self.events.push_back(StdbEvent::AgentTickRollupReceived {
             tick_start,
             tick_end,
             agent_entity_id,
-            rollup_json,
+            document,
         });
         self.events_received += 1;
     }
@@ -2098,7 +2098,10 @@ mod tests {
 
     #[test]
     fn test_receive_debug_telemetry_events() {
-        use pod_core::{AgentToolCallTrace, TickTelemetryFrame, VersionedTickTelemetry};
+        use pod_core::{
+            AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace, TickTelemetryFrame,
+            VersionedTickTelemetry,
+        };
 
         let mut client = StdbClient::new(StdbClientConfig::default());
         client.receive_agent_telemetry_tick(
@@ -2112,9 +2115,33 @@ mod tests {
             "llm.complete".into(),
             "qwen".into(),
             "Succeeded".into(),
-            AgentToolCallTrace::success(8, "llm.complete", "qwen", 12, 24, 8).to_toon_document(),
+            AgentToolCallEvent::new(
+                41,
+                AgentToolCallTrace::success(8, "llm.complete", "qwen", 12, 24, 8),
+            )
+            .to_toon_document(),
         );
-        client.receive_agent_tick_rollup(1, 60, 41, "{\"distance\":42.0}".into());
+        client.receive_agent_tick_rollup(
+            1,
+            60,
+            41,
+            AgentTickRollup {
+                tick_start: 1,
+                tick_end: 60,
+                agent_entity_id: 41,
+                total_distance: 42.0,
+                submitted_action_count: 4,
+                executed_action_count: 3,
+                rejected_action_count: 1,
+                tool_call_count: 2,
+                tool_error_count: 1,
+                visible_entity_count: 21,
+                audible_event_count: 4,
+                message_count: 2,
+                average_tool_latency_ms: 24.0,
+            }
+            .to_toon_document(),
+        );
 
         let events: Vec<StdbEvent> = client.drain_events().collect();
         assert!(matches!(
@@ -2130,8 +2157,9 @@ mod tests {
             StdbEvent::AgentToolCallEventReceived {
                 tick: 8,
                 agent_entity_id: 41,
+                document,
                 ..
-            }
+            } if document.contains("agent_tool_call_event")
         ));
         assert!(matches!(
             &events[2],
@@ -2139,8 +2167,8 @@ mod tests {
                 tick_start: 1,
                 tick_end: 60,
                 agent_entity_id: 41,
-                ..
-            }
+                document,
+            } if document.contains("agent_tick_rollup")
         ));
     }
 

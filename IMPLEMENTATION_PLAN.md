@@ -596,5 +596,12 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `bun run typecheck`
   - `bun run build`
 
-**Last updated**: Iteration 65
-**Current focus**: Iteration 66 TOON-backed tool-call event and telemetry rollup parity across SpacetimeDB/browser/editor consumers, plus live replay/incident streaming hooks for shard debug operations
+### Iteration 66
+- [x] Added canonical TOON document types in `pod-core` for `agent_tool_call_event` and `agent_tick_rollup`, including rollup derivation helpers so debug consumers share one schema across core, browser, editor, and SpacetimeDB surfaces.
+- [x] Extended `pod-net::client_stdb` with a live debug-document queue, retaining TOON telemetry/tool-call/rollup payloads plus injected replay/incident documents for shard debug operations without widening the gameplay message path.
+- [x] Extended `apps/pod-web` with live TOON debug-document routing, tool-call/rollup parsing and summaries, and explicit replay/incident streaming hooks for debug overlays.
+- [x] Extended `pod-editor` with TOON imports for tool-call events, tick rollups, and generic live debug documents, keeping dashboard/telemetry state aligned with replay and incident ingestion.
+- [x] Added deterministic coverage for core TOON telemetry exports, SpacetimeDB debug-document retention, browser live debug routing, and editor live TOON imports.
+
+**Last updated**: Iteration 66
+**Current focus**: Iteration 67 live SpacetimeDB telemetry row production and shard-ops document streaming from authoritative runtime paths, plus browser/editor consumption of those streams end to end

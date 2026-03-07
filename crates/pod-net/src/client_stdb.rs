@@ -396,6 +396,7 @@ pub struct SpacetimeDBClient {
     pending_actions: Vec<Action>,
     local_snapshot: Option<WorldSnapshot>,
     last_debug_telemetry_json: Option<String>,
+    pending_debug_documents: Vec<String>,
     render_buffer: SnapshotInterpolationBuffer,
     render_clock: RenderClock,
     welcome_sent: bool,
@@ -413,6 +414,7 @@ impl SpacetimeDBClient {
             pending_actions: Vec::new(),
             local_snapshot: None,
             last_debug_telemetry_json: None,
+            pending_debug_documents: Vec::new(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
             welcome_sent: false,
@@ -693,7 +695,12 @@ impl SpacetimeDBClient {
                 }
                 StdbEvent::AgentTelemetryTickReceived { frame_json, .. } => {
                     self.last_debug_telemetry_json = Some(frame_json.clone());
+                    self.pending_debug_documents.push(frame_json.clone());
                     messages.push(ServerMessage::TickTelemetry { frame_json });
+                }
+                StdbEvent::AgentToolCallEventReceived { document, .. }
+                | StdbEvent::AgentTickRollupReceived { document, .. } => {
+                    self.pending_debug_documents.push(document);
                 }
 
                 // ── Tick advancement ──
@@ -715,8 +722,6 @@ impl SpacetimeDBClient {
 
                 // ── Internal events (no ServerMessage equivalent) ──
                 StdbEvent::ObservationReceived { .. }
-                | StdbEvent::AgentToolCallEventReceived { .. }
-                | StdbEvent::AgentTickRollupReceived { .. }
                 | StdbEvent::ReducerCallSuccess { .. }
                 | StdbEvent::ReducerCallError { .. } => {}
             }
@@ -732,6 +737,7 @@ impl SpacetimeDBClient {
         self.welcome_sent = false;
         self.last_emitted_tick = 0;
         self.last_debug_telemetry_json = None;
+        self.pending_debug_documents.clear();
         self.subscriptions.reset_connection();
         self.clear_presentation_state();
     }
@@ -868,6 +874,27 @@ impl SpacetimeDBClient {
 
     pub fn last_debug_telemetry_document(&self) -> Option<&str> {
         self.last_debug_telemetry_json()
+    }
+
+    /// Inspect the newest retained TOON document across live debug telemetry,
+    /// tool-call events, rollups, replays, and shard incidents.
+    pub fn last_debug_document(&self) -> Option<&str> {
+        self.pending_debug_documents
+            .last()
+            .map(String::as_str)
+            .or_else(|| self.last_debug_telemetry_document())
+    }
+
+    /// Drain all pending TOON debug documents gathered since the last call.
+    pub fn drain_debug_documents(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_debug_documents)
+    }
+
+    /// Inject a TOON debug document into the live stream surface. This lets
+    /// shard tooling forward replay files and incident summaries through the
+    /// same browser/editor consumer path as tick telemetry.
+    pub fn push_debug_document(&mut self, document: String) {
+        self.pending_debug_documents.push(document);
     }
 
     /// Inspect the local rollback/replay path from a chosen retained tick.
@@ -1220,7 +1247,9 @@ fn convert_world_event(
 mod tests {
     use super::*;
     use pod_core::{
-        action::SpeakVolume as CoreSpeakVolume, TickTelemetryFrame, VersionedTickTelemetry,
+        action::SpeakVolume as CoreSpeakVolume, AgentTickRollup, AgentToolCallEvent,
+        AgentToolCallTrace, ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame,
+        VersionedTickTelemetry,
     };
 
     #[test]
@@ -1587,6 +1616,115 @@ mod tests {
         assert!(client
             .last_debug_telemetry_document()
             .expect("debug telemetry stored")
+            .contains("versioned_tick_telemetry"));
+    }
+
+    #[test]
+    fn test_debug_documents_include_live_tool_rollup_replay_and_incident_docs() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.inner_mut().receive_agent_telemetry_tick(
+            12,
+            44,
+            VersionedTickTelemetry::new(TickTelemetryFrame::empty(12)).to_toon_document(),
+        );
+        client.inner_mut().receive_agent_tool_call_event(
+            12,
+            44,
+            "llm.complete".into(),
+            "qwen".into(),
+            "TimedOut".into(),
+            AgentToolCallEvent::new(
+                44,
+                AgentToolCallTrace::failure(
+                    12,
+                    "llm.complete",
+                    "qwen",
+                    pod_core::ToolCallStatus::TimedOut,
+                    48,
+                    "timeout",
+                ),
+            )
+            .to_toon_document(),
+        );
+        client.inner_mut().receive_agent_tick_rollup(
+            1,
+            60,
+            44,
+            AgentTickRollup {
+                tick_start: 1,
+                tick_end: 60,
+                agent_entity_id: 44,
+                total_distance: 18.5,
+                submitted_action_count: 4,
+                executed_action_count: 3,
+                rejected_action_count: 1,
+                tool_call_count: 1,
+                tool_error_count: 1,
+                visible_entity_count: 12,
+                audible_event_count: 3,
+                message_count: 2,
+                average_tool_latency_ms: 48.0,
+            }
+            .to_toon_document(),
+        );
+
+        client.push_debug_document(
+            ReplayFile {
+                header: ReplayHeader {
+                    name: "ops-replay".into(),
+                    timestamp: 1_741_315_200,
+                    world_seed: 42,
+                    tick_count: 1,
+                    agent_count: 0,
+                    notes: "debug".into(),
+                },
+                traces: Vec::new(),
+                telemetry_windows: vec![TickTelemetryFrame::empty(12)],
+            }
+            .to_toon_document(),
+        );
+        client.push_debug_document(
+            ShardIncidentSummary {
+                shard_id: "alpha-1".into(),
+                latest_tick: 12,
+                severity: pod_core::IncidentSeverity::Warning,
+                summary: "Shard alpha-1 requires attention".into(),
+                tick_budget_overrun_rate: 0.08,
+                action_rejection_rate: 0.02,
+                tool_call_error_rate: 0.11,
+                average_tool_latency_ms: 820.0,
+                average_trajectory_distance: 3.2,
+                peak_entity_count: 512,
+                peak_agent_count: 128,
+                capture_actions: 4,
+                summon_actions: 2,
+                gather_actions: 7,
+                loot_actions: 9,
+                notes: vec!["tool-call error rate exceeds 10%".into()],
+            }
+            .to_toon_document(),
+        );
+
+        let _ = client.poll_updates();
+        let documents = client.drain_debug_documents();
+        assert!(documents
+            .iter()
+            .any(|document| document.contains("versioned_tick_telemetry")));
+        assert!(documents
+            .iter()
+            .any(|document| document.contains("agent_tool_call_event")));
+        assert!(documents
+            .iter()
+            .any(|document| document.contains("agent_tick_rollup")));
+        assert!(documents
+            .iter()
+            .any(|document| document.contains("replay_file")));
+        assert!(documents
+            .iter()
+            .any(|document| document.contains("shard_incident_summary")));
+        assert!(client
+            .last_debug_document()
+            .expect("latest telemetry document retained")
             .contains("versioned_tick_telemetry"));
     }
 

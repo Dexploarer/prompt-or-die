@@ -310,6 +310,59 @@ export interface ShardIncidentSummary {
   notes: string[];
 }
 
+export interface AgentToolCallEventDocument {
+  tick: number;
+  agent_entity_id: number;
+  trace: TelemetryToolCallTrace;
+}
+
+export interface AgentTickRollupDocument {
+  tick_start: number;
+  tick_end: number;
+  agent_entity_id: number;
+  total_distance: number;
+  submitted_action_count: number;
+  executed_action_count: number;
+  rejected_action_count: number;
+  tool_call_count: number;
+  tool_error_count: number;
+  visible_entity_count: number;
+  audible_event_count: number;
+  message_count: number;
+  average_tool_latency_ms: number;
+}
+
+export interface ToolCallEventSummary {
+  agentEntityId: number;
+  toolName: string;
+  provider: string;
+  status: string;
+  latencyMs: number;
+  requestUnits: number;
+  responseUnits: number;
+  errorMessage: string | null;
+}
+
+export interface TickRollupSummary {
+  agentEntityId: number;
+  tickStart: number;
+  tickEnd: number;
+  totalDistance: number;
+  rejectedActionCount: number;
+  toolErrorCount: number;
+  averageToolLatencyMs: number;
+  visibleEntityCount: number;
+  audibleEventCount: number;
+  messageCount: number;
+}
+
+export type LiveDebugDocument =
+  | { kind: "tickTelemetry"; documentType: string; payload: TickTelemetryEnvelope }
+  | { kind: "toolCallEvent"; documentType: string; payload: AgentToolCallEventDocument }
+  | { kind: "tickRollup"; documentType: string; payload: AgentTickRollupDocument }
+  | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
+  | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
+
 interface ToonDocumentEnvelope<T = unknown> {
   document_type: string;
   payload: T;
@@ -503,6 +556,126 @@ export function parseShardIncidentSummary(
   }
 
   throw new Error("Invalid shard incident summary payload");
+}
+
+export function parseAgentToolCallEvent(
+  event: string | AgentToolCallEventDocument
+): AgentToolCallEventDocument {
+  const parsed =
+    typeof event === "string" ? decodeStructuredString(event) : event;
+  const eventDocument = documentEnvelope(parsed);
+
+  if (eventDocument?.document_type === "agent_tool_call_event") {
+    return eventDocument.payload as AgentToolCallEventDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.tick === "number" &&
+    typeof parsed.agent_entity_id === "number" &&
+    isRecord(parsed.trace)
+  ) {
+    return parsed as unknown as AgentToolCallEventDocument;
+  }
+
+  throw new Error("Invalid agent tool-call event payload");
+}
+
+export function summarizeAgentToolCallEvent(
+  event: AgentToolCallEventDocument
+): ToolCallEventSummary {
+  return {
+    agentEntityId: event.agent_entity_id,
+    toolName: event.trace.tool_name,
+    provider: event.trace.provider,
+    status: event.trace.status,
+    latencyMs: event.trace.latency_ms,
+    requestUnits: event.trace.request_units,
+    responseUnits: event.trace.response_units,
+    errorMessage: event.trace.error_message ?? null
+  };
+}
+
+export function parseAgentTickRollup(
+  rollup: string | AgentTickRollupDocument
+): AgentTickRollupDocument {
+  const parsed =
+    typeof rollup === "string" ? decodeStructuredString(rollup) : rollup;
+  const rollupDocument = documentEnvelope(parsed);
+
+  if (rollupDocument?.document_type === "agent_tick_rollup") {
+    return rollupDocument.payload as AgentTickRollupDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.tick_start === "number" &&
+    typeof parsed.tick_end === "number" &&
+    typeof parsed.agent_entity_id === "number"
+  ) {
+    return parsed as unknown as AgentTickRollupDocument;
+  }
+
+  throw new Error("Invalid agent tick rollup payload");
+}
+
+export function summarizeAgentTickRollup(
+  rollup: AgentTickRollupDocument
+): TickRollupSummary {
+  return {
+    agentEntityId: rollup.agent_entity_id,
+    tickStart: rollup.tick_start,
+    tickEnd: rollup.tick_end,
+    totalDistance: Number(rollup.total_distance.toFixed(2)),
+    rejectedActionCount: rollup.rejected_action_count,
+    toolErrorCount: rollup.tool_error_count,
+    averageToolLatencyMs: Number(rollup.average_tool_latency_ms.toFixed(2)),
+    visibleEntityCount: rollup.visible_entity_count,
+    audibleEventCount: rollup.audible_event_count,
+    messageCount: rollup.message_count
+  };
+}
+
+export function parseLiveDebugDocument(document: string): LiveDebugDocument {
+  const parsed = decodeStructuredString(document);
+  const envelope = documentEnvelope(parsed);
+
+  switch (envelope?.document_type) {
+    case "tick_telemetry_envelope":
+    case "tick_telemetry_frame":
+    case "versioned_tick_telemetry":
+      return {
+        kind: "tickTelemetry",
+        documentType: envelope.document_type,
+        payload: parseTickTelemetryEnvelope(document)
+      };
+    case "agent_tool_call_event":
+      return {
+        kind: "toolCallEvent",
+        documentType: envelope.document_type,
+        payload: parseAgentToolCallEvent(document)
+      };
+    case "agent_tick_rollup":
+      return {
+        kind: "tickRollup",
+        documentType: envelope.document_type,
+        payload: parseAgentTickRollup(document)
+      };
+    case "replay_file":
+      return {
+        kind: "replay",
+        documentType: envelope.document_type,
+        payload: parseReplayFile(document)
+      };
+    case "shard_incident_summary":
+      return {
+        kind: "incident",
+        documentType: envelope.document_type,
+        payload: parseShardIncidentSummary(document)
+      };
+    default:
+      throw new Error("Unsupported live debug document payload");
+  }
 }
 
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {

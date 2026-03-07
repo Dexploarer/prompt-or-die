@@ -12,9 +12,10 @@
 use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
-    decode_toon_document, encode_toon_document, Action, ActionLifecycleStage, AgentTelemetryFrame,
-    AgentType, CreatureIdentity, CreatureTemperament, ReplayFile,
-    ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
+    AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, CreatureIdentity,
+    CreatureTemperament, ReplayFile, ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame,
+    ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -566,6 +567,10 @@ pub struct SpacetimeDashboardState {
     pub loot_actions: usize,
     #[serde(default)]
     pub latest_incident_summary: Option<ShardIncidentSummary>,
+    #[serde(default)]
+    pub recent_tool_call_events: VecDeque<AgentToolCallEvent>,
+    #[serde(default)]
+    pub recent_tick_rollups: VecDeque<AgentTickRollup>,
     pub last_reducer_call: String,
     pub reducer_calls: u32,
 }
@@ -588,6 +593,8 @@ impl Default for SpacetimeDashboardState {
             gather_actions: 0,
             loot_actions: 0,
             latest_incident_summary: None,
+            recent_tool_call_events: VecDeque::new(),
+            recent_tick_rollups: VecDeque::new(),
             last_reducer_call: "none".to_string(),
             reducer_calls: 0,
         }
@@ -754,6 +761,102 @@ impl SpacetimeDashboardState {
         self.latest_incident_summary = Some(summary);
     }
 
+    pub fn apply_tool_call_event(&mut self, event: AgentToolCallEvent) {
+        retain_recent_debug_docs(
+            &mut self.recent_tool_call_events,
+            TelemetryConfig::default().editor_timeline_ticks,
+        );
+        self.latest_tick = self.latest_tick.max(event.tick);
+        self.recent_tool_call_events.push_back(event);
+
+        let total_tool_calls = self.recent_tool_call_events.len();
+        let tool_errors = self
+            .recent_tool_call_events
+            .iter()
+            .filter(|event| {
+                !matches!(
+                    event.trace.status,
+                    ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                )
+            })
+            .count();
+        self.tool_call_error_rate = if total_tool_calls == 0 {
+            0.0
+        } else {
+            tool_errors as f32 / total_tool_calls as f32
+        };
+        self.average_tool_latency_ms = if total_tool_calls == 0 {
+            0.0
+        } else {
+            self.recent_tool_call_events
+                .iter()
+                .map(|event| event.trace.latency_ms as f32)
+                .sum::<f32>()
+                / total_tool_calls as f32
+        };
+    }
+
+    pub fn apply_tick_rollup(&mut self, rollup: AgentTickRollup) {
+        retain_recent_debug_docs(
+            &mut self.recent_tick_rollups,
+            TelemetryConfig::default().editor_timeline_ticks,
+        );
+        self.latest_tick = self.latest_tick.max(rollup.tick_end);
+        self.visible_entity_count = rollup.visible_entity_count as usize;
+        self.audible_event_count = rollup.audible_event_count as usize;
+        self.message_count = rollup.message_count as usize;
+        self.recent_tick_rollups.push_back(rollup.clone());
+
+        let total_actions = self
+            .recent_tick_rollups
+            .iter()
+            .map(|rollup| {
+                rollup.submitted_action_count
+                    + rollup.executed_action_count
+                    + rollup.rejected_action_count
+            })
+            .sum::<u32>();
+        let total_rejected = self
+            .recent_tick_rollups
+            .iter()
+            .map(|rollup| rollup.rejected_action_count)
+            .sum::<u32>();
+        self.action_rejection_rate = if total_actions == 0 {
+            0.0
+        } else {
+            total_rejected as f32 / total_actions as f32
+        };
+        self.average_trajectory_distance = if self.recent_tick_rollups.is_empty() {
+            0.0
+        } else {
+            self.recent_tick_rollups
+                .iter()
+                .map(|rollup| rollup.total_distance)
+                .sum::<f32>()
+                / self.recent_tick_rollups.len() as f32
+        };
+
+        match self
+            .agent_summaries
+            .iter_mut()
+            .find(|summary| summary.entity_id == Some(rollup.agent_entity_id))
+        {
+            Some(summary) => {
+                summary.trajectory_distance = rollup.total_distance;
+                summary.rejected_actions = rollup.rejected_action_count as usize;
+                summary.tool_errors = rollup.tool_error_count as usize;
+            }
+            None => self.agent_summaries.push(TelemetryAgentSummary {
+                agent_id: format!("entity:{}", rollup.agent_entity_id),
+                entity_id: Some(rollup.agent_entity_id),
+                role: "Rollup".to_string(),
+                trajectory_distance: rollup.total_distance,
+                rejected_actions: rollup.rejected_action_count as usize,
+                tool_errors: rollup.tool_error_count as usize,
+            }),
+        }
+    }
+
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("editor_spacetime_dashboard", self)
     }
@@ -842,6 +945,12 @@ impl TelemetryPanelState {
 
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("editor_telemetry_panel", self)
+    }
+}
+
+fn retain_recent_debug_docs<T>(entries: &mut VecDeque<T>, max_entries: usize) {
+    while entries.len() >= max_entries.max(1) {
+        entries.pop_front();
     }
 }
 
@@ -2049,6 +2158,83 @@ impl PodEditorApp {
         Ok(())
     }
 
+    pub fn import_agent_tool_call_toon_document(&mut self, document: &str) -> Result<(), String> {
+        let event: AgentToolCallEvent = decode_toon_document(document, "agent_tool_call_event")?;
+        let agent_entity_id = event.agent_entity_id;
+
+        self.history.remember(self.state.clone());
+        self.state.spacetime_dashboard.apply_tool_call_event(event);
+        self.push_console(format!(
+            "Imported live tool-call event for entity {agent_entity_id}"
+        ));
+        Ok(())
+    }
+
+    pub fn import_agent_tick_rollup_toon_document(&mut self, document: &str) -> Result<(), String> {
+        let rollup: AgentTickRollup = decode_toon_document(document, "agent_tick_rollup")?;
+        let agent_entity_id = rollup.agent_entity_id;
+
+        self.history.remember(self.state.clone());
+        self.state.spacetime_dashboard.apply_tick_rollup(rollup);
+        self.push_console(format!(
+            "Imported telemetry rollup for entity {agent_entity_id}"
+        ));
+        Ok(())
+    }
+
+    pub fn import_live_debug_toon_document(&mut self, document: &str) -> Result<(), String> {
+        let document_type = decode_toon_value(document)?
+            .get("document_type")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| "Missing TOON document_type".to_string())?
+            .to_string();
+
+        match document_type.as_str() {
+            "versioned_tick_telemetry" => {
+                let telemetry: VersionedTickTelemetry =
+                    decode_toon_document(document, "versioned_tick_telemetry")?;
+                self.history.remember(self.state.clone());
+                self.record_tick_telemetry(telemetry.payload);
+                self.push_console("Imported live tick telemetry".to_string());
+                Ok(())
+            }
+            "tick_telemetry_frame" => {
+                let telemetry: TickTelemetryFrame =
+                    decode_toon_document(document, "tick_telemetry_frame")?;
+                self.history.remember(self.state.clone());
+                self.record_tick_telemetry(telemetry);
+                self.push_console("Imported live tick telemetry".to_string());
+                Ok(())
+            }
+            "agent_tool_call_event" => self.import_agent_tool_call_toon_document(document),
+            "agent_tick_rollup" => self.import_agent_tick_rollup_toon_document(document),
+            "replay_file" => {
+                let replay: ReplayFile = decode_toon_document(document, "replay_file")?;
+                let replay_name = replay.header.name.clone();
+                let telemetry_windows = replay.telemetry_windows.clone();
+
+                self.history.remember(self.state.clone());
+                self.state.latest_replay = Some(replay);
+                if self.state.telemetry.latest().is_none() && !telemetry_windows.is_empty() {
+                    self.state
+                        .telemetry
+                        .replace_timeline(telemetry_windows.clone());
+                    if let Some(last_frame) = telemetry_windows.last() {
+                        self.state
+                            .spacetime_dashboard
+                            .record_tick_telemetry(last_frame);
+                    }
+                }
+                self.push_console(format!("Streamed live replay {replay_name}"));
+                Ok(())
+            }
+            "shard_incident_summary" => self.import_shard_incident_toon_document(document),
+            _ => Err(format!(
+                "Unsupported live debug document type `{document_type}`"
+            )),
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
@@ -3245,6 +3431,38 @@ mod tests {
         }
     }
 
+    fn sample_tool_call_event(tick: u64, entity_id: u64) -> AgentToolCallEvent {
+        AgentToolCallEvent::new(
+            entity_id,
+            AgentToolCallTrace::failure(
+                tick,
+                "llm.complete",
+                "qwen",
+                ToolCallStatus::TimedOut,
+                48,
+                "timeout",
+            ),
+        )
+    }
+
+    fn sample_tick_rollup(entity_id: u64) -> AgentTickRollup {
+        AgentTickRollup {
+            tick_start: 10,
+            tick_end: 15,
+            agent_entity_id: entity_id,
+            total_distance: 16.75,
+            submitted_action_count: 4,
+            executed_action_count: 3,
+            rejected_action_count: 1,
+            tool_call_count: 1,
+            tool_error_count: 1,
+            visible_entity_count: 12,
+            audible_event_count: 3,
+            message_count: 2,
+            average_tool_latency_ms: 48.0,
+        }
+    }
+
     #[test]
     fn editor_default_state_is_viewport() {
         let app = PodEditorApp::default();
@@ -3669,6 +3887,92 @@ mod tests {
         assert_eq!(incident.shard_id, "alpha-1");
         assert_eq!(app.state.spacetime_dashboard.average_tool_latency_ms, 820.0);
         assert_eq!(app.state.spacetime_dashboard.capture_actions, 4);
+    }
+
+    #[test]
+    fn editor_imports_live_tool_call_and_rollup_toon_documents() {
+        let mut app = PodEditorApp::default();
+        let tool_event = sample_tool_call_event(16, 1001);
+        let rollup = sample_tick_rollup(1001);
+
+        app.import_agent_tool_call_toon_document(&tool_event.to_toon_document())
+            .expect("tool-call TOON should import");
+        app.import_agent_tick_rollup_toon_document(&rollup.to_toon_document())
+            .expect("rollup TOON should import");
+
+        assert_eq!(
+            app.state.spacetime_dashboard.recent_tool_call_events.len(),
+            1
+        );
+        assert_eq!(app.state.spacetime_dashboard.recent_tick_rollups.len(), 1);
+        assert!(app.state.spacetime_dashboard.tool_call_error_rate > 0.0);
+        assert_eq!(app.state.spacetime_dashboard.visible_entity_count, 12);
+        assert_eq!(app.state.spacetime_dashboard.agent_summaries.len(), 1);
+    }
+
+    #[test]
+    fn editor_routes_live_debug_toon_documents_into_existing_surfaces() {
+        let mut app = PodEditorApp::default();
+        let replay = sample_replay_file();
+        let incident = ShardIncidentSummary {
+            shard_id: "alpha-2".to_string(),
+            latest_tick: 360,
+            severity: pod_core::IncidentSeverity::Warning,
+            summary: "Shard alpha-2 requires attention".to_string(),
+            tick_budget_overrun_rate: 0.08,
+            action_rejection_rate: 0.02,
+            tool_call_error_rate: 0.11,
+            average_tool_latency_ms: 820.0,
+            average_trajectory_distance: 3.2,
+            peak_entity_count: 512,
+            peak_agent_count: 128,
+            capture_actions: 4,
+            summon_actions: 2,
+            gather_actions: 7,
+            loot_actions: 9,
+            notes: vec!["tool-call error rate exceeds 10%".to_string()],
+        };
+
+        app.import_live_debug_toon_document(
+            &VersionedTickTelemetry::new(sample_tick_telemetry(18, 1001)).to_toon_document(),
+        )
+        .expect("telemetry TOON should route");
+        app.import_live_debug_toon_document(&sample_tool_call_event(18, 1001).to_toon_document())
+            .expect("tool-call TOON should route");
+        app.import_live_debug_toon_document(&sample_tick_rollup(1001).to_toon_document())
+            .expect("rollup TOON should route");
+        app.import_live_debug_toon_document(&replay.to_toon_document())
+            .expect("replay TOON should route");
+        app.import_live_debug_toon_document(&incident.to_toon_document())
+            .expect("incident TOON should route");
+
+        assert_eq!(
+            app.state.telemetry.latest().expect("telemetry stored").tick,
+            18
+        );
+        assert_eq!(
+            app.state
+                .latest_replay
+                .as_ref()
+                .expect("replay stored")
+                .header
+                .name,
+            "flagship-mmo-loop"
+        );
+        assert_eq!(
+            app.state
+                .spacetime_dashboard
+                .latest_incident_summary
+                .as_ref()
+                .expect("incident stored")
+                .shard_id,
+            "alpha-2"
+        );
+        assert_eq!(
+            app.state.spacetime_dashboard.recent_tool_call_events.len(),
+            1
+        );
+        assert_eq!(app.state.spacetime_dashboard.recent_tick_rollups.len(), 1);
     }
 
     #[test]
