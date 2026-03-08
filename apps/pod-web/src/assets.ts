@@ -202,6 +202,8 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
   private readonly spriteDescriptorCache = new Map<string, PodThreeSpriteAssetDescriptor | null>();
   private readonly residentGeometryAssets = new Set<string>();
   private readonly residentSpriteAssets = new Set<string>();
+  private readonly warnedGeometryFallbacks = new Set<string>();
+  private readonly warnedSpriteFallbacks = new Set<string>();
 
   constructor(private readonly options: ManifestBackedPodThreeAssetRegistryOptions) {
     this.fallbackRegistry = options.fallbackRegistry ?? new DefaultPodThreeAssetRegistry();
@@ -224,9 +226,10 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
     }
 
     const pending = this.options.geometryLoader.load(assetPath).catch(async (error) => {
-      this.geometryCache.delete(cacheKey);
-      this.residentGeometryAssets.delete(cacheKey);
-      console.warn(`Falling back to procedural mesh asset for ${batch.mesh}`, error);
+      if (!this.warnedGeometryFallbacks.has(cacheKey)) {
+        this.warnedGeometryFallbacks.add(cacheKey);
+        console.warn(`Falling back to procedural mesh asset for ${batch.mesh}`, error);
+      }
       return await Promise.resolve(this.fallbackRegistry.resolveGeometry(batch, lodLevel));
     });
     void pending.then(() => {
@@ -254,9 +257,10 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
     }
 
     const pending = this.loadSpriteTexture(descriptor, assetPath, anisotropy).catch(async (error) => {
-      this.textureCache.delete(cacheKey);
-      this.residentSpriteAssets.delete(cacheKey);
-      console.warn(`Falling back to procedural sprite asset for ${batch.texture}`, error);
+      if (!this.warnedSpriteFallbacks.has(cacheKey)) {
+        this.warnedSpriteFallbacks.add(cacheKey);
+        console.warn(`Falling back to procedural sprite asset for ${batch.texture}`, error);
+      }
       return await Promise.resolve(this.fallbackRegistry.resolveSpriteTexture(batch, anisotropy));
     });
     void pending.then(() => {
@@ -514,7 +518,16 @@ export function createSpriteMaterial(
 export const OVERLAY_PLANE_GEOMETRY = new PlaneGeometry(1, 1);
 export const SPRITE_PLANE_GEOMETRY = new PlaneGeometry(1, 1);
 
-function createRadialTexture(color: [number, number, number]): Texture {
+export function createProceduralSpriteTexture(assetPath: string): Texture {
+  const normalized = normalizeAssetKey(assetPath);
+  const color = spritePalette(assetPath);
+  if (normalized.includes("ring")) {
+    return createRingTexture(color, assetPath);
+  }
+  return createRadialTexture(color, assetPath);
+}
+
+function createRadialTexture(color: [number, number, number], assetPath?: string): Texture {
   const size = 32;
   const pixels = new Uint8Array(size * size * 4);
 
@@ -538,7 +551,40 @@ function createRadialTexture(color: [number, number, number]): Texture {
   texture.colorSpace = SRGBColorSpace;
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
-  texture.name = "pod-fallback-sprite";
+  texture.name = assetPath
+    ? `pod-procedural-sprite:${normalizeAssetKey(assetPath)}`
+    : "pod-fallback-sprite";
+  return texture;
+}
+
+function createRingTexture(color: [number, number, number], assetPath: string): Texture {
+  const size = 64;
+  const pixels = new Uint8Array(size * size * 4);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4;
+      const dx = (x / (size - 1)) * 2 - 1;
+      const dy = (y / (size - 1)) * 2 - 1;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const outerFade = clamp01((0.9 - distance) / 0.08);
+      const innerFade = clamp01((distance - 0.52) / 0.08);
+      const glow = clamp01((0.72 - Math.abs(distance - 0.72)) / 0.18);
+      const alpha = clamp01(Math.min(outerFade, innerFade) * 0.85 + glow * 0.25);
+
+      pixels[index] = color[0];
+      pixels[index + 1] = color[1];
+      pixels[index + 2] = color[2];
+      pixels[index + 3] = Math.round(alpha * 255);
+    }
+  }
+
+  const texture = new DataTexture(pixels, size, size);
+  texture.needsUpdate = true;
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.name = `pod-procedural-sprite:${normalizeAssetKey(assetPath)}`;
   return texture;
 }
 
@@ -593,6 +639,20 @@ function shouldUseToonShading(batch: ThreeJsMeshBatch): boolean {
       token
     )
   );
+}
+
+function spritePalette(assetPath: string): [number, number, number] {
+  const normalized = normalizeAssetKey(assetPath);
+  if (normalized.includes("danger")) {
+    return [246, 92, 92];
+  }
+  if (normalized.includes("mist")) {
+    return [132, 208, 255];
+  }
+  if (normalized.includes("selection") || normalized.includes("target") || normalized.includes("focus")) {
+    return [255, 212, 94];
+  }
+  return hashColor(assetPath);
 }
 
 function parseAssetRecord<T>(
@@ -794,7 +854,12 @@ async function createRuntimeAssetLoaders(options: {
         path: string,
         loaderOptions: { anisotropy: number; colorSpace: "srgb" | "none" }
       ): Promise<Texture> {
-        const texture = await textureLoader.loadAsync(path);
+        const texture =
+          typeof document === "object"
+            ? await textureLoader.loadAsync(path)
+            : path.endsWith(".svg")
+              ? createProceduralSpriteTexture(path)
+              : await loadWorkerSafeTexture(path);
         texture.colorSpace =
           loaderOptions.colorSpace === "none" ? NoColorSpace : SRGBColorSpace;
         texture.anisotropy = loaderOptions.anisotropy;
@@ -837,6 +902,22 @@ function extractPrimaryGeometry(root: { traverse: Mesh["traverse"] }, path: stri
   return primaryGeometry;
 }
 
+async function loadWorkerSafeTexture(path: string): Promise<Texture> {
+  if (typeof fetch !== "function" || typeof createImageBitmap !== "function") {
+    throw new Error(`Worker texture loading is unavailable for ${path}`);
+  }
+
+  const response = await fetch(path);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading ${path}`);
+  }
+
+  const image = await createImageBitmap(await response.blob());
+  const texture = new Texture(image);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
 }
@@ -853,4 +934,8 @@ function dedupeBy<T>(values: T[], keySelector: (value: T) => string): T[] {
     output.push(value);
   }
   return output;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }

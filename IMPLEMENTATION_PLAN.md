@@ -735,5 +735,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4173`
   - `git diff --check`
 
-**Last updated**: Iteration 77
-**Current focus**: Iteration 78 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache, worker/offscreen render execution, and replacing emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 78
+- [x] Added a real `OffscreenCanvas` render-worker runtime in `apps/pod-web`, with a dedicated worker module that owns `PodThreeWorldRenderer` off the main thread while keeping the HUD, input, and authoritative socket flow on the main thread.
+- [x] Added a creator-facing render-thread preference (`?renderThread=worker` / `?renderThread=main`) and a safe default of main-thread rendering until broader worker compatibility hardening is complete.
+- [x] Added worker-side render-command coalescing plus live worker stats propagation so the HUD can report `main` vs `worker` thread execution without blocking the gameplay/bootstrap path.
+- [x] Added deterministic Bun coverage for render-thread preference parsing and worker-capability gating.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4173?renderThread=worker`
+  - `git diff --check`
+
+**Last updated**: Iteration 78
+**Current focus**: Iteration 79 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache and replacing emulated SpacetimeDB client paths with generated typed bindings

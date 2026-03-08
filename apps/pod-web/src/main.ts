@@ -29,8 +29,8 @@ import {
   runtimeConfigFromLocation,
   type DirectConnectStatus
 } from "./direct-connect";
-import { PodThreeWorldRenderer } from "./renderer";
 import { createDemoFrame } from "./sample-frame";
+import { createPodRenderRuntime, type PodThreeRenderRuntime } from "./render-runtime";
 import {
   applyTickTelemetry,
   createTelemetryOverlayState,
@@ -55,7 +55,7 @@ declare global {
       resetTelemetry: () => void;
       resetDemo: () => void;
       getBackend: () => string;
-      getStats: () => ReturnType<PodThreeWorldRenderer["getStats"]>;
+      getStats: () => ReturnType<PodThreeRenderRuntime["getStats"]>;
       getTelemetryStats: () => ReturnType<typeof telemetryStats>;
       getReplaySummary: () => ReplaySummary | null;
       getIncidentSummary: () => ShardIncidentSummary | null;
@@ -156,9 +156,9 @@ const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
 
-const renderer = await PodThreeWorldRenderer.create(canvas);
+const renderer = await createPodRenderRuntime(canvas);
 backendLabel.textContent = renderer.backend;
-qualityLabel.textContent = renderer.quality.preset;
+qualityLabel.textContent = renderer.qualityPreset;
 const runtimeStatsLabel = statsLabel;
 const telemetryState = createTelemetryOverlayState(300);
 const runtimeConfig = runtimeConfigFromLocation(window.location);
@@ -206,8 +206,8 @@ const liveClient = runtimeConfig
         syncSelectedTarget();
         latestFrame = buildAuthoritativeWorldFrame(snapshot, {
           ...frameOptions,
-          viewportWidth: canvas.clientWidth || window.innerWidth,
-          viewportHeight: canvas.clientHeight || window.innerHeight
+      viewportWidth: canvas.clientWidth || window.innerWidth,
+      viewportHeight: canvas.clientHeight || window.innerHeight
         });
         liveFrameSource = "threejs";
         frameSourceLabel.textContent = "authoritative websocket";
@@ -564,7 +564,7 @@ window.podRender = {
   streamShardIncidentSummary(document: string) {
     applyLiveDebugDocument(document);
   },
-  resetTelemetry() {
+    resetTelemetry() {
     resetTelemetry(telemetryState);
     renderer.clearTelemetryTrail();
   },
@@ -646,7 +646,7 @@ async function tick(timestamp: number): Promise<void> {
   const stats = renderer.getStats();
   runtimeStatsLabel.textContent = `${stats.drawCalls} calls · ${stats.triangles} tris · ${stats.pixelRatio.toFixed(
     2
-  )}x DPR · ${stats.frameMs.toFixed(1)}ms · assets ${
+  )}x DPR · ${stats.frameMs.toFixed(1)}ms · ${stats.renderThread} thread · assets ${
     stats.residentGeometryAssets + stats.residentSpriteAssets
   } resident / ${stats.pendingGeometryAssets + stats.pendingSpriteAssets} pending`;
   renderTelemetryHud();
