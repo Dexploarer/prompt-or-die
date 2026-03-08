@@ -23,6 +23,7 @@ import {
   withInteractionMarkers,
   withWorldEventMarkers
 } from "./contracts";
+import { sampleTerrainHeight } from "./landscape";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -805,6 +806,10 @@ describe("TOON contract parsing", () => {
     expect(heroInstance?.animationSetId).toBe("hero-runescape");
     expect(heroInstance?.motionSpeed).toBeGreaterThan(0.3);
     expect(heroInstance?.controlled).toBe(true);
+    expect(heroInstance?.position[1]).toBeCloseTo(
+      sampleTerrainHeight(8, 10) + 1.205 * (2.0 * 1.15) + 0.1,
+      5
+    );
     const selectionRing = frame.spriteBatches.find(
       (batch) => batch.texture === "selection-ring"
     );
@@ -822,6 +827,13 @@ describe("TOON contract parsing", () => {
     );
     expect(criticalRing?.instances[0]?.scale).toEqual([4.2, 4.2, 1]);
     expect(criticalRing?.instances[0]?.color).toEqual([1, 0.18, 0.16, 0.5]);
+    const beastInstance = frame.meshBatches
+      .flatMap((batch) => batch.instances)
+      .find((instance) => instance.sourceEntity === 9);
+    expect(beastInstance?.position[1]).toBeCloseTo(
+      sampleTerrainHeight(12, 10) + 1.1 * 1.9 + 0.08,
+      5
+    );
   });
 
   test("adds point-click and target selection markers without mutating the base frame", () => {
