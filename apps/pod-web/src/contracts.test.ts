@@ -25,7 +25,13 @@ import {
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
   return {
     kind,
+    chunk_key: null,
+    region_id: null,
+    region_name: null,
     team_id: null,
+    quest_graph_ids: [],
+    faction_track_id: null,
+    encounter_table_id: null,
     combat_style: null,
     species_id: null,
     species_name: null,
@@ -60,7 +66,13 @@ function typedEntityMetadata(
 ): NetworkEntityMetadataSnapshot {
   return {
     kind,
+    chunkKey: null,
+    regionId: null,
+    regionName: null,
     teamId: null,
+    questGraphIds: [],
+    factionTrackId: null,
+    encounterTableId: null,
     combatStyle: null,
     speciesId: null,
     speciesName: null,
@@ -317,6 +329,9 @@ describe("TOON contract parsing", () => {
                 rotation: 0.4,
                 label: "Hero",
                 metadata: entityMetadata("Player", {
+                  chunk_key: "0:0",
+                  region_id: "verdant-heart",
+                  region_name: "Verdant Heart",
                   faction: {
                     faction_id: "verdant-wardens",
                     role_id: "initiate",
@@ -347,6 +362,8 @@ describe("TOON contract parsing", () => {
     }
     expect(welcome.snapshot.entities[0]?.position).toEqual([12, 18]);
     expect(welcome.snapshot.entities[0]?.metadata.kind).toBe("Player");
+    expect(welcome.snapshot.entities[0]?.metadata.chunkKey).toBe("0:0");
+    expect(welcome.snapshot.entities[0]?.metadata.regionId).toBe("verdant-heart");
     expect(welcome.snapshot.entities[0]?.metadata.faction?.factionId).toBe("verdant-wardens");
 
     const delta = parseDirectConnectServerMessage(
@@ -366,6 +383,12 @@ describe("TOON contract parsing", () => {
                 rotation: 0.55,
                 label: "Hero",
                 metadata: entityMetadata("Player", {
+                  chunk_key: "0:1",
+                  region_id: "spirewatch",
+                  region_name: "Spirewatch Rise",
+                  quest_graph_ids: ["verdant-intro", "spire-attunement"],
+                  faction_track_id: "verdant-wardens",
+                  encounter_table_id: "spirewatch-encounters",
                   team_id: 2,
                   quest_anchor: {
                     quest_ids: ["verdant-intro"],
@@ -398,6 +421,13 @@ describe("TOON contract parsing", () => {
     expect(delta.delta.updated[0]?.position).toEqual([14, 19]);
     expect(delta.acknowledgedActionTick).toBe(12);
     expect(delta.delta.updated[0]?.metadata.teamId).toBe(2);
+    expect(delta.delta.updated[0]?.metadata.chunkKey).toBe("0:1");
+    expect(delta.delta.updated[0]?.metadata.regionName).toBe("Spirewatch Rise");
+    expect(delta.delta.updated[0]?.metadata.questGraphIds).toEqual([
+      "verdant-intro",
+      "spire-attunement"
+    ]);
+    expect(delta.delta.updated[0]?.metadata.factionTrackId).toBe("verdant-wardens");
     expect(delta.delta.updated[0]?.metadata.questAnchor?.questIds).toEqual([
       "verdant-intro"
     ]);

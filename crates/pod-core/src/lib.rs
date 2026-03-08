@@ -66,9 +66,11 @@ pub use constraint::{
     ValidationPipeline,
 };
 pub use contract::{
-    AgentCapabilities, AgentRole, AgentRuntimeProfile, RuntimeContractVersion, ToolBudget,
-    ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
-    VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+    AgentCapabilities, AgentRole, AgentRuntimeProfile, EncounterSpawnEntry, FactionReputationTier,
+    FactionReputationTrack, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
+    RuntimeContractVersion, ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest,
+    ToolInvocationResult, ToolPolicy, VersionedAgentAction, VersionedObservation,
+    VersionedTickTelemetry, WorldChunkDefinition, WorldRegionDefinition,
     RUNTIME_CONTRACT_VERSION_V1,
 };
 pub use event::*;

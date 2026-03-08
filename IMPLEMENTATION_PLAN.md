@@ -807,5 +807,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 83
-**Current focus**: Iteration 84 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, and higher-level creator workflows for quest-state graphs, faction reputation progression, and encounter-table driven population across streamed world regions
+### Iteration 84
+- [x] Added native creator-region contracts in `pod-core` for `QuestStateGraph`, `FactionReputationTrack`, `RegionEncounterTable`, `WorldChunkDefinition`, and `WorldRegionDefinition`, and registered them in the core type registry so editor/runtime/AI tooling can share explicit quest-graph, reputation, encounter-table, and streamed-region definitions instead of reconstructing them from labels.
+- [x] Extended authoritative `pod-net` entity metadata with creator-facing association ids such as `quest_graph_ids`, `faction_track_id`, and `encounter_table_id`, and updated snapshot hashing/tests so browser consumers can reason about authored world relationships from the network layer instead of only the local sandbox.
+- [x] Reworked `apps/pod-web` local flagship world into a chunked authored sandbox with live chunk activation/deactivation, persisted per-chunk entity state, progression-gated regional population, and richer debug text for active chunks, current region, quest graphs, faction reputation, and encounter tables.
+- [x] Added deterministic coverage for the new core contracts, network metadata associations, chunk streaming transitions, and progression-gated region unlocks in the browser sandbox.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cd apps/pod-web && bun test ./src/local-world.test.ts ./src/contracts.test.ts ./src/affordances.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 84
+**Current focus**: Iteration 85 browser-first flagship world delivery, continuing with real shard-side region/chunk metadata, creator/editor graph tooling for quests and faction reputation, and higher-density streamed world population beyond the local sandbox

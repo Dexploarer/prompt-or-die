@@ -8,7 +8,13 @@ function metadata(
 ): NetworkEntityMetadataSnapshot {
   return {
     kind: "Unknown",
+    chunkKey: null,
+    regionId: null,
+    regionName: null,
     teamId: null,
+    questGraphIds: [],
+    factionTrackId: null,
+    encounterTableId: null,
     combatStyle: null,
     speciesId: null,
     speciesName: null,

@@ -85,11 +85,14 @@ describe("PodWebLocalWorld", () => {
       world.currentActionState(),
       "sandbox ready",
       [],
-      world.companionRoster()
+      world.companionRoster(),
+      world.currentDebugState()
     );
     expect(textState).toContain("\"mode\":\"local-sandbox\"");
     expect(textState).toContain("\"world\":\"Verdant Hollow\"");
     expect(textState).toContain("\"coordinateSystem\":\"world x east-west, y north-south\"");
+    expect(textState).toContain("\"streaming\"");
+    expect(textState).toContain("\"progression\"");
   });
 
   test("supports gathering and looting loops", () => {
@@ -136,5 +139,47 @@ describe("PodWebLocalWorld", () => {
     const batch = world.drainEventBatch();
     expect(batch?.events.some((event) => event.summary.includes("Captured Verdant Lynx"))).toBe(true);
     expect(batch?.events.some((event) => event.summary.includes("Summoned Verdant Lynx"))).toBe(true);
+  });
+
+  test("streams authored chunks as the player crosses region boundaries", () => {
+    const world = new PodWebLocalWorld("Scout");
+    world.connect();
+
+    const initial = world.snapshotState();
+    expect(initial.entities.some((entity) => entity.id === 22)).toBe(false);
+    expect(initial.entities.some((entity) => entity.id === 31)).toBe(true);
+    expect(world.currentDebugState().activeChunkKeys).toContain("0:0");
+
+    world.submitActions([{ kind: "move", direction: [-1, 0] }]);
+    stepTicks(world, 120);
+    world.submitActions([{ kind: "stop" }]);
+    stepTicks(world, 1);
+
+    const streamed = world.snapshotState();
+    expect(streamed.entities.some((entity) => entity.id === 22)).toBe(true);
+    expect(streamed.entities.some((entity) => entity.id === 31)).toBe(false);
+    expect(world.currentDebugState().currentRegionId).toBe("gloamwood-edge");
+  });
+
+  test("gates region resources behind quest and reputation progression", () => {
+    const world = new PodWebLocalWorld("Scout");
+    world.connect();
+
+    expect(world.snapshotState().entities.some((entity) => entity.id === 11)).toBe(false);
+
+    moveToward(world, 2, 36);
+    world.submitActions([{ kind: "interactWith", target: 2 }]);
+    stepTicks(world, 2);
+
+    moveToward(world, 9, 80);
+    moveToward(world, 26, 80);
+    world.submitActions([{ kind: "interactWith", target: 26 }]);
+    stepTicks(world, 2);
+
+    const snapshot = world.snapshotState();
+    expect(snapshot.entities.some((entity) => entity.id === 11)).toBe(true);
+    const debug = world.currentDebugState();
+    expect(debug.factionReputation.some((track) => track.trackId === "ancient-spirekeepers" && track.tierId === "noticed")).toBe(true);
+    expect(debug.questGraphs.some((graph) => graph.graphId === "spire-attunement" && graph.currentStageTags.includes("attuned"))).toBe(true);
   });
 });

@@ -330,6 +330,16 @@ impl App {
         self.types.register_contract::<Observation>("Observation");
         self.types.register_contract::<AgentAction>("AgentAction");
         self.types
+            .register_contract::<crate::contract::QuestStateGraph>("QuestStateGraph");
+        self.types
+            .register_contract::<crate::contract::FactionReputationTrack>("FactionReputationTrack");
+        self.types
+            .register_contract::<crate::contract::RegionEncounterTable>("RegionEncounterTable");
+        self.types
+            .register_contract::<crate::contract::WorldChunkDefinition>("WorldChunkDefinition");
+        self.types
+            .register_contract::<crate::contract::WorldRegionDefinition>("WorldRegionDefinition");
+        self.types
             .register_contract::<ToolDefinition>("ToolDefinition");
         self.types.register_contract::<ToolCatalog>("ToolCatalog");
         self.types.register_contract::<ToolPolicy>("ToolPolicy");

@@ -11,8 +11,8 @@ use std::ops::Deref;
 use pod_core::{
     Action, ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout,
     CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterProfile,
-    EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer,
-    Movement, QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
+    EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer, Movement,
+    QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
 };
 
 const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
@@ -86,7 +86,13 @@ pub struct EntityInteractionHints {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EntityMetadataSnapshot {
     pub kind: EntityKind,
+    pub chunk_key: Option<String>,
+    pub region_id: Option<String>,
+    pub region_name: Option<String>,
     pub team_id: Option<u8>,
+    pub quest_graph_ids: Vec<String>,
+    pub faction_track_id: Option<String>,
+    pub encounter_table_id: Option<String>,
     pub combat_style: Option<CombatStyle>,
     pub species_id: Option<String>,
     pub species_name: Option<String>,
@@ -544,7 +550,18 @@ impl WorldSnapshot {
                 label,
                 metadata: EntityMetadataSnapshot {
                     kind,
+                    chunk_key: None,
+                    region_id: None,
+                    region_name: None,
                     team_id,
+                    quest_graph_ids: quest_anchor
+                        .as_ref()
+                        .map(|value| value.quest_ids.clone())
+                        .unwrap_or_default(),
+                    faction_track_id: faction.as_ref().map(|value| value.faction_id.clone()),
+                    encounter_table_id: encounter_profile
+                        .as_ref()
+                        .map(|value| value.table_id.clone()),
                     combat_style: combat_loadout.as_ref().map(|loadout| loadout.style),
                     species_id: creature
                         .as_ref()
@@ -1218,7 +1235,16 @@ fn hash_option_u8(hash: &mut u64, value: Option<u8>) {
 
 fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_option_str(hash, Some(entity_kind_name(metadata.kind)));
+    hash_option_str(hash, metadata.chunk_key.as_deref());
+    hash_option_str(hash, metadata.region_id.as_deref());
+    hash_option_str(hash, metadata.region_name.as_deref());
     hash_option_u8(hash, metadata.team_id);
+    hash_u64(hash, metadata.quest_graph_ids.len() as u64);
+    for quest_graph_id in &metadata.quest_graph_ids {
+        hash_option_str(hash, Some(quest_graph_id.as_str()));
+    }
+    hash_option_str(hash, metadata.faction_track_id.as_deref());
+    hash_option_str(hash, metadata.encounter_table_id.as_deref());
     hash_option_str(hash, metadata.combat_style.map(combat_style_name));
     hash_option_str(hash, metadata.species_id.as_deref());
     hash_option_str(hash, metadata.species_name.as_deref());
@@ -1470,6 +1496,7 @@ mod tests {
             .expect("player entity present");
         assert!(player.metadata.interaction.can_chat);
         assert!(player.metadata.interaction.can_attack);
+        assert_eq!(player.metadata.faction_track_id, None);
 
         let resource = snapshot
             .entities
@@ -1479,6 +1506,7 @@ mod tests {
         assert_eq!(resource.metadata.kind, EntityKind::ResourceNode);
         assert_eq!(resource.metadata.resource_skill, Some(SkillKind::Mining));
         assert!(resource.metadata.interaction.can_gather);
+        assert_eq!(resource.metadata.faction_track_id, None);
 
         let loot = snapshot
             .entities
@@ -1493,6 +1521,15 @@ mod tests {
             .iter()
             .find(|entity| entity.metadata.kind == EntityKind::WildCreature)
             .expect("wild creature present");
+        assert_eq!(
+            creature.metadata.faction_track_id.as_deref(),
+            Some("verdant-wilds")
+        );
+        assert_eq!(
+            creature.metadata.encounter_table_id.as_deref(),
+            Some("verdant-predators")
+        );
+        assert_eq!(creature.metadata.quest_graph_ids, Vec::<String>::new());
         assert_eq!(creature.metadata.species_id.as_deref(), Some("embercub"));
         assert_eq!(
             creature.metadata.species_name.as_deref(),
