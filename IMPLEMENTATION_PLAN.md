@@ -980,5 +980,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 98
-**Current focus**: Iteration 99 shard-side debug/telemetry subscription partitioning on the `pod-stdb` path, then worker-route gameplay-input parity proof and richer traversal/combat feedback
+### Iteration 99
+- [x] Added entity-scoped SpacetimeDB debug subscription helpers, so editor/debug consumers can subscribe to raw telemetry, tool-call events, and rollups for a focused agent/entity selection instead of defaulting to full-shard telemetry queries.
+- [x] Extended the `pod-net` SpacetimeDB adapter with an entity-scoped editor-debug subscription profile and public API for selected-entity debug telemetry consumption.
+- [x] Added deterministic query-generation coverage proving entity-scoped debug subscriptions stay narrow and do not silently widen back to global telemetry tables.
+- [x] Validated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 99
+**Current focus**: Iteration 100 worker-route gameplay-input parity proof, then further HUD reduction, richer traversal/combat feedback, and editor/runtime wiring for selected-entity SpacetimeDB debug telemetry
