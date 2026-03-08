@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   detectRenderWorkerCapabilities,
   readRenderSurfaceMetrics,
+  resolveRendererBackendPreference,
   resolveRenderThreadPreference,
   shouldUseRenderWorker
 } from "./render-runtime";
@@ -13,6 +14,13 @@ describe("render worker runtime", () => {
     expect(resolveRenderThreadPreference("?renderThread=main")).toBe("main");
     expect(resolveRenderThreadPreference("?renderThread=worker")).toBe("worker");
     expect(resolveRenderThreadPreference("?renderThread=unknown")).toBe("auto");
+  });
+
+  test("parses backend preferences from the query string", () => {
+    expect(resolveRendererBackendPreference("")).toBe("auto");
+    expect(resolveRendererBackendPreference("?backend=webgpu")).toBe("webgpu");
+    expect(resolveRendererBackendPreference("?backend=webgl2")).toBe("webgl2");
+    expect(resolveRendererBackendPreference("?backend=software")).toBe("auto");
   });
 
   test("only enables the render worker when explicitly requested and supported", () => {

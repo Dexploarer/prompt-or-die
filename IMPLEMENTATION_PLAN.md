@@ -989,5 +989,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 99
-**Current focus**: Iteration 100 worker-route gameplay-input parity proof, then further HUD reduction, richer traversal/combat feedback, and editor/runtime wiring for selected-entity SpacetimeDB debug telemetry
+### Iteration 100
+- [x] Hardened the browser gameplay surface so keyboard input explicitly claims the canvas, labels it as an application-grade gameplay target, and clears pressed-key state on blur/visibility loss instead of relying on incidental page focus.
+- [x] Exposed `window.podRender.requestGameplayFocus()` and `window.podRender.getGameplayState()` so deterministic browser smoke tests and creator debugging can verify controlled-entity movement without scraping HUD text.
+- [x] Added a renderer backend query override (`?backend=webgl2`) plus a Playwright smoke harness that proves both main-thread and worker-thread browser routes accept gameplay focus and movement input under automated test.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+**Last updated**: Iteration 100
+**Current focus**: Iteration 101 further HUD reduction, richer traversal/combat feedback, and editor/runtime wiring for selected-entity SpacetimeDB debug telemetry

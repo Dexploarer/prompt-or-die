@@ -96,17 +96,22 @@ export async function createPodRenderRuntime(
   workerFactory: ((url: URL, options: WorkerOptions) => Worker) | null = defaultWorkerFactory
 ): Promise<PodThreeRenderRuntime> {
   const preference = resolveRenderThreadPreference(search);
+  const backendPreference = resolveRendererBackendPreference(search);
   const capabilities = detectRenderWorkerCapabilities(canvas);
+  const resolvedOptions: PodThreeWorldRendererOptions = {
+    ...options,
+    backendPreference
+  };
 
   if (shouldUseRenderWorker(preference, capabilities) && workerFactory) {
-    return await WorkerPodRenderRuntime.create(canvas, options, workerFactory);
+    return await WorkerPodRenderRuntime.create(canvas, resolvedOptions, workerFactory);
   }
 
   if (preference === "worker" && !shouldUseRenderWorker(preference, capabilities)) {
     console.warn("Falling back to main-thread rendering; render worker prerequisites are missing");
   }
 
-  const renderer = await PodThreeWorldRenderer.create(canvas, options);
+  const renderer = await PodThreeWorldRenderer.create(canvas, resolvedOptions);
   return new MainThreadPodRenderRuntime(renderer);
 }
 
@@ -114,6 +119,17 @@ export function resolveRenderThreadPreference(search: string): PodRenderThreadPr
   const params = new URLSearchParams(search);
   const requested = params.get("renderThread")?.trim().toLowerCase();
   if (requested === "main" || requested === "worker") {
+    return requested;
+  }
+  return "auto";
+}
+
+export function resolveRendererBackendPreference(
+  search: string
+): PodThreeWorldRendererOptions["backendPreference"] {
+  const params = new URLSearchParams(search);
+  const requested = params.get("backend")?.trim().toLowerCase();
+  if (requested === "webgpu" || requested === "webgl2") {
     return requested;
   }
   return "auto";

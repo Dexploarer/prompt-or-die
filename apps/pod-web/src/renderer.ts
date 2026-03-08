@@ -401,6 +401,7 @@ export interface RenderSurfaceMetrics {
 
 export interface PodThreeWorldRendererOptions {
   assetRegistry?: PodThreeAssetRegistry;
+  backendPreference?: "auto" | "webgpu" | "webgl2";
   cameraRig?: PodThreeCameraRigOptions;
   qualityPreset?: PodThreeQualityPreset;
   qualityProfile?: Partial<PodThreeQualityProfile>;
@@ -1836,7 +1837,7 @@ async function createRenderer(
 ): Promise<{ renderer: RuntimeRenderer; backend: "webgpu" | "webgl2" }> {
   installThreeConsoleFilter();
 
-  if ("gpu" in navigator) {
+  if (options.backendPreference !== "webgl2" && "gpu" in navigator) {
     try {
       const webgpuModule = await import("three/webgpu");
       const renderer = new webgpuModule.WebGPURenderer({

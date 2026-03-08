@@ -78,6 +78,8 @@ export function focusGameplaySurface(surface: GameplaySurface | null | undefined
     surface.tabIndex = 0;
   }
   surface.setAttribute?.("aria-label", "Game world");
+  surface.setAttribute?.("role", "application");
+  surface.setAttribute?.("data-gameplay-surface", "true");
 
   if (typeof surface.focus === "function") {
     surface.focus({ preventScroll: true });
