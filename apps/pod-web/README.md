@@ -47,6 +47,7 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 - `Enter`: focus chat input and send a shard message
 - HUD feedback and event feed rows are driven by authoritative `EventBatch` messages from the shard, so combat/chat/loot/capture outcomes come from server events rather than client-side guesses
 - The action status row is driven by authoritative `acknowledged_action_tick` and `Rejected` responses, so creators can see pending, acknowledged, and rejected browser input on the live shard path
+- The selected-target summary and suggested-actions row give browser players and creators an immediate interaction hint from the live shard state instead of relying on memorized keybinds alone
 
 ## Validate
 
