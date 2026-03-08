@@ -802,6 +802,23 @@ impl SpacetimeDBClient {
             .ensure_subscriptions_applied(&mut self.inner)
     }
 
+    /// Mirror editor selection into the active debug telemetry subscription.
+    ///
+    /// `Some(entity_id)` narrows raw telemetry/tool/rollup streams to that
+    /// entity while retaining editor world-state tables. `None` drops back to
+    /// world-state-only editor mode.
+    pub fn sync_selected_entity_debug_focus(
+        &mut self,
+        entity_id: Option<u64>,
+    ) -> Result<bool, StdbClientError> {
+        match entity_id {
+            Some(entity_id) => {
+                self.subscribe_as_editor_with_debug_telemetry_for_entities([entity_id])
+            }
+            None => self.subscribe_as_editor(),
+        }
+    }
+
     /// Configure subscriptions for a specific player entity.
     ///
     /// Includes shared world tables and the connected entity row + filtered observations.
@@ -1678,6 +1695,31 @@ mod tests {
         assert!(!queries
             .iter()
             .any(|query| query == "SELECT * FROM agent_tick_rollup"));
+    }
+
+    #[test]
+    fn test_sync_selected_entity_debug_focus_switches_between_scoped_and_editor_queries() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+
+        client
+            .sync_selected_entity_debug_focus(Some(44))
+            .expect("selection sync should stage");
+        let queries = client.subscriptions.queries_for_profile();
+        assert!(queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = 44"));
+        assert!(!queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick"));
+
+        client
+            .sync_selected_entity_debug_focus(None)
+            .expect("clearing selection should stage editor profile");
+        let queries = client.subscriptions.queries_for_profile();
+        assert!(queries.iter().any(|query| query.contains("FROM world_state")));
+        assert!(!queries
+            .iter()
+            .any(|query| query.contains("FROM agent_telemetry_tick")));
     }
 
     #[test]

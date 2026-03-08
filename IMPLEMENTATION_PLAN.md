@@ -1000,5 +1000,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run test:smoke`
   - `git diff --check`
 
-**Last updated**: Iteration 100
-**Current focus**: Iteration 101 further HUD reduction, richer traversal/combat feedback, and editor/runtime wiring for selected-entity SpacetimeDB debug telemetry
+### Iteration 101
+- [x] Added selected-entity raw debug summaries in `pod-editor`, so entity-scoped SpacetimeDB telemetry remains useful even when the editor is intentionally subscribed to tool-call and rollup docs instead of full tick timelines.
+- [x] Extended editor snapshot export and telemetry/spacetime panels with selected-entity debug context derived from live tool-call and rollup documents.
+- [x] Added `pod-net` helper wiring to mirror editor selection into the active entity-scoped SpacetimeDB debug subscription profile.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 101
+**Current focus**: Iteration 102 further HUD reduction, richer traversal/combat feedback, and deeper selected-entity debug telemetry consumption in browser/runtime surfaces
