@@ -385,6 +385,19 @@ export interface NetworkStateDelta {
   destroyed: number[];
 }
 
+export interface NetworkGameEvent {
+  tick: number;
+  origin: Vec2Tuple | null;
+  kind: string;
+  summary: string;
+  entityIds: number[];
+}
+
+export interface NetworkEventBatch {
+  tick: number;
+  events: NetworkGameEvent[];
+}
+
 export type DirectConnectServerMessage =
   | {
       kind: "welcome";
@@ -403,7 +416,7 @@ export type DirectConnectServerMessage =
       isFullSnapshot: boolean;
       delta: NetworkStateDelta;
     }
-  | { kind: "eventBatch"; tick: number; events: unknown[] }
+  | { kind: "eventBatch"; tick: number; events: NetworkGameEvent[] }
   | { kind: "tickTelemetry"; frameJson: string }
   | { kind: "debugDocument"; document: string }
   | { kind: "pong"; clientTimestamp: number; serverTimestamp: number }
@@ -599,6 +612,182 @@ function parseNetworkStateDelta(value: unknown): NetworkStateDelta | null {
     updated,
     destroyed
   };
+}
+
+function entityRef(entityId: number | null | undefined): string {
+  return entityId == null ? "Unknown" : `E(${entityId})`;
+}
+
+function entityIdsFromPayload(payload: JsonRecord): number[] {
+  const ids = new Set<number>();
+  for (const key of [
+    "entity",
+    "target",
+    "source",
+    "killer",
+    "victim",
+    "resource",
+    "trigger",
+    "item"
+  ]) {
+    const entityId = asNumber(payload[key]);
+    if (entityId != null) {
+      ids.add(entityId);
+    }
+  }
+  return Array.from(ids.values()).sort((left, right) => left - right);
+}
+
+function parseNetworkGameEvent(value: unknown): NetworkGameEvent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const tick = asNumber(value.tick);
+  const origin = vec2Tuple(value.origin);
+  const eventRecord = isRecord(value.event) ? value.event : null;
+  if (tick == null || !eventRecord) {
+    return null;
+  }
+
+  const entries = Object.entries(eventRecord);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const [kind, rawPayload] = entries[0] ?? [];
+  const payload = isRecord(rawPayload) ? rawPayload : {};
+  const entityIds = entityIdsFromPayload(payload);
+
+  switch (kind) {
+    case "Damage": {
+      const amount = asNumber(payload.amount) ?? 0;
+      const source = asNumber(payload.source);
+      const target = asNumber(payload.target);
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(source)} hit ${entityRef(target)} for ${amount.toFixed(1)}`,
+        entityIds
+      };
+    }
+    case "Kill":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.killer))} defeated ${entityRef(
+          asNumber(payload.victim)
+        )}`,
+        entityIds
+      };
+    case "Heal": {
+      const amount = asNumber(payload.amount) ?? 0;
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.source))} healed ${entityRef(
+          asNumber(payload.target)
+        )} for ${amount.toFixed(1)}`,
+        entityIds
+      };
+    }
+    case "AgentSpoke": {
+      const agentId = asString(payload.agent_id)?.slice(0, 8) ?? "agent";
+      const message = asString(payload.message) ?? "";
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${agentId}: ${message}`,
+        entityIds
+      };
+    }
+    case "CreatureCaptured":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `Captured ${asString(payload.species_id) ?? "creature"}`,
+        entityIds
+      };
+    case "CompanionSummoned":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `Summoned ${asString(payload.species_id) ?? "companion"}`,
+        entityIds
+      };
+    case "CompanionCommandIssued":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `Companion ${asString(payload.command) ?? "command"}${
+          asNumber(payload.target) != null ? ` ${entityRef(asNumber(payload.target))}` : ""
+        }`,
+        entityIds
+      };
+    case "ResourceGathered":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.entity))} gathered ${
+          asNumber(payload.quantity) ?? 0
+        } ${asString(payload.item_id) ?? "resource"}`,
+        entityIds
+      };
+    case "LootClaimed":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.entity))} looted ${
+          asNumber(payload.coins) ?? 0
+        } coins`,
+        entityIds
+      };
+    case "AutoRetaliateSet":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.entity))} auto-retaliate ${
+          payload.enabled === true ? "enabled" : "disabled"
+        }`,
+        entityIds
+      };
+    case "EntitySpawned":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${asString(payload.entity_type) ?? "Entity"} ${entityRef(
+          asNumber(payload.entity)
+        )} spawned`,
+        entityIds
+      };
+    case "EntityDestroyed":
+      return {
+        tick,
+        origin,
+        kind,
+        summary: `${entityRef(asNumber(payload.entity))} destroyed`,
+        entityIds
+      };
+    default:
+      return {
+        tick,
+        origin,
+        kind,
+        summary: kind.replace(/([A-Z])/g, " $1").trim(),
+        entityIds
+      };
+  }
 }
 
 function directTickTelemetryFrame(value: unknown): TickTelemetryFrame | null {
@@ -946,6 +1135,8 @@ export function parseDirectConnectServerMessage(
       kind: "eventBatch",
       tick: eventBatch.tick,
       events: eventBatch.events
+        .map((event) => parseNetworkGameEvent(event))
+        .filter((event): event is NetworkGameEvent => event != null)
     };
   }
 

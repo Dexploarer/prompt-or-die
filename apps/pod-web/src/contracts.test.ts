@@ -293,6 +293,49 @@ describe("TOON contract parsing", () => {
     expect(delta.acknowledgedActionTick).toBe(12);
   });
 
+  test("parses authoritative event batches into gameplay summaries", () => {
+    const eventBatch = parseDirectConnectServerMessage(
+      JSON.stringify({
+        EventBatch: {
+          tick: 27,
+          events: [
+            {
+              tick: 27,
+              origin: [18, 22],
+              event: {
+                Damage: {
+                  source: 44,
+                  target: 12,
+                  amount: 7.5
+                }
+              }
+            },
+            {
+              tick: 27,
+              origin: [18, 22],
+              event: {
+                AgentSpoke: {
+                  agent_id: "agent-12345678",
+                  message: "ready",
+                  volume: 200
+                }
+              }
+            }
+          ]
+        }
+      })
+    );
+
+    expect(eventBatch.kind).toBe("eventBatch");
+    if (eventBatch.kind !== "eventBatch") {
+      throw new Error("expected event batch");
+    }
+    expect(eventBatch.events).toHaveLength(2);
+    expect(eventBatch.events[0]?.summary).toBe("E(44) hit E(12) for 7.5");
+    expect(eventBatch.events[0]?.entityIds).toEqual([12, 44]);
+    expect(eventBatch.events[1]?.summary).toBe("agent-12: ready");
+  });
+
   test("applies authoritative state deltas and builds a live world frame", () => {
     const baseline: NetworkWorldSnapshot = {
       tick: 10,

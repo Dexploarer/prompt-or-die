@@ -45,6 +45,7 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 - `F`: issue a follow command to companion slot `0`
 - `P`: toggle auto-retaliate
 - `Enter`: focus chat input and send a shard message
+- HUD feedback and event feed rows are driven by authoritative `EventBatch` messages from the shard, so combat/chat/loot/capture outcomes come from server events rather than client-side guesses
 
 ## Validate
 

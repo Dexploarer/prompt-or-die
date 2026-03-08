@@ -665,5 +665,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 71
-**Current focus**: Iteration 72 richer MMO browser loop completion, starting with surfacing chat/combat outcomes from authoritative events, streamed-world presentation depth, and more direct browser-side interaction feedback on top of the live socket
+### Iteration 72
+- [x] Extended the authoritative direct-connect `GameServer` runtime to broadcast real `EventBatch` gameplay events alongside `StateDelta` and TOON debug documents, instead of leaving browser clients with input but no server-confirmed outcomes.
+- [x] Added typed gameplay-event parsing in `apps/pod-web` for websocket `EventBatch` payloads, including compact summaries and involved entity ids for combat, chat, capture, summon, gather, loot, and lifecycle events.
+- [x] Wired the browser direct-connect client and HUD to authoritative event feedback so the live shard now surfaces recent MMO outcomes and target-relevant status directly in the client instead of only in telemetry/debug overlays.
+- [x] Added deterministic coverage for authoritative event-batch parsing, browser websocket event routing, and direct-connect server event broadcasting.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 72
+**Current focus**: Iteration 73 browser MMO loop completion beyond event feedback, starting with live combat/chat outcome staging, richer world-state presentation, and authoritative UI affordances for creators and players on the flagship shard path

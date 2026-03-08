@@ -75,6 +75,7 @@ describe("direct-connect runtime config", () => {
     MockWebSocket.instances = [];
 
     const frames: number[] = [];
+    const eventSummaries: string[] = [];
     const debugDocuments: string[] = [];
 
     try {
@@ -88,6 +89,9 @@ describe("direct-connect runtime config", () => {
         {
           onFrame(snapshot) {
             frames.push(snapshot.tick);
+          },
+          onEventBatch(batch) {
+            eventSummaries.push(...batch.events.map((event) => event.summary));
           },
           onDebugDocument(document) {
             debugDocuments.push(document);
@@ -151,6 +155,29 @@ describe("direct-connect runtime config", () => {
           }
         })
       );
+
+      socket?.emitMessage(
+        JSON.stringify({
+          EventBatch: {
+            tick: 19,
+            events: [
+              {
+                tick: 19,
+                origin: [12, 10],
+                event: {
+                  LootClaimed: {
+                    entity: 12,
+                    source: 14,
+                    coins: 32,
+                    item_count: 2
+                  }
+                }
+              }
+            ]
+          }
+        })
+      );
+      expect(eventSummaries).toEqual(["E(12) looted 32 coins"]);
 
       socket?.emitMessage(
         JSON.stringify({
