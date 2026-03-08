@@ -526,6 +526,63 @@ describe("sampleAnimatedInstanceTransform", () => {
     expect(hoveringCompanion.scale[1]).not.toBeCloseTo(1.2, 4);
   });
 
+  test("differentiates critical rings from destination markers", () => {
+    const criticalRing = sampleAnimatedInstanceTransform(
+      {
+        position: [4, 0.15, -3],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1, 1],
+        sourceEntity: 0,
+        animationSetId: "critical-ring",
+        motionSpeed: 0
+      },
+      0.3
+    );
+    const destinationRing = sampleAnimatedInstanceTransform(
+      {
+        position: [4, 0.15, -3],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1, 1],
+        sourceEntity: 0,
+        animationSetId: "destination-ring",
+        motionSpeed: 0
+      },
+      0.3
+    );
+
+    expect(criticalRing.scale[0]).toBeGreaterThan(destinationRing.scale[0]);
+    expect(criticalRing.position[1]).toBeGreaterThan(destinationRing.position[1]);
+  });
+
+  test("gives beasts a lower, heavier stance than humanoids", () => {
+    const beast = sampleAnimatedInstanceTransform(
+      {
+        position: [2, 1.6, 5],
+        rotation: [0, 0, 0, 1],
+        scale: [1.4, 1.4, 2],
+        sourceEntity: 5,
+        animationSetId: "rift-beast",
+        motionSpeed: 0.8
+      },
+      1.2
+    );
+    const humanoid = sampleAnimatedInstanceTransform(
+      {
+        position: [2, 1.6, 5],
+        rotation: [0, 0, 0, 1],
+        scale: [1.4, 1.4, 2],
+        sourceEntity: 5,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.8
+      },
+      1.2
+    );
+
+    expect(beast.scale[1]).toBeLessThan(humanoid.scale[1]);
+    expect(beast.scale[2]).toBeGreaterThan(humanoid.scale[2]);
+    expect(Math.abs(beast.rotation[1])).toBeGreaterThan(Math.abs(humanoid.rotation[1]));
+  });
+
   test("adds gait bounce and event pulse response to moving humanoids", () => {
     const neutral = sampleAnimatedInstanceTransform(
       {
