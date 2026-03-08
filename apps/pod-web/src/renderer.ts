@@ -69,6 +69,12 @@ export interface PodThreeRendererStats {
   pendingSpriteAssets: number;
 }
 
+export interface RenderSurfaceMetrics {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
 export interface PodThreeWorldRendererOptions {
   assetRegistry?: PodThreeAssetRegistry;
   cameraRig?: PodThreeCameraRigOptions;
@@ -78,6 +84,7 @@ export interface PodThreeWorldRendererOptions {
   enableShadows?: boolean;
   showGrid?: boolean;
   maxPixelRatio?: number;
+  surfaceMetrics?: RenderSurfaceMetrics;
 }
 
 export class PodThreeWorldRenderer {
@@ -116,6 +123,7 @@ export class PodThreeWorldRenderer {
   private adaptivePixelRatio: number;
   private smoothedFrameMs = 16.7;
   private adjustmentCooldown = 0;
+  private surfaceMetrics: RenderSurfaceMetrics | null;
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
 
@@ -127,13 +135,14 @@ export class PodThreeWorldRenderer {
   ) {
     this.backend = backend;
     this.assetRegistry = options.assetRegistry ?? new DefaultPodThreeAssetRegistry();
+    this.surfaceMetrics = options.surfaceMetrics ?? null;
     const deviceMemory = readNavigatorDeviceMemory();
     const baseQuality = resolveQualityProfile({
       backend,
       preferredPreset: options.qualityPreset,
       hardwareConcurrency: readNavigatorHardwareConcurrency(),
       deviceMemory,
-      devicePixelRatio: readDevicePixelRatio()
+      devicePixelRatio: this.surfaceMetrics?.devicePixelRatio ?? readDevicePixelRatio()
     });
     this.quality = {
       ...baseQuality,
@@ -202,6 +211,11 @@ export class PodThreeWorldRenderer {
     this.clearOverlay();
     this.clearTelemetryTrail();
     this.renderer.dispose();
+  }
+
+  setSurfaceMetrics(metrics: RenderSurfaceMetrics): void {
+    this.surfaceMetrics = metrics;
+    this.resize();
   }
 
   private bootstrapScenes(): void {
@@ -500,8 +514,11 @@ export class PodThreeWorldRenderer {
   }
 
   private resize(): void {
-    const { width, height } = readRenderSurfaceSize(this.canvas);
-    const pixelRatio = Math.min(readDevicePixelRatio(), this.adaptivePixelRatio);
+    const { width, height } = readRenderSurfaceSize(this.canvas, this.surfaceMetrics);
+    const pixelRatio = Math.min(
+      this.surfaceMetrics?.devicePixelRatio ?? readDevicePixelRatio(),
+      this.adaptivePixelRatio
+    );
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
@@ -820,8 +837,16 @@ function readDevicePixelRatio(): number {
 }
 
 function readRenderSurfaceSize(
-  canvas: HTMLCanvasElement | OffscreenCanvas
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  surfaceMetrics: RenderSurfaceMetrics | null = null
 ): { width: number; height: number } {
+  if (surfaceMetrics) {
+    return {
+      width: Math.max(Math.round(surfaceMetrics.width), 1),
+      height: Math.max(Math.round(surfaceMetrics.height), 1)
+    };
+  }
+
   if (isHtmlCanvasElement(canvas)) {
     return {
       width:

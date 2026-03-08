@@ -41,6 +41,18 @@ async function handleMessage(message: RenderWorkerRequest): Promise<void> {
       case "clearTelemetryTrail":
         renderer?.clearTelemetryTrail();
         return;
+      case "resize":
+        renderer?.setSurfaceMetrics(message.surfaceMetrics);
+        if (renderer) {
+          scope.postMessage({
+            type: "stats",
+            stats: {
+              ...renderer.getStats(),
+              renderThread: "worker"
+            }
+          });
+        }
+        return;
       case "dispose":
         renderer?.dispose();
         renderer = null;

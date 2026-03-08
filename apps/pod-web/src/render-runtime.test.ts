@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   detectRenderWorkerCapabilities,
+  readRenderSurfaceMetrics,
   resolveRenderThreadPreference,
   shouldUseRenderWorker
 } from "./render-runtime";
@@ -43,6 +44,24 @@ describe("render worker runtime", () => {
       hasWorkerConstructor: typeof Worker === "function",
       hasOffscreenCanvas: typeof OffscreenCanvas === "function",
       hasCanvasTransferControl: true
+    });
+  });
+
+  test("measures logical canvas size and device pixel ratio for worker rendering", () => {
+    expect(
+      readRenderSurfaceMetrics(
+        {
+          clientWidth: 1280,
+          clientHeight: 720,
+          width: 300,
+          height: 150
+        },
+        2
+      )
+    ).toEqual({
+      width: 1280,
+      height: 720,
+      devicePixelRatio: 2
     });
   });
 });

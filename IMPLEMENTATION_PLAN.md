@@ -747,5 +747,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4173?renderThread=worker`
   - `git diff --check`
 
-**Last updated**: Iteration 78
-**Current focus**: Iteration 79 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache and replacing emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 79
+- [x] Fixed worker-mode render softness by syncing logical viewport size and device pixel ratio from the main thread into the `OffscreenCanvas` runtime instead of letting the worker fall back to a `1.00x` backing store.
+- [x] Added worker-side resize propagation so creator resizing and high-DPI displays keep the off-thread renderer visually aligned with the main-thread path.
+- [x] Added deterministic Bun coverage for worker surface-metric measurement.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/assets.test.ts ./src/render-runtime.test.ts ./src/contracts.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4174?renderThread=worker`
+  - `git diff --check`
+
+**Last updated**: Iteration 79
+**Current focus**: Iteration 80 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache and replacing emulated SpacetimeDB client paths with generated typed bindings
