@@ -3384,12 +3384,17 @@ impl PodEditorApp {
                         .find(|region| region.region_id == region_id)
                     {
                         ui.label(format!(
-                            "Selected region pop: {} active · {}/{} chunks hot · cap {} · budget {}",
+                            "Selected region pop: {} active · {}/{} chunks hot · cap {} · budget {} · respawns {}{}",
                             region.active_entity_count,
                             region.active_chunk_count,
                             region.chunk_keys.len(),
                             region.ambient_population_cap,
-                            region.spawn_budget_remaining
+                            region.spawn_budget_remaining,
+                            region.pending_respawns,
+                            region
+                                .next_respawn_tick
+                                .map(|tick| format!(" @ {tick}"))
+                                .unwrap_or_default()
                         ));
                     }
                 }
@@ -3403,10 +3408,15 @@ impl PodEditorApp {
                         .find(|chunk| chunk.chunk_key == chunk_key)
                     {
                         ui.label(format!(
-                            "Selected chunk pop: {} active · pressure {:.2} · cap {}",
+                            "Selected chunk pop: {} active · pressure {:.2} · cap {} · respawns {}{}",
                             chunk.active_entity_count,
                             chunk.population_pressure,
-                            chunk.ambient_population_cap
+                            chunk.ambient_population_cap,
+                            chunk.pending_respawns,
+                            chunk
+                                .next_respawn_tick
+                                .map(|tick| format!(" @ {tick}"))
+                                .unwrap_or_default()
                         ));
                     }
                 }
@@ -4607,6 +4617,8 @@ mod tests {
                 active_entity_count: 6,
                 ambient_population_cap: 8,
                 spawn_budget_remaining: 2,
+                pending_respawns: 1,
+                next_respawn_tick: Some(48),
                 population_pressure: 0.75,
             }],
             regions: vec![RegionPopulationState {
@@ -4627,6 +4639,8 @@ mod tests {
                 active_entity_count: 6,
                 ambient_population_cap: 8,
                 spawn_budget_remaining: 2,
+                pending_respawns: 1,
+                next_respawn_tick: Some(48),
                 population_pressure: 0.75,
             }],
         };
@@ -4643,6 +4657,10 @@ mod tests {
         assert_eq!(
             app.state.spacetime_dashboard.population_state.chunks[0].spawn_budget_remaining,
             2
+        );
+        assert_eq!(
+            app.state.spacetime_dashboard.population_state.chunks[0].next_respawn_tick,
+            Some(48)
         );
     }
 

@@ -559,6 +559,8 @@ describe("TOON contract parsing", () => {
               activeEntityCount: 4,
               ambientPopulationCap: 6,
               spawnBudgetRemaining: 4,
+              pendingRespawns: 1,
+              nextRespawnTick: 36,
               populationPressure: 0.33
             }
           ],
@@ -584,6 +586,8 @@ describe("TOON contract parsing", () => {
               activeEntityCount: 4,
               ambientPopulationCap: 6,
               spawnBudgetRemaining: 4,
+              pendingRespawns: 1,
+              nextRespawnTick: 36,
               populationPressure: 0.33
             }
           ]
@@ -887,6 +891,8 @@ describe("TOON contract parsing", () => {
                   active_entity_count: 15,
                   ambient_population_cap: 8,
                   spawn_budget_remaining: 1,
+                  pending_respawns: 2,
+                  next_respawn_tick: 42,
                   population_pressure: 0.875
                 }
               ],
@@ -912,6 +918,8 @@ describe("TOON contract parsing", () => {
                   active_entity_count: 15,
                   ambient_population_cap: 8,
                   spawn_budget_remaining: 1,
+                  pending_respawns: 2,
+                  next_respawn_tick: 42,
                   population_pressure: 0.875
                 }
               ]
@@ -929,6 +937,7 @@ describe("TOON contract parsing", () => {
     expect(message.snapshot.population.tick).toBe(24);
     expect(message.snapshot.population.chunks[0]?.chunkKey).toBe("0:0");
     expect(message.snapshot.population.chunks[0]?.counts.wildCreatures).toBe(3);
+    expect(message.snapshot.population.chunks[0]?.nextRespawnTick).toBe(42);
     expect(message.snapshot.population.regions[0]?.populationPressure).toBe(0.875);
   });
 });

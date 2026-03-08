@@ -1261,6 +1261,16 @@ fn hash_option_u8(hash: &mut u64, value: Option<u8>) {
     }
 }
 
+fn hash_option_u64(hash: &mut u64, value: Option<u64>) {
+    match value {
+        Some(value) => {
+            hash_u64(hash, 1);
+            hash_u64(hash, value);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
 fn hash_population_breakdown(hash: &mut u64, counts: &pod_core::PopulationBreakdown) {
     hash_u64(hash, counts.players as u64);
     hash_u64(hash, counts.npcs as u64);
@@ -1286,6 +1296,8 @@ fn hash_population_state(hash: &mut u64, population: &WorldPopulationState) {
         hash_u64(hash, chunk.active_entity_count as u64);
         hash_u64(hash, chunk.ambient_population_cap as u64);
         hash_u64(hash, chunk.spawn_budget_remaining as u64);
+        hash_u64(hash, chunk.pending_respawns as u64);
+        hash_option_u64(hash, chunk.next_respawn_tick);
         hash_f32(hash, chunk.population_pressure);
     }
     hash_u64(hash, population.regions.len() as u64);
@@ -1302,6 +1314,8 @@ fn hash_population_state(hash: &mut u64, population: &WorldPopulationState) {
         hash_u64(hash, region.active_entity_count as u64);
         hash_u64(hash, region.ambient_population_cap as u64);
         hash_u64(hash, region.spawn_budget_remaining as u64);
+        hash_u64(hash, region.pending_respawns as u64);
+        hash_option_u64(hash, region.next_respawn_tick);
         hash_f32(hash, region.population_pressure);
     }
 }

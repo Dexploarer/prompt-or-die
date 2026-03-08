@@ -846,5 +846,20 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 86
-**Current focus**: Iteration 87 authoritative streamed respawn tuning and richer shard-backed flagship biome authoring, followed by browser/editor heatmaps and creator controls for live regional population balancing
+### Iteration 87
+- [x] Reworked streamed shard population reconciliation into slot-based authoritative runtime state, including remembered live slots, per-slot respawn deadlines, and deterministic refill timing so streamed encounters no longer respawn immediately after despawn.
+- [x] Extended `WorldPopulationState` with pending-respawn and next-respawn timing at both chunk and region level, then propagated those new fields through `pod-net` hashing/transport and the browser/editor population contract surfaces.
+- [x] Updated `apps/pod-web` HUD summaries and `pod-editor` Spacetime dashboard summaries to show pending respawns and next respawn tick, so creators can tune live density pacing instead of only reading active counts and budget.
+- [x] Added deterministic regression coverage for respawn deadline behavior in `pod-core`, updated browser parsing tests for the new population timing fields, and kept the server flagship shard map green under the new authoritative pacing rules.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/local-world.test.ts ./src/affordances.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 87
+**Current focus**: Iteration 88 browser/editor population heatmaps and creator balancing controls on top of authoritative shard respawn state, followed by richer flagship biome authoring and denser multi-region shard content
