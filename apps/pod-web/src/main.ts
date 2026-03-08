@@ -284,12 +284,12 @@ function currentPopulationSummary(): string {
   }
 
   const chunkSummary = chunk
-    ? `${chunk.chunkKey} ${chunk.activeEntityCount} active · cap ${chunk.ambientPopulationCap} · budget ${chunk.spawnBudgetRemaining}`
+    ? `${chunk.chunkKey} ${chunk.activeEntityCount} active · cap ${chunk.ambientPopulationCap} · budget ${chunk.spawnBudgetRemaining} · respawns ${chunk.pendingRespawns}${chunk.nextRespawnTick != null ? ` @${chunk.nextRespawnTick}` : ""}`
     : "unassigned chunk";
   const regionSummary = region
     ? `${region.regionName} ${region.activeEntityCount} active · ${region.activeChunkCount}/${region.chunkKeys.length} chunks hot · pressure ${region.populationPressure.toFixed(
         2
-      )}`
+      )} · respawns ${region.pendingRespawns}${region.nextRespawnTick != null ? ` @${region.nextRespawnTick}` : ""}`
     : "unassigned region";
   return `${regionSummary} · ${chunkSummary}`;
 }

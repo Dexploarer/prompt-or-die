@@ -2499,6 +2499,8 @@ function summarizePopulationState(
         activeEntityCount: 0,
         ambientPopulationCap,
         spawnBudgetRemaining: ambientPopulationCap,
+        pendingRespawns: 0,
+        nextRespawnTick: null,
         populationPressure: 0
       });
     }
@@ -2526,6 +2528,8 @@ function summarizePopulationState(
         activeEntityCount: 0,
         ambientPopulationCap: 0,
         spawnBudgetRemaining: 0,
+        pendingRespawns: 0,
+        nextRespawnTick: null,
         populationPressure: 0
       };
 
@@ -2575,6 +2579,8 @@ function summarizePopulationState(
         activeEntityCount: 0,
         ambientPopulationCap,
         spawnBudgetRemaining: ambientPopulationCap,
+        pendingRespawns: 0,
+        nextRespawnTick: null,
         populationPressure: 0
       };
       finalizeRegionPopulation(regionState);

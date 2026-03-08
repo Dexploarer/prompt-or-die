@@ -566,6 +566,8 @@ export interface NetworkChunkPopulationState {
   activeEntityCount: number;
   ambientPopulationCap: number;
   spawnBudgetRemaining: number;
+  pendingRespawns: number;
+  nextRespawnTick: number | null;
   populationPressure: number;
 }
 
@@ -582,6 +584,8 @@ export interface NetworkRegionPopulationState {
   activeEntityCount: number;
   ambientPopulationCap: number;
   spawnBudgetRemaining: number;
+  pendingRespawns: number;
+  nextRespawnTick: number | null;
   populationPressure: number;
 }
 
@@ -1244,6 +1248,10 @@ function parseChunkPopulationState(value: unknown): NetworkChunkPopulationState 
       asNumber(value.ambient_population_cap ?? value.ambientPopulationCap) ?? 0,
     spawnBudgetRemaining:
       asNumber(value.spawn_budget_remaining ?? value.spawnBudgetRemaining) ?? 0,
+    pendingRespawns:
+      asNumber(value.pending_respawns ?? value.pendingRespawns) ?? 0,
+    nextRespawnTick:
+      asNumber(value.next_respawn_tick ?? value.nextRespawnTick) ?? null,
     populationPressure:
       asNumber(value.population_pressure ?? value.populationPressure) ?? 0
   };
@@ -1285,6 +1293,10 @@ function parseRegionPopulationState(value: unknown): NetworkRegionPopulationStat
       asNumber(value.ambient_population_cap ?? value.ambientPopulationCap) ?? 0,
     spawnBudgetRemaining:
       asNumber(value.spawn_budget_remaining ?? value.spawnBudgetRemaining) ?? 0,
+    pendingRespawns:
+      asNumber(value.pending_respawns ?? value.pendingRespawns) ?? 0,
+    nextRespawnTick:
+      asNumber(value.next_respawn_tick ?? value.nextRespawnTick) ?? null,
     populationPressure:
       asNumber(value.population_pressure ?? value.populationPressure) ?? 0
   };

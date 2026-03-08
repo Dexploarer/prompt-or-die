@@ -38,6 +38,12 @@ pub struct World {
     /// Authored streamed-world metadata used by authoritative snapshot and
     /// tooling surfaces.
     pub streaming: WorldStreamingMetadata,
+    /// Previously live authored streaming slots, tracked so despawns can be
+    /// converted into deterministic respawn deadlines instead of immediate
+    /// refills.
+    streaming_live_slots: HashSet<String>,
+    /// Per-slot respawn gates for streamed authored populations.
+    streaming_respawn_deadlines: HashMap<String, u64>,
     /// Externally submitted actions (e.g., from network clients).
     external_actions: Vec<AgentAction>,
 }
@@ -123,6 +129,8 @@ pub struct ChunkPopulationState {
     pub active_entity_count: u32,
     pub ambient_population_cap: u32,
     pub spawn_budget_remaining: u32,
+    pub pending_respawns: u32,
+    pub next_respawn_tick: Option<u64>,
     pub population_pressure: f32,
 }
 
@@ -153,6 +161,8 @@ pub struct RegionPopulationState {
     pub active_entity_count: u32,
     pub ambient_population_cap: u32,
     pub spawn_budget_remaining: u32,
+    pub pending_respawns: u32,
+    pub next_respawn_tick: Option<u64>,
     pub population_pressure: f32,
 }
 
@@ -195,6 +205,7 @@ enum PopulationKind {
 
 #[derive(Debug, Clone)]
 struct StreamingSpawnRequest {
+    slot_key: String,
     chunk_key: String,
     biome_id: String,
     faction_track_id: Option<String>,
@@ -202,6 +213,7 @@ struct StreamingSpawnRequest {
     spawn_group: String,
     archetype_id: String,
     slot_index: u32,
+    respawn_ticks: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -374,6 +386,8 @@ impl World {
             next_entity_id: 1,
             paused: false,
             streaming: WorldStreamingMetadata::new(8.0),
+            streaming_live_slots: HashSet::new(),
+            streaming_respawn_deadlines: HashMap::new(),
             external_actions: Vec::new(),
         }
     }
@@ -448,6 +462,24 @@ impl World {
             chunk_state.refresh_metrics();
         }
 
+        for (slot_key, deadline) in &self.streaming_respawn_deadlines {
+            if *deadline <= self.tick {
+                continue;
+            }
+            let Some((chunk_key, _, _)) = parse_streaming_slot_key(slot_key) else {
+                continue;
+            };
+            let chunk_state = chunk_states
+                .entry(chunk_key.to_string())
+                .or_insert_with(|| self.streaming.chunk_population_seed(chunk_key));
+            chunk_state.pending_respawns += 1;
+            chunk_state.next_respawn_tick = Some(
+                chunk_state
+                    .next_respawn_tick
+                    .map_or(*deadline, |current| current.min(*deadline)),
+            );
+        }
+
         let mut chunks = chunk_states.into_values().collect::<Vec<_>>();
         chunks.sort_by(|left, right| left.chunk_key.cmp(&right.chunk_key));
 
@@ -478,6 +510,13 @@ impl World {
                         state.active_chunk_count += 1;
                     }
                     state.counts.merge(chunk.counts);
+                    state.pending_respawns += chunk.pending_respawns;
+                    state.next_respawn_tick = match (state.next_respawn_tick, chunk.next_respawn_tick)
+                    {
+                        (Some(current), Some(next)) => Some(current.min(next)),
+                        (None, Some(next)) => Some(next),
+                        (current, None) => current,
+                    };
                 }
                 state.refresh_metrics();
                 state
@@ -502,67 +541,70 @@ impl World {
             return;
         }
 
-        let mut live_counts = HashMap::<(String, String), u32>::new();
+        let slot_specs = self.streaming_slot_specs(&active_chunks);
+        let active_slot_keys = slot_specs
+            .iter()
+            .map(|spec| spec.slot_key.clone())
+            .collect::<HashSet<_>>();
+
+        self.streaming_live_slots
+            .retain(|slot_key| active_slot_keys.contains(slot_key));
+        self.streaming_respawn_deadlines
+            .retain(|slot_key, _| active_slot_keys.contains(slot_key));
+
+        let mut live_slot_keys = HashSet::new();
         let mut stale_entities = Vec::new();
-        for (entity, (transform, spawn_profile)) in self.ecs.query::<(&Transform, &SpawnProfile)>().iter()
+        for (entity, (transform, spawn_profile)) in
+            self.ecs.query::<(&Transform, &SpawnProfile)>().iter()
         {
             let chunk_key = self.streaming.chunk_key_for_position(transform.position);
             if !active_chunks.contains(&chunk_key) {
                 stale_entities.push(entity);
                 continue;
             }
-
-            let Some(table_id) = streaming_profile_table_id(spawn_profile) else {
-                continue;
-            };
-            *live_counts
-                .entry((chunk_key, table_id.to_string()))
-                .or_default() += 1;
+            live_slot_keys.insert(spawn_profile.profile_id.clone());
         }
 
         for entity in stale_entities {
             let _ = self.ecs.despawn(entity);
         }
 
-        let mut requests = Vec::new();
-        for chunk_key in &active_chunks {
-            let seed = self.streaming.chunk_population_seed(chunk_key);
-            for table_id in &seed.encounter_table_ids {
-                let Some(table) = self.streaming.encounter_table(table_id) else {
-                    continue;
-                };
-                if table.entries.is_empty() {
-                    continue;
-                }
-
-                let current = live_counts
-                    .get(&(chunk_key.clone(), table_id.clone()))
-                    .copied()
-                    .unwrap_or_default();
-                let desired = table.ambient_cap as u32;
-                for slot_index in current..desired {
-                    let Some(entry) = choose_streaming_entry(table, chunk_key, slot_index) else {
-                        continue;
-                    };
-                    requests.push(StreamingSpawnRequest {
-                        chunk_key: chunk_key.clone(),
-                        biome_id: seed
-                            .biome_id
-                            .clone()
-                            .unwrap_or_else(|| table.biome_id.clone()),
-                        faction_track_id: seed.faction_track_id.clone(),
-                        encounter_table_id: table.table_id.clone(),
-                        spawn_group: table.spawn_group.clone(),
-                        archetype_id: entry.archetype_id.clone(),
-                        slot_index,
-                    });
-                }
+        let previous_live_slots = self.streaming_live_slots.clone();
+        for slot_key in previous_live_slots.difference(&live_slot_keys) {
+            if self.streaming_respawn_deadlines.contains_key(slot_key) {
+                continue;
             }
+            let Some(spec) = slot_specs.iter().find(|spec| spec.slot_key == *slot_key) else {
+                continue;
+            };
+            self.streaming_respawn_deadlines
+                .insert(slot_key.clone(), self.tick + spec.respawn_ticks as u64);
         }
 
+        let mut requests = Vec::new();
+        for spec in slot_specs {
+            if live_slot_keys.contains(&spec.slot_key) {
+                self.streaming_respawn_deadlines.remove(&spec.slot_key);
+                continue;
+            }
+
+            if self
+                .streaming_respawn_deadlines
+                .get(&spec.slot_key)
+                .is_some_and(|deadline| *deadline > self.tick)
+            {
+                continue;
+            }
+            self.streaming_respawn_deadlines.remove(&spec.slot_key);
+            requests.push(spec);
+        }
+
+        let mut next_live_slots = live_slot_keys;
         for request in requests {
+            next_live_slots.insert(request.slot_key.clone());
             self.spawn_streaming_request(request);
         }
+        self.streaming_live_slots = next_live_slots;
     }
 
     /// Advance the simulation by one tick
@@ -708,6 +750,50 @@ impl World {
         active
     }
 
+    fn streaming_slot_specs(&self, active_chunks: &HashSet<String>) -> Vec<StreamingSpawnRequest> {
+        let mut specs = Vec::new();
+
+        for chunk_key in active_chunks {
+            let seed = self.streaming.chunk_population_seed(chunk_key);
+            for table_id in &seed.encounter_table_ids {
+                let Some(table) = self.streaming.encounter_table(table_id) else {
+                    continue;
+                };
+                if table.entries.is_empty() {
+                    continue;
+                }
+
+                let biome_id = seed
+                    .biome_id
+                    .clone()
+                    .unwrap_or_else(|| table.biome_id.clone());
+                for slot_index in 0..table.ambient_cap as u32 {
+                    let Some(entry) = choose_streaming_entry(table, chunk_key, slot_index) else {
+                        continue;
+                    };
+                    let respawn_ticks = streaming_respawn_ticks(
+                        &entry.archetype_id,
+                        &table.spawn_group,
+                        entry.max_count,
+                    );
+                    specs.push(StreamingSpawnRequest {
+                        slot_key: encode_streaming_slot_key(chunk_key, &table.table_id, slot_index),
+                        chunk_key: chunk_key.clone(),
+                        biome_id: biome_id.clone(),
+                        faction_track_id: seed.faction_track_id.clone(),
+                        encounter_table_id: table.table_id.clone(),
+                        spawn_group: table.spawn_group.clone(),
+                        archetype_id: entry.archetype_id.clone(),
+                        slot_index,
+                        respawn_ticks,
+                    });
+                }
+            }
+        }
+
+        specs
+    }
+
     fn spawn_streaming_request(&mut self, request: StreamingSpawnRequest) {
         let position = streaming_spawn_position(
             &request.chunk_key,
@@ -717,10 +803,10 @@ impl World {
         );
         let display_name = archetype_display_name(&request.archetype_id);
         let spawn_profile = SpawnProfile {
-            profile_id: format!("{}::{}", request.encounter_table_id, request.slot_index),
+            profile_id: request.slot_key.clone(),
             biome_id: request.biome_id.clone(),
             spawn_group: request.spawn_group.clone(),
-            respawn_ticks: 60 * 30,
+            respawn_ticks: request.respawn_ticks,
             leash_radius: self.streaming.chunk_size * 0.45,
         };
         let faction = request
@@ -755,7 +841,7 @@ impl World {
                     })
                     .with_encounter_profile(EncounterProfile {
                         table_id: request.encounter_table_id.clone(),
-                        respawn_ticks: 60 * 30,
+                        respawn_ticks: request.respawn_ticks,
                         ..EncounterProfile::default()
                     })
                     .with_spawn_profile(spawn_profile)
@@ -841,8 +927,14 @@ fn classify_population_kind(
     PopulationKind::Scenery
 }
 
-fn streaming_profile_table_id(profile: &SpawnProfile) -> Option<&str> {
-    profile.profile_id.split_once("::").map(|(table_id, _)| table_id)
+fn encode_streaming_slot_key(chunk_key: &str, table_id: &str, slot_index: u32) -> String {
+    format!("{chunk_key}|{table_id}|{slot_index}")
+}
+
+fn parse_streaming_slot_key(slot_key: &str) -> Option<(&str, &str, u32)> {
+    let (chunk_key, remainder) = slot_key.split_once('|')?;
+    let (table_id, slot_index) = remainder.rsplit_once('|')?;
+    Some((chunk_key, table_id, slot_index.parse().ok()?))
 }
 
 fn choose_streaming_entry<'a>(
@@ -921,6 +1013,26 @@ fn streaming_spawn_position(
     let salt = stable_streaming_hash(chunk_key, encounter_table_id) as usize;
     let offset = pattern[(slot_index as usize + salt) % pattern.len()] * chunk_size;
     center + offset
+}
+
+fn streaming_respawn_ticks(archetype_id: &str, spawn_group: &str, entry_max_count: u8) -> u32 {
+    let normalized = format!(
+        "{}:{}",
+        archetype_id.to_ascii_lowercase(),
+        spawn_group.to_ascii_lowercase()
+    );
+    if normalized.contains("resource")
+        || normalized.contains("vein")
+        || normalized.contains("outcrop")
+        || normalized.contains("tree")
+    {
+        60 * 12
+    } else if normalized.contains("boss") || normalized.contains("beast") {
+        60 * 20
+    } else {
+        let density_factor = entry_max_count.max(1) as u32;
+        60 * (6 + density_factor * 2)
+    }
 }
 
 fn classify_streaming_archetype(archetype_id: &str, spawn_group: &str) -> StreamingArchetypeKind {
@@ -1360,6 +1472,83 @@ mod tests {
             .expect("steppe chunk should exist");
         assert_eq!(heart_after.counts.wild_creatures, 0);
         assert_eq!(steppe_after.counts.wild_creatures, 1);
+    }
+
+    #[test]
+    fn reconcile_streaming_population_respects_respawn_deadlines() {
+        let mut world = World::new(7);
+
+        let mut chunk = WorldChunkDefinition::new("0:0", "verdant-heart", "verdant-hollow");
+        chunk.encounter_table_ids.push("verdant-heart-wildlife".into());
+        let mut region =
+            WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
+        region.chunk_keys.push("0:0".into());
+        region
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
+
+        world.set_streaming_metadata(
+            8.0,
+            vec![chunk],
+            vec![region],
+            vec![RegionEncounterTable {
+                ambient_cap: 1,
+                ..RegionEncounterTable::new(
+                    "verdant-heart-wildlife",
+                    "verdant-hollow",
+                    "wildlife",
+                    vec![EncounterSpawnEntry {
+                        archetype_id: "verdant-lynx".into(),
+                        weight: 1,
+                        min_count: 1,
+                        max_count: 1,
+                        required_stage_tags: Vec::new(),
+                        required_reputation_tiers: Vec::new(),
+                    }],
+                )
+            }],
+        );
+
+        world.add_agent(Box::new(crate::agent::IdleAgent::new()));
+        world.reconcile_streaming_population();
+        let spawned_entity = world
+            .ecs
+            .query::<&SpawnProfile>()
+            .iter()
+            .map(|(entity, _)| entity)
+            .next()
+            .expect("streamed entity should spawn");
+        let respawn_ticks = world
+            .ecs
+            .get::<&SpawnProfile>(spawned_entity)
+            .expect("spawn profile exists")
+            .respawn_ticks as u64;
+
+        assert!(world.ecs.despawn(spawned_entity).is_ok());
+        world.reconcile_streaming_population();
+
+        let during_cooldown = world.population_state();
+        let chunk_state = during_cooldown
+            .chunks
+            .iter()
+            .find(|chunk| chunk.chunk_key == "0:0")
+            .expect("chunk should exist");
+        assert_eq!(chunk_state.counts.wild_creatures, 0);
+        assert_eq!(chunk_state.pending_respawns, 1);
+        assert_eq!(chunk_state.next_respawn_tick, Some(respawn_ticks));
+
+        world.tick = respawn_ticks;
+        world.reconcile_streaming_population();
+
+        let after_respawn = world.population_state();
+        let chunk_state = after_respawn
+            .chunks
+            .iter()
+            .find(|chunk| chunk.chunk_key == "0:0")
+            .expect("chunk should still exist");
+        assert_eq!(chunk_state.counts.wild_creatures, 1);
+        assert_eq!(chunk_state.pending_respawns, 0);
+        assert_eq!(chunk_state.next_respawn_tick, None);
     }
 }
 
