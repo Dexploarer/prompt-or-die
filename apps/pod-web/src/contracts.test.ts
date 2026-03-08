@@ -897,16 +897,31 @@ describe("TOON contract parsing", () => {
     const decorated = withInteractionMarkers(baseFrame, {
       moveTarget: [6, -4],
       selectedTarget: target,
-      controlledEntity: 1
+      controlledEntity: 1,
+      controlledSnapshot: {
+        id: 1,
+        position: [0, 0],
+        velocity: [0, 0],
+        rotation: 0,
+        health: 24,
+        maxHealth: 24,
+        movementSpeed: 4,
+        label: "WebPlayer",
+        metadata: typedEntityMetadata("Player", {})
+      }
     });
 
     expect(baseFrame.spriteBatches).toHaveLength(0);
-    expect(decorated.spriteBatches).toHaveLength(2);
+    expect(decorated.spriteBatches).toHaveLength(3);
     expect(
       decorated.spriteBatches.some((batch) =>
         batch.instances.some((instance) => instance.animationSetId === "destination-ring")
       )
     ).toBe(true);
+    const pathBatch = decorated.spriteBatches.find((batch) =>
+      batch.instances.some((instance) => instance.animationSetId === "path-node")
+    );
+    expect(pathBatch?.instances.length).toBeGreaterThanOrEqual(2);
     expect(
       decorated.spriteBatches.some((batch) =>
         batch.instances.some(

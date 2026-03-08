@@ -483,7 +483,8 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
     {
       moveTarget: clickMoveTarget,
       selectedTarget: target,
-      controlledEntity: liveConnectionStatus?.controlledEntity ?? null
+      controlledEntity: liveConnectionStatus?.controlledEntity ?? null,
+      controlledSnapshot: controlled
     }
   );
 }
