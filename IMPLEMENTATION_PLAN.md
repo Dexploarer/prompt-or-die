@@ -687,5 +687,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 73
-**Current focus**: Iteration 74 browser MMO loop completion beyond action staging, starting with richer live world-state affordances, direct shard-side player/chat outcome surfaces, and tighter creator inspection UX on the flagship browser path
+### Iteration 74
+- [x] Added pure, testable browser target-affordance helpers so the selected target now exposes compact summary and suggested-action hints grounded in live shard state.
+- [x] Surfaced selected-target affordances and better local feedback in the gameplay HUD, including immediate client-side guidance for missing targets, empty chat submits, and unavailable direct-connect submission paths.
+- [x] Added deterministic Bun coverage for target summary formatting and interaction-hint classification across creature and loot targets.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 74
+**Current focus**: Iteration 75 broader flagship MMO loop completion, starting with richer shard-side world metadata for browser clients, stronger creator inspection affordances, and continued convergence on the browser-first live world path

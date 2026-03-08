@@ -20,6 +20,10 @@ import {
   type ShardIncidentSummary
 } from "./contracts";
 import {
+  describeTargetAffordances,
+  formatTargetSummary
+} from "./affordances";
+import {
   PodWebDirectConnectClient,
   type DirectConnectActionState,
   runtimeConfigFromLocation,
@@ -65,6 +69,7 @@ const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
 const targetLabel = document.querySelector<HTMLElement>("#target-label");
+const affordanceLabel = document.querySelector<HTMLElement>("#affordance-label");
 const actionStatusLabel = document.querySelector<HTMLElement>("#action-status-label");
 const feedbackLabel = document.querySelector<HTMLElement>("#feedback-label");
 const eventFeedLabel = document.querySelector<HTMLElement>("#event-feed-label");
@@ -101,6 +106,7 @@ if (
   !connectionLabel ||
   !worldLabel ||
   !targetLabel ||
+  !affordanceLabel ||
   !actionStatusLabel ||
   !feedbackLabel ||
   !eventFeedLabel ||
@@ -130,6 +136,7 @@ const telemetryToggleButton = telemetryToggle;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
 const targetNode = targetLabel;
+const affordanceNode = affordanceLabel;
 const actionStatusNode = actionStatusLabel;
 const feedbackNode = feedbackLabel;
 const eventFeedNode = eventFeedLabel;
@@ -284,19 +291,6 @@ function selectedTarget(): NetworkEntitySnapshot | null {
   return targetableEntities().find((entity) => entity.id === selectedTargetId) ?? null;
 }
 
-function entityHealthSummary(entity: NetworkEntitySnapshot | null): string {
-  if (
-    entity == null ||
-    entity.health == null ||
-    entity.maxHealth == null ||
-    entity.maxHealth <= 0
-  ) {
-    return "status unknown";
-  }
-
-  return `${entity.health.toFixed(0)}/${entity.maxHealth.toFixed(0)} hp`;
-}
-
 function eventTouchesEntity(event: NetworkGameEvent, entityId: number | null): boolean {
   return entityId != null && event.entityIds.includes(entityId);
 }
@@ -384,9 +378,12 @@ function cycleTargetSelection(delta: number): void {
 
 function submitActions(actions: BrowserAction[]): void {
   if (!liveClient) {
+    latestFeedback = "Direct-connect is not active";
     return;
   }
-  liveClient.submitActions(actions);
+  if (!liveClient.submitActions(actions)) {
+    latestFeedback = "Action could not be submitted";
+  }
 }
 
 function movementDirection(): [number, number] | null {
@@ -433,6 +430,7 @@ function submitTargetedAction(
 ): void {
   const target = selectedTarget();
   if (!target) {
+    latestFeedback = "Select a target first";
     return;
   }
   submitActions([actionBuilder(target)]);
@@ -506,6 +504,7 @@ chatFormNode.addEventListener("submit", (event) => {
   event.preventDefault();
   const message = chatInputNode.value.trim();
   if (message.length === 0) {
+    latestFeedback = "Type a message first";
     return;
   }
 
@@ -652,6 +651,7 @@ async function tick(timestamp: number): Promise<void> {
 function renderTelemetryHud(): void {
   const stats = telemetryStats(telemetryState);
   const target = selectedTarget();
+  const controlled = controlledEntity();
   connectionNode.textContent = liveConnectionStatus
     ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
     : "offline demo / bridge mode";
@@ -664,9 +664,8 @@ function renderTelemetryHud(): void {
             : `controlled E(${liveConnectionStatus.controlledEntity})`
         }`
     : "demo scene";
-  targetNode.textContent = target
-    ? `${target.label ?? "Target"} · E(${target.id}) · ${entityHealthSummary(target)}`
-    : "No target selected";
+  targetNode.textContent = formatTargetSummary(target, controlled);
+  affordanceNode.textContent = describeTargetAffordances(target);
   actionStatusNode.textContent = formatActionStatus();
   feedbackNode.textContent = latestFeedback;
   eventFeedNode.textContent = formatRecentEventFeed();
