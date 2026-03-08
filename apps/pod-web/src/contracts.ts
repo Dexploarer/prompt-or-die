@@ -431,6 +431,36 @@ export interface NetworkEntityInteractionHints {
   canChat: boolean;
 }
 
+export type NetworkFactionDisposition = "Friendly" | "Neutral" | "Hostile";
+
+export interface NetworkFactionAffiliation {
+  factionId: string;
+  roleId: string;
+  disposition: NetworkFactionDisposition;
+  influenceRadius: number;
+}
+
+export interface NetworkQuestAnchor {
+  questIds: string[];
+  primaryPrompt: string;
+  stageTags: string[];
+}
+
+export interface NetworkEncounterProfile {
+  tableId: string;
+  difficultyTier: number;
+  recommendedPartySize: number;
+  respawnTicks: number;
+}
+
+export interface NetworkSpawnProfile {
+  profileId: string;
+  biomeId: string;
+  spawnGroup: string;
+  respawnTicks: number;
+  leashRadius: number;
+}
+
 export interface NetworkAtmosphereProfile {
   biomeId: string;
   skyColor: RgbaTuple;
@@ -485,6 +515,10 @@ export interface NetworkEntityMetadataSnapshot {
   resourceSkill: NetworkSkillKind | null;
   resourceTier: number | null;
   encounterKind: NetworkEncounterKind | null;
+  faction: NetworkFactionAffiliation | null;
+  questAnchor: NetworkQuestAnchor | null;
+  encounterProfile: NetworkEncounterProfile | null;
+  spawnProfile: NetworkSpawnProfile | null;
   atmosphere: NetworkAtmosphereProfile | null;
   atmosphereVolume: NetworkAtmosphereVolume | null;
   actorPresentation: NetworkActorPresentation | null;
@@ -760,6 +794,12 @@ function parseNetworkEntityMetadata(value: unknown): NetworkEntityMetadataSnapsh
     resourceSkill: isSkillKind(resourceSkill) ? resourceSkill : null,
     resourceTier: optionalNumber(value.resource_tier ?? value.resourceTier) ?? null,
     encounterKind: isEncounterKind(encounterKind) ? encounterKind : null,
+    faction: parseFactionAffiliation(value.faction),
+    questAnchor: parseQuestAnchor(value.quest_anchor ?? value.questAnchor),
+    encounterProfile: parseEncounterProfile(
+      value.encounter_profile ?? value.encounterProfile
+    ),
+    spawnProfile: parseSpawnProfile(value.spawn_profile ?? value.spawnProfile),
     atmosphere: parseAtmosphereProfile(value.atmosphere),
     atmosphereVolume: parseAtmosphereVolume(value.atmosphere_volume ?? value.atmosphereVolume),
     actorPresentation: parseActorPresentation(
@@ -769,6 +809,116 @@ function parseNetworkEntityMetadata(value: unknown): NetworkEntityMetadataSnapsh
       value.combat_presentation ?? value.combatPresentation
     ),
     interaction: parseInteractionHints(value.interaction)
+  };
+}
+
+function parseStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const strings = value.filter((entry): entry is string => typeof entry === "string");
+  return strings.length === value.length ? strings : null;
+}
+
+function parseFactionAffiliation(value: unknown): NetworkFactionAffiliation | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const factionId = optionalString(value.faction_id ?? value.factionId);
+  const roleId = optionalString(value.role_id ?? value.roleId);
+  const disposition = value.disposition;
+  const influenceRadius = asNumber(value.influence_radius ?? value.influenceRadius);
+  if (
+    factionId == null ||
+    roleId == null ||
+    !isFactionDisposition(disposition) ||
+    influenceRadius == null
+  ) {
+    return null;
+  }
+
+  return {
+    factionId,
+    roleId,
+    disposition,
+    influenceRadius
+  };
+}
+
+function parseQuestAnchor(value: unknown): NetworkQuestAnchor | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const questIds = parseStringArray(value.quest_ids ?? value.questIds);
+  const primaryPrompt = optionalString(value.primary_prompt ?? value.primaryPrompt);
+  const stageTags = parseStringArray(value.stage_tags ?? value.stageTags);
+  if (questIds == null || primaryPrompt == null || stageTags == null) {
+    return null;
+  }
+
+  return {
+    questIds,
+    primaryPrompt,
+    stageTags
+  };
+}
+
+function parseEncounterProfile(value: unknown): NetworkEncounterProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const tableId = optionalString(value.table_id ?? value.tableId);
+  const difficultyTier = asNumber(value.difficulty_tier ?? value.difficultyTier);
+  const recommendedPartySize = asNumber(
+    value.recommended_party_size ?? value.recommendedPartySize
+  );
+  const respawnTicks = asNumber(value.respawn_ticks ?? value.respawnTicks);
+  if (
+    tableId == null ||
+    difficultyTier == null ||
+    recommendedPartySize == null ||
+    respawnTicks == null
+  ) {
+    return null;
+  }
+
+  return {
+    tableId,
+    difficultyTier,
+    recommendedPartySize,
+    respawnTicks
+  };
+}
+
+function parseSpawnProfile(value: unknown): NetworkSpawnProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const profileId = optionalString(value.profile_id ?? value.profileId);
+  const biomeId = optionalString(value.biome_id ?? value.biomeId);
+  const spawnGroup = optionalString(value.spawn_group ?? value.spawnGroup);
+  const respawnTicks = asNumber(value.respawn_ticks ?? value.respawnTicks);
+  const leashRadius = asNumber(value.leash_radius ?? value.leashRadius);
+  if (
+    profileId == null ||
+    biomeId == null ||
+    spawnGroup == null ||
+    respawnTicks == null ||
+    leashRadius == null
+  ) {
+    return null;
+  }
+
+  return {
+    profileId,
+    biomeId,
+    spawnGroup,
+    respawnTicks,
+    leashRadius
   };
 }
 
@@ -975,12 +1125,20 @@ function defaultNetworkEntityMetadata(): NetworkEntityMetadataSnapshot {
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    faction: null,
+    questAnchor: null,
+    encounterProfile: null,
+    spawnProfile: null,
     atmosphere: null,
     atmosphereVolume: null,
     actorPresentation: null,
     combatPresentation: null,
     interaction: defaultInteractionHints()
   };
+}
+
+function isFactionDisposition(value: unknown): value is NetworkFactionDisposition {
+  return value === "Friendly" || value === "Neutral" || value === "Hostile";
 }
 
 function isEntityKind(value: unknown): value is NetworkEntityKind {

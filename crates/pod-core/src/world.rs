@@ -191,6 +191,10 @@ enum ComponentToAdd {
     CombatLoadout(CombatLoadout),
     ActorPresentation(ActorPresentation),
     CombatPresentation(CombatPresentation),
+    FactionAffiliation(FactionAffiliation),
+    QuestAnchor(QuestAnchor),
+    EncounterProfile(EncounterProfile),
+    SpawnProfile(SpawnProfile),
     SkillBook(SkillBook),
     Inventory(Inventory),
     CreatureIdentity(CreatureIdentity),
@@ -293,6 +297,28 @@ impl<'w> EntityBuilder<'w> {
         self
     }
 
+    pub fn with_faction_affiliation(mut self, faction: FactionAffiliation) -> Self {
+        self.components
+            .push(ComponentToAdd::FactionAffiliation(faction));
+        self
+    }
+
+    pub fn with_quest_anchor(mut self, quest_anchor: QuestAnchor) -> Self {
+        self.components.push(ComponentToAdd::QuestAnchor(quest_anchor));
+        self
+    }
+
+    pub fn with_encounter_profile(mut self, encounter: EncounterProfile) -> Self {
+        self.components
+            .push(ComponentToAdd::EncounterProfile(encounter));
+        self
+    }
+
+    pub fn with_spawn_profile(mut self, spawn: SpawnProfile) -> Self {
+        self.components.push(ComponentToAdd::SpawnProfile(spawn));
+        self
+    }
+
     pub fn with_skill_book(mut self, skill_book: SkillBook) -> Self {
         self.components.push(ComponentToAdd::SkillBook(skill_book));
         self
@@ -381,6 +407,18 @@ impl<'w> EntityBuilder<'w> {
                 }
                 ComponentToAdd::CombatPresentation(presentation) => {
                     self.world.ecs.insert_one(entity, presentation).unwrap();
+                }
+                ComponentToAdd::FactionAffiliation(faction) => {
+                    self.world.ecs.insert_one(entity, faction).unwrap();
+                }
+                ComponentToAdd::QuestAnchor(quest_anchor) => {
+                    self.world.ecs.insert_one(entity, quest_anchor).unwrap();
+                }
+                ComponentToAdd::EncounterProfile(encounter) => {
+                    self.world.ecs.insert_one(entity, encounter).unwrap();
+                }
+                ComponentToAdd::SpawnProfile(spawn) => {
+                    self.world.ecs.insert_one(entity, spawn).unwrap();
                 }
                 ComponentToAdd::SkillBook(skill_book) => {
                     self.world.ecs.insert_one(entity, skill_book).unwrap();

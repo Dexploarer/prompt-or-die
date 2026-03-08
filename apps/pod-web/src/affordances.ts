@@ -13,6 +13,14 @@ export function formatTargetSummary(
   if (descriptor) {
     parts.push(descriptor);
   }
+  const faction = factionSummary(target);
+  if (faction) {
+    parts.push(faction);
+  }
+  const questHooks = questHookSummary(target);
+  if (questHooks) {
+    parts.push(questHooks);
+  }
   if (target.metadata.teamId != null) {
     parts.push(`team ${target.metadata.teamId}`);
   }
@@ -133,12 +141,38 @@ function describeTargetKind(target: NetworkEntitySnapshot): string | null {
   }
 }
 
+function factionSummary(target: NetworkEntitySnapshot): string | null {
+  const faction = target.metadata.faction;
+  if (!faction) {
+    return null;
+  }
+
+  return `${faction.factionId} ${faction.roleId}`;
+}
+
+function questHookSummary(target: NetworkEntitySnapshot): string | null {
+  const questAnchor = target.metadata.questAnchor;
+  if (!questAnchor || questAnchor.questIds.length === 0) {
+    return null;
+  }
+
+  return questAnchor.questIds.length === 1
+    ? "1 quest"
+    : `${questAnchor.questIds.length} quests`;
+}
+
 function authoritativeAffordances(target: NetworkEntitySnapshot): string[] {
   const actions: string[] = [];
   const hints = target.metadata.interaction;
 
   if (target.metadata.kind === "Scenery") {
+    if ((target.metadata.questAnchor?.questIds.length ?? 0) > 0) {
+      return ["Q quests", "Static scenery"];
+    }
     return ["Static scenery"];
+  }
+  if ((target.metadata.questAnchor?.questIds.length ?? 0) > 0) {
+    actions.push("Q quests");
   }
   if (hints.canAttack) {
     actions.push("Space attack");

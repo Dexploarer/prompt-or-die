@@ -10,8 +10,9 @@ use std::ops::Deref;
 
 use pod_core::{
     Action, ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout,
-    CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterState, Health,
-    Label, LootContainer, Movement, ResourceNode, SkillKind, Team, Transform, Velocity,
+    CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterProfile,
+    EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer,
+    Movement, QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
 };
 
 const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
@@ -92,6 +93,10 @@ pub struct EntityMetadataSnapshot {
     pub resource_skill: Option<SkillKind>,
     pub resource_tier: Option<u8>,
     pub encounter_kind: Option<EncounterKind>,
+    pub faction: Option<FactionAffiliation>,
+    pub quest_anchor: Option<QuestAnchor>,
+    pub encounter_profile: Option<EncounterProfile>,
+    pub spawn_profile: Option<SpawnProfile>,
     pub atmosphere: Option<AtmosphereProfile>,
     pub atmosphere_volume: Option<AtmosphereVolume>,
     pub actor_presentation: Option<ActorPresentation>,
@@ -496,6 +501,10 @@ impl WorldSnapshot {
             let resource = world.ecs.get::<&ResourceNode>(entity).ok();
             let loot = world.ecs.get::<&LootContainer>(entity).ok();
             let encounter = world.ecs.get::<&EncounterState>(entity).ok();
+            let faction = world.ecs.get::<&FactionAffiliation>(entity).ok();
+            let quest_anchor = world.ecs.get::<&QuestAnchor>(entity).ok();
+            let encounter_profile = world.ecs.get::<&EncounterProfile>(entity).ok();
+            let spawn_profile = world.ecs.get::<&SpawnProfile>(entity).ok();
             let atmosphere = world.ecs.get::<&AtmosphereProfile>(entity).ok();
             let atmosphere_volume = world.ecs.get::<&AtmosphereVolume>(entity).ok();
             let actor_presentation = world.ecs.get::<&ActorPresentation>(entity).ok();
@@ -546,6 +555,10 @@ impl WorldSnapshot {
                     resource_skill: resource.as_ref().map(|resource| resource.skill),
                     resource_tier: resource.as_ref().map(|resource| resource.tier),
                     encounter_kind: encounter.as_ref().map(|encounter| encounter.kind),
+                    faction: faction.map(|value| value.deref().clone()),
+                    quest_anchor: quest_anchor.map(|value| value.deref().clone()),
+                    encounter_profile: encounter_profile.map(|value| value.deref().clone()),
+                    spawn_profile: spawn_profile.map(|value| value.deref().clone()),
                     atmosphere: atmosphere.map(|value| value.deref().clone()),
                     atmosphere_volume: atmosphere_volume.map(|value| *value.deref()),
                     actor_presentation: actor_presentation.map(|value| value.deref().clone()),
@@ -1084,6 +1097,72 @@ fn hash_option_atmosphere(hash: &mut u64, atmosphere: Option<&AtmosphereProfile>
     }
 }
 
+fn hash_string_list(hash: &mut u64, values: &[String]) {
+    hash_u64(hash, values.len() as u64);
+    for value in values {
+        hash_option_str(hash, Some(value.as_str()));
+    }
+}
+
+fn hash_option_faction(hash: &mut u64, faction: Option<&FactionAffiliation>) {
+    match faction {
+        Some(faction) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(faction.faction_id.as_str()));
+            hash_option_str(hash, Some(faction.role_id.as_str()));
+            hash_option_str(
+                hash,
+                Some(match faction.disposition {
+                    FactionDisposition::Friendly => "Friendly",
+                    FactionDisposition::Neutral => "Neutral",
+                    FactionDisposition::Hostile => "Hostile",
+                }),
+            );
+            hash_f32(hash, faction.influence_radius);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_quest_anchor(hash: &mut u64, quest_anchor: Option<&QuestAnchor>) {
+    match quest_anchor {
+        Some(quest_anchor) => {
+            hash_u64(hash, 1);
+            hash_string_list(hash, &quest_anchor.quest_ids);
+            hash_option_str(hash, Some(quest_anchor.primary_prompt.as_str()));
+            hash_string_list(hash, &quest_anchor.stage_tags);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_encounter_profile(hash: &mut u64, encounter: Option<&EncounterProfile>) {
+    match encounter {
+        Some(encounter) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(encounter.table_id.as_str()));
+            hash_u64(hash, encounter.difficulty_tier as u64);
+            hash_u64(hash, encounter.recommended_party_size as u64);
+            hash_u64(hash, encounter.respawn_ticks as u64);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_spawn_profile(hash: &mut u64, spawn: Option<&SpawnProfile>) {
+    match spawn {
+        Some(spawn) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(spawn.profile_id.as_str()));
+            hash_option_str(hash, Some(spawn.biome_id.as_str()));
+            hash_option_str(hash, Some(spawn.spawn_group.as_str()));
+            hash_u64(hash, spawn.respawn_ticks as u64);
+            hash_f32(hash, spawn.leash_radius);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
 fn hash_option_atmosphere_volume(hash: &mut u64, volume: Option<&AtmosphereVolume>) {
     match volume {
         Some(volume) => {
@@ -1146,6 +1225,10 @@ fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_option_str(hash, metadata.resource_skill.map(skill_kind_name));
     hash_option_u8(hash, metadata.resource_tier);
     hash_option_str(hash, metadata.encounter_kind.map(encounter_kind_name));
+    hash_option_faction(hash, metadata.faction.as_ref());
+    hash_option_quest_anchor(hash, metadata.quest_anchor.as_ref());
+    hash_option_encounter_profile(hash, metadata.encounter_profile.as_ref());
+    hash_option_spawn_profile(hash, metadata.spawn_profile.as_ref());
     hash_option_atmosphere(hash, metadata.atmosphere.as_ref());
     hash_option_atmosphere_volume(hash, metadata.atmosphere_volume.as_ref());
     hash_option_actor_presentation(hash, metadata.actor_presentation.as_ref());
@@ -1282,7 +1365,8 @@ mod tests {
     use super::*;
     use pod_core::{
         ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout, CombatPresentation,
-        CreatureIdentity, IdleAgent, LootContainer, ResourceNode,
+        CreatureIdentity, EncounterProfile, FactionAffiliation, FactionDisposition, IdleAgent,
+        LootContainer, QuestAnchor, ResourceNode, SpawnProfile,
     };
 
     #[test]
@@ -1335,6 +1419,25 @@ mod tests {
                 is_wild: true,
                 ..CreatureIdentity::default()
             })
+            .with_faction_affiliation(FactionAffiliation {
+                faction_id: "verdant-wilds".into(),
+                role_id: "stalker".into(),
+                disposition: FactionDisposition::Hostile,
+                influence_radius: 18.0,
+            })
+            .with_encounter_profile(EncounterProfile {
+                table_id: "verdant-predators".into(),
+                difficulty_tier: 2,
+                recommended_party_size: 1,
+                respawn_ticks: 1_800,
+            })
+            .with_spawn_profile(SpawnProfile {
+                profile_id: "predator-grove".into(),
+                biome_id: "verdant-hollow".into(),
+                spawn_group: "predators".into(),
+                respawn_ticks: 900,
+                leash_radius: 14.0,
+            })
             .build();
         world
             .spawn_at(4.0, 4.0)
@@ -1348,6 +1451,11 @@ mod tests {
             .with_atmosphere_volume(AtmosphereVolume {
                 radius: 128.0,
                 priority: 3,
+            })
+            .with_quest_anchor(QuestAnchor {
+                quest_ids: vec!["discover-verdant-hollow".into()],
+                primary_prompt: "Inspect the spire".into(),
+                stage_tags: vec!["exploration".into(), "intro".into()],
             })
             .build();
 
@@ -1407,6 +1515,30 @@ mod tests {
                 .map(|presentation| presentation.profile_id.as_str()),
             Some("ember-crit")
         );
+        assert_eq!(
+            creature
+                .metadata
+                .faction
+                .as_ref()
+                .map(|faction| faction.faction_id.as_str()),
+            Some("verdant-wilds")
+        );
+        assert_eq!(
+            creature
+                .metadata
+                .encounter_profile
+                .as_ref()
+                .map(|encounter| encounter.table_id.as_str()),
+            Some("verdant-predators")
+        );
+        assert_eq!(
+            creature
+                .metadata
+                .spawn_profile
+                .as_ref()
+                .map(|spawn| spawn.profile_id.as_str()),
+            Some("predator-grove")
+        );
 
         let atmosphere = snapshot
             .entities
@@ -1428,6 +1560,14 @@ mod tests {
                 .as_ref()
                 .map(|volume| volume.priority),
             Some(3)
+        );
+        assert_eq!(
+            atmosphere
+                .metadata
+                .quest_anchor
+                .as_ref()
+                .map(|quest| quest.primary_prompt.as_str()),
+            Some("Inspect the spire")
         );
     }
 

@@ -44,6 +44,26 @@ describe("PodWebLocalWorld", () => {
     expect(snapshot.entities.some((entity) => entity.metadata.kind === "LootContainer")).toBe(true);
     expect(snapshot.entities.some((entity) => entity.label === "glass spire")).toBe(true);
     expect(snapshot.entities.some((entity) => entity.label === "canopy tree")).toBe(true);
+    expect(
+      snapshot.entities.some(
+        (entity) => entity.metadata.faction?.factionId === "verdant-wardens"
+      )
+    ).toBe(true);
+    expect(
+      snapshot.entities.some(
+        (entity) => (entity.metadata.questAnchor?.questIds.length ?? 0) > 0
+      )
+    ).toBe(true);
+    expect(
+      snapshot.entities.some(
+        (entity) => entity.metadata.encounterProfile?.tableId === "verdant-lynx-encounters"
+      )
+    ).toBe(true);
+    expect(
+      snapshot.entities.some(
+        (entity) => entity.metadata.spawnProfile?.biomeId === "verdant-hollow"
+      )
+    ).toBe(true);
   });
 
   test("moves the player and exposes high-signal text state", () => {

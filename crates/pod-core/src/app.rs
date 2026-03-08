@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use crate::action::AgentAction;
 use crate::component::{
     ActorPresentation, AgentControlled, AtmosphereProfile, AtmosphereVolume, ColorRect,
-    CombatLoadout, CombatPresentation, CompanionRoster, CreatureIdentity, EncounterState, Health,
-    Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook, Sprite,
-    Transform, Transform3D, Velocity,
+    CombatLoadout, CombatPresentation, CompanionRoster, CreatureIdentity, EncounterProfile,
+    EncounterState, FactionAffiliation, Health, Inventory, Label, LootContainer, Movement,
+    Perception, QuestAnchor, ResourceNode, Script, SkillBook, SpawnProfile, Sprite, Transform,
+    Transform3D, Velocity,
 };
 use crate::contract::{
     ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
@@ -299,6 +300,13 @@ impl App {
         self.types
             .register_component::<CombatPresentation>("CombatPresentation");
         self.types
+            .register_component::<FactionAffiliation>("FactionAffiliation");
+        self.types.register_component::<QuestAnchor>("QuestAnchor");
+        self.types
+            .register_component::<EncounterProfile>("EncounterProfile");
+        self.types
+            .register_component::<SpawnProfile>("SpawnProfile");
+        self.types
             .register_component::<AgentControlled>("AgentControlled");
         self.types.register_component::<Health>("Health");
         self.types.register_component::<Label>("Label");
@@ -428,6 +436,11 @@ mod tests {
             .metadata::<crate::component::Transform>()
             .expect("transform metadata");
         assert_eq!(transform.category, RegisteredTypeCategory::Component);
+        let faction = app
+            .type_registry()
+            .metadata::<crate::component::FactionAffiliation>()
+            .expect("faction metadata");
+        assert_eq!(faction.category, RegisteredTypeCategory::Component);
 
         let observation = app
             .type_registry()

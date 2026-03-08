@@ -534,6 +534,100 @@ impl Default for CombatPresentation {
     }
 }
 
+/// Relationship of an entity to an authored faction or social group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FactionDisposition {
+    Friendly,
+    Neutral,
+    Hostile,
+}
+
+impl Default for FactionDisposition {
+    fn default() -> Self {
+        Self::Neutral
+    }
+}
+
+/// Authored faction context used for NPCs, creatures, props, and quest hubs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FactionAffiliation {
+    pub faction_id: String,
+    pub role_id: String,
+    pub disposition: FactionDisposition,
+    pub influence_radius: f32,
+}
+
+impl Default for FactionAffiliation {
+    fn default() -> Self {
+        Self {
+            faction_id: "neutral-world".to_string(),
+            role_id: "wanderer".to_string(),
+            disposition: FactionDisposition::Neutral,
+            influence_radius: 0.0,
+        }
+    }
+}
+
+/// World-authored quest hooks attached to NPCs, props, and landmarks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuestAnchor {
+    pub quest_ids: Vec<String>,
+    pub primary_prompt: String,
+    pub stage_tags: Vec<String>,
+}
+
+impl Default for QuestAnchor {
+    fn default() -> Self {
+        Self {
+            quest_ids: Vec::new(),
+            primary_prompt: String::new(),
+            stage_tags: Vec::new(),
+        }
+    }
+}
+
+/// Encounter-table identity and tuning for authored creatures and regions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncounterProfile {
+    pub table_id: String,
+    pub difficulty_tier: u8,
+    pub recommended_party_size: u8,
+    pub respawn_ticks: u32,
+}
+
+impl Default for EncounterProfile {
+    fn default() -> Self {
+        Self {
+            table_id: "ambient-encounter".to_string(),
+            difficulty_tier: 1,
+            recommended_party_size: 1,
+            respawn_ticks: 60 * 45,
+        }
+    }
+}
+
+/// Spawn-table identity for authored fauna, resources, and region population groups.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpawnProfile {
+    pub profile_id: String,
+    pub biome_id: String,
+    pub spawn_group: String,
+    pub respawn_ticks: u32,
+    pub leash_radius: f32,
+}
+
+impl Default for SpawnProfile {
+    fn default() -> Self {
+        Self {
+            profile_id: "ambient-spawn".to_string(),
+            biome_id: "neutral-shard".to_string(),
+            spawn_group: "ambient".to_string(),
+            respawn_ticks: 60 * 30,
+            leash_radius: 18.0,
+        }
+    }
+}
+
 // ============================================================
 // GAMEPLAY COMPONENTS
 // ============================================================
