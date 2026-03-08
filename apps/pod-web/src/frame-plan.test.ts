@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ThreeJsWebGpuFrame } from "./contracts";
 import { buildCameraPose, buildFramePlan, splitSpriteBatchesByTint } from "./frame-plan";
+import { sampleTerrainHeight } from "./landscape";
 import { resolveQualityProfile } from "./quality";
 
 function testEnvironment(): ThreeJsWebGpuFrame["environment"] {
@@ -31,16 +32,38 @@ describe("buildCameraPose", () => {
     const pose = buildCameraPose({
       x: 24,
       y: -10,
-      zoom: 2,
+      zoom: 1.1,
       rotation: Math.PI / 2,
+      pitch: 0.34,
+      followDistance: 13.5,
+      focusHeight: 2.2,
+      shoulderOffset: 0.9,
       viewportWidth: 1280,
       viewportHeight: 720
     });
 
-    expect(pose.target).toEqual([24, 0, -10]);
+    expect(pose.target).toEqual([24, sampleTerrainHeight(24, -10) + 2.2, -10]);
     expect(pose.position[0]).toBeGreaterThan(24);
-    expect(pose.position[2]).toBeCloseTo(-10, 5);
-    expect(pose.position[1]).toBeGreaterThan(0);
+    expect(Math.abs(pose.position[2] + 10)).toBeLessThan(1.2);
+    expect(pose.position[1]).toBeGreaterThan(pose.target[1]);
+  });
+
+  test("pulls the camera in front of terrain occlusion instead of burying it in cliffs", () => {
+    const pose = buildCameraPose({
+      x: 18,
+      y: -14,
+      zoom: 0.76,
+      rotation: 0.12,
+      pitch: 0.42,
+      followDistance: 17,
+      focusHeight: 2.2,
+      shoulderOffset: 0.9,
+      viewportWidth: 1280,
+      viewportHeight: 720
+    });
+
+    const clearance = sampleTerrainHeight(pose.position[0], pose.position[2]) + 1.45;
+    expect(pose.position[1]).toBeGreaterThanOrEqual(clearance - 0.01);
   });
 });
 
@@ -273,8 +296,8 @@ describe("buildFramePlan", () => {
     expect(plan.meshBatches[0]?.visibleCount).toBe(1);
     expect(plan.meshBatches[0]?.batch.castShadows).toBe(true);
     expect(plan.meshBatches[1]?.visibleCount).toBe(1);
-    expect(plan.meshBatches[1]?.batch.castShadows).toBe(false);
     expect(plan.meshBatches[2]?.visibleCount).toBe(1);
+    expect(plan.meshBatches[2]?.batch.castShadows).toBe(false);
   });
 
   test("drops instances outside the distance budget", () => {
@@ -455,12 +478,11 @@ describe("buildFramePlan", () => {
     expect(plan.preloadedWorldChunks).toHaveLength(9);
     expect(plan.meshBatches).toHaveLength(1);
     expect(plan.spriteBatches).toHaveLength(0);
-    expect(plan.prewarmMeshRequests).toHaveLength(3);
+    expect(plan.prewarmMeshRequests).toHaveLength(2);
     expect(
       plan.prewarmMeshRequests.map((request) => [request.batch.mesh, request.lodLevel])
     ).toEqual([
       ["canopy-tree", 0],
-      ["canopy-tree", 1],
       ["tower", 0]
     ]);
     expect(plan.prewarmSpriteRequests).toHaveLength(1);

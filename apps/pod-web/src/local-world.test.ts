@@ -76,7 +76,7 @@ describe("PodWebLocalWorld", () => {
 
     const snapshot = world.snapshotState();
     const player = snapshot.entities.find((entity) => entity.id === 1);
-    expect(player?.position[0]).toBeGreaterThan(4);
+    expect(player?.position[0]).toBeGreaterThan(3.5);
 
     const textState = renderGameToText(
       snapshot,

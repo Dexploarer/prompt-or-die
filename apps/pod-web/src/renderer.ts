@@ -26,6 +26,24 @@ import {
   type ThreeJsWebGpuFrame
 } from "./contracts";
 import {
+  LANDSCAPE_PROFILE_ID,
+  LANDSCAPE_WORLD_SIZE,
+  WATER_CENTER,
+  WATER_LEVEL,
+  WATER_PROFILE_ID,
+  WATER_RADII,
+  clamp,
+  describeEnvironmentPreset,
+  fractalNoise,
+  mixScalar,
+  mixVec3,
+  sampleLakeMask,
+  sampleTerrainHeight,
+  sampleTerrainSlope,
+  sampleTimeLapseEnvironment,
+  smoothstep
+} from "./landscape";
+import {
   resolveQualityProfile,
   type PodThreeQualityPreset,
   type PodThreeQualityProfile
@@ -55,14 +73,192 @@ const INLINE_TSL_FN_WARNING =
 let installedThreeConsoleFilter = false;
 let didReportInlineFnWarning = false;
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+function createPaintSurface(width: number, height: number): PaintSurface {
+  if (typeof OffscreenCanvas === "function") {
+    return new OffscreenCanvas(width, height);
+  }
+
+  if (typeof document === "object") {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+  }
+
+  throw new Error("Canvas surface creation is unavailable in this environment");
+}
+
+function getPaintContext(surface: PaintSurface): OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D {
+  const context = surface.getContext("2d");
+  if (!context) {
+    throw new Error("2D canvas context is unavailable");
+  }
+  return context;
+}
+
+function createTerrainGeometry(
+  size = LANDSCAPE_WORLD_SIZE,
+  segments = 168
+): THREE.PlaneGeometry {
+  const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+  const positions = geometry.attributes.position;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const y = positions.getY(index);
+    const radialFalloff = clamp(1 - Math.hypot(x, y) / (size * 0.82), 0, 1);
+    const height = sampleTerrainHeight(x, y) * (0.84 + (1 - radialFalloff) * 0.22);
+    positions.setZ(index, height);
+  }
+
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function paintTerrainTexture(
+  surface: PaintSurface,
+  environment: ThreeJsEnvironment
+): void {
+  const context = getPaintContext(surface);
+  const width = "width" in surface ? surface.width : 512;
+  const height = "height" in surface ? surface.height : 512;
+  const grass = mixVec3(
+    environment.groundColor.slice(0, 3) as [number, number, number],
+    [0.2, 0.35, 0.22],
+    0.45
+  );
+  const moss = mixVec3(grass, [0.36, 0.49, 0.24], 0.52);
+  const cliff = mixVec3(grass, [0.38, 0.35, 0.31], 0.78);
+  const sand: [number, number, number] = [0.72, 0.66, 0.48];
+  const imageData = context.createImageData(width, height);
+  const worldHalfSize = LANDSCAPE_WORLD_SIZE * 0.5;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const worldX = (x / Math.max(width - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
+      const worldZ = (y / Math.max(height - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
+      const terrainHeight = sampleTerrainHeight(worldX, worldZ);
+      const slope = sampleTerrainSlope(worldX, worldZ);
+      const lake = sampleLakeMask(worldX, worldZ);
+      const shore = lake * (1 - smoothstep(2.4, 8.4, Math.abs(terrainHeight - WATER_LEVEL)));
+      const cliffMask = clamp((slope - 0.55) / 1.9 + Math.max(terrainHeight - 10, 0) / 18, 0, 1);
+      const meadowNoise = fractalNoise(worldX * 0.12 + 8, worldZ * 0.12 - 12);
+      const distanceFalloff = 1 - clamp(Math.hypot(worldX, worldZ) / worldHalfSize, 0, 1);
+
+      let tint = mixVec3(grass, moss, meadowNoise * 0.75 + distanceFalloff * 0.15);
+      tint = mixVec3(tint, sand, shore * 0.82);
+      tint = mixVec3(tint, cliff, cliffMask);
+
+      const brightness = clamp(
+        0.74 + terrainHeight * 0.012 - cliffMask * 0.08 + meadowNoise * 0.12,
+        0.36,
+        1.18
+      );
+      const index = (y * width + x) * 4;
+      imageData.data[index] = Math.round(tint[0] * brightness * 255);
+      imageData.data[index + 1] = Math.round(tint[1] * brightness * 255);
+      imageData.data[index + 2] = Math.round(tint[2] * brightness * 255);
+      imageData.data[index + 3] = 255;
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+}
+
+function paintWaterTexture(surface: PaintSurface): void {
+  const context = getPaintContext(surface);
+  const width = "width" in surface ? surface.width : 512;
+  const height = "height" in surface ? surface.height : 512;
+  const gradient = context.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, "rgb(162, 223, 239)");
+  gradient.addColorStop(0.45, "rgb(77, 162, 204)");
+  gradient.addColorStop(1, "rgb(18, 77, 119)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.16)";
+  context.lineWidth = 3;
+  for (let stripe = 0; stripe < 18; stripe += 1) {
+    const offsetY = (stripe / 18) * height;
+    context.beginPath();
+    for (let x = 0; x <= width; x += 16) {
+      const waveY =
+        offsetY +
+        Math.sin((x / width) * Math.PI * 4 + stripe * 0.9) * (6 + (stripe % 3) * 2);
+      if (x === 0) {
+        context.moveTo(x, waveY);
+      } else {
+        context.lineTo(x, waveY);
+      }
+    }
+    context.stroke();
+  }
+}
+
+function createLakeGeometry(pointCount = 56): THREE.ShapeGeometry {
+  const shape = new THREE.Shape();
+
+  for (let index = 0; index <= pointCount; index += 1) {
+    const angle = (index / pointCount) * Math.PI * 2;
+    const noise = 0.86 + fractalNoise(Math.cos(angle) * 12, Math.sin(angle) * 12) * 0.24;
+    const x = WATER_CENTER[0] + Math.cos(angle) * WATER_RADII[0] * noise;
+    const z = WATER_CENTER[1] + Math.sin(angle) * WATER_RADII[1] * noise;
+
+    if (index === 0) {
+      shape.moveTo(x, z);
+    } else {
+      shape.lineTo(x, z);
+    }
+  }
+
+  const geometry = new THREE.ShapeGeometry(shape, 18);
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+function paintSkyTexture(surface: PaintSurface, environment: ThreeJsEnvironment): void {
+  const context = getPaintContext(surface);
+  const width = "width" in surface ? surface.width : 512;
+  const height = "height" in surface ? surface.height : 512;
+  const top = mixVec3(environment.skyColor.slice(0, 3) as [number, number, number], [0.9, 0.97, 1], 0.28);
+  const horizon = mixVec3(environment.fogColor.slice(0, 3) as [number, number, number], [0.97, 0.91, 0.72], 0.38);
+
+  const gradient = context.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, `rgb(${Math.round(top[0] * 255)}, ${Math.round(top[1] * 255)}, ${Math.round(top[2] * 255)})`);
+  gradient.addColorStop(0.68, `rgb(${Math.round(horizon[0] * 255)}, ${Math.round(horizon[1] * 255)}, ${Math.round(horizon[2] * 255)})`);
+  gradient.addColorStop(1, `rgb(${Math.round(environment.groundColor[0] * 255)}, ${Math.round(environment.groundColor[1] * 255)}, ${Math.round(environment.groundColor[2] * 255)})`);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  const sunGradient = context.createRadialGradient(width * 0.72, height * 0.28, 0, width * 0.72, height * 0.28, width * 0.18);
+  sunGradient.addColorStop(0, "rgba(255, 246, 220, 0.92)");
+  sunGradient.addColorStop(0.22, "rgba(255, 229, 162, 0.48)");
+  sunGradient.addColorStop(1, "rgba(255, 229, 162, 0)");
+  context.fillStyle = sunGradient;
+  context.fillRect(0, 0, width, height);
+}
+
+function environmentSignature(environment: ThreeJsEnvironment): string {
+  return [
+    ...environment.skyColor.slice(0, 3),
+    ...environment.fogColor.slice(0, 3),
+    ...environment.groundColor.slice(0, 3),
+    ...environment.sunColor,
+    environment.sunIntensity,
+    environment.starfieldIntensity
+  ]
+    .map((value) => value.toFixed(3))
+    .join("|");
 }
 
 export interface PodThreeRendererStats {
   backend: "webgpu" | "webgl2";
   renderThread: "main" | "worker";
   qualityPreset: PodThreeQualityPreset;
+  environmentPreset: "daylight" | "twilight" | "night";
+  landscapeMode: typeof LANDSCAPE_PROFILE_ID;
+  waterMode: typeof WATER_PROFILE_ID;
+  timeOfDayHours: number;
   pixelRatio: number;
   drawCalls: number;
   triangles: number;
@@ -93,6 +289,8 @@ export interface PodThreeWorldRendererOptions {
   maxPixelRatio?: number;
   surfaceMetrics?: RenderSurfaceMetrics;
 }
+
+type PaintSurface = OffscreenCanvas | HTMLCanvasElement;
 
 export class PodThreeWorldRenderer {
   static async create(
@@ -132,6 +330,17 @@ export class PodThreeWorldRenderer {
   private fillLight: THREE.DirectionalLight | null = null;
   private rimLight: THREE.PointLight | null = null;
   private groundMaterial: THREE.MeshStandardMaterial | null = null;
+  private terrainMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null =
+    null;
+  private terrainTexture: THREE.Texture | null = null;
+  private terrainTextureSurface: PaintSurface | null = null;
+  private waterMesh: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> | null = null;
+  private waterTexture: THREE.Texture | null = null;
+  private waterTextureSurface: PaintSurface | null = null;
+  private skyDome: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial> | null = null;
+  private skyTexture: THREE.Texture | null = null;
+  private skyTextureSurface: PaintSurface | null = null;
+  private sunOrb: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial> | null = null;
   private starfieldMaterial: THREE.PointsMaterial | null = null;
   private adaptivePixelRatio: number;
   private smoothedFrameMs = 16.7;
@@ -139,6 +348,13 @@ export class PodThreeWorldRenderer {
   private surfaceMetrics: RenderSurfaceMetrics | null;
   private visibleWorldChunks = 0;
   private preloadedWorldChunks = 0;
+  private environmentPreset: "daylight" | "twilight" | "night" = "daylight";
+  private timeOfDayHours = 12;
+  private lastEnvironmentSignature: string | null = null;
+  private baseEnvironment: ThreeJsEnvironment | null = null;
+  private readonly smoothedCameraTarget = new THREE.Vector3();
+  private cameraPoseInitialized = false;
+  private lastCameraUpdateAt = 0;
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
 
@@ -239,6 +455,26 @@ export class PodThreeWorldRenderer {
     this.scene.fog = new THREE.Fog(0x09111b, 28, 180);
     this.scene.backgroundIntensity = 0.8;
 
+    const defaultEnvironment: ThreeJsEnvironment = {
+      biomeId: "verdant-hollow",
+      skyColor: [0.64, 0.8, 0.98, 1],
+      fogColor: [0.73, 0.84, 0.78, 1],
+      fogNear: 30,
+      fogFar: 196,
+      ambientColor: [0.82, 0.92, 0.88],
+      ambientIntensity: 1.4,
+      sunColor: [1, 0.96, 0.84],
+      sunIntensity: 2.9,
+      sunDirection: [30, 48, 18],
+      fillColor: [0.44, 0.74, 0.94],
+      fillIntensity: 0.88,
+      fillDirection: [-18, 14, -10],
+      rimColor: [0.42, 0.88, 0.78],
+      rimIntensity: 9,
+      groundColor: [0.19, 0.33, 0.21, 1],
+      starfieldIntensity: 0.08
+    };
+
     const hemisphere = new THREE.HemisphereLight(0xa8d1ff, 0x14263f, 1.2);
     this.scene.add(hemisphere);
     this.hemisphereLight = hemisphere;
@@ -266,16 +502,81 @@ export class PodThreeWorldRenderer {
     this.scene.add(rim);
     this.rimLight = rim;
 
+    this.skyTextureSurface = createPaintSurface(512, 512);
+    paintSkyTexture(this.skyTextureSurface, defaultEnvironment);
+    const skyTexture = new THREE.CanvasTexture(this.skyTextureSurface);
+    skyTexture.colorSpace = THREE.SRGBColorSpace;
+    this.skyTexture = skyTexture;
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      map: skyTexture,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false
+    });
+    const skyDome = new THREE.Mesh(new THREE.SphereGeometry(280, 40, 24), skyMaterial);
+    this.scene.add(skyDome);
+    this.skyDome = skyDome;
+
+    const sunOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 24, 24),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1, 0.95, 0.82),
+        transparent: true,
+        opacity: 0.94,
+        fog: false
+      })
+    );
+    this.scene.add(sunOrb);
+    this.sunOrb = sunOrb;
+
+    this.terrainTextureSurface = createPaintSurface(512, 512);
+    paintTerrainTexture(this.terrainTextureSurface, defaultEnvironment);
+    const terrainTexture = new THREE.CanvasTexture(this.terrainTextureSurface);
+    terrainTexture.colorSpace = THREE.SRGBColorSpace;
+    terrainTexture.wrapS = THREE.RepeatWrapping;
+    terrainTexture.wrapT = THREE.RepeatWrapping;
+    terrainTexture.repeat.set(1, 1);
+    this.terrainTexture = terrainTexture;
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0e1724,
-      roughness: 0.95,
+      color: 0xffffff,
+      map: terrainTexture,
+      roughness: 0.96,
       metalness: 0.02
     });
     this.groundMaterial = groundMaterial;
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(140, 64), groundMaterial);
+    const ground = new THREE.Mesh(createTerrainGeometry(), groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
+    ground.castShadow = false;
     this.scene.add(ground);
+    this.terrainMesh = ground;
+
+    this.waterTextureSurface = createPaintSurface(384, 384);
+    paintWaterTexture(this.waterTextureSurface);
+    const waterTexture = new THREE.CanvasTexture(this.waterTextureSurface);
+    waterTexture.colorSpace = THREE.SRGBColorSpace;
+    waterTexture.wrapS = THREE.RepeatWrapping;
+    waterTexture.wrapT = THREE.RepeatWrapping;
+    waterTexture.repeat.set(1.4, 1.4);
+    this.waterTexture = waterTexture;
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0.24, 0.62, 0.76),
+      map: waterTexture,
+      transparent: true,
+      opacity: 0.84,
+      roughness: 0.14,
+      metalness: 0.04,
+      emissive: new THREE.Color(0.04, 0.12, 0.18),
+      emissiveIntensity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const water = new THREE.Mesh(createLakeGeometry(), waterMaterial);
+    water.position.y = WATER_LEVEL + 0.06;
+    water.receiveShadow = true;
+    water.renderOrder = 2;
+    this.scene.add(water);
+    this.waterMesh = water;
 
     if (this.quality.showGrid) {
       const grid = new THREE.GridHelper(180, 60, 0x5fa7ff, 0x173049);
@@ -295,6 +596,7 @@ export class PodThreeWorldRenderer {
     const skyline = new THREE.Points(createStarfieldGeometry(640, 220), starfieldMaterial);
     skyline.position.y = 36;
     this.scene.add(skyline);
+    this.applyEnvironment(defaultEnvironment);
 
     this.overlayScene.background = null;
     this.overlayCamera.position.set(0, 0, 5);
@@ -302,6 +604,28 @@ export class PodThreeWorldRenderer {
   }
 
   private applyEnvironment(environment: ThreeJsEnvironment): void {
+    this.baseEnvironment = environment;
+    const signature = environmentSignature(environment);
+    if (signature !== this.lastEnvironmentSignature) {
+      if (this.skyTextureSurface && this.skyTexture) {
+        paintSkyTexture(this.skyTextureSurface, environment);
+        this.skyTexture.needsUpdate = true;
+      }
+      if (this.terrainTextureSurface && this.terrainTexture) {
+        paintTerrainTexture(this.terrainTextureSurface, environment);
+        this.terrainTexture.needsUpdate = true;
+      }
+      this.lastEnvironmentSignature = signature;
+    }
+
+    this.applyDynamicEnvironment(
+      sampleTimeLapseEnvironment(environment, performance.now() / 1000).environment
+    );
+  }
+
+  private applyDynamicEnvironment(environment: ThreeJsEnvironment): void {
+    this.environmentPreset = describeEnvironmentPreset(environment);
+
     this.scene.background = new THREE.Color(...environment.skyColor.slice(0, 3));
     const fog = this.scene.fog;
     if (fog instanceof THREE.Fog) {
@@ -362,6 +686,27 @@ export class PodThreeWorldRenderer {
       environment.groundColor[1],
       environment.groundColor[2]
     );
+    if (this.waterMesh) {
+      this.waterMesh.material.color.setRGB(0.18, 0.48 + environment.skyColor[1] * 0.18, 0.62 + environment.skyColor[2] * 0.1);
+      this.waterMesh.material.emissive.setRGB(
+        0.04 + environment.skyColor[0] * 0.05,
+        0.08 + environment.skyColor[1] * 0.08,
+        0.12 + environment.skyColor[2] * 0.08
+      );
+      this.waterMesh.material.emissiveIntensity = 0.4 + environment.sunIntensity * 0.03;
+    }
+    if (this.sunOrb) {
+      const sunDirection = new THREE.Vector3(...environment.sunDirection)
+        .normalize()
+        .multiplyScalar(210);
+      this.sunOrb.position.copy(sunDirection);
+      this.sunOrb.material.color.setRGB(
+        environment.sunColor[0],
+        environment.sunColor[1],
+        environment.sunColor[2]
+      );
+      this.sunOrb.material.opacity = clamp(0.18 + environment.sunIntensity * 0.22, 0.18, 0.96);
+    }
     if (this.starfieldMaterial) {
       this.starfieldMaterial.opacity = clamp(environment.starfieldIntensity, 0, 1);
     }
@@ -371,12 +716,33 @@ export class PodThreeWorldRenderer {
     pose: ReturnType<typeof buildCameraPose>,
     frameCamera: ThreeJsWebGpuFrame["camera"]
   ): void {
-    this.camera.position.set(...pose.position);
-    this.camera.quaternion.copy(pose.quaternion);
+    const targetPosition = new THREE.Vector3(...pose.position);
+    const targetLookAt = new THREE.Vector3(...pose.target);
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    const deltaSeconds =
+      this.lastCameraUpdateAt === 0
+        ? 1 / 60
+        : clamp((now - this.lastCameraUpdateAt) / 1000, 1 / 240, 0.12);
+    this.lastCameraUpdateAt = now;
+    const positionAlpha = 1 - Math.exp(-deltaSeconds * 10);
+    const targetAlpha = 1 - Math.exp(-deltaSeconds * 14);
+
+    if (!this.cameraPoseInitialized) {
+      this.camera.position.copy(targetPosition);
+      this.smoothedCameraTarget.copy(targetLookAt);
+      this.cameraPoseInitialized = true;
+    } else {
+      this.camera.position.lerp(targetPosition, positionAlpha);
+      this.smoothedCameraTarget.lerp(targetLookAt, targetAlpha);
+    }
+
     this.camera.fov = pose.fov;
     this.camera.near = pose.near;
     this.camera.far = pose.far;
-    this.camera.lookAt(...pose.target);
+    this.camera.lookAt(this.smoothedCameraTarget);
     this.camera.updateProjectionMatrix();
 
     const halfWidth = frameCamera.viewportWidth / 2;
@@ -558,7 +924,7 @@ export class PodThreeWorldRenderer {
       (sample, index) =>
         new THREE.Vector3(
           sample.position[0],
-          0.22 + index * 0.0035,
+          sampleTerrainHeight(sample.position[0], sample.position[1]) + 0.22 + index * 0.0035,
           sample.position[1]
         )
     );
@@ -588,6 +954,17 @@ export class PodThreeWorldRenderer {
 
   private async renderFrame(): Promise<void> {
     const frameStart = performance.now();
+    if (this.baseEnvironment) {
+      const timeLapse = sampleTimeLapseEnvironment(this.baseEnvironment, frameStart / 1000);
+      this.timeOfDayHours = timeLapse.timeOfDayHours;
+      this.applyDynamicEnvironment(timeLapse.environment);
+    }
+    if (this.waterTexture) {
+      this.waterTexture.offset.set(
+        (frameStart * 0.000045) % 1,
+        (frameStart * 0.00003) % 1
+      );
+    }
     const previousAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = true;
     await renderWithFallback(this.renderer, this.scene, this.camera);
@@ -608,6 +985,23 @@ export class PodThreeWorldRenderer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
+
+    const rendererWithCapabilities = this.renderer as RuntimeRenderer & {
+      capabilities?: { getMaxAnisotropy?: () => number };
+    };
+    const anisotropy =
+      typeof rendererWithCapabilities.capabilities?.getMaxAnisotropy === "function"
+        ? Math.min(rendererWithCapabilities.capabilities.getMaxAnisotropy(), 8)
+        : 1;
+    if (this.terrainTexture) {
+      this.terrainTexture.anisotropy = anisotropy;
+    }
+    if (this.skyTexture) {
+      this.skyTexture.anisotropy = anisotropy;
+    }
+    if (this.waterTexture) {
+      this.waterTexture.anisotropy = anisotropy;
+    }
   }
 
   getStats(): PodThreeRendererStats {
@@ -617,11 +1011,19 @@ export class PodThreeWorldRenderer {
       pendingGeometryAssets: 0,
       pendingSpriteAssets: 0
     };
+    const landscapeMode =
+      this.terrainMesh && this.skyDome
+        ? LANDSCAPE_PROFILE_ID
+        : LANDSCAPE_PROFILE_ID;
 
     return {
       backend: this.backend,
       renderThread: "main",
       qualityPreset: this.quality.preset,
+      environmentPreset: this.environmentPreset,
+      landscapeMode,
+      waterMode: WATER_PROFILE_ID,
+      timeOfDayHours: Number(this.timeOfDayHours.toFixed(2)),
       pixelRatio: this.renderer.getPixelRatio(),
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,

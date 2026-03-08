@@ -874,5 +874,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 88
-**Current focus**: Iteration 89 richer flagship biome authoring, denser multi-region shard content, and stronger creator-facing progression balancing on top of the new streamed population tooling
+### Iteration 89
+- [x] Replaced the rigid player-tied debug chase camera in `apps/pod-web` with a browser-side third-person orbit rig: independent yaw/pitch/zoom state, right-drag orbit, wheel zoom, velocity lead, and terrain-aware spring-arm collision so the flagship world reads like a controllable action camera instead of a floating shard overview.
+- [x] Smoothed local sandbox locomotion by replacing instant velocity snaps with acceleration/deceleration and turn easing, improving both WASD steering and point-and-click movement feel without changing the action pipeline.
+- [x] Kept the grounded terrain/water/daylight path from the previous graphics pass and validated that click-to-move, orbit-relative keyboard movement, and warmed asset residency still behave correctly in the live browser client.
+- [x] Added deterministic regression coverage for the new camera pose/collision behavior, updated controls tests for the terrain-aware pick ray, and kept the touched Bun suite green.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/controls.test.ts ./src/local-world.test.ts ./src/contracts.test.ts ./src/renderer.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 89
+**Current focus**: Iteration 90 real terrain meshes, shoreline/water polish, and reducing the flagship HUD/debug chrome so the browser client feels like a game first and a diagnostics surface second

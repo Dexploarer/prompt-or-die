@@ -8,6 +8,7 @@ import type {
   ThreeJsSpriteBatch,
   ThreeJsWebGpuFrame
 } from "./contracts";
+import { sampleTerrainHeight } from "./landscape";
 import type { PodThreeQualityProfile } from "./quality";
 
 const DEFAULT_UP = new Vector3(0, 1, 0);
@@ -89,20 +90,27 @@ export function buildCameraPose(
   camera: CameraState,
   options: PodThreeCameraRigOptions = {}
 ): PlannedCameraPose {
-  const pitch = options.pitch ?? 0.42;
-  const baseDistance = options.baseDistance ?? 28;
-  const minDistance = options.minDistance ?? 18;
-  const maxDistance = options.maxDistance ?? 48;
-  const distance = clamp(baseDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
-  const heightOffset = options.height ?? 3.5;
-  const target = new Vector3(camera.x, 0, camera.y);
+  const pitch = camera.pitch ?? options.pitch ?? 0.34;
+  const followDistance = camera.followDistance ?? options.baseDistance ?? 13.5;
+  const minDistance = options.minDistance ?? 9.5;
+  const maxDistance = options.maxDistance ?? 26;
+  const distance = clamp(followDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
+  const focusHeight = camera.focusHeight ?? options.height ?? 2.2;
+  const terrainHeight = sampleTerrainHeight(camera.x, camera.y);
+  const leadX = camera.leadX ?? 0;
+  const leadY = camera.leadY ?? 0;
+  const target = new Vector3(camera.x + leadX, terrainHeight + focusHeight, camera.y + leadY);
   const azimuth = camera.rotation;
   const horizontalDistance = Math.cos(pitch) * distance;
-  const position = new Vector3(
-    target.x + Math.sin(azimuth) * horizontalDistance,
-    target.y + Math.sin(pitch) * distance + heightOffset,
-    target.z + Math.cos(azimuth) * horizontalDistance
+  const shoulderOffset = camera.shoulderOffset ?? 0.9;
+  const rightX = Math.cos(azimuth);
+  const rightZ = -Math.sin(azimuth);
+  const desiredPosition = new Vector3(
+    target.x + Math.sin(azimuth) * horizontalDistance + rightX * shoulderOffset,
+    target.y + Math.sin(pitch) * distance,
+    target.z + Math.cos(azimuth) * horizontalDistance + rightZ * shoulderOffset
   );
+  const position = resolveCameraCollision(target, desiredPosition);
   const quaternion = new Quaternion().setFromRotationMatrix(
     new Matrix4().lookAt(position, target, DEFAULT_UP)
   );
@@ -115,6 +123,31 @@ export function buildCameraPose(
     near: options.near ?? 0.1,
     far: options.far ?? 1024
   };
+}
+
+function resolveCameraCollision(target: Vector3, desiredPosition: Vector3): Vector3 {
+  const safePosition = desiredPosition.clone();
+  const cameraClearance = 1.45;
+  const sweepSteps = 18;
+  let obstructionT = 1;
+
+  for (let step = 1; step <= sweepSteps; step += 1) {
+    const t = step / sweepSteps;
+    const sample = target.clone().lerp(desiredPosition, t);
+    const terrainHeight = sampleTerrainHeight(sample.x, sample.z) + cameraClearance;
+    if (sample.y < terrainHeight) {
+      obstructionT = Math.max(0.12, (step - 1) / sweepSteps);
+      break;
+    }
+  }
+
+  safePosition.lerpVectors(target, desiredPosition, obstructionT);
+  safePosition.y = Math.max(
+    safePosition.y,
+    sampleTerrainHeight(safePosition.x, safePosition.z) + cameraClearance
+  );
+
+  return safePosition;
 }
 
 export function buildFramePlan(

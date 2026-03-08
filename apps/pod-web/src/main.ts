@@ -1,6 +1,7 @@
 import {
   type BrowserAction,
   buildAuthoritativeWorldFrame,
+  type CameraState,
   type NetworkEventBatch,
   type NetworkGameEvent,
   type NetworkEntitySnapshot,
@@ -14,6 +15,7 @@ import {
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
+  type ThreeJsWebGpuFrame,
   type TickRollupSummary,
   type ToolCallEventSummary,
   type ReplaySummary,
@@ -23,6 +25,11 @@ import {
   describeTargetAffordances,
   formatTargetSummary
 } from "./affordances";
+import {
+  cameraRelativeMovementDirection,
+  pickWorldGroundPoint,
+  resolvePointerTarget
+} from "./controls";
 import {
   PodWebDirectConnectClient,
   type DirectConnectActionState,
@@ -207,7 +214,7 @@ let latestActionStatus: DirectConnectActionState = {
 };
 let latestFeedback = runtimeConfig
   ? "Awaiting authoritative outcomes"
-  : "Local sandbox ready: WASD move, Tab target, then test combat, gather, loot, capture, summon, and chat";
+  : "Local sandbox ready: click terrain to move, right-drag the camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
 let recentWorldEvents: NetworkGameEvent[] = [];
 let manualFrameOverride = false;
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
@@ -257,8 +264,21 @@ const liveClient = runtimeConfig
 const pressedKeys = new Set<string>();
 let selectedTargetId: number | null = null;
 let autoRetaliateEnabled = true;
+let clickMoveTarget: [number, number] | null = null;
 let lastMovementSignature = "stop";
 let lastMovementSubmitAtMs = 0;
+let orbitPointerId: number | null = null;
+let orbitPointer: [number, number] | null = null;
+
+const cameraRig = {
+  initialized: false,
+  yaw: 0,
+  desiredYaw: 0,
+  pitch: 0.34,
+  desiredPitch: 0.34,
+  zoom: 1.08,
+  desiredZoom: 1.08
+};
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return (
@@ -356,6 +376,104 @@ function targetableEntities(): NetworkEntitySnapshot[] {
       }
       return left.id - right.id;
     });
+}
+
+function currentFrameCameraState() {
+  if (!latestFrame) {
+    return null;
+  }
+
+  if (typeof latestFrame === "string") {
+    if (liveFrameSource === "threejs") {
+      return renderableThreeFrame(parseThreeJsWebGpuFrame(latestFrame)).camera;
+    }
+    return parseRenderFrame(latestFrame).camera;
+  }
+
+  return liveFrameSource === "threejs"
+    ? renderableThreeFrame(latestFrame).camera
+    : latestFrame.camera;
+}
+
+function shortestAngleDelta(current: number, target: number): number {
+  let delta = target - current;
+  while (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  }
+  while (delta < -Math.PI) {
+    delta += Math.PI * 2;
+  }
+  return delta;
+}
+
+function stepAngleToward(current: number, target: number, sharpness: number, deltaMs: number): number {
+  const alpha = 1 - Math.exp(-(sharpness * deltaMs) / 1000);
+  return current + shortestAngleDelta(current, target) * alpha;
+}
+
+function stepScalarToward(current: number, target: number, sharpness: number, deltaMs: number): number {
+  const alpha = 1 - Math.exp(-(sharpness * deltaMs) / 1000);
+  return current + (target - current) * alpha;
+}
+
+function syncCameraRig(camera: CameraState | null): void {
+  if (!camera) {
+    return;
+  }
+
+  if (!cameraRig.initialized) {
+    cameraRig.initialized = true;
+    cameraRig.yaw = camera.rotation;
+    cameraRig.desiredYaw = camera.rotation;
+    cameraRig.pitch = camera.pitch ?? 0.34;
+    cameraRig.desiredPitch = camera.pitch ?? 0.34;
+    cameraRig.zoom = camera.zoom;
+    cameraRig.desiredZoom = camera.zoom;
+  }
+}
+
+function updateCameraRig(deltaMs: number): void {
+  if (!cameraRig.initialized) {
+    return;
+  }
+
+  cameraRig.yaw = stepAngleToward(cameraRig.yaw, cameraRig.desiredYaw, 14, deltaMs);
+  cameraRig.pitch = stepScalarToward(cameraRig.pitch, cameraRig.desiredPitch, 16, deltaMs);
+  cameraRig.zoom = stepScalarToward(cameraRig.zoom, cameraRig.desiredZoom, 12, deltaMs);
+}
+
+function currentCameraYaw(): number {
+  return cameraRig.initialized
+    ? cameraRig.yaw
+    : currentFrameCameraState()?.rotation ?? 0;
+}
+
+function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame {
+  syncCameraRig(baseFrame.camera);
+  const controlled = controlledEntity();
+  const speed = controlled
+    ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
+    : 0;
+  const leadDistance = Math.min(1.4, speed * 0.16);
+  const leadX =
+    controlled && speed > 0.05 ? (controlled.velocity[0] / speed) * leadDistance : 0;
+  const leadY =
+    controlled && speed > 0.05 ? (controlled.velocity[1] / speed) * leadDistance : 0;
+
+  return {
+    ...baseFrame,
+    camera: {
+      ...baseFrame.camera,
+      rotation: cameraRig.yaw,
+      pitch: cameraRig.pitch,
+      zoom: cameraRig.zoom,
+      focusHeight: baseFrame.camera.focusHeight ?? 2.2,
+      followDistance: baseFrame.camera.followDistance ?? 13.5,
+      shoulderOffset: baseFrame.camera.shoulderOffset ?? 0.9,
+      leadX,
+      leadY
+    }
+  };
 }
 
 function selectedTarget(): NetworkEntitySnapshot | null {
@@ -472,31 +590,41 @@ function submitActions(actions: BrowserAction[]): void {
 }
 
 function movementDirection(): [number, number] | null {
-  const horizontal =
-    (pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight") ? 1 : 0) -
-    (pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft") ? 1 : 0);
-  const vertical =
-    (pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown") ? 1 : 0) -
-    (pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp") ? 1 : 0);
-
-  if (horizontal === 0 && vertical === 0) {
-    return null;
-  }
-
-  const length = Math.hypot(horizontal, vertical);
-  return [horizontal / length, vertical / length];
+  return cameraRelativeMovementDirection(pressedKeys, currentCameraYaw());
 }
 
 function maybeSubmitMovement(timestamp: number): void {
   const direction = movementDirection();
-  const signature = direction
-    ? `${direction[0].toFixed(3)}:${direction[1].toFixed(3)}`
+  const controlled = controlledEntity();
+  const clickDirection =
+    !direction && clickMoveTarget && controlled
+      ? (() => {
+          const dx = clickMoveTarget[0] - controlled.position[0];
+          const dy = clickMoveTarget[1] - controlled.position[1];
+          const distance = Math.hypot(dx, dy);
+
+          if (distance <= 0.7) {
+            clickMoveTarget = null;
+            latestFeedback = `Arrived at ${controlled.position[0].toFixed(1)}, ${controlled.position[1].toFixed(1)}`;
+            return null;
+          }
+
+          return [dx / distance, dy / distance] as [number, number];
+        })()
+      : null;
+  const activeDirection = direction ?? clickDirection;
+  const signature = activeDirection
+    ? `${activeDirection[0].toFixed(3)}:${activeDirection[1].toFixed(3)}`
     : "stop";
   const resendDue = timestamp - lastMovementSubmitAtMs >= 90;
 
   if (direction) {
+    clickMoveTarget = null;
+  }
+
+  if (activeDirection) {
     if (signature !== lastMovementSignature || resendDue) {
-      submitActions([{ kind: "move", direction }]);
+      submitActions([{ kind: "move", direction: activeDirection }]);
       lastMovementSignature = signature;
       lastMovementSubmitAtMs = timestamp;
     }
@@ -508,6 +636,29 @@ function maybeSubmitMovement(timestamp: number): void {
     lastMovementSignature = "stop";
     lastMovementSubmitAtMs = timestamp;
   }
+}
+
+function defaultPointerAction(target: NetworkEntitySnapshot): BrowserAction | null {
+  if (target.metadata.interaction.canLoot) {
+    return { kind: "loot", target: target.id };
+  }
+  if (target.metadata.interaction.canGather) {
+    return {
+      kind: "gatherResource",
+      target: target.id,
+      skill: target.metadata.resourceSkill ?? "Mining"
+    };
+  }
+  if (target.metadata.interaction.canCapture) {
+    return { kind: "captureCreature", target: target.id };
+  }
+  if (target.metadata.interaction.canAttack) {
+    return { kind: "attackTarget", target: target.id };
+  }
+  if (target.metadata.interaction.canInteract || target.metadata.interaction.canInspect) {
+    return { kind: "interactWith", target: target.id };
+  }
+  return null;
 }
 
 function submitTargetedAction(
@@ -603,6 +754,96 @@ chatFormNode.addEventListener("submit", (event) => {
   chatInputNode.value = "";
 });
 
+renderCanvas.addEventListener("pointerdown", (event) => {
+  if (event.button === 2) {
+    orbitPointerId = event.pointerId;
+    orbitPointer = [event.clientX, event.clientY];
+    renderCanvas.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    return;
+  }
+
+  if (event.button !== 0) {
+    return;
+  }
+
+  const camera = currentFrameCameraState();
+  if (!camera) {
+    return;
+  }
+
+  const rect = renderCanvas.getBoundingClientRect();
+  const worldPoint = pickWorldGroundPoint(
+    [event.clientX - rect.left, event.clientY - rect.top],
+    { width: rect.width, height: rect.height },
+    camera
+  );
+  if (!worldPoint) {
+    return;
+  }
+
+  const target = resolvePointerTarget(targetableEntities(), worldPoint);
+  if (target) {
+    selectedTargetId = target.id;
+    clickMoveTarget = null;
+    const action = event.detail >= 2 ? defaultPointerAction(target) : null;
+    latestFeedback =
+      action != null ? `Default action on ${target.label}` : `Selected ${target.label}`;
+    if (action) {
+      submitActions([action]);
+    }
+    return;
+  }
+
+  selectedTargetId = null;
+  clickMoveTarget = worldPoint;
+  lastMovementSignature = "stop";
+  latestFeedback = `Move order · ${worldPoint[0].toFixed(1)}, ${worldPoint[1].toFixed(1)}`;
+});
+
+renderCanvas.addEventListener("pointermove", (event) => {
+  if (orbitPointerId !== event.pointerId || orbitPointer == null) {
+    return;
+  }
+
+  const deltaX = event.clientX - orbitPointer[0];
+  const deltaY = event.clientY - orbitPointer[1];
+  orbitPointer = [event.clientX, event.clientY];
+  cameraRig.desiredYaw -= deltaX * 0.008;
+  cameraRig.desiredPitch = Math.max(0.18, Math.min(0.7, cameraRig.desiredPitch - deltaY * 0.0035));
+});
+
+renderCanvas.addEventListener("pointerup", (event) => {
+  if (orbitPointerId !== event.pointerId) {
+    return;
+  }
+
+  renderCanvas.releasePointerCapture(event.pointerId);
+  orbitPointerId = null;
+  orbitPointer = null;
+});
+
+renderCanvas.addEventListener("pointercancel", (event) => {
+  if (orbitPointerId !== event.pointerId) {
+    return;
+  }
+
+  orbitPointerId = null;
+  orbitPointer = null;
+});
+
+renderCanvas.addEventListener("wheel", (event) => {
+  cameraRig.desiredZoom = Math.max(
+    0.72,
+    Math.min(1.65, cameraRig.desiredZoom - event.deltaY * 0.0009)
+  );
+  event.preventDefault();
+}, { passive: false });
+
+renderCanvas.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
   liveClient?.setDebugTelemetry(telemetryState.enabled);
@@ -660,8 +901,16 @@ window.podRender = {
     liveIncidentDocuments = 0;
     if (localSandbox) {
       localSandbox.reset();
+      cameraRig.initialized = false;
+      cameraRig.yaw = 0;
+      cameraRig.desiredYaw = 0;
+      cameraRig.pitch = 0.34;
+      cameraRig.desiredPitch = 0.34;
+      cameraRig.zoom = 1.08;
+      cameraRig.desiredZoom = 1.08;
       latestFeedback =
-        "Local sandbox ready: WASD move, Tab target, then test combat, gather, loot, capture, summon, and chat";
+        "Local sandbox ready: click terrain to move, right-drag the camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
+      clickMoveTarget = null;
       refreshLocalSandboxFrame();
       renderTelemetryHud();
       return;
@@ -781,6 +1030,7 @@ let lastTickTimestamp = performance.now();
 async function tick(timestamp: number): Promise<void> {
   const deltaMs = Math.min(Math.max(timestamp - lastTickTimestamp, 0), 250);
   lastTickTimestamp = timestamp;
+  updateCameraRig(deltaMs);
   maybeSubmitMovement(timestamp);
 
   if (localSandbox && !manualFrameOverride) {
@@ -810,13 +1060,13 @@ async function renderCurrentFrame(timestamp: number): Promise<void> {
 
   if (latestFrame) {
     if (liveFrameSource === "threejs") {
-      await renderer.applyFrame(
-        typeof latestFrame === "string" ? parseThreeJsWebGpuFrame(latestFrame) : latestFrame
-      );
+      const frame =
+        typeof latestFrame === "string" ? parseThreeJsWebGpuFrame(latestFrame) : latestFrame;
+      await renderer.applyFrame(renderableThreeFrame(frame));
     } else if (typeof latestFrame === "string") {
       await renderer.applyLegacyFrame(parseRenderFrame(latestFrame));
     } else {
-      await renderer.applyFrame(latestFrame);
+      await renderer.applyFrame(renderableThreeFrame(latestFrame));
     }
   } else {
     await renderer.applyFrame(createDemoFrame(timestamp / 1000));
@@ -825,7 +1075,9 @@ async function renderCurrentFrame(timestamp: number): Promise<void> {
   const stats = renderer.getStats();
   runtimeStatsLabel.textContent = `${stats.drawCalls} calls · ${stats.triangles} tris · ${stats.pixelRatio.toFixed(
     2
-  )}x DPR · ${stats.frameMs.toFixed(1)}ms · ${stats.renderThread} thread · chunks ${
+  )}x DPR · ${stats.frameMs.toFixed(1)}ms · ${stats.renderThread} thread · ${stats.environmentPreset} ${stats.timeOfDayHours.toFixed(
+    1
+  )}h · ${stats.landscapeMode} · ${stats.waterMode} · chunks ${
     stats.visibleWorldChunks
   } visible / ${stats.preloadedWorldChunks} warm · assets ${
     stats.residentGeometryAssets + stats.residentSpriteAssets
