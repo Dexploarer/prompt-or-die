@@ -105,12 +105,16 @@ mod config {
 
 #[allow(dead_code)]
 mod map {
-    use pod_core::World;
+    use pod_core::{
+        EncounterSpawnEntry, RegionEncounterTable, Team, World, WorldChunkDefinition,
+        WorldRegionDefinition,
+    };
 
     /// Load a map by name into the world
     pub fn load_default_map(world: &mut World, map_name: &str) {
         match map_name {
-            "default" | _ => load_arena_map(world),
+            "arena" => load_arena_map(world),
+            "default" | "verdant-hollow" | _ => load_verdant_hollow(world),
         }
     }
 
@@ -186,6 +190,191 @@ mod map {
             .build();
 
         info!("Arena map loaded: 4 walls + 5 obstacles");
+    }
+
+    fn load_verdant_hollow(world: &mut World) {
+        use log::info;
+
+        let mut heart = WorldRegionDefinition::new(
+            "verdant-heart",
+            "Verdant Heart",
+            "verdant-hollow",
+        );
+        heart.chunk_keys = vec!["-1:-1".into(), "-1:0".into(), "0:-1".into(), "0:0".into()];
+        heart.active_quest_graph_ids = vec!["verdant-intro".into(), "tempered-trail".into()];
+        heart.dominant_faction_track_id = "verdant-wardens".into();
+        heart.encounter_table_ids = vec![
+            "verdant-heart-wildlife".into(),
+            "verdant-heart-resources".into(),
+        ];
+
+        let mut spirewatch =
+            WorldRegionDefinition::new("spirewatch", "Spirewatch Rise", "verdant-hollow");
+        spirewatch.chunk_keys = vec!["0:1".into(), "1:1".into()];
+        spirewatch.active_quest_graph_ids = vec!["spire-attunement".into()];
+        spirewatch.dominant_faction_track_id = "ancient-spirekeepers".into();
+        spirewatch.encounter_table_ids = vec![
+            "spirewatch-encounters".into(),
+            "spirewatch-resources".into(),
+        ];
+
+        let chunks = vec![
+            authored_chunk(
+                "-1:-1",
+                "verdant-heart",
+                "verdant-hollow",
+                vec!["-1:0", "0:-1"],
+                vec!["verdant-heart-wildlife", "verdant-heart-resources"],
+                vec!["verdant-intro"],
+                vec!["verdant-wardens"],
+            ),
+            authored_chunk(
+                "-1:0",
+                "verdant-heart",
+                "verdant-hollow",
+                vec!["-1:-1", "0:0"],
+                vec!["verdant-heart-wildlife", "verdant-heart-resources"],
+                vec!["verdant-intro", "tempered-trail"],
+                vec!["verdant-wardens"],
+            ),
+            authored_chunk(
+                "0:-1",
+                "verdant-heart",
+                "verdant-hollow",
+                vec!["-1:-1", "0:0", "0:1"],
+                vec!["verdant-heart-wildlife", "verdant-heart-resources"],
+                vec!["verdant-intro"],
+                vec!["verdant-wardens"],
+            ),
+            authored_chunk(
+                "0:0",
+                "verdant-heart",
+                "verdant-hollow",
+                vec!["-1:0", "0:-1", "0:1", "1:1"],
+                vec!["verdant-heart-wildlife", "verdant-heart-resources"],
+                vec!["verdant-intro", "tempered-trail"],
+                vec!["verdant-wardens"],
+            ),
+            authored_chunk(
+                "0:1",
+                "spirewatch",
+                "verdant-hollow",
+                vec!["0:0", "1:1"],
+                vec!["spirewatch-encounters", "spirewatch-resources"],
+                vec!["spire-attunement"],
+                vec!["ancient-spirekeepers"],
+            ),
+            authored_chunk(
+                "1:1",
+                "spirewatch",
+                "verdant-hollow",
+                vec!["0:0", "0:1"],
+                vec!["spirewatch-encounters", "spirewatch-resources"],
+                vec!["spire-attunement"],
+                vec!["ancient-spirekeepers"],
+            ),
+        ];
+
+        let encounter_tables = vec![
+            encounter_table(
+                "verdant-heart-wildlife",
+                "verdant-hollow",
+                "wildlife",
+                3,
+                vec![spawn_entry("verdant-lynx", 8, 1, 2)],
+            ),
+            encounter_table(
+                "verdant-heart-resources",
+                "verdant-hollow",
+                "resources",
+                2,
+                vec![spawn_entry("copper-vein-resource", 10, 1, 1)],
+            ),
+            encounter_table(
+                "spirewatch-encounters",
+                "verdant-hollow",
+                "wildlife",
+                2,
+                vec![spawn_entry("rift-beast", 5, 1, 1)],
+            ),
+            encounter_table(
+                "spirewatch-resources",
+                "verdant-hollow",
+                "resources",
+                1,
+                vec![spawn_entry("moonstone-outcrop-resource", 6, 1, 1)],
+            ),
+        ];
+
+        world.set_streaming_metadata(160.0, chunks, vec![heart, spirewatch], encounter_tables);
+
+        world
+            .spawn_at(0.0, -20.0)
+            .with_color(54.0, 54.0, [0.18, 0.54, 0.30, 1.0])
+            .with_label("canopy tree", Team::None)
+            .build();
+        world
+            .spawn_at(62.0, 68.0)
+            .with_color(42.0, 60.0, [0.62, 0.74, 0.84, 1.0])
+            .with_label("glass spire", Team::None)
+            .build();
+        world
+            .spawn_at(-48.0, 36.0)
+            .with_color(38.0, 38.0, [0.36, 0.30, 0.26, 1.0])
+            .with_label("weathered boulder", Team::None)
+            .build();
+        world
+            .spawn_at(28.0, -64.0)
+            .with_color(30.0, 42.0, [0.44, 0.30, 0.22, 1.0])
+            .with_label("warden totem", Team::None)
+            .build();
+
+        info!("Verdant Hollow loaded: streamed flagship region map");
+    }
+
+    fn authored_chunk(
+        chunk_key: &str,
+        region_id: &str,
+        biome_id: &str,
+        neighbors: Vec<&str>,
+        encounter_table_ids: Vec<&str>,
+        quest_graph_ids: Vec<&str>,
+        faction_track_ids: Vec<&str>,
+    ) -> WorldChunkDefinition {
+        let mut chunk = WorldChunkDefinition::new(chunk_key, region_id, biome_id);
+        chunk.neighbor_chunk_keys = neighbors.into_iter().map(str::to_string).collect();
+        chunk.encounter_table_ids = encounter_table_ids.into_iter().map(str::to_string).collect();
+        chunk.quest_graph_ids = quest_graph_ids.into_iter().map(str::to_string).collect();
+        chunk.faction_track_ids = faction_track_ids.into_iter().map(str::to_string).collect();
+        chunk
+    }
+
+    fn spawn_entry(
+        archetype_id: &str,
+        weight: u16,
+        min_count: u8,
+        max_count: u8,
+    ) -> EncounterSpawnEntry {
+        EncounterSpawnEntry {
+            archetype_id: archetype_id.to_string(),
+            weight,
+            min_count,
+            max_count,
+            required_stage_tags: Vec::new(),
+            required_reputation_tiers: Vec::new(),
+        }
+    }
+
+    fn encounter_table(
+        table_id: &str,
+        biome_id: &str,
+        spawn_group: &str,
+        ambient_cap: u16,
+        entries: Vec<EncounterSpawnEntry>,
+    ) -> RegionEncounterTable {
+        let mut table = RegionEncounterTable::new(table_id, biome_id, spawn_group, entries);
+        table.ambient_cap = ambient_cap;
+        table
     }
 }
 
@@ -982,7 +1171,8 @@ Configuration:
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{config::ServerConfig, parse_bind_target};
+    use super::{config::ServerConfig, map::load_default_map, parse_bind_target};
+    use pod_core::{IdleAgent, World};
 
     #[test]
     fn parse_bind_target_splits_host_and_port() {
@@ -1011,6 +1201,24 @@ mod runtime_tests {
         restore_var("POD_RUNTIME_MODE", original_runtime);
         restore_var("POD_ENABLE_WEBSOCKET", original_ws_enabled);
         restore_var("POD_WEBSOCKET_PORT", original_ws_port);
+    }
+
+    #[test]
+    fn default_map_seeds_streamed_population_for_authoritative_worlds() {
+        let mut world = World::new(7);
+        load_default_map(&mut world, "default");
+        world.add_agent(Box::new(IdleAgent::new()));
+        world.reconcile_streaming_population();
+
+        let population = world.population_state();
+        assert!(!population.regions.is_empty());
+        assert!(!population.chunks.is_empty());
+        assert!(
+            population
+                .chunks
+                .iter()
+                .any(|chunk| chunk.counts.wild_creatures > 0 || chunk.counts.resource_nodes > 0)
+        );
     }
 
     fn restore_var(key: &str, value: Option<std::ffi::OsString>) {

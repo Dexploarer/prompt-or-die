@@ -101,6 +101,14 @@ function typedEntityMetadata(
   };
 }
 
+function populationState(tick: number) {
+  return {
+    tick,
+    chunks: [],
+    regions: []
+  };
+}
+
 describe("TOON contract parsing", () => {
   test("accepts versioned tick telemetry TOON documents", () => {
     const document = encode({
@@ -479,6 +487,7 @@ describe("TOON contract parsing", () => {
   test("applies authoritative state deltas and builds a live world frame", () => {
     const baseline: NetworkWorldSnapshot = {
       tick: 10,
+      population: populationState(10),
       entities: [
         {
           id: 1,
@@ -527,6 +536,58 @@ describe("TOON contract parsing", () => {
       baseline,
       {
         tick: 11,
+        population: {
+          tick: 11,
+          chunks: [
+            {
+              chunkKey: "0:0",
+              regionId: "verdant-heart",
+              regionName: "Verdant Heart",
+              biomeId: "verdant-hollow",
+              questGraphIds: ["verdant-intro"],
+              factionTrackId: "verdant-wardens",
+              encounterTableIds: ["verdant-heart-wildlife"],
+              counts: {
+                players: 1,
+                npcs: 0,
+                wildCreatures: 1,
+                companions: 0,
+                resourceNodes: 0,
+                lootContainers: 0,
+                scenery: 2
+              },
+              activeEntityCount: 4,
+              ambientPopulationCap: 6,
+              spawnBudgetRemaining: 4,
+              populationPressure: 0.33
+            }
+          ],
+          regions: [
+            {
+              regionId: "verdant-heart",
+              regionName: "Verdant Heart",
+              primaryBiomeId: "verdant-hollow",
+              chunkKeys: ["0:0"],
+              activeQuestGraphIds: ["verdant-intro"],
+              dominantFactionTrackId: "verdant-wardens",
+              encounterTableIds: ["verdant-heart-wildlife"],
+              activeChunkCount: 1,
+              counts: {
+                players: 1,
+                npcs: 0,
+                wildCreatures: 1,
+                companions: 0,
+                resourceNodes: 0,
+                lootContainers: 0,
+                scenery: 2
+              },
+              activeEntityCount: 4,
+              ambientPopulationCap: 6,
+              spawnBudgetRemaining: 4,
+              populationPressure: 0.33
+            }
+          ]
+        },
         updated: [
           {
             id: 1,
@@ -618,6 +679,8 @@ describe("TOON contract parsing", () => {
 
     expect(next.tick).toBe(11);
     expect(next.entities.map((entity) => entity.id)).toEqual([1, 3, 4, 5]);
+    expect(next.population.regions[0]?.regionId).toBe("verdant-heart");
+    expect(next.population.chunks[0]?.ambientPopulationCap).toBe(6);
 
     const frame = buildAuthoritativeWorldFrame(next, {
       controlledEntity: 1,
@@ -636,6 +699,7 @@ describe("TOON contract parsing", () => {
   test("builds presentation-driven environments and actor affordances", () => {
     const snapshot: NetworkWorldSnapshot = {
       tick: 18,
+      population: populationState(18),
       entities: [
         {
           id: 1,
@@ -786,5 +850,85 @@ describe("TOON contract parsing", () => {
         ]
       }
     });
+  });
+
+  test("parses authoritative world population summaries from snapshots", () => {
+    const message = parseDirectConnectServerMessage(
+      JSON.stringify({
+        Welcome: {
+          client_id: "client-1",
+          reconnect_token: "resume-1",
+          tick: 24,
+          controlled_entity: 1,
+          authoritative_digest: 77,
+          snapshot: {
+            tick: 24,
+            entities: [],
+            population: {
+              tick: 24,
+              chunks: [
+                {
+                  chunk_key: "0:0",
+                  region_id: "verdant-heart",
+                  region_name: "Verdant Heart",
+                  biome_id: "verdant-hollow",
+                  quest_graph_ids: ["verdant-intro"],
+                  faction_track_id: "verdant-wardens",
+                  encounter_table_ids: ["verdant-heart-wildlife"],
+                  counts: {
+                    players: 1,
+                    npcs: 2,
+                    wild_creatures: 3,
+                    companions: 1,
+                    resource_nodes: 2,
+                    loot_containers: 1,
+                    scenery: 5
+                  },
+                  active_entity_count: 15,
+                  ambient_population_cap: 8,
+                  spawn_budget_remaining: 1,
+                  population_pressure: 0.875
+                }
+              ],
+              regions: [
+                {
+                  region_id: "verdant-heart",
+                  region_name: "Verdant Heart",
+                  primary_biome_id: "verdant-hollow",
+                  chunk_keys: ["0:0", "0:1"],
+                  active_quest_graph_ids: ["verdant-intro"],
+                  dominant_faction_track_id: "verdant-wardens",
+                  encounter_table_ids: ["verdant-heart-wildlife"],
+                  active_chunk_count: 1,
+                  counts: {
+                    players: 1,
+                    npcs: 2,
+                    wild_creatures: 3,
+                    companions: 1,
+                    resource_nodes: 2,
+                    loot_containers: 1,
+                    scenery: 5
+                  },
+                  active_entity_count: 15,
+                  ambient_population_cap: 8,
+                  spawn_budget_remaining: 1,
+                  population_pressure: 0.875
+                }
+              ]
+            }
+          }
+        }
+      })
+    );
+
+    expect(message.kind).toBe("welcome");
+    if (message.kind !== "welcome") {
+      throw new Error("expected welcome");
+    }
+
+    expect(message.snapshot.population.tick).toBe(24);
+    expect(message.snapshot.population.chunks[0]?.chunkKey).toBe("0:0");
+    expect(message.snapshot.population.chunks[0]?.counts.wildCreatures).toBe(3);
+    expect(message.snapshot.population.regions[0]?.populationPressure).toBe(0.875);
   });
 });

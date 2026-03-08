@@ -13,11 +13,12 @@ use eframe::{App, Frame};
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
     decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
-    AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, CreatureIdentity,
-    CreatureTemperament, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
-    QuestStageDefinition, QuestStateGraph, RegionEncounterTable, ReplayFile, ShardIncidentSummary,
+    AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, ChunkPopulationState,
+    CreatureIdentity, CreatureTemperament, EncounterSpawnEntry, FactionReputationTier,
+    FactionReputationTrack, PopulationBreakdown, QuestStageDefinition, QuestStateGraph,
+    RegionEncounterTable, RegionPopulationState, ReplayFile, ShardIncidentSummary,
     TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
-    WorldChunkDefinition, WorldRegionDefinition,
+    WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -573,6 +574,8 @@ pub struct SpacetimeDashboardState {
     pub recent_tool_call_events: VecDeque<AgentToolCallEvent>,
     #[serde(default)]
     pub recent_tick_rollups: VecDeque<AgentTickRollup>,
+    #[serde(default)]
+    pub population_state: WorldPopulationState,
     pub last_reducer_call: String,
     pub reducer_calls: u32,
 }
@@ -597,6 +600,7 @@ impl Default for SpacetimeDashboardState {
             latest_incident_summary: None,
             recent_tool_call_events: VecDeque::new(),
             recent_tick_rollups: VecDeque::new(),
+            population_state: WorldPopulationState::default(),
             last_reducer_call: "none".to_string(),
             reducer_calls: 0,
         }
@@ -857,6 +861,11 @@ impl SpacetimeDashboardState {
                 tool_errors: rollup.tool_error_count as usize,
             }),
         }
+    }
+
+    pub fn apply_population_state(&mut self, population_state: WorldPopulationState) {
+        self.latest_tick = self.latest_tick.max(population_state.tick);
+        self.population_state = population_state;
     }
 
     pub fn to_toon_document(&self) -> String {
@@ -2542,6 +2551,22 @@ impl PodEditorApp {
         Ok(())
     }
 
+    pub fn import_world_population_toon_document(
+        &mut self,
+        document: &str,
+    ) -> Result<(), String> {
+        let population: WorldPopulationState =
+            decode_toon_document(document, "world_population_state")?;
+        let tick = population.tick;
+
+        self.history.remember(self.state.clone());
+        self.state
+            .spacetime_dashboard
+            .apply_population_state(population);
+        self.push_console(format!("Imported world population state @ tick {tick}"));
+        Ok(())
+    }
+
     pub fn import_live_debug_toon_document(&mut self, document: &str) -> Result<(), String> {
         let document_type = decode_toon_value(document)?
             .get("document_type")
@@ -2568,6 +2593,7 @@ impl PodEditorApp {
             }
             "agent_tool_call_event" => self.import_agent_tool_call_toon_document(document),
             "agent_tick_rollup" => self.import_agent_tick_rollup_toon_document(document),
+            "world_population_state" => self.import_world_population_toon_document(document),
             "replay_file" => {
                 let replay: ReplayFile = decode_toon_document(document, "replay_file")?;
                 let replay_name = replay.header.name.clone();
@@ -3340,6 +3366,52 @@ impl PodEditorApp {
             self.state.world_graph.faction_tracks.len(),
             self.state.world_graph.encounter_tables.len()
         ));
+        ui.label(format!(
+            "Authoritative population: {} regions · {} chunks",
+            self.state.spacetime_dashboard.population_state.regions.len(),
+            self.state.spacetime_dashboard.population_state.chunks.len()
+        ));
+        ui.separator();
+        if let Some(entity_id) = self.state.selected_entity {
+            if let Some(binding) = self.state.world_graph.binding_for_entity(entity_id) {
+                if let Some(region_id) = binding.region_id.as_deref() {
+                    if let Some(region) = self
+                        .state
+                        .spacetime_dashboard
+                        .population_state
+                        .regions
+                        .iter()
+                        .find(|region| region.region_id == region_id)
+                    {
+                        ui.label(format!(
+                            "Selected region pop: {} active · {}/{} chunks hot · cap {} · budget {}",
+                            region.active_entity_count,
+                            region.active_chunk_count,
+                            region.chunk_keys.len(),
+                            region.ambient_population_cap,
+                            region.spawn_budget_remaining
+                        ));
+                    }
+                }
+                if let Some(chunk_key) = binding.chunk_key.as_deref() {
+                    if let Some(chunk) = self
+                        .state
+                        .spacetime_dashboard
+                        .population_state
+                        .chunks
+                        .iter()
+                        .find(|chunk| chunk.chunk_key == chunk_key)
+                    {
+                        ui.label(format!(
+                            "Selected chunk pop: {} active · pressure {:.2} · cap {}",
+                            chunk.active_entity_count,
+                            chunk.population_pressure,
+                            chunk.ambient_population_cap
+                        ));
+                    }
+                }
+            }
+        }
         ui.separator();
         ui.label("Per-agent trajectory distance");
         if self.state.spacetime_dashboard.agent_summaries.is_empty() {
@@ -4511,6 +4583,67 @@ mod tests {
             15
         );
         assert_eq!(app.state.spacetime_dashboard.latest_tick, 15);
+    }
+
+    #[test]
+    fn editor_imports_world_population_toon_into_dashboard_state() {
+        let mut app = PodEditorApp::default();
+        let population = WorldPopulationState {
+            tick: 22,
+            chunks: vec![ChunkPopulationState {
+                chunk_key: "0:0".to_string(),
+                region_id: Some("verdant-heart".to_string()),
+                region_name: Some("Verdant Heart".to_string()),
+                biome_id: Some("verdant-hollow".to_string()),
+                quest_graph_ids: vec!["verdant-intro".to_string()],
+                faction_track_id: Some("verdant-wardens".to_string()),
+                encounter_table_ids: vec!["verdant-heart-wildlife".to_string()],
+                counts: PopulationBreakdown {
+                    players: 1,
+                    wild_creatures: 2,
+                    scenery: 3,
+                    ..PopulationBreakdown::default()
+                },
+                active_entity_count: 6,
+                ambient_population_cap: 8,
+                spawn_budget_remaining: 2,
+                population_pressure: 0.75,
+            }],
+            regions: vec![RegionPopulationState {
+                region_id: "verdant-heart".to_string(),
+                region_name: "Verdant Heart".to_string(),
+                primary_biome_id: "verdant-hollow".to_string(),
+                chunk_keys: vec!["0:0".to_string()],
+                active_quest_graph_ids: vec!["verdant-intro".to_string()],
+                dominant_faction_track_id: Some("verdant-wardens".to_string()),
+                encounter_table_ids: vec!["verdant-heart-wildlife".to_string()],
+                active_chunk_count: 1,
+                counts: PopulationBreakdown {
+                    players: 1,
+                    wild_creatures: 2,
+                    scenery: 3,
+                    ..PopulationBreakdown::default()
+                },
+                active_entity_count: 6,
+                ambient_population_cap: 8,
+                spawn_budget_remaining: 2,
+                population_pressure: 0.75,
+            }],
+        };
+
+        app.import_world_population_toon_document(&population.to_toon_document())
+            .expect("population TOON should import");
+
+        assert_eq!(app.state.spacetime_dashboard.latest_tick, 22);
+        assert_eq!(app.state.spacetime_dashboard.population_state.tick, 22);
+        assert_eq!(
+            app.state.spacetime_dashboard.population_state.regions[0].region_id,
+            "verdant-heart"
+        );
+        assert_eq!(
+            app.state.spacetime_dashboard.population_state.chunks[0].spawn_budget_remaining,
+            2
+        );
     }
 
     #[test]

@@ -887,6 +887,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: crate::snapshot::EntityMetadataSnapshot::default(),
             }],
+            population: pod_core::WorldPopulationState {
+                tick: 20,
+                ..Default::default()
+            },
         };
         let predicted = WorldSnapshot {
             tick: 21,
@@ -901,6 +905,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: crate::snapshot::EntityMetadataSnapshot::default(),
             }],
+            population: pod_core::WorldPopulationState {
+                tick: 21,
+                ..Default::default()
+            },
         };
         let mut render_buffer = SnapshotInterpolationBuffer::default();
         render_buffer.push(authoritative.clone());
