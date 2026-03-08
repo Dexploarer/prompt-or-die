@@ -710,5 +710,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo fmt --all`
   - `git diff --check`
 
-**Last updated**: Iteration 75
-**Current focus**: Iteration 76 browser-first flagship world delivery, starting with asset-backed WebGPU rendering (`GLTFLoader` + `KTX2Loader` + `Meshopt`), worker-ready/offscreen render preparation, and a plan to replace emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 76
+- [x] Added a manifest-driven asset registry in `apps/pod-web` that can resolve semantic creator ids and aliases into real browser assets while keeping procedural fallback geometry/textures as a safe default path.
+- [x] Wired `PodThreeWorldRenderer.create(...)` to initialize real runtime loaders (`GLTFLoader`, `MeshoptDecoder`, `KTX2Loader`) after renderer creation, so browser clients can load shipped mesh assets without breaking the existing instanced render contract.
+- [x] Added reproducible sample browser assets under `apps/pod-web/public/assets` plus a `bun run sync:assets` workflow that regenerates sample glTFs, semantic asset associations, SVG textures, and bundled Basis transcoders from the local Three.js install.
+- [x] Hardened `pod-web` for future worker promotion by removing DOM-only renderer assumptions where possible and allowing the renderer surface to accept `OffscreenCanvas` without a second renderer implementation.
+- [x] Added deterministic Bun coverage for manifest parsing, semantic asset lookup, manifest-backed geometry loading, sprite texture fallback, and compressed-texture preference.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 76
+**Current focus**: Iteration 77 browser-first flagship world delivery, continuing with chunk-streamed asset residency, worker/offscreen render execution, and replacing emulated SpacetimeDB client paths with generated typed bindings

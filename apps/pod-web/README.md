@@ -5,6 +5,7 @@
 It consumes the `pod-render` browser frame contract and provides:
 
 - `three/webgpu` rendering with automatic WebGL2 fallback
+- manifest-driven glTF mesh loading with `GLTFLoader`, `MeshoptDecoder`, and `KTX2Loader` support
 - instanced mesh batches for 3D authored content with distance LOD splitting
 - billboard sprite batches with transparent depth-order preservation
 - CPU-side frustum and distance culling before instance upload
@@ -19,6 +20,7 @@ It consumes the `pod-render` browser frame contract and provides:
 ```bash
 cd apps/pod-web
 bun install
+bun run sync:assets
 bun run dev
 ```
 
@@ -68,3 +70,22 @@ bun run build
   - returns the app to its built-in demo scene
 - `?server=127.0.0.1:7778&debug=1`
   - connects the browser directly to the authoritative websocket runtime and enables live TOON debug documents
+
+## Asset manifest
+
+`pod-web` now ships a reproducible browser asset pipeline rooted at:
+
+- `/Users/home/Desktop/prompt-or-die/apps/pod-web/public/assets/pod-asset-manifest.json`
+
+The manifest is creator-facing:
+
+- meshes and sprites are addressed by semantic ids instead of hard-coded filenames
+- each entry can declare `aliases`, `category`, and `tags` so `monster`, `wolf`, `ore-vein`, `tree`, and similar creator terms resolve intuitively
+- sprite entries may declare both `path` and `ktx2Path`; the runtime will prefer KTX2 when the transcoder path is available and fall back to the plain texture otherwise
+
+To regenerate the sample assets and bundled Basis transcoders:
+
+```bash
+cd apps/pod-web
+bun run sync:assets
+```
