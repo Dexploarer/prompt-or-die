@@ -1,5 +1,7 @@
 import { decode as decodeToon } from "@toon-format/toon";
 
+import { sampleTerrainHeight } from "./landscape";
+
 export type Vec3Tuple = [number, number, number];
 export type Vec4Tuple = [number, number, number, number];
 export type Vec2Tuple = [number, number];
@@ -10,6 +12,12 @@ export interface CameraState {
   y: number;
   zoom: number;
   rotation: number;
+  pitch?: number;
+  focusHeight?: number;
+  followDistance?: number;
+  shoulderOffset?: number;
+  leadX?: number;
+  leadY?: number;
   viewportWidth: number;
   viewportHeight: number;
 }
@@ -60,6 +68,10 @@ export interface ThreeJsInstance {
   scale: Vec3Tuple;
   color?: RgbaTuple;
   sourceEntity?: number;
+  animationSetId?: string;
+  motionSpeed?: number;
+  healthRatio?: number | null;
+  controlled?: boolean;
 }
 
 export type ThreeJsRenderPhase = "opaque" | "transparent";
@@ -2119,6 +2131,7 @@ interface EntityRenderProfile {
   tint: RgbaTuple;
   emissive: Vec3Tuple;
   scale: Vec3Tuple;
+  groundOffset: number;
   layer: number;
   renderOrder: number;
   roughness: number;
@@ -2172,22 +2185,22 @@ function defaultFrameHints(): ThreeJsWebGpuHints {
 function defaultEnvironment(): ThreeJsEnvironment {
   return {
     biomeId: "neutral-shard",
-    skyColor: [0.04, 0.06, 0.1, 1],
-    fogColor: [0.035, 0.06, 0.1, 1],
-    fogNear: 28,
-    fogFar: 180,
-    ambientColor: [0.66, 0.82, 1],
-    ambientIntensity: 1.2,
-    sunColor: [1, 0.94, 0.82],
-    sunIntensity: 2.6,
-    sunDirection: [24, 42, 18],
-    fillColor: [0.42, 0.74, 1],
-    fillIntensity: 0.7,
+    skyColor: [0.64, 0.8, 0.98, 1],
+    fogColor: [0.73, 0.84, 0.78, 1],
+    fogNear: 30,
+    fogFar: 196,
+    ambientColor: [0.82, 0.92, 0.88],
+    ambientIntensity: 1.4,
+    sunColor: [1, 0.96, 0.84],
+    sunIntensity: 2.95,
+    sunDirection: [30, 48, 18],
+    fillColor: [0.48, 0.76, 0.94],
+    fillIntensity: 0.88,
     fillDirection: [-18, 14, -10],
-    rimColor: [0.29, 0.76, 1],
-    rimIntensity: 12,
-    groundColor: [0.055, 0.09, 0.14, 1],
-    starfieldIntensity: 0.9
+    rimColor: [0.4, 0.88, 0.78],
+    rimIntensity: 8.5,
+    groundColor: [0.19, 0.33, 0.21, 1],
+    starfieldIntensity: 0.08
   };
 }
 
@@ -2268,6 +2281,47 @@ function healthBand(entity: NetworkEntitySnapshot): "healthy" | "wounded" | "cri
   return "healthy";
 }
 
+function healthRatio(entity: NetworkEntitySnapshot): number | null {
+  if (entity.health == null || entity.maxHealth == null || entity.maxHealth <= 0) {
+    return null;
+  }
+
+  return clamp(entity.health / entity.maxHealth, 0, 1);
+}
+
+function motionSpeed(entity: NetworkEntitySnapshot): number {
+  const speed = Math.hypot(entity.velocity[0], entity.velocity[1]);
+  const maxSpeed = entity.movementSpeed ?? 0;
+  if (maxSpeed > 0.001) {
+    return clamp(speed / maxSpeed, 0, 1.6);
+  }
+
+  return clamp(speed / 6, 0, 1.6);
+}
+
+function resolveAnimationSetId(entity: NetworkEntitySnapshot): string {
+  const actorPresentationId = entity.metadata.actorPresentation?.animationSetId?.trim();
+  if (actorPresentationId) {
+    return actorPresentationId;
+  }
+
+  switch (entity.metadata.kind) {
+    case "Player":
+    case "Npc":
+      return "humanoid-explorer";
+    case "WildCreature":
+      return "beast-stalker";
+    case "Companion":
+      return "companion-hover";
+    case "Scenery":
+    case "ResourceNode":
+    case "LootContainer":
+      return "static-prop";
+    default:
+      return "humanoid-idle";
+  }
+}
+
 function entityKind(entity: NetworkEntitySnapshot): NetworkEntityKind {
   return entity.metadata.kind;
 }
@@ -2332,6 +2386,7 @@ function finalizeEntityRenderProfile(
             baseProfile.scale[2] * actor.scaleMultiplier
           ]
         : baseProfile.scale,
+    groundOffset: baseProfile.groundOffset,
     selectionRingScale: actor?.selectionRingScale ?? 2.4,
     selectionRingColor: combat?.selectionRingColor ?? defaultSelectionRingColor,
     criticalRingColor: combat?.criticalRingColor ?? [0.92, 0.34, 0.3, 0.22],
@@ -2409,6 +2464,7 @@ function entityRenderProfile(
       tint: isWood ? [0.28, 0.62, 0.34, 1] : [0.74, 0.54, 0.28, 1],
       emissive: isWood ? [0.02, 0.05, 0.02] : [0.08, 0.04, 0.01],
       scale: isWood ? [2.0, 4.2, 2.0] : [1.85, 1.3, 1.7],
+      groundOffset: isWood ? 0.18 : 0.12,
       layer: 1,
       renderOrder: 1,
       roughness: isWood ? 0.9 : 0.86,
@@ -2423,6 +2479,7 @@ function entityRenderProfile(
       tint: [0.78, 0.58, 0.34, 1],
       emissive: [0.03, 0.02, 0.01],
       scale: [1.18, 0.82, 0.92],
+      groundOffset: 0.06,
       layer: 2,
       renderOrder: 2,
       roughness: 0.8,
@@ -2442,6 +2499,7 @@ function entityRenderProfile(
             : [0.72, 0.52, 0.4, 1],
       emissive: band === "critical" ? [0.12, 0.03, 0.02] : [0.04, 0.02, 0.01],
       scale: [1.6, 1.9, 1.6],
+      groundOffset: 0.08,
       layer: 3,
       renderOrder: 3,
       roughness: 0.82,
@@ -2456,6 +2514,7 @@ function entityRenderProfile(
       tint: [0.42, 0.88, 0.74, 1],
       emissive: [0.06, 0.16, 0.12],
       scale: [1.0, 1.35, 1.0],
+      groundOffset: 0.1,
       layer: 4,
       renderOrder: 4,
       roughness: 0.42,
@@ -2473,6 +2532,7 @@ function entityRenderProfile(
           : teamTint(entity.metadata.teamId, false),
       emissive: [0.02, 0.03, 0.05],
       scale: [1.1, 1.9, 1.1],
+      groundOffset: 0.08,
       layer: 5,
       renderOrder: 5,
       roughness: 0.66,
@@ -2487,6 +2547,7 @@ function entityRenderProfile(
       tint: [0.24, 0.3, 0.38, 1],
       emissive: [0.01, 0.02, 0.03],
       scale: [3.2, 2.8, 0.95],
+      groundOffset: 0.16,
       layer: 0,
       renderOrder: 0,
       roughness: 0.94,
@@ -2501,6 +2562,7 @@ function entityRenderProfile(
       tint: [0.54, 0.76, 0.94, 1],
       emissive: [0.08, 0.14, 0.2],
       scale: [1.7, 4.0, 1.7],
+      groundOffset: 0.24,
       layer: 1,
       renderOrder: 1,
       roughness: 0.22,
@@ -2515,6 +2577,7 @@ function entityRenderProfile(
       tint: [0.34, 0.66, 0.4, 1],
       emissive: [0.02, 0.05, 0.02],
       scale: [2.1, 4.3, 2.1],
+      groundOffset: 0.18,
       layer: 1,
       renderOrder: 1,
       roughness: 0.9,
@@ -2529,6 +2592,7 @@ function entityRenderProfile(
       tint: [0.34, 0.38, 0.46, 1],
       emissive: [0.02, 0.03, 0.05],
       scale: [1.4, 3.6, 1.4],
+      groundOffset: 0.16,
       layer: 1,
       renderOrder: 1,
       roughness: 0.9,
@@ -2543,6 +2607,7 @@ function entityRenderProfile(
       tint: [0.5, 0.42, 0.32, 1],
       emissive: [0.02, 0.015, 0.01],
       scale: [1.55, 1.12, 1.55],
+      groundOffset: 0.08,
       layer: 1,
       renderOrder: 1,
       roughness: 0.96,
@@ -2568,6 +2633,7 @@ function entityRenderProfile(
             : [0.72, 0.52, 0.4, 1],
       emissive: band === "critical" ? [0.12, 0.03, 0.02] : [0.04, 0.02, 0.01],
       scale: label.includes("npc") ? [1.1, 1.9, 1.1] : [1.6, 1.9, 1.6],
+      groundOffset: label.includes("npc") ? 0.08 : 0.08,
       layer: label.includes("npc") ? 5 : 3,
       renderOrder: label.includes("npc") ? 5 : 3,
       roughness: 0.82,
@@ -2588,6 +2654,7 @@ function entityRenderProfile(
       tint: [0.42, 0.88, 0.74, 1],
       emissive: [0.06, 0.16, 0.12],
       scale: [1.0, 1.35, 1.0],
+      groundOffset: 0.1,
       layer: 4,
       renderOrder: 4,
       roughness: 0.42,
@@ -2605,6 +2672,7 @@ function entityRenderProfile(
           : teamTint(entity.metadata.teamId, isControlled),
     emissive: isControlled ? [0.08, 0.06, 0.02] : [0.02, 0.03, 0.05],
     scale: isControlled ? [1.2, 2.0, 1.2] : [1.05, 1.85, 1.05],
+    groundOffset: isControlled ? 0.1 : 0.08,
     layer: 6,
     renderOrder: 6,
     roughness: 0.64,
@@ -2668,16 +2736,23 @@ export function buildAuthoritativeWorldFrame(
 
   for (const entity of snapshot.entities) {
     const profile = entityRenderProfile(entity, controlledEntity);
+    const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
+    const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
+    const groundHeight = sampleTerrainHeight(worldX, worldZ);
     const position: Vec3Tuple = [
-      entity.position[0] * WORLD_TO_RENDER_SCALE,
-      profile.scale[1] * 0.5,
-      entity.position[1] * WORLD_TO_RENDER_SCALE
+      worldX,
+      groundHeight + profile.scale[1] * 0.5 + profile.groundOffset,
+      worldZ
     ];
     const instance: ThreeJsInstance = {
       position,
       rotation: yawQuaternion(entity.rotation),
       scale: profile.scale,
-      sourceEntity: entity.id
+      sourceEntity: entity.id,
+      animationSetId: resolveAnimationSetId(entity),
+      motionSpeed: motionSpeed(entity),
+      healthRatio: healthRatio(entity),
+      controlled: controlledEntity != null && entity.id === controlledEntity
     };
 
     const batchKey = meshBatchKey(profile);
@@ -2721,7 +2796,7 @@ export function buildAuthoritativeWorldFrame(
         depthTest: true,
         instances: [
           {
-            position: [position[0], 0.12, position[2]],
+            position: [position[0], groundHeight + 0.12, position[2]],
             rotation: GROUND_RING_ROTATION,
             scale: [
               profile.selectionRingScale * 1.4,
@@ -2729,7 +2804,8 @@ export function buildAuthoritativeWorldFrame(
               1
             ],
             color: profile.auraColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "aura-ring"
           }
         ]
       });
@@ -2748,11 +2824,13 @@ export function buildAuthoritativeWorldFrame(
         depthTest: true,
         instances: [
           {
-            position: [position[0], 0.08, position[2]],
+            position: [position[0], groundHeight + 0.08, position[2]],
             rotation: GROUND_RING_ROTATION,
             scale: [profile.selectionRingScale, profile.selectionRingScale, 1],
             color: profile.selectionRingColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "selection-ring",
+            controlled: true
           }
         ]
       });
@@ -2770,7 +2848,7 @@ export function buildAuthoritativeWorldFrame(
         depthTest: true,
         instances: [
           {
-            position: [position[0], 0.06, position[2]],
+            position: [position[0], groundHeight + 0.06, position[2]],
             rotation: GROUND_RING_ROTATION,
             scale: [
               profile.selectionRingScale * profile.impactScale,
@@ -2778,7 +2856,9 @@ export function buildAuthoritativeWorldFrame(
               1
             ],
             color: profile.criticalRingColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "critical-ring",
+            healthRatio: healthRatio(entity)
           }
         ]
       });
@@ -2791,6 +2871,12 @@ export function buildAuthoritativeWorldFrame(
       y: focusPosition[1],
       zoom: cameraZoom,
       rotation: focus?.rotation ?? 0.48,
+      pitch: 0.34,
+      focusHeight: 2.2,
+      followDistance: 13.5,
+      shoulderOffset: 0.9,
+      leadX: 0,
+      leadY: 0,
       viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
       viewportHeight: options.viewportHeight ?? defaultViewportHeight()
     },

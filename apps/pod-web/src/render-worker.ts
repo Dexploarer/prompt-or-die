@@ -38,6 +38,9 @@ async function handleMessage(message: RenderWorkerRequest): Promise<void> {
       case "setTelemetryTrail":
         renderer?.setTelemetryTrail(message.samples);
         return;
+      case "notifyWorldEvents":
+        renderer?.notifyWorldEvents(message.events);
+        return;
       case "clearTelemetryTrail":
         renderer?.clearTelemetryTrail();
         return;

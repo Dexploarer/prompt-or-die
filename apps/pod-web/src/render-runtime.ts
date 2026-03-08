@@ -1,4 +1,5 @@
 import type {
+  NetworkGameEvent,
   RenderFrame,
   TelemetryTrajectorySample,
   ThreeJsWebGpuFrame
@@ -25,6 +26,7 @@ export interface PodThreeRenderRuntime {
   readonly renderThread: PodRenderThread;
   applyFrame(frame: ThreeJsWebGpuFrame): Promise<void>;
   applyLegacyFrame(frame: RenderFrame): Promise<void>;
+  notifyWorldEvents(events: NetworkGameEvent[]): void | Promise<void>;
   setTelemetryTrail(samples: TelemetryTrajectorySample[]): void | Promise<void>;
   clearTelemetryTrail(): void | Promise<void>;
   getStats(): PodThreeRendererStats;
@@ -66,6 +68,10 @@ export type RenderWorkerRequest =
   | {
       type: "applyLegacyFrame";
       frame: RenderFrame;
+    }
+  | {
+      type: "notifyWorldEvents";
+      events: NetworkGameEvent[];
     }
   | {
       type: "setTelemetryTrail";
@@ -168,6 +174,10 @@ class MainThreadPodRenderRuntime implements PodThreeRenderRuntime {
 
   async applyLegacyFrame(frame: RenderFrame): Promise<void> {
     await this.renderer.applyLegacyFrame(frame);
+  }
+
+  notifyWorldEvents(events: NetworkGameEvent[]): void {
+    this.renderer.notifyWorldEvents(events);
   }
 
   setTelemetryTrail(samples: TelemetryTrajectorySample[]): void {
@@ -293,6 +303,13 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
     this.worker.postMessage({
       type: "applyLegacyFrame",
       frame
+    } satisfies RenderWorkerRequest);
+  }
+
+  notifyWorldEvents(events: NetworkGameEvent[]): void {
+    this.worker.postMessage({
+      type: "notifyWorldEvents",
+      events
     } satisfies RenderWorkerRequest);
   }
 

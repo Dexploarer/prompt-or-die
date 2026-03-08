@@ -46,16 +46,16 @@
 
       .hud {
         position: absolute;
-        inset: 20px auto auto 20px;
-        width: min(352px, calc(100vw - 40px));
-        padding: 16px 16px 14px;
+        inset: 18px auto auto 18px;
+        width: min(316px, calc(100vw - 36px));
+        padding: 14px 14px 12px;
         border: 1px solid var(--panel-border);
-        border-radius: 20px;
+        border-radius: 18px;
         background:
-          linear-gradient(180deg, rgba(10, 16, 26, 0.84), rgba(7, 11, 18, 0.72)),
+          linear-gradient(180deg, rgba(10, 16, 26, 0.76), rgba(7, 11, 18, 0.6)),
           var(--panel-bg);
-        backdrop-filter: blur(22px);
-        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
       }
 
       .hud--telemetry {
@@ -67,9 +67,9 @@
 
       .hud h1 {
         margin: 0;
-        font-size: 1.18rem;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
+        font-size: 1.02rem;
+        letter-spacing: 0.02em;
+        text-transform: none;
       }
 
       .hud p {
@@ -116,15 +116,15 @@
 
       .hud__stack {
         display: grid;
-        gap: 9px;
-        margin-top: 12px;
+        gap: 8px;
+        margin-top: 10px;
       }
 
       .hud__card {
         border: 1px solid rgba(130, 170, 255, 0.16);
-        border-radius: 15px;
-        background: rgba(3, 7, 12, 0.46);
-        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(3, 7, 12, 0.38);
+        padding: 9px 11px;
       }
 
       .hud__card-label {
@@ -138,7 +138,7 @@
         display: block;
         margin-top: 4px;
         color: var(--copy);
-        font-size: 0.98rem;
+        font-size: 0.94rem;
         line-height: 1.28;
       }
 
@@ -147,7 +147,12 @@
         margin-top: 4px;
         color: var(--muted);
         line-height: 1.28;
-        font-size: 0.86rem;
+        font-size: 0.83rem;
+      }
+
+      #event-feed-label {
+        max-height: 2.6em;
+        overflow: hidden;
       }
 
       .hud dl {
@@ -288,7 +293,7 @@
           <span>Verdant Hollow live shard</span>
           <span id="backend-label">starting…</span>
         </div>
-        <h1>Prompt or Die</h1>
+        <h1>Playable browser shard</h1>
         <p id="feedback-label">
           Awaiting authoritative outcomes
         </p>
@@ -332,7 +337,7 @@
             <dt>Stats</dt>
             <dd id="stats-label">warming up…</dd>
             <dt>Controls</dt>
-            <dd><code>WASD</code> move · <code>Tab</code> target · <code>Space</code> attack · <code>E</code> interact · <code>Enter</code> chat</dd>
+            <dd><code>Click</code> terrain to move · <code>WASD</code> camera-relative steer · <code>Tab</code> target · <code>Double-click</code> target action · <code>Enter</code> chat</dd>
             <dt>Bridge</dt>
             <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
           </dl>

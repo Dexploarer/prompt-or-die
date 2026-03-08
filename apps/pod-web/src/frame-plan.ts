@@ -1,4 +1,4 @@
-import { Frustum, Matrix4, PerspectiveCamera, Quaternion, Sphere, Vector3 } from "three";
+import { Euler, Frustum, Matrix4, PerspectiveCamera, Quaternion, Sphere, Vector3 } from "three";
 
 import type {
   CameraState,
@@ -8,6 +8,7 @@ import type {
   ThreeJsSpriteBatch,
   ThreeJsWebGpuFrame
 } from "./contracts";
+import { sampleTerrainHeight } from "./landscape";
 import type { PodThreeQualityProfile } from "./quality";
 
 const DEFAULT_UP = new Vector3(0, 1, 0);
@@ -50,6 +51,7 @@ export interface PlannedMeshBatch {
   batch: ThreeJsMeshBatch;
   lodLevel: 0 | 1 | 2;
   visibleCount: number;
+  instances: ThreeJsInstance[];
   matrices: Matrix4[];
 }
 
@@ -89,20 +91,27 @@ export function buildCameraPose(
   camera: CameraState,
   options: PodThreeCameraRigOptions = {}
 ): PlannedCameraPose {
-  const pitch = options.pitch ?? 0.42;
-  const baseDistance = options.baseDistance ?? 28;
-  const minDistance = options.minDistance ?? 18;
-  const maxDistance = options.maxDistance ?? 48;
-  const distance = clamp(baseDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
-  const heightOffset = options.height ?? 3.5;
-  const target = new Vector3(camera.x, 0, camera.y);
+  const pitch = camera.pitch ?? options.pitch ?? 0.34;
+  const followDistance = camera.followDistance ?? options.baseDistance ?? 13.5;
+  const minDistance = options.minDistance ?? 9.5;
+  const maxDistance = options.maxDistance ?? 26;
+  const distance = clamp(followDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
+  const focusHeight = camera.focusHeight ?? options.height ?? 2.2;
+  const terrainHeight = sampleTerrainHeight(camera.x, camera.y);
+  const leadX = camera.leadX ?? 0;
+  const leadY = camera.leadY ?? 0;
+  const target = new Vector3(camera.x + leadX, terrainHeight + focusHeight, camera.y + leadY);
   const azimuth = camera.rotation;
   const horizontalDistance = Math.cos(pitch) * distance;
-  const position = new Vector3(
-    target.x + Math.sin(azimuth) * horizontalDistance,
-    target.y + Math.sin(pitch) * distance + heightOffset,
-    target.z + Math.cos(azimuth) * horizontalDistance
+  const shoulderOffset = camera.shoulderOffset ?? 0.9;
+  const rightX = Math.cos(azimuth);
+  const rightZ = -Math.sin(azimuth);
+  const desiredPosition = new Vector3(
+    target.x + Math.sin(azimuth) * horizontalDistance + rightX * shoulderOffset,
+    target.y + Math.sin(pitch) * distance,
+    target.z + Math.cos(azimuth) * horizontalDistance + rightZ * shoulderOffset
   );
+  const position = resolveCameraCollision(target, desiredPosition);
   const quaternion = new Quaternion().setFromRotationMatrix(
     new Matrix4().lookAt(position, target, DEFAULT_UP)
   );
@@ -115,6 +124,31 @@ export function buildCameraPose(
     near: options.near ?? 0.1,
     far: options.far ?? 1024
   };
+}
+
+function resolveCameraCollision(target: Vector3, desiredPosition: Vector3): Vector3 {
+  const safePosition = desiredPosition.clone();
+  const cameraClearance = 1.45;
+  const sweepSteps = 18;
+  let obstructionT = 1;
+
+  for (let step = 1; step <= sweepSteps; step += 1) {
+    const t = step / sweepSteps;
+    const sample = target.clone().lerp(desiredPosition, t);
+    const terrainHeight = sampleTerrainHeight(sample.x, sample.z) + cameraClearance;
+    if (sample.y < terrainHeight) {
+      obstructionT = Math.max(0.12, (step - 1) / sweepSteps);
+      break;
+    }
+  }
+
+  safePosition.lerpVectors(target, desiredPosition, obstructionT);
+  safePosition.y = Math.max(
+    safePosition.y,
+    sampleTerrainHeight(safePosition.x, safePosition.z) + cameraClearance
+  );
+
+  return safePosition;
 }
 
 export function buildFramePlan(
@@ -280,13 +314,109 @@ export function composeInstanceMatrix(
   instance: ThreeJsInstance,
   rotationOverride?: Quaternion
 ): Matrix4 {
+  return composeAnimatedInstanceMatrix(instance, 0, 0, rotationOverride);
+}
+
+export function composeAnimatedInstanceMatrix(
+  instance: ThreeJsInstance,
+  elapsedSeconds: number,
+  pulse = 0,
+  rotationOverride?: Quaternion
+): Matrix4 {
+  const transform = sampleAnimatedInstanceTransform(instance, elapsedSeconds, pulse);
   const matrix = new Matrix4();
   matrix.compose(
-    new Vector3(...instance.position),
-    rotationOverride ?? new Quaternion(...instance.rotation),
-    new Vector3(...instance.scale)
+    new Vector3(...transform.position),
+    rotationOverride ?? new Quaternion(...transform.rotation),
+    new Vector3(...transform.scale)
   );
   return matrix;
+}
+
+export function sampleAnimatedInstanceTransform(
+  instance: ThreeJsInstance,
+  elapsedSeconds: number,
+  pulse = 0
+): Pick<ThreeJsInstance, "position" | "rotation" | "scale"> {
+  const animationSetId = instance.animationSetId?.toLowerCase() ?? "static-prop";
+  const motion = clamp(instance.motionSpeed ?? 0, 0, 1.6);
+  const health = instance.healthRatio ?? 1;
+  const phaseSeed = instance.sourceEntity ?? 0;
+  const phase = phaseSeed * 0.41887902047863906;
+  const idleWave = Math.sin(elapsedSeconds * 1.4 + phase);
+  const strideWave = Math.sin(elapsedSeconds * (2.8 + motion * 5.4) + phase);
+  const hoverWave = Math.sin(elapsedSeconds * 2.35 + phase);
+  const pulseAmount = clamp(pulse, 0, 1);
+
+  let yOffset = 0;
+  let scaleX = instance.scale[0];
+  let scaleY = instance.scale[1];
+  let scaleZ = instance.scale[2];
+  let pitchOffset = 0;
+  let rollOffset = 0;
+
+  if (animationSetId.includes("ring")) {
+    const ringPulse = Math.sin(elapsedSeconds * 2.2 + phase);
+    const ringScale = 1 + ringPulse * 0.045;
+    scaleX *= ringScale;
+    scaleY *= ringScale;
+  } else if (animationSetId.includes("companion") || animationSetId.includes("hover")) {
+    yOffset += 0.18 + hoverWave * 0.14;
+    scaleX *= 1 + hoverWave * 0.025;
+    scaleY *= 1 - hoverWave * 0.05;
+    scaleZ *= 1 + hoverWave * 0.025;
+    rollOffset += hoverWave * 0.045;
+  } else if (animationSetId.includes("beast")) {
+    const stomp = Math.abs(strideWave) * Math.max(0.2, motion);
+    yOffset += idleWave * 0.04 + stomp * 0.16;
+    scaleX *= 1 + stomp * 0.035;
+    scaleY *= 1 - stomp * 0.06;
+    scaleZ *= 1 + stomp * 0.035;
+    pitchOffset += strideWave * 0.04 * Math.max(motion, 0.25);
+  } else if (!animationSetId.includes("static")) {
+    const gait = Math.abs(strideWave) * Math.max(0.18, motion);
+    yOffset += idleWave * 0.03 + gait * 0.12;
+    scaleX *= 1 + gait * 0.018;
+    scaleY *= 1 - gait * 0.04;
+    scaleZ *= 1 + gait * 0.018;
+    pitchOffset += strideWave * 0.028 * Math.max(motion, 0.2);
+    rollOffset += Math.sin(elapsedSeconds * 1.8 + phase) * 0.012;
+  }
+
+  if (health < 0.35) {
+    const stress = (0.35 - health) / 0.35;
+    yOffset += Math.sin(elapsedSeconds * 8.4 + phase * 2) * 0.025 * stress;
+    rollOffset += Math.cos(elapsedSeconds * 9.8 + phase) * 0.018 * stress;
+  }
+
+  if (instance.controlled) {
+    yOffset += Math.abs(strideWave) * motion * 0.03;
+  }
+
+  if (pulseAmount > 0.001) {
+    const easedPulse = 1 - (1 - pulseAmount) * (1 - pulseAmount);
+    yOffset += easedPulse * 0.22;
+    scaleX *= 1 + easedPulse * 0.12;
+    scaleY *= 1 - easedPulse * 0.08;
+    scaleZ *= 1 + easedPulse * 0.12;
+    pitchOffset += easedPulse * 0.05;
+  }
+
+  const baseRotation = new Quaternion(...instance.rotation);
+  const animationRotation = new Quaternion().setFromEuler(
+    new Euler(pitchOffset, 0, rollOffset)
+  );
+  const finalRotation = baseRotation.multiply(animationRotation);
+
+  return {
+    position: [
+      instance.position[0],
+      instance.position[1] + yOffset,
+      instance.position[2]
+    ],
+    rotation: [finalRotation.x, finalRotation.y, finalRotation.z, finalRotation.w],
+    scale: [scaleX, scaleY, scaleZ]
+  };
 }
 
 function createMeshBatchKey(batch: ThreeJsMeshBatch, lodLevel?: number): string {
@@ -396,6 +526,7 @@ function planMeshBatches(
         },
         lodLevel,
         visibleCount: group.instances.length,
+        instances: group.instances,
         matrices: group.matrices
       });
     }

@@ -1019,9 +1019,29 @@ export class PodWebLocalWorld {
   private integrateMovement(): void {
     for (const entity of this.state.entities) {
       const desired = entity.desiredMove;
-      if (desired) {
-        entity.velocity = [desired[0] * entity.movementSpeed, desired[1] * entity.movementSpeed];
-      } else {
+      const targetVelocity: Vec2Tuple = desired
+        ? [desired[0] * entity.movementSpeed, desired[1] * entity.movementSpeed]
+        : [0, 0];
+      const acceleration =
+        entity.role === "player"
+          ? entity.movementSpeed * 0.18
+          : entity.movementSpeed * 0.14;
+      const deceleration =
+        entity.role === "player"
+          ? entity.movementSpeed * 0.24
+          : entity.movementSpeed * 0.18;
+      const velocityStep =
+        desired != null
+          ? Math.max(0.08, acceleration)
+          : Math.max(0.08, deceleration);
+
+      entity.velocity = [
+        moveScalarToward(entity.velocity[0], targetVelocity[0], velocityStep),
+        moveScalarToward(entity.velocity[1], targetVelocity[1], velocityStep)
+      ];
+
+      const speed = Math.hypot(entity.velocity[0], entity.velocity[1]);
+      if (speed < 0.02) {
         entity.velocity = [0, 0];
       }
 
@@ -1030,8 +1050,12 @@ export class PodWebLocalWorld {
         clamp(entity.position[1] + entity.velocity[1] / 60, -WORLD_LIMIT, WORLD_LIMIT)
       ];
 
-      if (entity.velocity[0] !== 0 || entity.velocity[1] !== 0) {
-        entity.rotation = Math.atan2(entity.velocity[0], entity.velocity[1]);
+      if (speed > 0) {
+        entity.rotation = rotateTowardAngle(
+          entity.rotation,
+          Math.atan2(entity.velocity[0], entity.velocity[1]),
+          0.24
+        );
       }
     }
   }
@@ -2208,22 +2232,22 @@ function metadata(
 function verdantAtmosphereProfile(): NetworkAtmosphereProfile {
   return {
     biomeId: "verdant-hollow",
-    skyColor: [0.05, 0.08, 0.12, 1],
-    fogColor: [0.06, 0.12, 0.1, 1],
-    fogNear: 22,
-    fogFar: 148,
-    ambientColor: [0.7, 0.88, 0.84],
-    ambientIntensity: 1.28,
-    sunColor: [1, 0.95, 0.82],
-    sunIntensity: 2.7,
-    sunDirection: [20, 38, 12],
-    fillColor: [0.42, 0.78, 0.92],
-    fillIntensity: 0.78,
-    fillDirection: [-16, 11, -8],
-    rimColor: [0.34, 0.9, 0.82],
-    rimIntensity: 11,
-    groundColor: [0.08, 0.16, 0.12, 1],
-    starfieldIntensity: 0.72
+    skyColor: [0.64, 0.8, 0.98, 1],
+    fogColor: [0.72, 0.84, 0.78, 1],
+    fogNear: 30,
+    fogFar: 196,
+    ambientColor: [0.82, 0.92, 0.88],
+    ambientIntensity: 1.4,
+    sunColor: [1, 0.96, 0.84],
+    sunIntensity: 2.95,
+    sunDirection: [30, 48, 18],
+    fillColor: [0.48, 0.76, 0.94],
+    fillIntensity: 0.88,
+    fillDirection: [-18, 14, -10],
+    rimColor: [0.4, 0.88, 0.78],
+    rimIntensity: 8.5,
+    groundColor: [0.19, 0.33, 0.21, 1],
+    starfieldIntensity: 0.08
   };
 }
 
@@ -2758,6 +2782,24 @@ function normalize(vector: Vec2Tuple): Vec2Tuple | null {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function moveScalarToward(current: number, target: number, maxDelta: number): number {
+  if (current < target) {
+    return Math.min(current + maxDelta, target);
+  }
+  return Math.max(current - maxDelta, target);
+}
+
+function rotateTowardAngle(current: number, target: number, factor: number): number {
+  let delta = target - current;
+  while (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  }
+  while (delta < -Math.PI) {
+    delta += Math.PI * 2;
+  }
+  return current + delta * factor;
 }
 
 function angleBetween(origin: Vec2Tuple, target: Vec2Tuple): number {

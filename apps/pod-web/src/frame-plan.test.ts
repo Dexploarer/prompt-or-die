@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ThreeJsWebGpuFrame } from "./contracts";
-import { buildCameraPose, buildFramePlan, splitSpriteBatchesByTint } from "./frame-plan";
+import {
+  buildCameraPose,
+  buildFramePlan,
+  sampleAnimatedInstanceTransform,
+  splitSpriteBatchesByTint
+} from "./frame-plan";
+import { sampleTerrainHeight } from "./landscape";
 import { resolveQualityProfile } from "./quality";
 
 function testEnvironment(): ThreeJsWebGpuFrame["environment"] {
@@ -31,16 +37,38 @@ describe("buildCameraPose", () => {
     const pose = buildCameraPose({
       x: 24,
       y: -10,
-      zoom: 2,
+      zoom: 1.1,
       rotation: Math.PI / 2,
+      pitch: 0.34,
+      followDistance: 13.5,
+      focusHeight: 2.2,
+      shoulderOffset: 0.9,
       viewportWidth: 1280,
       viewportHeight: 720
     });
 
-    expect(pose.target).toEqual([24, 0, -10]);
+    expect(pose.target).toEqual([24, sampleTerrainHeight(24, -10) + 2.2, -10]);
     expect(pose.position[0]).toBeGreaterThan(24);
-    expect(pose.position[2]).toBeCloseTo(-10, 5);
-    expect(pose.position[1]).toBeGreaterThan(0);
+    expect(Math.abs(pose.position[2] + 10)).toBeLessThan(1.2);
+    expect(pose.position[1]).toBeGreaterThan(pose.target[1]);
+  });
+
+  test("pulls the camera in front of terrain occlusion instead of burying it in cliffs", () => {
+    const pose = buildCameraPose({
+      x: 18,
+      y: -14,
+      zoom: 0.76,
+      rotation: 0.12,
+      pitch: 0.42,
+      followDistance: 17,
+      focusHeight: 2.2,
+      shoulderOffset: 0.9,
+      viewportWidth: 1280,
+      viewportHeight: 720
+    });
+
+    const clearance = sampleTerrainHeight(pose.position[0], pose.position[2]) + 1.45;
+    expect(pose.position[1]).toBeGreaterThanOrEqual(clearance - 0.01);
   });
 });
 
@@ -273,8 +301,8 @@ describe("buildFramePlan", () => {
     expect(plan.meshBatches[0]?.visibleCount).toBe(1);
     expect(plan.meshBatches[0]?.batch.castShadows).toBe(true);
     expect(plan.meshBatches[1]?.visibleCount).toBe(1);
-    expect(plan.meshBatches[1]?.batch.castShadows).toBe(false);
     expect(plan.meshBatches[2]?.visibleCount).toBe(1);
+    expect(plan.meshBatches[2]?.batch.castShadows).toBe(false);
   });
 
   test("drops instances outside the distance budget", () => {
@@ -455,16 +483,82 @@ describe("buildFramePlan", () => {
     expect(plan.preloadedWorldChunks).toHaveLength(9);
     expect(plan.meshBatches).toHaveLength(1);
     expect(plan.spriteBatches).toHaveLength(0);
-    expect(plan.prewarmMeshRequests).toHaveLength(3);
+    expect(plan.prewarmMeshRequests).toHaveLength(2);
     expect(
       plan.prewarmMeshRequests.map((request) => [request.batch.mesh, request.lodLevel])
     ).toEqual([
       ["canopy-tree", 0],
-      ["canopy-tree", 1],
       ["tower", 0]
     ]);
     expect(plan.prewarmSpriteRequests).toHaveLength(1);
     expect(plan.prewarmSpriteRequests[0]?.batch.texture).toBe("mist");
+  });
+});
+
+describe("sampleAnimatedInstanceTransform", () => {
+  test("keeps static props grounded while animating hovering companions", () => {
+    const staticProp = sampleAnimatedInstanceTransform(
+      {
+        position: [12, 4, -6],
+        rotation: [0, 0, 0, 1],
+        scale: [2, 3, 2],
+        sourceEntity: 44,
+        animationSetId: "static-prop",
+        motionSpeed: 0
+      },
+      2.4
+    );
+    const hoveringCompanion = sampleAnimatedInstanceTransform(
+      {
+        position: [12, 4, -6],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1.2, 1],
+        sourceEntity: 9,
+        animationSetId: "companion-hover",
+        motionSpeed: 0.2
+      },
+      2.4
+    );
+
+    expect(staticProp.position).toEqual([12, 4, -6]);
+    expect(hoveringCompanion.position[1]).toBeGreaterThan(4.12);
+    expect(hoveringCompanion.scale[1]).not.toBeCloseTo(1.2, 4);
+  });
+
+  test("adds gait bounce and event pulse response to moving humanoids", () => {
+    const neutral = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 2, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 2, 1],
+        sourceEntity: 3,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.9,
+        controlled: true,
+        healthRatio: 0.82
+      },
+      1.8,
+      0
+    );
+    const pulsed = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 2, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 2, 1],
+        sourceEntity: 3,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.9,
+        controlled: true,
+        healthRatio: 0.82
+      },
+      1.8,
+      1
+    );
+
+    expect(neutral.position[1]).toBeGreaterThan(2);
+    expect(neutral.scale[1]).toBeLessThan(2);
+    expect(pulsed.position[1]).toBeGreaterThan(neutral.position[1]);
+    expect(pulsed.scale[0]).toBeGreaterThan(neutral.scale[0]);
   });
 });
 
