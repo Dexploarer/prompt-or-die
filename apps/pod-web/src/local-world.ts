@@ -32,7 +32,7 @@ const COMPANION_RANGE = 2.8;
 const PLAYER_ATTACK_COOLDOWN = 30;
 const CREATURE_ATTACK_COOLDOWN = 40;
 const COMPANION_ATTACK_COOLDOWN = 26;
-const WORLD_LIMIT = 18.5;
+const WORLD_LIMIT = 28;
 const LOCAL_WORLD_CHUNK_SIZE = 8;
 const LOCAL_ACTIVE_CHUNK_RADIUS = 1;
 
@@ -1335,38 +1335,38 @@ function createInitialState(playerName: string): LocalWorldState {
 
 function authoredTemplateEntities(): LocalEntity[] {
   return [
-    createNpcEntity(2, "Archivist Mara", [-2.1, -2.9]),
-    createNpcEntity(8, "Forgekeeper Ivo", [2.5, -2.4]),
-    createNpcEntity(9, "Warden Selene", [0.8, 3.3]),
-    createWildCreatureEntity(3, "Verdant Lynx", [5.8, 1.9], 18, 32),
-    createWildCreatureEntity(4, "Cinder Hare", [7.2, -5.8], 22, 30),
-    createWildCreatureEntity(10, "Rift Stag", [1.8, 8.8], 26, 36),
-    createResourceEntity(5, "Copper Vein", [3.8, -1.4], "Mining", "copper-ore"),
-    createResourceEntity(6, "Ancient Pine", [-6.3, 4.8], "Woodcutting", "pine-log"),
-    createResourceEntity(11, "Moonstone Outcrop", [6.4, 8.6], "Mining", "moonstone-shard"),
-    createResourceEntity(12, "Silver Birch", [-7.4, 1.8], "Woodcutting", "birch-log"),
-    createLootEntity(7, "Supply Cache", [-2.5, 1.8], 48, "travel-ration"),
-    createLootEntity(13, "Expedition Chest", [4.8, 9.4], 96, "ember-charm"),
-    createSceneryEntity(20, "wall north", [0, -10.8], [0, 0]),
-    createSceneryEntity(21, "wall south", [0, 10.8], [0, 0]),
-    createSceneryEntity(22, "wall west", [-11.2, 0], [0, 0]),
-    createSceneryEntity(23, "wall east", [11.2, 0], [0, 0]),
-    createSceneryEntity(24, "weathered boulder", [5.8, 5.6], [0, 0]),
-    createSceneryEntity(25, "weathered boulder", [-5.4, -6.1], [0, 0]),
-    createSceneryEntity(26, "glass spire", [0.1, 8.4], [0, 0]),
-    createSceneryEntity(27, "canopy tree", [-4.6, 5.7], [0, 0]),
-    createSceneryEntity(28, "canopy tree", [-7.6, 3.8], [0, 0]),
-    createSceneryEntity(29, "basalt pillar", [4.5, -8.1], [0, 0]),
-    createSceneryEntity(30, "basalt pillar", [6.3, -8.1], [0, 0]),
-    createSceneryEntity(31, "weathered boulder", [8.6, 1.4], [0, 0]),
-    createSceneryEntity(32, "weathered boulder", [8.4, 4.4], [0, 0]),
-    createSceneryEntity(33, "canopy tree", [9.1, -2.1], [0, 0]),
-    createSceneryEntity(34, "glass spire", [-8.4, -4.8], [0, 0]),
-    createSceneryEntity(35, "basalt pillar", [-3.2, 8.8], [0, 0]),
-    createSceneryEntity(36, "basalt pillar", [3.2, 8.8], [0, 0]),
-    createSceneryEntity(37, "weathered boulder", [-8.8, -0.6], [0, 0]),
-    createSceneryEntity(38, "canopy tree", [-9.0, -3.2], [0, 0]),
-    createSceneryEntity(39, "wall shrine", [0, -8.7], [0, 0])
+    createNpcEntity(2, "Archivist Mara", [-5.4, -5.2]),
+    createNpcEntity(8, "Forgekeeper Ivo", [7.8, -5.4]),
+    createNpcEntity(9, "Warden Selene", [5.4, 5.8]),
+    createWildCreatureEntity(3, "Verdant Lynx", [13.6, 4.2], 18, 32),
+    createWildCreatureEntity(4, "Cinder Hare", [13.8, -9.4], 22, 30),
+    createWildCreatureEntity(10, "Rift Stag", [-6.8, 15.8], 26, 36),
+    createResourceEntity(5, "Copper Vein", [9.2, -2.6], "Mining", "copper-ore"),
+    createResourceEntity(6, "Ancient Pine", [-12.4, 8.6], "Woodcutting", "pine-log"),
+    createResourceEntity(11, "Moonstone Outcrop", [7.4, 14.8], "Mining", "moonstone-shard"),
+    createResourceEntity(12, "Silver Birch", [-13.6, 2.8], "Woodcutting", "birch-log"),
+    createLootEntity(7, "Supply Cache", [1.2, -7.8], 48, "travel-ration"),
+    createLootEntity(13, "Expedition Chest", [8.8, 16.0], 96, "ember-charm"),
+    createSceneryEntity(20, "wall north", [0, -16.4], [0, 0]),
+    createSceneryEntity(21, "wall south", [0, 16.4], [0, 0]),
+    createSceneryEntity(22, "wall west", [-16.8, 0], [0, 0]),
+    createSceneryEntity(23, "wall east", [16.8, 0], [0, 0]),
+    createSceneryEntity(24, "weathered boulder", [8.8, 7.8], [0, 0]),
+    createSceneryEntity(25, "weathered boulder", [-7.8, -9.0], [0, 0]),
+    createSceneryEntity(26, "glass spire", [0.8, 13.8], [0, 0]),
+    createSceneryEntity(27, "canopy tree", [-6.2, 9.4], [0, 0]),
+    createSceneryEntity(28, "canopy tree", [-10.8, 5.4], [0, 0]),
+    createSceneryEntity(29, "basalt pillar", [7.8, -12.4], [0, 0]),
+    createSceneryEntity(30, "basalt pillar", [10.6, -12.6], [0, 0]),
+    createSceneryEntity(31, "weathered boulder", [12.4, 1.6], [0, 0]),
+    createSceneryEntity(32, "weathered boulder", [15.8, 7.4], [0, 0]),
+    createSceneryEntity(33, "canopy tree", [12.8, -3.6], [0, 0]),
+    createSceneryEntity(34, "glass spire", [-12.8, -7.2], [0, 0]),
+    createSceneryEntity(35, "basalt pillar", [-4.6, 14.2], [0, 0]),
+    createSceneryEntity(36, "basalt pillar", [2.8, 15.0], [0, 0]),
+    createSceneryEntity(37, "weathered boulder", [-13.2, -1.2], [0, 0]),
+    createSceneryEntity(38, "canopy tree", [-13.6, -5.2], [0, 0]),
+    createSceneryEntity(39, "wall shrine", [0, -13.2], [0, 0])
   ];
 }
 

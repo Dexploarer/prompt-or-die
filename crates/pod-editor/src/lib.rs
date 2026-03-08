@@ -10,7 +10,7 @@
 #![allow(clippy::question_mark)]
 
 use eframe::{App, Frame};
-use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
+use egui::{CentralPanel, Context, ProgressBar, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
     decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
     AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, ChunkPopulationState,
@@ -550,6 +550,45 @@ pub struct TelemetryAgentSummary {
     pub trajectory_distance: f32,
     pub rejected_actions: usize,
     pub tool_errors: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EncounterBalancePreview {
+    pub table_id: String,
+    pub biome_id: String,
+    pub spawn_group: String,
+    pub ambient_cap_per_chunk: u16,
+    pub effective_cap: u32,
+    pub attached_chunk_count: u32,
+    pub hot_chunk_count: u32,
+    pub active_spawned_actors: u32,
+    pub spawn_budget_remaining: u32,
+    pub pending_respawns: u32,
+    pub next_respawn_tick: Option<u64>,
+    pub population_pressure: f32,
+    pub suggested_cap_delta: i16,
+}
+
+fn breakdown_active_spawned_actors(counts: PopulationBreakdown) -> u32 {
+    counts.players + counts.npcs + counts.wild_creatures + counts.companions
+}
+
+fn suggested_encounter_cap_delta(
+    population_pressure: f32,
+    spawn_budget_remaining: u32,
+    pending_respawns: u32,
+) -> i16 {
+    if population_pressure >= 0.95 || (population_pressure >= 0.82 && pending_respawns >= 2) {
+        2
+    } else if population_pressure >= 0.72 || spawn_budget_remaining == 0 {
+        1
+    } else if population_pressure <= 0.25 && pending_respawns == 0 {
+        -2
+    } else if population_pressure <= 0.45 && spawn_budget_remaining >= 4 {
+        -1
+    } else {
+        0
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2868,6 +2907,118 @@ impl PodEditorApp {
         ));
     }
 
+    pub fn adjust_world_encounter_table_ambient_cap(
+        &mut self,
+        table_id: &str,
+        delta: i16,
+    ) -> bool {
+        let Some(index) = self
+            .state
+            .world_graph
+            .encounter_tables
+            .iter()
+            .position(|table| table.table_id == table_id)
+        else {
+            return false;
+        };
+
+        let current = self.state.world_graph.encounter_tables[index].ambient_cap;
+        let next = if delta >= 0 {
+            current.saturating_add(delta as u16)
+        } else {
+            current.saturating_sub((-delta) as u16).max(1)
+        };
+        if next == current {
+            return false;
+        }
+
+        self.history.remember(self.state.clone());
+        self.state.world_graph.encounter_tables[index].ambient_cap = next;
+        self.refresh_world_graph_bindings();
+        self.push_console(format!(
+            "Adjusted encounter table {} ambient cap {} -> {}",
+            table_id, current, next
+        ));
+        true
+    }
+
+    fn encounter_balance_previews(&self) -> Vec<EncounterBalancePreview> {
+        let mut previews = self
+            .state
+            .world_graph
+            .encounter_tables
+            .iter()
+            .map(|table| {
+                let matching_chunks = self
+                    .state
+                    .spacetime_dashboard
+                    .population_state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| {
+                        chunk.encounter_table_ids
+                            .iter()
+                            .any(|table_id| table_id == &table.table_id)
+                    })
+                    .collect::<Vec<_>>();
+                let attached_chunk_count = matching_chunks.len() as u32;
+                let effective_cap = u32::from(table.ambient_cap) * attached_chunk_count.max(1);
+                let active_spawned_actors = matching_chunks
+                    .iter()
+                    .map(|chunk| breakdown_active_spawned_actors(chunk.counts))
+                    .sum::<u32>();
+                let hot_chunk_count = matching_chunks
+                    .iter()
+                    .filter(|chunk| chunk.population_pressure >= 0.75)
+                    .count() as u32;
+                let pending_respawns = matching_chunks
+                    .iter()
+                    .map(|chunk| chunk.pending_respawns)
+                    .sum::<u32>();
+                let next_respawn_tick = matching_chunks
+                    .iter()
+                    .filter_map(|chunk| chunk.next_respawn_tick)
+                    .min();
+                let spawn_budget_remaining =
+                    effective_cap.saturating_sub(active_spawned_actors);
+                let population_pressure = if effective_cap == 0 {
+                    0.0
+                } else {
+                    active_spawned_actors as f32 / effective_cap as f32
+                };
+
+                EncounterBalancePreview {
+                    table_id: table.table_id.clone(),
+                    biome_id: table.biome_id.clone(),
+                    spawn_group: table.spawn_group.clone(),
+                    ambient_cap_per_chunk: table.ambient_cap,
+                    effective_cap,
+                    attached_chunk_count,
+                    hot_chunk_count,
+                    active_spawned_actors,
+                    spawn_budget_remaining,
+                    pending_respawns,
+                    next_respawn_tick,
+                    population_pressure,
+                    suggested_cap_delta: suggested_encounter_cap_delta(
+                        population_pressure,
+                        spawn_budget_remaining,
+                        pending_respawns,
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+        previews.sort_by(|left, right| {
+            right
+                .population_pressure
+                .partial_cmp(&left.population_pressure)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.pending_respawns.cmp(&left.pending_respawns))
+                .then_with(|| left.table_id.cmp(&right.table_id))
+        });
+        previews
+    }
+
     fn move_selected_entity(&mut self, dx: f32, dy: f32) {
         self.history.remember(self.state.clone());
         if let Some(transform) = self.selected_entity_transform() {
@@ -3371,6 +3522,37 @@ impl PodEditorApp {
             self.state.spacetime_dashboard.population_state.regions.len(),
             self.state.spacetime_dashboard.population_state.chunks.len()
         ));
+        let mut hottest_chunks = self
+            .state
+            .spacetime_dashboard
+            .population_state
+            .chunks
+            .iter()
+            .collect::<Vec<_>>();
+        hottest_chunks.sort_by(|left, right| {
+            right
+                .population_pressure
+                .partial_cmp(&left.population_pressure)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.pending_respawns.cmp(&left.pending_respawns))
+                .then_with(|| left.chunk_key.cmp(&right.chunk_key))
+        });
+        if !hottest_chunks.is_empty() {
+            ui.label("Population heat");
+            for chunk in hottest_chunks.into_iter().take(5) {
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "{} · {} active · respawns {}",
+                        chunk.chunk_key, chunk.active_entity_count, chunk.pending_respawns
+                    ));
+                    ui.add(
+                        ProgressBar::new((chunk.population_pressure / 1.25).clamp(0.0, 1.0))
+                            .desired_width(120.0)
+                            .text(format!("{:.2}", chunk.population_pressure)),
+                    );
+                });
+            }
+        }
         ui.separator();
         if let Some(entity_id) = self.state.selected_entity {
             if let Some(binding) = self.state.world_graph.binding_for_entity(entity_id) {
@@ -3454,6 +3636,75 @@ impl PodEditorApp {
                 ));
                 ui.separator();
             }
+        }
+        let previews = self.encounter_balance_previews();
+        if previews.is_empty() {
+            ui.label("Encounter balancing: no encounter tables authored yet.");
+        } else {
+            ui.label("Encounter balancing");
+            let selected_table_id = self
+                .state
+                .selected_entity
+                .and_then(|entity_id| self.state.world_graph.binding_for_entity(entity_id))
+                .and_then(|binding| binding.encounter_table_id.clone());
+            let mut pending_adjustment: Option<(String, i16)> = None;
+
+            if let Some(selected_table_id) = selected_table_id.as_deref() {
+                if let Some(selected_preview) = previews
+                    .iter()
+                    .find(|preview| preview.table_id == selected_table_id)
+                {
+                    ui.label(format!(
+                        "Selected table: {} · {} · cap {} per chunk / {} effective · pressure {:.2} · respawns {}{}",
+                        selected_preview.table_id,
+                        selected_preview.spawn_group,
+                        selected_preview.ambient_cap_per_chunk,
+                        selected_preview.effective_cap,
+                        selected_preview.population_pressure,
+                        selected_preview.pending_respawns,
+                        selected_preview
+                            .next_respawn_tick
+                            .map(|tick| format!(" @ {tick}"))
+                            .unwrap_or_default()
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cap -1").clicked() {
+                            pending_adjustment =
+                                Some((selected_preview.table_id.clone(), -1));
+                        }
+                        if ui.button("Cap +1").clicked() {
+                            pending_adjustment =
+                                Some((selected_preview.table_id.clone(), 1));
+                        }
+                    });
+                }
+            }
+
+            for preview in previews.iter().take(4) {
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "{} · {} chunk(s) · {} active / {} cap · budget {} · pressure {:.2} · suggest {:+}",
+                        preview.table_id,
+                        preview.attached_chunk_count,
+                        preview.active_spawned_actors,
+                        preview.effective_cap,
+                        preview.spawn_budget_remaining,
+                        preview.population_pressure,
+                        preview.suggested_cap_delta
+                    ));
+                    if ui.small_button("-1").clicked() {
+                        pending_adjustment = Some((preview.table_id.clone(), -1));
+                    }
+                    if ui.small_button("+1").clicked() {
+                        pending_adjustment = Some((preview.table_id.clone(), 1));
+                    }
+                });
+            }
+
+            if let Some((table_id, delta)) = pending_adjustment {
+                let _ = self.adjust_world_encounter_table_ambient_cap(&table_id, delta);
+            }
+            ui.separator();
         }
         if ui.button("Simulate reducer").clicked() {
             self.set_spacetime_reducer_call("manual_reducer");
@@ -4662,6 +4913,93 @@ mod tests {
             app.state.spacetime_dashboard.population_state.chunks[0].next_respawn_tick,
             Some(48)
         );
+    }
+
+    #[test]
+    fn encounter_balance_previews_reflect_authoritative_population_pressure() {
+        let mut app = PodEditorApp::default();
+        let population = WorldPopulationState {
+            tick: 22,
+            chunks: vec![ChunkPopulationState {
+                chunk_key: "0:0".to_string(),
+                region_id: Some("verdant-heart".to_string()),
+                region_name: Some("Verdant Heart".to_string()),
+                biome_id: Some("verdant-hollow".to_string()),
+                quest_graph_ids: vec!["verdant-intro".to_string()],
+                faction_track_id: Some("verdant-wardens".to_string()),
+                encounter_table_ids: vec!["verdant-heart-wildlife".to_string()],
+                counts: PopulationBreakdown {
+                    players: 1,
+                    npcs: 2,
+                    wild_creatures: 6,
+                    companions: 1,
+                    ..PopulationBreakdown::default()
+                },
+                active_entity_count: 10,
+                ambient_population_cap: 12,
+                spawn_budget_remaining: 2,
+                pending_respawns: 2,
+                next_respawn_tick: Some(48),
+                population_pressure: 0.83,
+            }],
+            regions: Vec::new(),
+        };
+
+        app.import_world_population_toon_document(&population.to_toon_document())
+            .expect("population TOON should import");
+
+        let preview = app
+            .encounter_balance_previews()
+            .into_iter()
+            .find(|preview| preview.table_id == "verdant-heart-wildlife")
+            .expect("verdant preview");
+
+        assert_eq!(preview.attached_chunk_count, 1);
+        assert_eq!(preview.effective_cap, 12);
+        assert_eq!(preview.active_spawned_actors, 10);
+        assert_eq!(preview.pending_respawns, 2);
+        assert_eq!(preview.next_respawn_tick, Some(48));
+        assert_eq!(preview.suggested_cap_delta, 2);
+    }
+
+    #[test]
+    fn encounter_table_ambient_cap_adjustments_are_clamped_and_persisted() {
+        let mut app = PodEditorApp::default();
+        let initial_cap = app
+            .state
+            .world_graph
+            .encounter_tables
+            .iter()
+            .find(|table| table.table_id == "verdant-heart-wildlife")
+            .map(|table| table.ambient_cap)
+            .expect("seeded encounter table");
+        assert_eq!(initial_cap, 12);
+
+        assert!(app.adjust_world_encounter_table_ambient_cap(
+            "verdant-heart-wildlife",
+            3
+        ));
+        let boosted = app
+            .state
+            .world_graph
+            .encounter_tables
+            .iter()
+            .find(|table| table.table_id == "verdant-heart-wildlife")
+            .expect("boosted encounter table");
+        assert_eq!(boosted.ambient_cap, 15);
+
+        assert!(app.adjust_world_encounter_table_ambient_cap(
+            "verdant-heart-wildlife",
+            -99
+        ));
+        let clamped = app
+            .state
+            .world_graph
+            .encounter_tables
+            .iter()
+            .find(|table| table.table_id == "verdant-heart-wildlife")
+            .expect("clamped encounter table");
+        assert_eq!(clamped.ambient_cap, 1);
     }
 
     #[test]

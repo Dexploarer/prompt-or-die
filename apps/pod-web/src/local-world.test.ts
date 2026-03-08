@@ -37,7 +37,7 @@ describe("PodWebLocalWorld", () => {
       detail: "Local sandbox shard ready"
     });
     expect(snapshot.entities.find((entity) => entity.id === 1)?.label).toBe("Scout");
-    expect(snapshot.entities.length).toBeGreaterThan(18);
+    expect(snapshot.entities.length).toBeGreaterThanOrEqual(16);
     expect(snapshot.entities.filter((entity) => entity.metadata.kind === "Npc")).toHaveLength(3);
     expect(snapshot.entities.some((entity) => entity.metadata.kind === "WildCreature")).toBe(true);
     expect(snapshot.entities.some((entity) => entity.metadata.kind === "ResourceNode")).toBe(true);
@@ -99,11 +99,11 @@ describe("PodWebLocalWorld", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
 
-    moveToward(world, 5, 45);
+    moveToward(world, 5, 120);
     world.submitActions([{ kind: "gatherResource", target: 5, skill: "Mining" }]);
     stepTicks(world, 2);
 
-    moveToward(world, 7, 70);
+    moveToward(world, 7, 96);
     world.submitActions([{ kind: "loot", target: 7 }]);
     stepTicks(world, 2);
 
@@ -117,7 +117,7 @@ describe("PodWebLocalWorld", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
 
-    moveToward(world, 3, 44);
+    moveToward(world, 3, 160);
     world.submitActions([{ kind: "attackTarget", target: 3 }]);
     stepTicks(world, 2);
     world.submitActions([{ kind: "captureCreature", target: 3 }]);
@@ -137,6 +137,7 @@ describe("PodWebLocalWorld", () => {
     const snapshot = world.snapshotState();
     expect(snapshot.entities.some((entity) => entity.metadata.kind === "Companion")).toBe(true);
     const batch = world.drainEventBatch();
+    expect(batch?.events.some((event) => event.kind === "Damage")).toBe(true);
     expect(batch?.events.some((event) => event.summary.includes("Captured Verdant Lynx"))).toBe(true);
     expect(batch?.events.some((event) => event.summary.includes("Summoned Verdant Lynx"))).toBe(true);
   });
@@ -167,12 +168,12 @@ describe("PodWebLocalWorld", () => {
 
     expect(world.snapshotState().entities.some((entity) => entity.id === 11)).toBe(false);
 
-    moveToward(world, 2, 36);
+    moveToward(world, 2, 95);
     world.submitActions([{ kind: "interactWith", target: 2 }]);
     stepTicks(world, 2);
 
-    moveToward(world, 9, 80);
-    moveToward(world, 26, 80);
+    moveToward(world, 9, 185);
+    moveToward(world, 26, 115);
     world.submitActions([{ kind: "interactWith", target: 26 }]);
     stepTicks(world, 2);
 
