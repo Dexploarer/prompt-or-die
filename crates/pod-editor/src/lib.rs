@@ -14,8 +14,10 @@ use egui::{CentralPanel, Context, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
     decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
     AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, CreatureIdentity,
-    CreatureTemperament, ReplayFile, ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame,
-    ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
+    CreatureTemperament, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
+    QuestStageDefinition, QuestStateGraph, RegionEncounterTable, ReplayFile, ShardIncidentSummary,
+    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
+    WorldChunkDefinition, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -948,6 +950,331 @@ impl TelemetryPanelState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorEntityWorldBinding {
+    pub entity_id: u64,
+    pub chunk_key: Option<String>,
+    pub region_id: Option<String>,
+    pub region_name: Option<String>,
+    pub quest_graph_ids: Vec<String>,
+    pub faction_track_id: Option<String>,
+    pub encounter_table_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EditorWorldGraphState {
+    pub chunk_size: f32,
+    pub regions: Vec<WorldRegionDefinition>,
+    pub chunks: Vec<WorldChunkDefinition>,
+    pub quest_graphs: Vec<QuestStateGraph>,
+    pub faction_tracks: Vec<FactionReputationTrack>,
+    pub encounter_tables: Vec<RegionEncounterTable>,
+    pub entity_bindings: Vec<EditorEntityWorldBinding>,
+}
+
+impl Default for EditorWorldGraphState {
+    fn default() -> Self {
+        let mut state = Self::flagship_seed();
+        state.sync_entity_bindings(&SceneHierarchy::default(), &default_transforms_2d());
+        state
+    }
+}
+
+impl EditorWorldGraphState {
+    pub fn flagship_seed() -> Self {
+        let mut verdant_region =
+            WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
+        verdant_region.chunk_keys = vec!["0:0".into(), "0:-1".into()];
+        verdant_region.active_quest_graph_ids = vec!["verdant-intro".into(), "lynx-patrol".into()];
+        verdant_region.dominant_faction_track_id = "verdant-wardens".into();
+        verdant_region.encounter_table_ids = vec![
+            "verdant-heart-wildlife".into(),
+            "verdant-heart-resources".into(),
+        ];
+
+        let mut spire_region =
+            WorldRegionDefinition::new("spirewatch", "Spirewatch Rise", "spirewatch");
+        spire_region.chunk_keys = vec!["0:1".into(), "1:1".into()];
+        spire_region.active_quest_graph_ids = vec!["spire-attunement".into()];
+        spire_region.dominant_faction_track_id = "ancient-spirekeepers".into();
+        spire_region.encounter_table_ids = vec!["spirewatch-encounters".into()];
+
+        let mut steppe_region =
+            WorldRegionDefinition::new("ashen-steppe", "Ashen Steppe", "ashen-steppe");
+        steppe_region.chunk_keys = vec!["1:-1".into(), "1:0".into()];
+        steppe_region.active_quest_graph_ids = vec!["tempered-trail".into()];
+        steppe_region.dominant_faction_track_id = "ashen-forgebound".into();
+        steppe_region.encounter_table_ids = vec!["ashen-steppe-encounters".into()];
+
+        let mut verdant_chunk = WorldChunkDefinition::new("0:0", "verdant-heart", "verdant-hollow");
+        verdant_chunk.quest_graph_ids = vec!["verdant-intro".into(), "lynx-patrol".into()];
+        verdant_chunk.faction_track_ids = vec!["verdant-wardens".into()];
+        verdant_chunk.encounter_table_ids = vec!["verdant-heart-wildlife".into()];
+        verdant_chunk.neighbor_chunk_keys = vec!["0:-1".into(), "1:-1".into(), "0:1".into()];
+
+        let mut frontier_chunk = WorldChunkDefinition::new("1:-1", "ashen-steppe", "ashen-steppe");
+        frontier_chunk.quest_graph_ids = vec!["tempered-trail".into()];
+        frontier_chunk.faction_track_ids = vec!["ashen-forgebound".into()];
+        frontier_chunk.encounter_table_ids = vec!["ashen-steppe-encounters".into()];
+        frontier_chunk.neighbor_chunk_keys = vec!["0:0".into(), "1:0".into()];
+
+        let mut spire_chunk = WorldChunkDefinition::new("0:1", "spirewatch", "spirewatch");
+        spire_chunk.quest_graph_ids = vec!["spire-attunement".into()];
+        spire_chunk.faction_track_ids = vec!["ancient-spirekeepers".into()];
+        spire_chunk.encounter_table_ids = vec!["spirewatch-encounters".into()];
+        spire_chunk.neighbor_chunk_keys = vec!["0:0".into(), "1:1".into()];
+
+        Self {
+            chunk_size: 8.0,
+            regions: vec![verdant_region, spire_region, steppe_region],
+            chunks: vec![verdant_chunk, frontier_chunk, spire_chunk],
+            quest_graphs: vec![
+                QuestStateGraph::new(
+                    "verdant-intro",
+                    "Verdant Hollow Introduction",
+                    "speak-to-mara",
+                    vec![
+                        QuestStageDefinition {
+                            stage_id: "speak-to-mara".into(),
+                            title: "Speak to Mara".into(),
+                            objectives: vec!["Find Archivist Mara in Verdant Heart".into()],
+                            next_stage_ids: vec!["inspect-the-spire".into()],
+                            reward_tags: vec!["unlock:verdant-heart".into()],
+                        },
+                        QuestStageDefinition {
+                            stage_id: "inspect-the-spire".into(),
+                            title: "Inspect the Spire".into(),
+                            objectives: vec!["Reach the spire ridge and inspect the anchor".into()],
+                            next_stage_ids: vec![],
+                            reward_tags: vec!["unlock:spirewatch".into()],
+                        },
+                    ],
+                ),
+                QuestStateGraph::new(
+                    "lynx-patrol",
+                    "Lynx Patrol",
+                    "spot-the-lynx",
+                    vec![
+                        QuestStageDefinition {
+                            stage_id: "spot-the-lynx".into(),
+                            title: "Spot the Lynx".into(),
+                            objectives: vec!["Track a wild lynx through Verdant Heart".into()],
+                            next_stage_ids: vec!["capture-the-lynx".into()],
+                            reward_tags: vec!["encounter:verdant-heart-wildlife".into()],
+                        },
+                        QuestStageDefinition {
+                            stage_id: "capture-the-lynx".into(),
+                            title: "Capture the Lynx".into(),
+                            objectives: vec!["Capture or pacify the wild lynx".into()],
+                            next_stage_ids: vec![],
+                            reward_tags: vec!["companion:lynx".into()],
+                        },
+                    ],
+                ),
+                QuestStateGraph::new(
+                    "tempered-trail",
+                    "Tempered Trail",
+                    "reach-the-forge",
+                    vec![QuestStageDefinition {
+                        stage_id: "reach-the-forge".into(),
+                        title: "Reach the Frontier Forge".into(),
+                        objectives: vec!["Cross into the Ashen Steppe and report to Ivo".into()],
+                        next_stage_ids: vec![],
+                        reward_tags: vec!["unlock:ashen-steppe".into()],
+                    }],
+                ),
+                QuestStateGraph::new(
+                    "spire-attunement",
+                    "Spire Attunement",
+                    "align-the-anchor",
+                    vec![QuestStageDefinition {
+                        stage_id: "align-the-anchor".into(),
+                        title: "Align the Anchor".into(),
+                        objectives: vec!["Stabilize the spire anchor for regional travel".into()],
+                        next_stage_ids: vec![],
+                        reward_tags: vec!["unlock:moonstone".into()],
+                    }],
+                ),
+            ],
+            faction_tracks: vec![
+                FactionReputationTrack::new(
+                    "verdant-wardens",
+                    "Verdant Wardens",
+                    vec![
+                        FactionReputationTier {
+                            tier_id: "outsider".into(),
+                            label: "Outsider".into(),
+                            minimum_score: 0,
+                            perk_tags: vec!["quest:verdant-intro".into()],
+                        },
+                        FactionReputationTier {
+                            tier_id: "trusted".into(),
+                            label: "Trusted".into(),
+                            minimum_score: 30,
+                            perk_tags: vec!["resource:moonstone".into()],
+                        },
+                    ],
+                ),
+                FactionReputationTrack::new(
+                    "ancient-spirekeepers",
+                    "Ancient Spirekeepers",
+                    vec![FactionReputationTier {
+                        tier_id: "recognized".into(),
+                        label: "Recognized".into(),
+                        minimum_score: 20,
+                        perk_tags: vec!["quest:spire-attunement".into()],
+                    }],
+                ),
+                FactionReputationTrack::new(
+                    "ashen-forgebound",
+                    "Ashen Forgebound",
+                    vec![FactionReputationTier {
+                        tier_id: "forge-friend".into(),
+                        label: "Forge Friend".into(),
+                        minimum_score: 25,
+                        perk_tags: vec!["quest:tempered-trail".into()],
+                    }],
+                ),
+            ],
+            encounter_tables: vec![
+                RegionEncounterTable::new(
+                    "verdant-heart-wildlife",
+                    "verdant-hollow",
+                    "wildlife",
+                    vec![EncounterSpawnEntry {
+                        archetype_id: "wild-lynx".into(),
+                        weight: 10,
+                        min_count: 1,
+                        max_count: 2,
+                        required_stage_tags: vec!["hunt".into()],
+                        required_reputation_tiers: vec![],
+                    }],
+                ),
+                RegionEncounterTable::new(
+                    "verdant-heart-resources",
+                    "verdant-hollow",
+                    "resources",
+                    vec![EncounterSpawnEntry {
+                        archetype_id: "moonstone-outcrop".into(),
+                        weight: 6,
+                        min_count: 1,
+                        max_count: 1,
+                        required_stage_tags: vec!["unlock:moonstone".into()],
+                        required_reputation_tiers: vec!["trusted".into()],
+                    }],
+                ),
+                RegionEncounterTable::new(
+                    "spirewatch-encounters",
+                    "spirewatch",
+                    "anomalies",
+                    vec![EncounterSpawnEntry {
+                        archetype_id: "spire-anomaly".into(),
+                        weight: 5,
+                        min_count: 1,
+                        max_count: 1,
+                        required_stage_tags: vec!["unlock:spirewatch".into()],
+                        required_reputation_tiers: vec!["recognized".into()],
+                    }],
+                ),
+                RegionEncounterTable::new(
+                    "ashen-steppe-encounters",
+                    "ashen-steppe",
+                    "forgefront",
+                    vec![EncounterSpawnEntry {
+                        archetype_id: "ember-stag".into(),
+                        weight: 8,
+                        min_count: 1,
+                        max_count: 3,
+                        required_stage_tags: vec!["unlock:ashen-steppe".into()],
+                        required_reputation_tiers: vec!["forge-friend".into()],
+                    }],
+                ),
+            ],
+            entity_bindings: Vec::new(),
+        }
+    }
+
+    pub fn binding_for_entity(&self, entity_id: u64) -> Option<&EditorEntityWorldBinding> {
+        self.entity_bindings
+            .iter()
+            .find(|binding| binding.entity_id == entity_id)
+    }
+
+    pub fn sync_entity_bindings(
+        &mut self,
+        hierarchy: &SceneHierarchy,
+        transforms: &HashMap<u64, Transform2D>,
+    ) {
+        self.entity_bindings.clear();
+        for entity in hierarchy.entities() {
+            let Some(transform) = transforms.get(&entity.entity_id) else {
+                continue;
+            };
+            let chunk_key =
+                editor_chunk_key_from_position(transform.x, transform.y, self.chunk_size);
+            let chunk = self
+                .chunks
+                .iter()
+                .find(|chunk| chunk.chunk_key == chunk_key);
+            let region = chunk
+                .and_then(|chunk| {
+                    self.regions
+                        .iter()
+                        .find(|region| region.region_id == chunk.region_id)
+                })
+                .or_else(|| {
+                    self.regions
+                        .iter()
+                        .find(|region| region.chunk_keys.iter().any(|value| value == &chunk_key))
+                });
+
+            let mut quest_graph_ids = chunk
+                .map(|chunk| chunk.quest_graph_ids.clone())
+                .unwrap_or_default();
+            if let Some(region) = region {
+                for quest_id in &region.active_quest_graph_ids {
+                    if !quest_graph_ids.contains(quest_id) {
+                        quest_graph_ids.push(quest_id.clone());
+                    }
+                }
+            }
+
+            let faction_track_id = chunk
+                .and_then(|chunk| chunk.faction_track_ids.first().cloned())
+                .or_else(|| {
+                    region.and_then(|region| {
+                        (!region.dominant_faction_track_id.is_empty())
+                            .then(|| region.dominant_faction_track_id.clone())
+                    })
+                });
+            let encounter_table_id = chunk
+                .and_then(|chunk| chunk.encounter_table_ids.first().cloned())
+                .or_else(|| region.and_then(|region| region.encounter_table_ids.first().cloned()));
+
+            self.entity_bindings.push(EditorEntityWorldBinding {
+                entity_id: entity.entity_id,
+                chunk_key: Some(chunk_key),
+                region_id: region.map(|region| region.region_id.clone()),
+                region_name: region.map(|region| region.display_name.clone()),
+                quest_graph_ids,
+                faction_track_id,
+                encounter_table_id,
+            });
+        }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("editor_world_graph", self)
+    }
+}
+
+fn editor_chunk_key_from_position(x: f32, y: f32, chunk_size: f32) -> String {
+    let chunk_size = chunk_size.max(0.001);
+    let chunk_x = (x / chunk_size).floor() as i32;
+    let chunk_y = (y / chunk_size).floor() as i32;
+    format!("{chunk_x}:{chunk_y}")
+}
+
 fn retain_recent_debug_docs<T>(entries: &mut VecDeque<T>, max_entries: usize) {
     while entries.len() >= max_entries.max(1) {
         entries.pop_front();
@@ -1599,6 +1926,21 @@ impl SceneHierarchy {
             .find_map(|node| find_label(node, entity_id))
     }
 
+    pub fn entities(&self) -> Vec<&HierarchyNode> {
+        fn collect<'a>(node: &'a HierarchyNode, output: &mut Vec<&'a HierarchyNode>) {
+            output.push(node);
+            for child in &node.children {
+                collect(child, output);
+            }
+        }
+
+        let mut entities = Vec::new();
+        for root in &self.roots {
+            collect(root, &mut entities);
+        }
+        entities
+    }
+
     pub fn render(&mut self, ui: &mut Ui, selected_entity: &mut Option<u64>) {
         for node in &mut self.roots {
             node.render(ui, selected_entity);
@@ -1708,6 +2050,13 @@ impl Transform2D {
     }
 }
 
+fn default_transforms_2d() -> HashMap<u64, Transform2D> {
+    [1000, 1001, 1002, 1003, 1004]
+        .into_iter()
+        .map(|entity_id| (entity_id, Transform2D::with_defaults(entity_id)))
+        .collect()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EditorState {
     pub project_name: String,
@@ -1727,6 +2076,8 @@ pub struct EditorState {
     pub llm_agent_config: LlmAgentConfig,
     pub telemetry: TelemetryPanelState,
     pub spacetime_dashboard: SpacetimeDashboardState,
+    #[serde(default)]
+    pub world_graph: EditorWorldGraphState,
     pub creator_catalog: CreatorCatalog,
     #[serde(default)]
     pub latest_replay: Option<ReplayFile>,
@@ -1735,14 +2086,14 @@ pub struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         let mut inspector_data = HashMap::new();
-        let mut transforms_2d = HashMap::new();
         for entity_id in [1000, 1001, 1002, 1003, 1004] {
             inspector_data.insert(entity_id, EntityPropertyMap::with_defaults(entity_id));
-            transforms_2d.insert(entity_id, Transform2D::with_defaults(entity_id));
         }
+        let transforms_2d = default_transforms_2d();
 
         let hierarchy = SceneHierarchy::default();
         let asset_browser = AssetBrowserState::default();
+        let world_graph = EditorWorldGraphState::default();
         let mut creator_catalog = CreatorCatalog::default();
         if let Some(asset) = asset_browser
             .assets
@@ -1778,6 +2129,7 @@ impl Default for EditorState {
             llm_agent_config: LlmAgentConfig::default(),
             telemetry: TelemetryPanelState::default(),
             spacetime_dashboard: SpacetimeDashboardState::default(),
+            world_graph,
             creator_catalog,
             latest_replay: None,
         }
@@ -1793,8 +2145,10 @@ pub struct EditorSnapshotExport {
     pub hierarchy: SceneHierarchy,
     pub selected_entity_properties: Option<HashMap<String, String>>,
     pub selected_entity_transform: Option<Transform2D>,
+    pub selected_entity_world_binding: Option<EditorEntityWorldBinding>,
     pub selected_entity_trajectory: Vec<TrajectorySample>,
     pub assets: Vec<EditorAsset>,
+    pub world_graph: EditorWorldGraphState,
     pub creator_catalog: CreatorCatalog,
     pub behavior_tree: BehaviorTree,
     pub fsm: FiniteStateMachine,
@@ -1813,6 +2167,10 @@ impl EditorSnapshotExport {
             .selected_entity
             .and_then(|entity_id| state.transforms_2d.get(&entity_id))
             .cloned();
+        let selected_entity_world_binding = state
+            .selected_entity
+            .and_then(|entity_id| state.world_graph.binding_for_entity(entity_id))
+            .cloned();
         let selected_entity_trajectory = state
             .selected_entity
             .map(|entity_id| state.telemetry.trajectory_for_entity(entity_id))
@@ -1826,8 +2184,10 @@ impl EditorSnapshotExport {
             hierarchy: state.hierarchy.clone(),
             selected_entity_properties,
             selected_entity_transform,
+            selected_entity_world_binding,
             selected_entity_trajectory,
             assets: state.asset_browser.assets.clone(),
+            world_graph: state.world_graph.clone(),
             creator_catalog: state.creator_catalog.clone(),
             behavior_tree: state.behavior_tree.clone(),
             fsm: state.fsm.clone(),
@@ -2276,6 +2636,7 @@ impl PodEditorApp {
             io::Error::new(io::ErrorKind::Other, format!("deserialize failed: {error}"))
         })?;
         self.state = loaded;
+        self.refresh_world_graph_bindings();
         self.history.clear();
         self.push_console("Project loaded".to_string());
         Ok(())
@@ -2384,12 +2745,110 @@ impl PodEditorApp {
             .and_then(|entity_id| self.state.transforms_2d.get_mut(&entity_id))
     }
 
+    pub fn sync_world_region(&mut self, region: WorldRegionDefinition) {
+        self.history.remember(self.state.clone());
+        if let Some(existing) = self
+            .state
+            .world_graph
+            .regions
+            .iter_mut()
+            .find(|existing| existing.region_id == region.region_id)
+        {
+            *existing = region.clone();
+        } else {
+            self.state.world_graph.regions.push(region.clone());
+        }
+        self.refresh_world_graph_bindings();
+        self.push_console(format!("Synced world region {}", region.region_id));
+    }
+
+    pub fn sync_world_chunk(&mut self, chunk: WorldChunkDefinition) {
+        self.history.remember(self.state.clone());
+        if let Some(existing) = self
+            .state
+            .world_graph
+            .chunks
+            .iter_mut()
+            .find(|existing| existing.chunk_key == chunk.chunk_key)
+        {
+            *existing = chunk.clone();
+        } else {
+            self.state.world_graph.chunks.push(chunk.clone());
+        }
+        self.refresh_world_graph_bindings();
+        self.push_console(format!("Synced world chunk {}", chunk.chunk_key));
+    }
+
+    pub fn sync_world_quest_graph(&mut self, quest_graph: QuestStateGraph) {
+        self.history.remember(self.state.clone());
+        if let Some(existing) = self
+            .state
+            .world_graph
+            .quest_graphs
+            .iter_mut()
+            .find(|existing| existing.quest_id == quest_graph.quest_id)
+        {
+            *existing = quest_graph.clone();
+        } else {
+            self.state
+                .world_graph
+                .quest_graphs
+                .push(quest_graph.clone());
+        }
+        self.refresh_world_graph_bindings();
+        self.push_console(format!("Synced quest graph {}", quest_graph.quest_id));
+    }
+
+    pub fn sync_world_faction_track(&mut self, faction_track: FactionReputationTrack) {
+        self.history.remember(self.state.clone());
+        if let Some(existing) = self
+            .state
+            .world_graph
+            .faction_tracks
+            .iter_mut()
+            .find(|existing| existing.faction_id == faction_track.faction_id)
+        {
+            *existing = faction_track.clone();
+        } else {
+            self.state
+                .world_graph
+                .faction_tracks
+                .push(faction_track.clone());
+        }
+        self.refresh_world_graph_bindings();
+        self.push_console(format!("Synced faction track {}", faction_track.faction_id));
+    }
+
+    pub fn sync_world_encounter_table(&mut self, encounter_table: RegionEncounterTable) {
+        self.history.remember(self.state.clone());
+        if let Some(existing) = self
+            .state
+            .world_graph
+            .encounter_tables
+            .iter_mut()
+            .find(|existing| existing.table_id == encounter_table.table_id)
+        {
+            *existing = encounter_table.clone();
+        } else {
+            self.state
+                .world_graph
+                .encounter_tables
+                .push(encounter_table.clone());
+        }
+        self.refresh_world_graph_bindings();
+        self.push_console(format!(
+            "Synced encounter table {}",
+            encounter_table.table_id
+        ));
+    }
+
     fn move_selected_entity(&mut self, dx: f32, dy: f32) {
         self.history.remember(self.state.clone());
         if let Some(transform) = self.selected_entity_transform() {
             transform.x += dx;
             transform.y += dy;
         }
+        self.refresh_world_graph_bindings();
     }
 
     fn push_console(&mut self, line: impl Into<String>) {
@@ -2397,6 +2856,12 @@ impl PodEditorApp {
         if self.state.console_output.len() > 300 {
             let _ = self.state.console_output.drain(0..50);
         }
+    }
+
+    fn refresh_world_graph_bindings(&mut self) {
+        self.state
+            .world_graph
+            .sync_entity_bindings(&self.state.hierarchy, &self.state.transforms_2d);
     }
 
     fn build_dock_toolbar(&mut self, ui: &mut Ui) {
@@ -2524,6 +2989,36 @@ impl PodEditorApp {
                     ui.label(format!("{key}:"));
                     ui.text_edit_singleline(value);
                 });
+            }
+            ui.separator();
+            ui.label("World Graph");
+            if let Some(binding) = self.state.world_graph.binding_for_entity(entity_id) {
+                ui.label(format!(
+                    "Region: {}",
+                    binding.region_name.as_deref().unwrap_or("Unassigned")
+                ));
+                ui.label(format!(
+                    "Chunk: {}",
+                    binding.chunk_key.as_deref().unwrap_or("Unassigned")
+                ));
+                ui.label(format!(
+                    "Faction track: {}",
+                    binding.faction_track_id.as_deref().unwrap_or("None")
+                ));
+                ui.label(format!(
+                    "Encounter table: {}",
+                    binding.encounter_table_id.as_deref().unwrap_or("None")
+                ));
+                ui.label(format!(
+                    "Quest graphs: {}",
+                    if binding.quest_graph_ids.is_empty() {
+                        "none".to_string()
+                    } else {
+                        binding.quest_graph_ids.join(", ")
+                    }
+                ));
+            } else {
+                ui.label("No streamed world binding for the selected entity.");
             }
         } else {
             ui.label("No entity selected.");
@@ -2837,6 +3332,14 @@ impl PodEditorApp {
             "Reducer calls: {}",
             self.state.spacetime_dashboard.reducer_calls
         ));
+        ui.label(format!(
+            "World graph: {} regions · {} chunks · {} quests · {} factions · {} encounter tables",
+            self.state.world_graph.regions.len(),
+            self.state.world_graph.chunks.len(),
+            self.state.world_graph.quest_graphs.len(),
+            self.state.world_graph.faction_tracks.len(),
+            self.state.world_graph.encounter_tables.len()
+        ));
         ui.separator();
         ui.label("Per-agent trajectory distance");
         if self.state.spacetime_dashboard.agent_summaries.is_empty() {
@@ -2857,6 +3360,19 @@ impl PodEditorApp {
             }
         }
         ui.separator();
+        if let Some(entity_id) = self.state.selected_entity {
+            if let Some(binding) = self.state.world_graph.binding_for_entity(entity_id) {
+                ui.label(format!(
+                    "Selected entity binding: {} / {}",
+                    binding
+                        .region_name
+                        .as_deref()
+                        .unwrap_or("Unassigned region"),
+                    binding.chunk_key.as_deref().unwrap_or("unassigned chunk")
+                ));
+                ui.separator();
+            }
+        }
         if ui.button("Simulate reducer").clicked() {
             self.set_spacetime_reducer_call("manual_reducer");
         }
@@ -3087,6 +3603,7 @@ impl PodEditorApp {
                                     .get_mut(&entity_id)
                                     .expect("selected entity transform exists");
                                 entry.x = x;
+                                self.refresh_world_graph_bindings();
                             }
                             ui.label("Y:");
                             let mut y = transform.y;
@@ -3097,6 +3614,7 @@ impl PodEditorApp {
                                     .get_mut(&entity_id)
                                     .expect("selected entity transform exists");
                                 entry.y = y;
+                                self.refresh_world_graph_bindings();
                             }
                         });
                         ui.label("Transform");
@@ -3789,6 +4307,128 @@ mod tests {
     }
 
     #[test]
+    fn editor_world_graph_binds_default_entities_to_streamed_regions() {
+        let app = PodEditorApp::default();
+        let binding = app
+            .state
+            .world_graph
+            .binding_for_entity(1001)
+            .expect("player binding should exist");
+
+        assert_eq!(binding.chunk_key.as_deref(), Some("0:0"));
+        assert_eq!(binding.region_id.as_deref(), Some("verdant-heart"));
+        assert_eq!(binding.region_name.as_deref(), Some("Verdant Heart"));
+        assert_eq!(binding.faction_track_id.as_deref(), Some("verdant-wardens"));
+        assert_eq!(
+            binding.encounter_table_id.as_deref(),
+            Some("verdant-heart-wildlife")
+        );
+        assert!(binding
+            .quest_graph_ids
+            .iter()
+            .any(|id| id == "verdant-intro"));
+
+        let environment = app
+            .state
+            .world_graph
+            .binding_for_entity(1004)
+            .expect("environment binding should exist");
+        assert_eq!(environment.chunk_key.as_deref(), Some("1:-1"));
+        assert_eq!(environment.region_id.as_deref(), Some("ashen-steppe"));
+    }
+
+    #[test]
+    fn editor_world_graph_updates_when_selected_entity_moves_between_chunks() {
+        let mut app = PodEditorApp::default();
+        app.set_selected_entity(Some(1001));
+        app.move_selected_entity(8.5, 0.0);
+
+        let binding = app
+            .state
+            .world_graph
+            .binding_for_entity(1001)
+            .expect("binding should be refreshed after movement");
+        assert_eq!(binding.chunk_key.as_deref(), Some("1:0"));
+    }
+
+    #[test]
+    fn editor_world_graph_sync_methods_update_exported_snapshot() {
+        let mut app = PodEditorApp::default();
+        let mut region =
+            WorldRegionDefinition::new("gloamwood-edge", "Gloamwood Edge", "gloamwood");
+        region.chunk_keys.push("-1:0".into());
+        region.active_quest_graph_ids.push("gloamwood-watch".into());
+        region.dominant_faction_track_id = "gloamwood-coven".into();
+        region
+            .encounter_table_ids
+            .push("gloamwood-encounters".into());
+        app.sync_world_region(region);
+
+        let mut chunk = WorldChunkDefinition::new("-1:0", "gloamwood-edge", "gloamwood");
+        chunk.quest_graph_ids.push("gloamwood-watch".into());
+        chunk.faction_track_ids.push("gloamwood-coven".into());
+        chunk
+            .encounter_table_ids
+            .push("gloamwood-encounters".into());
+        app.sync_world_chunk(chunk);
+
+        app.sync_world_quest_graph(QuestStateGraph::new(
+            "gloamwood-watch",
+            "Gloamwood Watch",
+            "enter-the-grove",
+            vec![QuestStageDefinition {
+                stage_id: "enter-the-grove".into(),
+                title: "Enter the Grove".into(),
+                objectives: vec!["Scout the gloamwood entrance".into()],
+                next_stage_ids: vec![],
+                reward_tags: vec!["unlock:gloamwood".into()],
+            }],
+        ));
+        app.sync_world_faction_track(FactionReputationTrack::new(
+            "gloamwood-coven",
+            "Gloamwood Coven",
+            vec![FactionReputationTier {
+                tier_id: "favored".into(),
+                label: "Favored".into(),
+                minimum_score: 25,
+                perk_tags: vec!["quest:gloamwood-watch".into()],
+            }],
+        ));
+        app.sync_world_encounter_table(RegionEncounterTable::new(
+            "gloamwood-encounters",
+            "gloamwood",
+            "grove",
+            vec![EncounterSpawnEntry {
+                archetype_id: "gloam-stalker".into(),
+                weight: 5,
+                min_count: 1,
+                max_count: 2,
+                required_stage_tags: vec!["unlock:gloamwood".into()],
+                required_reputation_tiers: vec!["favored".into()],
+            }],
+        ));
+
+        let snapshot = app.export_snapshot_toon_document();
+        let value = decode_toon_value(&snapshot).expect("snapshot should decode");
+        assert_eq!(
+            value["payload"]["world_graph"]["regions"]
+                .as_array()
+                .expect("regions array")
+                .len(),
+            4
+        );
+        assert_eq!(
+            value["payload"]["world_graph"]["quest_graphs"]
+                .as_array()
+                .expect("quest array")
+                .last()
+                .and_then(|entry| entry.get("quest_id"))
+                .and_then(|entry| entry.as_str()),
+            Some("gloamwood-watch")
+        );
+    }
+
+    #[test]
     fn editor_snapshot_exports_to_toon_for_world_building_agents() {
         let mut app = PodEditorApp::default();
         assert!(app.set_selected_asset("hero_character"));
@@ -3804,6 +4444,17 @@ mod tests {
         assert_eq!(
             value["payload"]["creator_catalog"]["monsters"][0]["id"],
             monster_id
+        );
+        assert_eq!(
+            value["payload"]["selected_entity_world_binding"]["region_id"],
+            "verdant-heart"
+        );
+        assert!(
+            value["payload"]["world_graph"]["regions"]
+                .as_array()
+                .expect("regions array")
+                .len()
+                >= 3
         );
         assert_eq!(value["payload"]["latest_tick_telemetry"]["tick"], 13);
     }
@@ -3827,6 +4478,15 @@ mod tests {
             "editor_spacetime_dashboard"
         );
         assert_eq!(dashboard_value["payload"]["latest_tick"], 14);
+
+        let world_graph_document = app.state.world_graph.to_toon_document();
+        let world_graph_value =
+            decode_toon_value(&world_graph_document).expect("world graph should decode");
+        assert_eq!(world_graph_value["document_type"], "editor_world_graph");
+        assert_eq!(
+            world_graph_value["payload"]["entity_bindings"][0]["region_id"],
+            "verdant-heart"
+        );
     }
 
     #[test]
