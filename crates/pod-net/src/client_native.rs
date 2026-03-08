@@ -495,6 +495,16 @@ impl NativeClient {
             .await
     }
 
+    /// Focus debug summaries on a specific entity without widening gameplay
+    /// visibility.
+    pub async fn set_debug_focus_entity(
+        &mut self,
+        entity_id: Option<u64>,
+    ) -> Result<(), ClientError> {
+        self.send_message(ClientMessage::SetDebugFocus { entity_id })
+            .await
+    }
+
     /// Disconnect from the server
     pub async fn disconnect(&mut self, reason: Option<&str>) -> Result<(), ClientError> {
         let msg = ClientMessage::Disconnect {

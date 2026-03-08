@@ -15,10 +15,10 @@ use pod_core::{
     decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
     AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, ChunkPopulationState,
     CreatureIdentity, CreatureTemperament, EncounterSpawnEntry, FactionReputationTier,
-    FactionReputationTrack, PopulationBreakdown, QuestStageDefinition, QuestStateGraph,
-    RegionEncounterTable, RegionPopulationState, ReplayFile, ShardIncidentSummary,
-    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
-    WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
+    FactionReputationTrack, FocusedEntityDebugSummary, PopulationBreakdown, QuestStageDefinition,
+    QuestStateGraph, RegionEncounterTable, RegionPopulationState, ReplayFile,
+    ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    VersionedTickTelemetry, WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -614,6 +614,8 @@ pub struct SpacetimeDashboardState {
     #[serde(default)]
     pub recent_tick_rollups: VecDeque<AgentTickRollup>,
     #[serde(default)]
+    pub recent_focused_debug_summaries: VecDeque<FocusedEntityDebugSummary>,
+    #[serde(default)]
     pub population_state: WorldPopulationState,
     pub last_reducer_call: String,
     pub reducer_calls: u32,
@@ -653,6 +655,7 @@ impl Default for SpacetimeDashboardState {
             latest_incident_summary: None,
             recent_tool_call_events: VecDeque::new(),
             recent_tick_rollups: VecDeque::new(),
+            recent_focused_debug_summaries: VecDeque::new(),
             population_state: WorldPopulationState::default(),
             last_reducer_call: "none".to_string(),
             reducer_calls: 0,
@@ -916,6 +919,19 @@ impl SpacetimeDashboardState {
         }
     }
 
+    pub fn apply_focused_entity_debug_summary(&mut self, summary: FocusedEntityDebugSummary) {
+        retain_recent_debug_docs(
+            &mut self.recent_focused_debug_summaries,
+            TelemetryConfig::default().editor_timeline_ticks,
+        );
+        self.latest_tick = self.latest_tick.max(summary.latest_tick);
+        self.visible_entity_count = summary.visible_entity_count;
+        self.audible_event_count = summary.audible_event_count;
+        self.message_count = summary.message_count;
+        self.average_tool_latency_ms = summary.average_tool_latency_ms;
+        self.recent_focused_debug_summaries.push_back(summary);
+    }
+
     pub fn apply_population_state(&mut self, population_state: WorldPopulationState) {
         self.latest_tick = self.latest_tick.max(population_state.tick);
         self.population_state = population_state;
@@ -936,12 +952,22 @@ impl SpacetimeDashboardState {
             .collect::<Vec<_>>();
         let latest_tool_call = tool_events.last().cloned();
         let latest_rollup = rollups.last().cloned();
+        let latest_focused_summary = self
+            .recent_focused_debug_summaries
+            .iter()
+            .rev()
+            .find(|summary| summary.entity_id == entity_id)
+            .cloned();
         let agent_summary = self
             .agent_summaries
             .iter()
             .find(|summary| summary.entity_id == Some(entity_id));
 
-        if latest_tool_call.is_none() && latest_rollup.is_none() && agent_summary.is_none() {
+        if latest_tool_call.is_none()
+            && latest_rollup.is_none()
+            && latest_focused_summary.is_none()
+            && agent_summary.is_none()
+        {
             return None;
         }
 
@@ -959,17 +985,25 @@ impl SpacetimeDashboardState {
                 .count()
         } else if let Some(rollup) = &latest_rollup {
             rollup.tool_error_count as usize
+        } else if let Some(summary) = &latest_focused_summary {
+            summary.tool_error_count
         } else {
             agent_summary.map(|summary| summary.tool_errors).unwrap_or_default()
         };
         let trajectory_distance = latest_rollup
             .as_ref()
             .map(|rollup| rollup.total_distance)
+            .or_else(|| latest_focused_summary.as_ref().map(|summary| summary.total_distance))
             .or_else(|| agent_summary.map(|summary| summary.trajectory_distance))
             .unwrap_or_default();
         let rejected_actions = latest_rollup
             .as_ref()
             .map(|rollup| rollup.rejected_action_count as usize)
+            .or_else(|| {
+                latest_focused_summary
+                    .as_ref()
+                    .map(|summary| summary.rejected_action_count)
+            })
             .or_else(|| agent_summary.map(|summary| summary.rejected_actions))
             .unwrap_or_default();
         let average_tool_latency_ms = if recent_tool_call_count > 0 {
@@ -982,6 +1016,11 @@ impl SpacetimeDashboardState {
             latest_rollup
                 .as_ref()
                 .map(|rollup| rollup.average_tool_latency_ms)
+                .or_else(|| {
+                    latest_focused_summary
+                        .as_ref()
+                        .map(|summary| summary.average_tool_latency_ms)
+                })
                 .unwrap_or_default()
         };
         let latest_tick = latest_tool_call
@@ -989,6 +1028,11 @@ impl SpacetimeDashboardState {
             .map(|event| event.tick)
             .into_iter()
             .chain(latest_rollup.as_ref().map(|rollup| rollup.tick_end))
+            .chain(
+                latest_focused_summary
+                    .as_ref()
+                    .map(|summary| summary.latest_tick),
+            )
             .max()
             .unwrap_or(self.latest_tick);
 
@@ -2700,6 +2744,24 @@ impl PodEditorApp {
         Ok(())
     }
 
+    pub fn import_focused_entity_debug_toon_document(
+        &mut self,
+        document: &str,
+    ) -> Result<(), String> {
+        let summary: FocusedEntityDebugSummary =
+            decode_toon_document(document, "focused_entity_debug_summary")?;
+        let entity_id = summary.entity_id;
+
+        self.history.remember(self.state.clone());
+        self.state
+            .spacetime_dashboard
+            .apply_focused_entity_debug_summary(summary);
+        self.push_console(format!(
+            "Imported focused debug summary for entity {entity_id}"
+        ));
+        Ok(())
+    }
+
     pub fn import_world_population_toon_document(
         &mut self,
         document: &str,
@@ -2742,6 +2804,9 @@ impl PodEditorApp {
             }
             "agent_tool_call_event" => self.import_agent_tool_call_toon_document(document),
             "agent_tick_rollup" => self.import_agent_tick_rollup_toon_document(document),
+            "focused_entity_debug_summary" => {
+                self.import_focused_entity_debug_toon_document(document)
+            }
             "world_population_state" => self.import_world_population_toon_document(document),
             "replay_file" => {
                 let replay: ReplayFile = decode_toon_document(document, "replay_file")?;
@@ -4362,8 +4427,8 @@ mod tests {
     use pod_core::{
         decode_toon_value, Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId,
         AgentRole, AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace,
-        CreatureTemperament, EntityId, ReplayFile, ReplayHeader, ShardIncidentSummary,
-        TickTelemetryFrame, ToolCallStatus,
+        CreatureTemperament, EntityId, FocusedEntityDebugSummary, ReplayFile, ReplayHeader,
+        ShardIncidentSummary, TickTelemetryFrame, ToolCallStatus,
     };
 
     fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {
@@ -4475,6 +4540,26 @@ mod tests {
             audible_event_count: 3,
             message_count: 2,
             average_tool_latency_ms: 48.0,
+        }
+    }
+
+    fn sample_focused_entity_debug_summary(entity_id: u64) -> FocusedEntityDebugSummary {
+        FocusedEntityDebugSummary {
+            shard_id: "direct-connect".to_string(),
+            entity_id,
+            latest_tick: 18,
+            tool_call_count: 2,
+            tool_error_count: 1,
+            rejected_action_count: 1,
+            total_distance: 22.75,
+            average_tool_latency_ms: 41.0,
+            visible_entity_count: 12,
+            audible_event_count: 3,
+            message_count: 2,
+            latest_tool_name: Some("llm.complete".to_string()),
+            latest_tool_status: Some("Succeeded".to_string()),
+            latest_tool_error: None,
+            notes: vec!["1 rejected action retained".to_string()],
         }
     }
 
@@ -5255,6 +5340,24 @@ mod tests {
     }
 
     #[test]
+    fn editor_imports_focused_entity_debug_summaries() {
+        let mut app = PodEditorApp::default();
+        let summary = sample_focused_entity_debug_summary(1001);
+
+        app.import_focused_entity_debug_toon_document(&summary.to_toon_document())
+            .expect("focused summary TOON should import");
+
+        let selected = app
+            .selected_entity_debug_summary()
+            .expect("selected entity debug summary available");
+        assert_eq!(selected.entity_id, 1001);
+        assert_eq!(selected.latest_tick, 18);
+        assert_eq!(selected.tool_errors, 1);
+        assert_eq!(selected.trajectory_distance, 22.75);
+        assert_eq!(selected.average_tool_latency_ms, 41.0);
+    }
+
+    #[test]
     fn editor_routes_live_debug_toon_documents_into_existing_surfaces() {
         let mut app = PodEditorApp::default();
         let replay = sample_replay_file();
@@ -5285,6 +5388,10 @@ mod tests {
             .expect("tool-call TOON should route");
         app.import_live_debug_toon_document(&sample_tick_rollup(1001).to_toon_document())
             .expect("rollup TOON should route");
+        app.import_live_debug_toon_document(
+            &sample_focused_entity_debug_summary(1001).to_toon_document(),
+        )
+        .expect("focused summary TOON should route");
         app.import_live_debug_toon_document(&replay.to_toon_document())
             .expect("replay TOON should route");
         app.import_live_debug_toon_document(&incident.to_toon_document())
@@ -5311,6 +5418,12 @@ mod tests {
                 .expect("incident stored")
                 .shard_id,
             "alpha-2"
+        );
+        assert_eq!(
+            app.selected_entity_debug_summary()
+                .expect("focused summary available")
+                .latest_tick,
+            18
         );
         assert_eq!(
             app.state.spacetime_dashboard.recent_tool_call_events.len(),

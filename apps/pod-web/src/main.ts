@@ -59,6 +59,7 @@ import {
   createLiveDebugState,
   recordLiveDebugDocument,
   resetLiveDebugState,
+  selectedFocusedDebugSummary,
   selectedTickRollupSummary,
   selectedToolEventSummary
 } from "./live-debug";
@@ -229,6 +230,7 @@ let lastTelemetryRevision = -1;
 let latestReplaySummary: ReplaySummary | null = null;
 let latestIncidentSummary: ShardIncidentSummary | null = null;
 const liveDebugState = createLiveDebugState();
+let lastPublishedDebugFocusEntityId: number | null | undefined = undefined;
 let latestSnapshot: NetworkWorldSnapshot | null = null;
 let latestActionStatus: DirectConnectActionState = {
   pendingCount: 0,
@@ -987,6 +989,7 @@ window.podRender = {
     recentWorldEvents = [];
     latestReplaySummary = null;
     latestIncidentSummary = null;
+    lastPublishedDebugFocusEntityId = undefined;
     resetLiveDebugState(liveDebugState);
     if (localSandbox) {
       localSandbox.reset();
@@ -1098,6 +1101,8 @@ function applyLiveDebugDocument(document: string): void {
       break;
     case "tickRollup":
       break;
+    case "focusedSummary":
+      break;
     case "replay":
       latestReplaySummary = summarizeReplayFile(parsed.payload);
       break;
@@ -1187,6 +1192,14 @@ function renderTelemetryHud(): void {
   const target = selectedTarget();
   const controlled = controlledEntity();
   const debugFocusEntityId = target?.id ?? controlled?.id ?? null;
+  if (liveClient && lastPublishedDebugFocusEntityId !== debugFocusEntityId) {
+    liveClient.setDebugFocusEntity(debugFocusEntityId);
+    lastPublishedDebugFocusEntityId = debugFocusEntityId;
+  }
+  const focusedDebugSummary = selectedFocusedDebugSummary(
+    liveDebugState,
+    debugFocusEntityId
+  );
   const focusedToolEvent = selectedToolEventSummary(liveDebugState, debugFocusEntityId);
   const focusedRollup = selectedTickRollupSummary(liveDebugState, debugFocusEntityId);
   const populationHeatmap = currentPopulationHeatmap();
@@ -1225,8 +1238,11 @@ function renderTelemetryHud(): void {
     stats.nextRetryTick == null
       ? stats.recoverySummary
       : `${stats.recoverySummary} · retry @ ${stats.nextRetryTick}`;
-  telemetrySummaryNode.textContent =
-    stats.tick == null
+  telemetrySummaryNode.textContent = focusedDebugSummary
+    ? `tick ${focusedDebugSummary.latest_tick} · focus E(${focusedDebugSummary.entity_id}) · ${focusedDebugSummary.total_distance.toFixed(
+        2
+      )}u · ${focusedDebugSummary.rejected_action_count} rejected`
+    : stats.tick == null
       ? "Waiting for authoritative telemetry."
       : `tick ${stats.tick} · ${stats.visibleEntities} visible · ${stats.audibleEvents} audible · ${stats.messages} messages`;
   replaySummaryNode.textContent = latestReplaySummary
@@ -1241,8 +1257,16 @@ function renderTelemetryHud(): void {
     ? `E(${focusedToolEvent.agentEntityId}) · ${focusedToolEvent.toolName} · ${focusedToolEvent.status} · ${focusedToolEvent.latencyMs}ms${
         debugFocusEntityId != null ? " · focus" : ""
       }`
+    : focusedDebugSummary?.latest_tool_name
+      ? `E(${focusedDebugSummary.entity_id}) · ${focusedDebugSummary.latest_tool_name} · ${focusedDebugSummary.latest_tool_status ?? "Unknown"} · avg ${focusedDebugSummary.average_tool_latency_ms.toFixed(
+          0
+        )}ms${debugFocusEntityId != null ? " · focus" : ""}`
     : "No tool-call event loaded";
-  rollupSummaryNode.textContent = focusedRollup
+  rollupSummaryNode.textContent = focusedDebugSummary
+    ? `E(${focusedDebugSummary.entity_id}) · ${focusedDebugSummary.visible_entity_count} visible · ${focusedDebugSummary.audible_event_count} audible · ${focusedDebugSummary.message_count} messages${
+        debugFocusEntityId != null ? " · focus" : ""
+      }`
+    : focusedRollup
     ? `E(${focusedRollup.agentEntityId}) · ticks ${focusedRollup.tickStart}-${focusedRollup.tickEnd} · ${focusedRollup.totalDistance.toFixed(
         2
       )}u · ${focusedRollup.toolErrorCount} tool errors${

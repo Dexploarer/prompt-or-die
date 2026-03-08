@@ -140,7 +140,7 @@ describe("direct-connect runtime config", () => {
       expect(socket).toBeDefined();
       socket?.open();
 
-      expect(socket?.sent.slice(0, 2)).toEqual([
+      expect(socket?.sent.slice(0, 3)).toEqual([
         JSON.stringify({
           Connect: {
             player_name: "BrowserPilot",
@@ -150,6 +150,11 @@ describe("direct-connect runtime config", () => {
         JSON.stringify({
           SetDebugTelemetry: {
             enabled: true
+          }
+        }),
+        JSON.stringify({
+          SetDebugFocus: {
+            entity_id: null
           }
         })
       ]);
@@ -279,6 +284,15 @@ describe("direct-connect runtime config", () => {
         })
       );
       expect(debugDocuments).toEqual(["debug-doc"]);
+
+      client.setDebugFocusEntity(12);
+      expect(socket?.sent.at(-1)).toEqual(
+        JSON.stringify({
+          SetDebugFocus: {
+            entity_id: 12
+          }
+        })
+      );
     } finally {
       globalThis.WebSocket = originalWebSocket;
     }

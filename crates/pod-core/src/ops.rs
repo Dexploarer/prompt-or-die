@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::toon::encode_toon_document;
+use crate::{ActionLifecycleStage, TelemetryArchive, ToolCallStatus};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IncidentSeverity {
@@ -61,11 +62,108 @@ impl FocusedEntityDebugSummary {
     }
 }
 
+pub fn summarize_focused_entity_debug(
+    shard_id: impl Into<String>,
+    archive: &TelemetryArchive,
+    entity_id: u64,
+) -> Option<FocusedEntityDebugSummary> {
+    let mut latest_tick = 0;
+    let mut tool_call_count = 0usize;
+    let mut tool_error_count = 0usize;
+    let mut total_tool_latency_ms = 0u64;
+    let mut rejected_action_count = 0usize;
+    let mut total_distance = 0.0f32;
+    let mut visible_entity_count = 0usize;
+    let mut audible_event_count = 0usize;
+    let mut message_count = 0usize;
+    let mut latest_tool_name = None;
+    let mut latest_tool_status = None;
+    let mut latest_tool_error = None;
+
+    for frame in archive.frames() {
+        for agent in &frame.agents {
+            let Some(agent_entity_id) = agent.entity_id else {
+                continue;
+            };
+            if agent_entity_id.0 != entity_id {
+                continue;
+            }
+
+            latest_tick = latest_tick.max(frame.tick);
+            visible_entity_count = agent.visible_entity_count;
+            audible_event_count = agent.audible_event_count;
+            message_count = agent.message_count;
+            if let Some(trajectory) = &agent.trajectory {
+                total_distance += trajectory.distance_travelled;
+            }
+            rejected_action_count += agent
+                .action_trace
+                .iter()
+                .filter(|trace| matches!(trace.stage, ActionLifecycleStage::Rejected))
+                .count();
+            for trace in &agent.tool_calls {
+                tool_call_count += 1;
+                total_tool_latency_ms += trace.latency_ms as u64;
+                latest_tool_name = Some(trace.tool_name.clone());
+                latest_tool_status = Some(format!("{:?}", trace.status));
+                latest_tool_error = trace.error_message.clone();
+                if !matches!(
+                    trace.status,
+                    ToolCallStatus::Succeeded | ToolCallStatus::Requested
+                ) {
+                    tool_error_count += 1;
+                }
+            }
+        }
+    }
+
+    if latest_tick == 0 && tool_call_count == 0 && rejected_action_count == 0 {
+        return None;
+    }
+
+    let average_tool_latency_ms = if tool_call_count == 0 {
+        0.0
+    } else {
+        total_tool_latency_ms as f32 / tool_call_count as f32
+    };
+
+    let mut notes = Vec::new();
+    if tool_error_count > 0 {
+        notes.push(format!("{tool_error_count} tool-call errors retained"));
+    }
+    if rejected_action_count > 0 {
+        notes.push(format!("{rejected_action_count} rejected actions retained"));
+    }
+
+    Some(FocusedEntityDebugSummary {
+        shard_id: shard_id.into(),
+        entity_id,
+        latest_tick,
+        tool_call_count,
+        tool_error_count,
+        rejected_action_count,
+        total_distance,
+        average_tool_latency_ms,
+        visible_entity_count,
+        audible_event_count,
+        message_count,
+        latest_tool_name,
+        latest_tool_status,
+        latest_tool_error,
+        notes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::telemetry::{AgentTelemetryFrame, TickTelemetryFrame, TrajectorySample};
     use crate::toon::decode_toon_value;
+    use crate::{AgentId, AgentRuntimeProfile, EntityId, TelemetryArchive, ToolCallStatus};
 
-    use super::{FocusedEntityDebugSummary, IncidentSeverity, ShardIncidentSummary};
+    use super::{
+        summarize_focused_entity_debug, FocusedEntityDebugSummary, IncidentSeverity,
+        ShardIncidentSummary,
+    };
 
     #[test]
     fn shard_incident_summary_exports_to_toon() {
@@ -121,5 +219,59 @@ mod tests {
         assert_eq!(value["payload"]["entity_id"], 41);
         assert_eq!(value["payload"]["tool_call_count"], 3);
         assert_eq!(value["payload"]["latest_tool_name"], "llm.complete");
+    }
+
+    #[test]
+    fn focused_entity_debug_summary_aggregates_from_archive() {
+        let mut archive = TelemetryArchive::with_capacity(16);
+        let start = TrajectorySample::new(
+            12,
+            12.0 / 60.0,
+            glam::Vec2::ZERO,
+            glam::Vec2::ZERO,
+            0.0,
+        );
+        let end = TrajectorySample::new(
+            12,
+            13.0 / 60.0,
+            glam::Vec2::new(2.0, 1.0),
+            glam::Vec2::new(1.0, 0.0),
+            0.0,
+        );
+        let mut agent = AgentTelemetryFrame::new(
+            12,
+            AgentId::new(),
+            Some(EntityId(41)),
+            AgentRuntimeProfile::default(),
+            7,
+            2,
+            1,
+            4,
+            1,
+            None,
+            Some(start),
+        );
+        agent.update_trajectory_end(end);
+        agent.record_tool_call(crate::AgentToolCallTrace::failure(
+            12,
+            "llm.complete",
+            "qwen",
+            ToolCallStatus::TimedOut,
+            80,
+            "timeout",
+        ));
+        archive.record_tick(TickTelemetryFrame {
+            tick: 12,
+            agents: vec![agent],
+        });
+
+        let summary = summarize_focused_entity_debug("alpha", &archive, 41)
+            .expect("focused summary should aggregate");
+        assert_eq!(summary.shard_id, "alpha");
+        assert_eq!(summary.entity_id, 41);
+        assert_eq!(summary.tool_call_count, 1);
+        assert_eq!(summary.tool_error_count, 1);
+        assert_eq!(summary.visible_entity_count, 7);
+        assert_eq!(summary.latest_tool_name.as_deref(), Some("llm.complete"));
     }
 }

@@ -68,6 +68,10 @@ pub enum ClientMessage {
     /// Enable or disable debug-only cross-agent telemetry streaming.
     SetDebugTelemetry { enabled: bool },
 
+    /// Focus debug-only summaries on one entity while leaving gameplay state
+    /// and broad interest filtering unchanged.
+    SetDebugFocus { entity_id: Option<u64> },
+
     /// Ping request — measures round-trip time
     Ping { timestamp: u64 },
 }
@@ -281,6 +285,20 @@ mod tests {
 
         match decoded {
             ClientMessage::SetDebugTelemetry { enabled } => assert!(enabled),
+            other => panic!("Wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_set_debug_focus_roundtrip() {
+        let msg = ClientMessage::SetDebugFocus {
+            entity_id: Some(41),
+        };
+        let encoded = msg.encode().unwrap();
+        let decoded = ClientMessage::decode(&encoded).unwrap();
+
+        match decoded {
+            ClientMessage::SetDebugFocus { entity_id } => assert_eq!(entity_id, Some(41)),
             other => panic!("Wrong message type: {other:?}"),
         }
     }

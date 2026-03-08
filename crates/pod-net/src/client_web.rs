@@ -436,6 +436,12 @@ impl WebClient {
         self.send_message(ClientMessage::SetDebugTelemetry { enabled })
     }
 
+    /// Focus debug summaries on a specific entity without widening gameplay
+    /// visibility.
+    pub fn set_debug_focus_entity(&self, entity_id: Option<u64>) -> Result<(), ClientError> {
+        self.send_message(ClientMessage::SetDebugFocus { entity_id })
+    }
+
     /// Disconnect from the server
     pub fn disconnect(&mut self, reason: Option<&str>) -> Result<(), ClientError> {
         let msg = ClientMessage::Disconnect {
