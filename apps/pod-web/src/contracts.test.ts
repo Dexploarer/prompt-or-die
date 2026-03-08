@@ -21,6 +21,30 @@ import {
   summarizeReplayFile
 } from "./contracts";
 
+function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
+  return {
+    kind,
+    team_id: null,
+    combat_style: null,
+    species_id: null,
+    species_name: null,
+    resource_skill: null,
+    resource_tier: null,
+    encounter_kind: null,
+    interaction: {
+      can_inspect: true,
+      can_interact: false,
+      can_attack: false,
+      can_gather: false,
+      can_loot: false,
+      can_capture: false,
+      can_command_companion: false,
+      can_chat: false
+    },
+    ...overrides
+  };
+}
+
 describe("TOON contract parsing", () => {
   test("accepts versioned tick telemetry TOON documents", () => {
     const document = encode({
@@ -247,7 +271,19 @@ describe("TOON contract parsing", () => {
                 position: [12, 18],
                 velocity: [1, 0],
                 rotation: 0.4,
-                label: "Hero"
+                label: "Hero",
+                metadata: entityMetadata("Player", {
+                  interaction: {
+                    can_inspect: true,
+                    can_interact: true,
+                    can_attack: true,
+                    can_gather: false,
+                    can_loot: false,
+                    can_capture: false,
+                    can_command_companion: false,
+                    can_chat: true
+                  }
+                })
               }
             ]
           }
@@ -260,6 +296,7 @@ describe("TOON contract parsing", () => {
       throw new Error("expected welcome");
     }
     expect(welcome.snapshot.entities[0]?.position).toEqual([12, 18]);
+    expect(welcome.snapshot.entities[0]?.metadata.kind).toBe("Player");
 
     const delta = parseDirectConnectServerMessage(
       JSON.stringify({
@@ -276,7 +313,20 @@ describe("TOON contract parsing", () => {
                 position: { x: 14, y: 19 },
                 velocity: [2, 0],
                 rotation: 0.55,
-                label: "Hero"
+                label: "Hero",
+                metadata: entityMetadata("Player", {
+                  team_id: 2,
+                  interaction: {
+                    can_inspect: true,
+                    can_interact: true,
+                    can_attack: true,
+                    can_gather: false,
+                    can_loot: false,
+                    can_capture: false,
+                    can_command_companion: false,
+                    can_chat: true
+                  }
+                })
               }
             ],
             destroyed: [99]
@@ -291,6 +341,7 @@ describe("TOON contract parsing", () => {
     }
     expect(delta.delta.updated[0]?.position).toEqual([14, 19]);
     expect(delta.acknowledgedActionTick).toBe(12);
+    expect(delta.delta.updated[0]?.metadata.teamId).toBe(2);
   });
 
   test("parses authoritative event batches into gameplay summaries", () => {
@@ -345,14 +396,54 @@ describe("TOON contract parsing", () => {
           position: [10, 10],
           velocity: [0, 0],
           rotation: 0,
-          label: "Hero"
+          label: "Hero",
+          metadata: {
+            kind: "Player",
+            teamId: 1,
+            combatStyle: "Melee",
+            speciesId: null,
+            speciesName: null,
+            resourceSkill: null,
+            resourceTier: null,
+            encounterKind: null,
+            interaction: {
+              canInspect: true,
+              canInteract: true,
+              canAttack: true,
+              canGather: false,
+              canLoot: false,
+              canCapture: false,
+              canCommandCompanion: false,
+              canChat: true
+            }
+          }
         },
         {
           id: 2,
           position: [20, 12],
           velocity: [0, 0],
           rotation: 0,
-          label: "Wall-East"
+          label: "Wall-East",
+          metadata: {
+            kind: "Scenery",
+            teamId: null,
+            combatStyle: null,
+            speciesId: null,
+            speciesName: null,
+            resourceSkill: null,
+            resourceTier: null,
+            encounterKind: null,
+            interaction: {
+              canInspect: true,
+              canInteract: false,
+              canAttack: false,
+              canGather: false,
+              canLoot: false,
+              canCapture: false,
+              canCommandCompanion: false,
+              canChat: false
+            }
+          }
         }
       ]
     };
@@ -367,14 +458,54 @@ describe("TOON contract parsing", () => {
             position: [14, 12],
             velocity: [4, 0],
             rotation: 0.3,
-            label: "Hero"
+            label: "Hero",
+            metadata: {
+              kind: "Player",
+              teamId: 1,
+              combatStyle: "Melee",
+              speciesId: null,
+              speciesName: null,
+              resourceSkill: null,
+              resourceTier: null,
+              encounterKind: null,
+              interaction: {
+                canInspect: true,
+                canInteract: true,
+                canAttack: true,
+                canGather: false,
+                canLoot: false,
+                canCapture: false,
+                canCommandCompanion: false,
+                canChat: true
+              }
+            }
           },
           {
             id: 3,
             position: [18, 20],
             velocity: [0, 0],
             rotation: 0,
-            label: "Monster-Wolf"
+            label: "Monster-Wolf",
+            metadata: {
+              kind: "WildCreature",
+              teamId: null,
+              combatStyle: "Melee",
+              speciesId: "embercub",
+              speciesName: "Wild Embercub",
+              resourceSkill: null,
+              resourceTier: null,
+              encounterKind: "WildCreature",
+              interaction: {
+                canInspect: true,
+                canInteract: false,
+                canAttack: true,
+                canGather: false,
+                canLoot: false,
+                canCapture: true,
+                canCommandCompanion: false,
+                canChat: false
+              }
+            }
           }
         ],
         destroyed: [2]

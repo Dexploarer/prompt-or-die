@@ -60,8 +60,9 @@ use pod_stdb::types::{
 use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{
     build_catch_up_diagnostics, build_rollback_preview, compose_presentation_snapshot,
-    CatchUpDiagnostics, EntitySnapshot, InterpolatedSnapshot, RecoveryRequestState, RenderClock,
-    RollbackPreview, SnapshotInterpolationBuffer, StateDelta, WorldSnapshot,
+    CatchUpDiagnostics, EntityMetadataSnapshot, EntitySnapshot, InterpolatedSnapshot,
+    RecoveryRequestState, RenderClock, RollbackPreview, SnapshotInterpolationBuffer, StateDelta,
+    WorldSnapshot,
 };
 
 // ============================================================
@@ -1013,6 +1014,10 @@ fn entity_to_snapshot(cached: &CachedEntity) -> EntitySnapshot {
         max_health: cached.max_health,
         movement_speed: cached.max_speed,
         label: cached.name.clone(),
+        metadata: EntityMetadataSnapshot {
+            team_id: cached.team_id,
+            ..EntityMetadataSnapshot::default()
+        },
     }
 }
 
@@ -1526,6 +1531,7 @@ mod tests {
                 max_health: Some(100.0),
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
         client.ingest_local_snapshot();
@@ -1551,6 +1557,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(90.0),
                 label: Some("npc".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
         client.ingest_local_snapshot();

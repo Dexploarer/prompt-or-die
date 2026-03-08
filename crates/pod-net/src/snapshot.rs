@@ -5,9 +5,12 @@
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use pod_core::{Action, Health, Label, Movement, Transform, Velocity};
+use pod_core::{
+    Action, CombatLoadout, CombatStyle, CreatureIdentity, EncounterKind, EncounterState, Health,
+    Label, LootContainer, Movement, ResourceNode, SkillKind, Team, Transform, Velocity,
+};
 
 const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
 const DEFAULT_PREDICTION_MOVE_SPEED: f32 = 200.0;
@@ -45,6 +48,49 @@ pub struct EntitySnapshot {
     pub movement_speed: Option<f32>,
     /// Entity label/name
     pub label: Option<String>,
+    /// Authoritative gameplay metadata used by browser/editor consumers.
+    pub metadata: EntityMetadataSnapshot,
+}
+
+/// Coarse authoritative classification for world entities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum EntityKind {
+    #[default]
+    Unknown,
+    Player,
+    Npc,
+    WildCreature,
+    Companion,
+    ResourceNode,
+    LootContainer,
+    Scenery,
+}
+
+/// Action affordances exposed to creator/browser tooling from authoritative state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct EntityInteractionHints {
+    pub can_inspect: bool,
+    pub can_interact: bool,
+    pub can_attack: bool,
+    pub can_gather: bool,
+    pub can_loot: bool,
+    pub can_capture: bool,
+    pub can_command_companion: bool,
+    pub can_chat: bool,
+}
+
+/// Rich per-entity metadata for browser/editor presentation and creator tooling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct EntityMetadataSnapshot {
+    pub kind: EntityKind,
+    pub team_id: Option<u8>,
+    pub combat_style: Option<CombatStyle>,
+    pub species_id: Option<String>,
+    pub species_name: Option<String>,
+    pub resource_skill: Option<SkillKind>,
+    pub resource_tier: Option<u8>,
+    pub encounter_kind: Option<EncounterKind>,
+    pub interaction: EntityInteractionHints,
 }
 
 /// Efficient delta — only changed entities
@@ -424,26 +470,74 @@ impl WorldSnapshot {
     /// Capture current world state into a snapshot
     pub fn capture(world: &pod_core::World) -> Self {
         let mut entities = Vec::new();
+        let controlled_entities = world
+            .agents
+            .iter()
+            .filter_map(|slot| slot.entity_id.map(|entity| entity.id() as u64))
+            .collect::<HashSet<_>>();
 
-        for (entity, (transform, velocity)) in world.ecs.query::<(&Transform, &Velocity)>().iter() {
+        for (entity, (transform,)) in world.ecs.query::<(&Transform,)>().iter() {
             let id = entity.id();
+            let velocity = world
+                .ecs
+                .get::<&Velocity>(entity)
+                .map(|velocity| velocity.linear)
+                .unwrap_or(Vec2::ZERO);
             let health_opt = world.ecs.get::<&Health>(entity).ok();
             let label_opt = world.ecs.get::<&Label>(entity).ok();
+            let combat_loadout = world.ecs.get::<&CombatLoadout>(entity).ok();
+            let creature = world.ecs.get::<&CreatureIdentity>(entity).ok();
+            let resource = world.ecs.get::<&ResourceNode>(entity).ok();
+            let loot = world.ecs.get::<&LootContainer>(entity).ok();
+            let encounter = world.ecs.get::<&EncounterState>(entity).ok();
 
             let health = health_opt.as_ref().map(|h| h.current);
             let max_health = health_opt.as_ref().map(|h| h.max);
             let movement_speed = world.ecs.get::<&Movement>(entity).ok().map(|m| m.max_speed);
-            let label = label_opt.map(|l| l.name.clone());
+            let label = label_opt.as_ref().map(|label| label.name.clone());
+            let team_id = label_opt.as_ref().and_then(|label| team_to_id(label.team));
+            let kind = classify_entity_kind(
+                id as u64,
+                &controlled_entities,
+                resource.is_some(),
+                loot.is_some(),
+                creature.as_deref(),
+                combat_loadout.as_deref(),
+                health_opt.as_deref(),
+            );
+            let interaction = interaction_hints_for_entity(
+                kind,
+                resource.as_deref(),
+                loot.as_deref(),
+                creature.as_deref(),
+                combat_loadout.as_deref(),
+                health_opt.as_deref(),
+            );
 
             entities.push(EntitySnapshot {
                 id: id as u64,
                 position: transform.position,
-                velocity: velocity.linear,
+                velocity,
                 rotation: transform.rotation,
                 health,
                 max_health,
                 movement_speed,
                 label,
+                metadata: EntityMetadataSnapshot {
+                    kind,
+                    team_id,
+                    combat_style: combat_loadout.as_ref().map(|loadout| loadout.style),
+                    species_id: creature
+                        .as_ref()
+                        .map(|creature| creature.species_id.clone()),
+                    species_name: creature
+                        .as_ref()
+                        .map(|creature| creature.species_name.clone()),
+                    resource_skill: resource.as_ref().map(|resource| resource.skill),
+                    resource_tier: resource.as_ref().map(|resource| resource.tier),
+                    encounter_kind: encounter.as_ref().map(|encounter| encounter.kind),
+                    interaction,
+                },
             });
         }
 
@@ -488,6 +582,7 @@ impl WorldSnapshot {
             hash_option_f32(&mut hash, entity.max_health);
             hash_option_f32(&mut hash, entity.movement_speed);
             hash_option_str(&mut hash, entity.label.as_deref());
+            hash_entity_metadata(&mut hash, &entity.metadata);
         }
 
         hash
@@ -608,6 +703,7 @@ fn entity_changed(old: &EntitySnapshot, new: &EntitySnapshot) -> bool {
         || old.max_health != new.max_health
         || old.movement_speed != new.movement_speed
         || old.label != new.label
+        || old.metadata != new.metadata
 }
 
 /// Applies an authoritative state update and validates its digest.
@@ -801,6 +897,11 @@ fn interpolate_entity(
         } else {
             upper.label.clone()
         },
+        metadata: if factor < 1.0 && lower.metadata == upper.metadata {
+            lower.metadata.clone()
+        } else {
+            upper.metadata.clone()
+        },
     }
 }
 
@@ -927,15 +1028,238 @@ fn hash_option_str(hash: &mut u64, value: Option<&str>) {
     }
 }
 
+fn hash_bool(hash: &mut u64, value: bool) {
+    hash_u64(hash, value as u64);
+}
+
+fn hash_option_u8(hash: &mut u64, value: Option<u8>) {
+    match value {
+        Some(value) => {
+            hash_u64(hash, 1);
+            hash_u64(hash, value as u64);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
+    hash_option_str(hash, Some(entity_kind_name(metadata.kind)));
+    hash_option_u8(hash, metadata.team_id);
+    hash_option_str(hash, metadata.combat_style.map(combat_style_name));
+    hash_option_str(hash, metadata.species_id.as_deref());
+    hash_option_str(hash, metadata.species_name.as_deref());
+    hash_option_str(hash, metadata.resource_skill.map(skill_kind_name));
+    hash_option_u8(hash, metadata.resource_tier);
+    hash_option_str(hash, metadata.encounter_kind.map(encounter_kind_name));
+    hash_bool(hash, metadata.interaction.can_inspect);
+    hash_bool(hash, metadata.interaction.can_interact);
+    hash_bool(hash, metadata.interaction.can_attack);
+    hash_bool(hash, metadata.interaction.can_gather);
+    hash_bool(hash, metadata.interaction.can_loot);
+    hash_bool(hash, metadata.interaction.can_capture);
+    hash_bool(hash, metadata.interaction.can_command_companion);
+    hash_bool(hash, metadata.interaction.can_chat);
+}
+
+fn team_to_id(team: Team) -> Option<u8> {
+    match team {
+        Team::None => None,
+        Team::Team(id) => Some(id),
+    }
+}
+
+fn classify_entity_kind(
+    entity_id: u64,
+    controlled_entities: &HashSet<u64>,
+    has_resource: bool,
+    has_loot: bool,
+    creature: Option<&CreatureIdentity>,
+    combat_loadout: Option<&CombatLoadout>,
+    health: Option<&Health>,
+) -> EntityKind {
+    if has_resource {
+        EntityKind::ResourceNode
+    } else if has_loot {
+        EntityKind::LootContainer
+    } else if let Some(creature) = creature {
+        if creature.is_wild {
+            EntityKind::WildCreature
+        } else {
+            EntityKind::Companion
+        }
+    } else if controlled_entities.contains(&entity_id) {
+        EntityKind::Player
+    } else if combat_loadout.is_some() || health.is_some() {
+        EntityKind::Npc
+    } else {
+        EntityKind::Scenery
+    }
+}
+
+fn interaction_hints_for_entity(
+    kind: EntityKind,
+    resource: Option<&ResourceNode>,
+    loot: Option<&LootContainer>,
+    creature: Option<&CreatureIdentity>,
+    combat_loadout: Option<&CombatLoadout>,
+    health: Option<&Health>,
+) -> EntityInteractionHints {
+    let has_health = health.map(|health| health.current > 0.0).unwrap_or(false);
+    let can_attack = matches!(
+        kind,
+        EntityKind::Player | EntityKind::Npc | EntityKind::WildCreature | EntityKind::Companion
+    ) && (combat_loadout.is_some() || has_health);
+
+    EntityInteractionHints {
+        can_inspect: !matches!(kind, EntityKind::Unknown),
+        can_interact: matches!(kind, EntityKind::Player | EntityKind::Npc),
+        can_attack,
+        can_gather: resource
+            .map(|resource| resource.remaining_uses > 0)
+            .unwrap_or(false),
+        can_loot: loot
+            .map(|loot| !loot.claimed && (loot.coins > 0 || !loot.items.is_empty()))
+            .unwrap_or(false),
+        can_capture: creature.map(|creature| creature.is_wild).unwrap_or(false),
+        can_command_companion: matches!(kind, EntityKind::Companion),
+        can_chat: matches!(kind, EntityKind::Player | EntityKind::Npc),
+    }
+}
+
+fn entity_kind_name(kind: EntityKind) -> &'static str {
+    match kind {
+        EntityKind::Unknown => "unknown",
+        EntityKind::Player => "player",
+        EntityKind::Npc => "npc",
+        EntityKind::WildCreature => "wild_creature",
+        EntityKind::Companion => "companion",
+        EntityKind::ResourceNode => "resource_node",
+        EntityKind::LootContainer => "loot_container",
+        EntityKind::Scenery => "scenery",
+    }
+}
+
+fn combat_style_name(style: CombatStyle) -> &'static str {
+    match style {
+        CombatStyle::Melee => "melee",
+        CombatStyle::Ranged => "ranged",
+        CombatStyle::Magic => "magic",
+        CombatStyle::Summoning => "summoning",
+    }
+}
+
+fn skill_kind_name(skill: SkillKind) -> &'static str {
+    match skill {
+        SkillKind::Attack => "attack",
+        SkillKind::Strength => "strength",
+        SkillKind::Defence => "defence",
+        SkillKind::Ranged => "ranged",
+        SkillKind::Magic => "magic",
+        SkillKind::Constitution => "constitution",
+        SkillKind::Mining => "mining",
+        SkillKind::Woodcutting => "woodcutting",
+        SkillKind::Fishing => "fishing",
+        SkillKind::Cooking => "cooking",
+        SkillKind::Smithing => "smithing",
+        SkillKind::Crafting => "crafting",
+        SkillKind::Slayer => "slayer",
+        SkillKind::Taming => "taming",
+        SkillKind::Bonding => "bonding",
+    }
+}
+
+fn encounter_kind_name(kind: EncounterKind) -> &'static str {
+    match kind {
+        EncounterKind::OpenWorld => "open_world",
+        EncounterKind::Duel => "duel",
+        EncounterKind::WildCreature => "wild_creature",
+        EncounterKind::Boss => "boss",
+        EncounterKind::Raid => "raid",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::{CombatLoadout, CreatureIdentity, IdleAgent, LootContainer, ResourceNode};
 
     #[test]
     fn test_snapshot_default() {
         let snap = WorldSnapshot::default();
         assert_eq!(snap.tick, 0);
         assert_eq!(snap.entity_count(), 0);
+    }
+
+    #[test]
+    fn test_capture_includes_static_entities_and_authoritative_metadata() {
+        let mut world = pod_core::World::new(7);
+        let _ = world.add_agent(Box::new(IdleAgent::new()));
+        world
+            .spawn_at(32.0, 12.0)
+            .with_label("Copper Vein", Team::None)
+            .with_resource_node(ResourceNode::default())
+            .build();
+        world
+            .spawn_at(36.0, 16.0)
+            .with_label("Bronze Chest", Team::None)
+            .with_loot_container(LootContainer {
+                coins: 24,
+                ..LootContainer::default()
+            })
+            .build();
+        world
+            .spawn_at(40.0, 20.0)
+            .with_label("Wild Embercub", Team::None)
+            .with_health(24.0)
+            .with_combat_loadout(CombatLoadout::default())
+            .with_creature_identity(CreatureIdentity {
+                species_id: "embercub".into(),
+                species_name: "Wild Embercub".into(),
+                is_wild: true,
+                ..CreatureIdentity::default()
+            })
+            .build();
+
+        let snapshot = WorldSnapshot::capture(&world);
+
+        assert_eq!(snapshot.entities.len(), 4);
+
+        let player = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.metadata.kind == EntityKind::Player)
+            .expect("player entity present");
+        assert!(player.metadata.interaction.can_chat);
+        assert!(player.metadata.interaction.can_attack);
+
+        let resource = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.label.as_deref() == Some("Copper Vein"))
+            .expect("resource present");
+        assert_eq!(resource.metadata.kind, EntityKind::ResourceNode);
+        assert_eq!(resource.metadata.resource_skill, Some(SkillKind::Mining));
+        assert!(resource.metadata.interaction.can_gather);
+
+        let loot = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.label.as_deref() == Some("Bronze Chest"))
+            .expect("loot present");
+        assert_eq!(loot.metadata.kind, EntityKind::LootContainer);
+        assert!(loot.metadata.interaction.can_loot);
+
+        let creature = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.metadata.kind == EntityKind::WildCreature)
+            .expect("wild creature present");
+        assert_eq!(creature.metadata.species_id.as_deref(), Some("embercub"));
+        assert_eq!(
+            creature.metadata.species_name.as_deref(),
+            Some("Wild Embercub")
+        );
+        assert!(creature.metadata.interaction.can_capture);
     }
 
     #[test]
@@ -950,6 +1274,7 @@ mod tests {
             max_health: Some(100.0),
             movement_speed: Some(200.0),
             label: Some("Player".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let mut snap2 = WorldSnapshot::default();
@@ -962,6 +1287,7 @@ mod tests {
             max_health: Some(100.0),
             movement_speed: Some(200.0),
             label: Some("Player".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let delta = StateDelta::diff(&snap1, &snap2);
@@ -981,6 +1307,7 @@ mod tests {
             max_health: None,
             movement_speed: None,
             label: None,
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let delta = StateDelta {
@@ -994,6 +1321,7 @@ mod tests {
                 max_health: None,
                 movement_speed: None,
                 label: None,
+                metadata: EntityMetadataSnapshot::default(),
             }],
             destroyed: vec![],
         };
@@ -1014,6 +1342,7 @@ mod tests {
             max_health: None,
             movement_speed: Some(200.0),
             label: Some("sprite2d".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let mut snap2 = WorldSnapshot::default();
@@ -1026,6 +1355,7 @@ mod tests {
             max_health: None,
             movement_speed: Some(200.0),
             label: Some("sprite2d".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let delta = StateDelta::diff(&snap1, &snap2);
@@ -1045,6 +1375,7 @@ mod tests {
             max_health: Some(100.0),
             movement_speed: Some(200.0),
             label: Some("sprite2d".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let mut next = WorldSnapshot::default();
@@ -1057,6 +1388,7 @@ mod tests {
             max_health: Some(100.0),
             movement_speed: Some(200.0),
             label: Some("sprite3d".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let delta = StateDelta::diff(&base, &next);
@@ -1088,6 +1420,7 @@ mod tests {
             max_health: Some(100.0),
             movement_speed: None,
             label: Some("keep".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
         base.entities.push(EntitySnapshot {
             id: 11,
@@ -1098,6 +1431,7 @@ mod tests {
             max_health: Some(50.0),
             movement_speed: None,
             label: Some("to_remove".into()),
+            metadata: EntityMetadataSnapshot::default(),
         });
 
         let delta = StateDelta {
@@ -1111,6 +1445,7 @@ mod tests {
                 max_health: Some(100.0),
                 movement_speed: None,
                 label: Some("updated".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
             destroyed: vec![11, 99_999],
         };
@@ -1142,6 +1477,7 @@ mod tests {
             max_health: Some(20.0),
             movement_speed: Some(200.0),
             label: Some("a".into()),
+            metadata: EntityMetadataSnapshot::default(),
         };
         let entity_b = EntitySnapshot {
             id: 2,
@@ -1152,6 +1488,7 @@ mod tests {
             max_health: None,
             movement_speed: None,
             label: Some("b".into()),
+            metadata: EntityMetadataSnapshot::default(),
         };
 
         let snapshot_a = WorldSnapshot {
@@ -1179,6 +1516,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         };
 
@@ -1217,6 +1555,7 @@ mod tests {
                 max_health: None,
                 movement_speed: None,
                 label: Some("old".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
         buffer.push(WorldSnapshot {
@@ -1230,6 +1569,7 @@ mod tests {
                 max_health: None,
                 movement_speed: None,
                 label: Some("new".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
 
@@ -1254,6 +1594,7 @@ mod tests {
                 max_health: Some(100.0),
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
         buffer.push(WorldSnapshot {
@@ -1267,6 +1608,7 @@ mod tests {
                 max_health: Some(100.0),
                 movement_speed: Some(160.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
 
@@ -1295,6 +1637,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(60.0),
                 label: Some("npc".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
 
@@ -1323,6 +1666,7 @@ mod tests {
                 max_health: None,
                 movement_speed: None,
                 label: None,
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
 
@@ -1381,6 +1725,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
         buffer.push(WorldSnapshot {
@@ -1394,6 +1739,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         });
 
@@ -1455,6 +1801,7 @@ mod tests {
                 max_health: Some(10.0),
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         };
         let predicted = WorldSnapshot {
@@ -1468,6 +1815,7 @@ mod tests {
                 max_health: Some(10.0),
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         };
         let mut buffer = SnapshotInterpolationBuffer::default();
@@ -1555,6 +1903,7 @@ mod tests {
                         max_health: None,
                         movement_speed: Some(120.0),
                         label: Some("player".into()),
+                        metadata: EntityMetadataSnapshot::default(),
                     },
                     EntitySnapshot {
                         id: 2,
@@ -1565,6 +1914,7 @@ mod tests {
                         max_health: None,
                         movement_speed: None,
                         label: Some("npc".into()),
+                        metadata: EntityMetadataSnapshot::default(),
                     },
                 ],
             },
@@ -1580,6 +1930,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
         };
 
@@ -1621,6 +1972,7 @@ mod tests {
                 max_health: Some(10.0),
                 movement_speed: Some(200.0),
                 label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
             }],
             destroyed: vec![],
         };
