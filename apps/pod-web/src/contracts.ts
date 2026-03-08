@@ -2894,6 +2894,96 @@ export function buildAuthoritativeWorldFrame(
   };
 }
 
+export interface InteractionMarkerOptions {
+  moveTarget?: Vec2Tuple | null;
+  selectedTarget?: NetworkEntitySnapshot | null;
+  controlledEntity?: number | null;
+}
+
+export function withInteractionMarkers(
+  frame: ThreeJsWebGpuFrame,
+  options: InteractionMarkerOptions
+): ThreeJsWebGpuFrame {
+  const markers = new Array<ThreeJsSpriteBatch>();
+  const controlledEntity = options.controlledEntity ?? null;
+
+  if (options.moveTarget) {
+    const worldX = options.moveTarget[0] * WORLD_TO_RENDER_SCALE;
+    const worldZ = options.moveTarget[1] * WORLD_TO_RENDER_SCALE;
+    markers.push({
+      texture: "selection-ring",
+      frame: 0,
+      layer: 7,
+      billboard: false,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 18,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, sampleTerrainHeight(worldX, worldZ) + 0.05, worldZ],
+          rotation: GROUND_RING_ROTATION,
+          scale: [1.65, 1.65, 1],
+          color: [0.86, 0.96, 1, 0.24],
+          animationSetId: "destination-ring"
+        }
+      ]
+    });
+  }
+
+  if (options.selectedTarget && options.selectedTarget.id !== controlledEntity) {
+    const target = options.selectedTarget;
+    const worldX = target.position[0] * WORLD_TO_RENDER_SCALE;
+    const worldZ = target.position[1] * WORLD_TO_RENDER_SCALE;
+    const interaction = target.metadata.interaction;
+    const scale = target.metadata.actorPresentation?.selectionRingScale ?? 2.4;
+    const useDangerRing = interaction.canAttack;
+    const color: RgbaTuple = interaction.canCapture
+      ? [0.46, 0.96, 0.72, 0.34]
+      : interaction.canGather
+        ? [0.94, 0.78, 0.36, 0.32]
+        : interaction.canAttack
+          ? [1, 0.38, 0.32, 0.34]
+          : interaction.canInteract
+            ? [0.54, 0.88, 1, 0.28]
+            : [0.76, 0.86, 1, 0.24];
+    markers.push({
+      texture: useDangerRing ? "danger-ring" : "selection-ring",
+      frame: 0,
+      layer: 8,
+      billboard: false,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 22,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, sampleTerrainHeight(worldX, worldZ) + 0.07, worldZ],
+          rotation: GROUND_RING_ROTATION,
+          scale: [scale * 1.08, scale * 1.08, 1],
+          color,
+          sourceEntity: target.id,
+          animationSetId: "target-ring",
+          healthRatio: healthRatio(target)
+        }
+      ]
+    });
+  }
+
+  if (markers.length === 0) {
+    return frame;
+  }
+
+  return {
+    ...frame,
+    spriteBatches: [...frame.spriteBatches, ...markers]
+  };
+}
+
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {
   return {
     camera: frame.camera,
