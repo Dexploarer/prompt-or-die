@@ -2898,6 +2898,7 @@ export interface InteractionMarkerOptions {
   moveTarget?: Vec2Tuple | null;
   selectedTarget?: NetworkEntitySnapshot | null;
   controlledEntity?: number | null;
+  controlledSnapshot?: NetworkEntitySnapshot | null;
 }
 
 export function withInteractionMarkers(
@@ -2931,6 +2932,42 @@ export function withInteractionMarkers(
         }
       ]
     });
+
+    const moveOrigin = options.controlledSnapshot?.position ?? null;
+    if (moveOrigin) {
+      const deltaX = options.moveTarget[0] - moveOrigin[0];
+      const deltaY = options.moveTarget[1] - moveOrigin[1];
+      const distance = Math.hypot(deltaX, deltaY);
+      const breadcrumbCount = Math.min(4, Math.max(0, Math.floor(distance / 3.4)));
+
+      if (breadcrumbCount > 0) {
+        markers.push({
+          texture: "mist-ring",
+          frame: 0,
+          layer: 6,
+          billboard: false,
+          phase: "transparent",
+          sortDepth: worldZ,
+          renderOrder: 17,
+          transparent: true,
+          depthWrite: false,
+          depthTest: true,
+          instances: Array.from({ length: breadcrumbCount }, (_, index) => {
+            const t = (index + 1) / (breadcrumbCount + 1);
+            const pathX = (moveOrigin[0] + deltaX * t) * WORLD_TO_RENDER_SCALE;
+            const pathZ = (moveOrigin[1] + deltaY * t) * WORLD_TO_RENDER_SCALE;
+            const scale = 0.74 + index * 0.08;
+            return {
+              position: [pathX, sampleTerrainHeight(pathX, pathZ) + 0.04, pathZ],
+              rotation: GROUND_RING_ROTATION,
+              scale: [scale, scale, 1],
+              color: [0.72, 0.92, 1, 0.12 + index * 0.03],
+              animationSetId: "path-node"
+            };
+          })
+        });
+      }
+    }
   }
 
   if (options.selectedTarget && options.selectedTarget.id !== controlledEntity) {
