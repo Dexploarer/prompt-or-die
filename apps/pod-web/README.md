@@ -41,6 +41,7 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 - default: main-thread rendering
 - `?renderThread=worker`: transfers the canvas to a dedicated render worker via `OffscreenCanvas`
 - `?renderThread=main`: forces the existing main-thread path
+- worker mode now mirrors the main thread's logical viewport size and device pixel ratio, so it should not look softer than the main-thread path on high-DPI displays
 
 ### Browser controls
 

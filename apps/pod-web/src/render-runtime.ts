@@ -5,6 +5,7 @@ import type {
 } from "./contracts";
 import {
   PodThreeWorldRenderer,
+  type RenderSurfaceMetrics,
   type PodThreeRendererStats,
   type PodThreeWorldRendererOptions
 } from "./renderer";
@@ -74,6 +75,10 @@ export type RenderWorkerRequest =
       type: "clearTelemetryTrail";
     }
   | {
+      type: "resize";
+      surfaceMetrics: RenderSurfaceMetrics;
+    }
+  | {
       type: "dispose";
     };
 
@@ -130,6 +135,20 @@ export function detectRenderWorkerCapabilities(
     hasWorkerConstructor: typeof Worker === "function",
     hasOffscreenCanvas: typeof OffscreenCanvas === "function",
     hasCanvasTransferControl: typeof canvas.transferControlToOffscreen === "function"
+  };
+}
+
+export function readRenderSurfaceMetrics(
+  canvas: Pick<HTMLCanvasElement, "clientWidth" | "clientHeight" | "width" | "height">,
+  devicePixelRatio =
+    typeof window === "object" && typeof window.devicePixelRatio === "number"
+      ? window.devicePixelRatio
+      : 1
+): RenderSurfaceMetrics {
+  return {
+    width: Math.max(canvas.clientWidth || canvas.width || 1, 1),
+    height: Math.max(canvas.clientHeight || canvas.height || 1, 1),
+    devicePixelRatio: Math.max(devicePixelRatio, 1)
   };
 }
 
@@ -208,27 +227,46 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
         {
           type: "init",
           canvas: offscreenCanvas,
-          options
+          options: {
+            ...options,
+            surfaceMetrics: readRenderSurfaceMetrics(canvas)
+          }
         } satisfies RenderWorkerRequest,
         [offscreenCanvas]
       );
     });
 
-    return new WorkerPodRenderRuntime(worker, ready);
+    return new WorkerPodRenderRuntime(worker, ready, canvas);
   }
 
   readonly backend: PodThreeRendererStats["backend"];
   readonly qualityPreset: PodThreeRendererStats["qualityPreset"];
   readonly renderThread: PodRenderThread = "worker";
   private latestStats: PodThreeRendererStats;
+  private readonly resizeObserver: ResizeObserver | null;
+  private readonly handleWindowResize = () => {
+    this.syncSurfaceMetrics();
+  };
 
   private constructor(
     private readonly worker: Worker,
-    ready: RenderWorkerReadyMessage
+    ready: RenderWorkerReadyMessage,
+    private readonly canvas: HTMLCanvasElement
   ) {
     this.backend = ready.backend;
     this.qualityPreset = ready.qualityPreset;
     this.latestStats = ready.stats;
+
+    this.resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            this.syncSurfaceMetrics();
+          })
+        : null;
+    this.resizeObserver?.observe(canvas);
+    if (typeof window === "object") {
+      window.addEventListener("resize", this.handleWindowResize);
+    }
 
     this.worker.addEventListener("message", (event: MessageEvent<RenderWorkerResponse>) => {
       if (event.data.type === "stats") {
@@ -240,6 +278,8 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
         console.error("pod-web render worker error:", event.data.message);
       }
     });
+
+    this.syncSurfaceMetrics();
   }
 
   async applyFrame(frame: ThreeJsWebGpuFrame): Promise<void> {
@@ -274,8 +314,19 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
   }
 
   dispose(): void {
+    this.resizeObserver?.disconnect();
+    if (typeof window === "object") {
+      window.removeEventListener("resize", this.handleWindowResize);
+    }
     this.worker.postMessage({ type: "dispose" } satisfies RenderWorkerRequest);
     this.worker.terminate();
+  }
+
+  private syncSurfaceMetrics(): void {
+    this.worker.postMessage({
+      type: "resize",
+      surfaceMetrics: readRenderSurfaceMetrics(this.canvas)
+    } satisfies RenderWorkerRequest);
   }
 }
 
