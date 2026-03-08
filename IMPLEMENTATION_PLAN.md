@@ -927,5 +927,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 93
-**Current focus**: Iteration 94 worker-route gameplay-input parity proof, then richer authored traversal/combat presentation on top of the differentiated actor motion pass
+### Iteration 94
+- [x] Added a real `pod-web` boot-state model so the browser shard no longer flashes misleading `demo frame` / `offline demo` placeholders while the local sandbox or direct-connect client is still initializing.
+- [x] Applied that boot state both in the module bootstrap path and in an inline pre-module HTML script, so first paint matches the actual mode before the renderer and local world finish booting.
+- [x] Added deterministic Bun coverage for local-sandbox and direct-connect boot-state selection in `direct-connect.test.ts`.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/frame-plan.test.ts ./src/contracts.test.ts ./src/renderer.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 94
+**Current focus**: Iteration 95 worker-route gameplay-input parity proof, then richer traversal/combat feedback and less intrusive flagship HUD chrome

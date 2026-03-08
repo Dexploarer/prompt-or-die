@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { PodWebDirectConnectClient, runtimeConfigFromLocation } from "./direct-connect";
+import {
+  initialHudStateFromLocation,
+  PodWebDirectConnectClient,
+  runtimeConfigFromLocation
+} from "./direct-connect";
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -67,6 +71,26 @@ describe("direct-connect runtime config", () => {
     } as Location);
 
     expect(config).toBeNull();
+  });
+
+  test("describes local sandbox boot state when no runtime config is present", () => {
+    const state = initialHudStateFromLocation({
+      search: ""
+    } as Location);
+
+    expect(state.connectionBadge).toBe("local sandbox booting");
+    expect(state.worldLabel).toBe("booting Verdant Hollow");
+    expect(state.frameSourceLabel).toBe("bootstrapping local sandbox");
+  });
+
+  test("describes direct-connect boot state from query params", () => {
+    const state = initialHudStateFromLocation({
+      search: "?server=127.0.0.1:7778"
+    } as Location);
+
+    expect(state.feedback).toBe("Connecting to ws://127.0.0.1:7778");
+    expect(state.connectionBadge).toBe("connecting to shard");
+    expect(state.worldLabel).toBe("waiting for shard snapshot");
   });
 
   test("submits websocket action batches after an authoritative welcome", () => {
