@@ -383,7 +383,8 @@ mod stats {
     use pod_core::action::Action;
     use pod_core::telemetry::ToolCallStatus;
     use pod_core::{
-        AgentTickRollup, AgentToolCallEvent, IncidentSeverity, ShardIncidentSummary,
+        AgentTickRollup, AgentToolCallEvent, FocusedEntityDebugSummary, IncidentSeverity,
+        ShardIncidentSummary,
         TelemetryArchive, TelemetryConfig, VersionedTickTelemetry,
     };
     use std::collections::{HashMap, VecDeque};
@@ -726,6 +727,101 @@ mod stats {
             self.pending_documents.drain(..).collect()
         }
 
+        pub fn focused_entity_summary(&self, entity_id: u64) -> Option<FocusedEntityDebugSummary> {
+            let mut latest_tick = 0;
+            let mut tool_call_count = 0usize;
+            let mut tool_error_count = 0usize;
+            let mut total_tool_latency_ms = 0u64;
+            let mut rejected_action_count = 0usize;
+            let mut total_distance = 0.0f32;
+            let mut visible_entity_count = 0usize;
+            let mut audible_event_count = 0usize;
+            let mut message_count = 0usize;
+            let mut latest_tool_name = None;
+            let mut latest_tool_status = None;
+            let mut latest_tool_error = None;
+
+            for frame in self.archive.frames() {
+                for agent in &frame.agents {
+                    let Some(agent_entity_id) = agent.entity_id else {
+                        continue;
+                    };
+                    if agent_entity_id.0 != entity_id {
+                        continue;
+                    }
+
+                    latest_tick = latest_tick.max(frame.tick);
+                    visible_entity_count = agent.visible_entity_count;
+                    audible_event_count = agent.audible_event_count;
+                    message_count = agent.message_count;
+                    if let Some(trajectory) = &agent.trajectory {
+                        total_distance += trajectory.distance_travelled;
+                    }
+                    rejected_action_count += agent
+                        .action_trace
+                        .iter()
+                        .filter(|trace| {
+                            matches!(trace.stage, pod_core::ActionLifecycleStage::Rejected)
+                        })
+                        .count();
+                    for trace in &agent.tool_calls {
+                        tool_call_count += 1;
+                        total_tool_latency_ms += trace.latency_ms as u64;
+                        latest_tool_name = Some(trace.tool_name.clone());
+                        latest_tool_status = Some(format!("{:?}", trace.status));
+                        latest_tool_error = trace.error_message.clone();
+                        if !matches!(
+                            trace.status,
+                            ToolCallStatus::Succeeded | ToolCallStatus::Requested
+                        ) {
+                            tool_error_count += 1;
+                        }
+                    }
+                }
+            }
+
+            if latest_tick == 0 && tool_call_count == 0 && rejected_action_count == 0 {
+                return None;
+            }
+
+            let average_tool_latency_ms = if tool_call_count == 0 {
+                0.0
+            } else {
+                total_tool_latency_ms as f32 / tool_call_count as f32
+            };
+
+            let mut notes = Vec::new();
+            if tool_error_count > 0 {
+                notes.push(format!("{tool_error_count} tool-call errors retained"));
+            }
+            if rejected_action_count > 0 {
+                notes.push(format!("{rejected_action_count} rejected actions retained"));
+            }
+
+            Some(FocusedEntityDebugSummary {
+                shard_id: self.shard_id.clone(),
+                entity_id,
+                latest_tick,
+                tool_call_count,
+                tool_error_count,
+                rejected_action_count,
+                total_distance,
+                average_tool_latency_ms,
+                visible_entity_count,
+                audible_event_count,
+                message_count,
+                latest_tool_name,
+                latest_tool_status,
+                latest_tool_error,
+                notes,
+            })
+        }
+
+        pub fn focused_entity_document(&self, entity_id: u64) -> Option<String> {
+            self.focused_entity_summary(entity_id)
+                .map(|summary| summary.to_toon_document())
+        }
+
         fn rollups_for_tick(&self, tick_end: u64) -> Vec<AgentTickRollup> {
             let tick_start = tick_end.saturating_sub(ROLLUP_WINDOW_TICKS - 1);
             let mut frames_by_agent = HashMap::<u64, Vec<pod_core::AgentTelemetryFrame>>::new();
@@ -932,6 +1028,34 @@ mod stats {
             assert!(documents.iter().any(|document| decode_toon_value(document)
                 .map(|value| value["document_type"] == "shard_incident_summary")
                 .unwrap_or(false)));
+        }
+
+        #[test]
+        fn shard_ops_debug_stream_builds_focused_entity_debug_documents() {
+            let mut stats = ServerStats::new(60);
+            let mut stream = ShardOpsDebugStream::new("overworld-a");
+
+            for tick in 0..6 {
+                let tick_result = sample_tick_at(tick);
+                stats.record_tick(&tick_result, 5, false);
+                stream.record_tick(&tick_result, &stats);
+            }
+
+            let summary = stream
+                .focused_entity_summary(41)
+                .expect("focused summary should exist");
+            assert_eq!(summary.entity_id, 41);
+            assert_eq!(summary.shard_id, "overworld-a");
+            assert!(summary.tool_call_count >= 1);
+            assert!(summary.total_distance > 0.0);
+
+            let document = stream
+                .focused_entity_document(41)
+                .expect("focused document should exist");
+            let value = decode_toon_value(&document).expect("focused document should decode");
+            assert_eq!(value["document_type"], "focused_entity_debug_summary");
+            assert_eq!(value["payload"]["entity_id"], 41);
+            assert_eq!(value["payload"]["shard_id"], "overworld-a");
         }
     }
 }

@@ -54,6 +54,7 @@ import {
   formatPopulationHeatmapLegend,
   renderPopulationHeatmap
 } from "./population-heatmap";
+import { compactRuntimeStats, highlightEventFeedback } from "./hud";
 import {
   createLiveDebugState,
   recordLiveDebugDocument,
@@ -552,7 +553,7 @@ function applyAuthoritativeEventBatch(batch: NetworkEventBatch): void {
       ) ?? batch.events.at(-1);
 
   if (highlighted) {
-    latestFeedback = `[${highlighted.kind}] ${highlighted.summary}`;
+    latestFeedback = highlightEventFeedback(highlighted);
   }
 }
 
@@ -1177,15 +1178,7 @@ async function renderCurrentFrame(timestamp: number): Promise<void> {
   }
 
   const stats = renderer.getStats();
-  runtimeStatsLabel.textContent = `${stats.drawCalls} calls · ${stats.triangles} tris · ${stats.pixelRatio.toFixed(
-    2
-  )}x DPR · ${stats.frameMs.toFixed(1)}ms · ${stats.renderThread} thread · ${stats.environmentPreset} ${stats.timeOfDayHours.toFixed(
-    1
-  )}h · ${stats.landscapeMode} · ${stats.waterMode} · ambient ${stats.ambientInstances} · chunks ${
-    stats.visibleWorldChunks
-  } visible / ${stats.preloadedWorldChunks} warm · assets ${
-    stats.residentGeometryAssets + stats.residentSpriteAssets
-  } resident / ${stats.pendingGeometryAssets + stats.pendingSpriteAssets} pending`;
+  runtimeStatsLabel.textContent = compactRuntimeStats(stats);
   renderTelemetryHud();
 }
 

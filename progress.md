@@ -30,3 +30,5 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Wired `pod-editor` selected-entity telemetry consumption to raw SpacetimeDB tool-call and rollup docs, so narrow entity-scoped debug subscriptions still produce useful per-selection telemetry and export data even without full tick frames.
 - Added a `pod-net` helper that mirrors editor selection into the active entity-scoped SpacetimeDB debug subscription profile, reducing consumer-side profile plumbing.
 - Added retained per-entity live-debug state in `pod-web`, so browser runtime/tooling can keep focused tool-call and rollup summaries for the selected target or controlled entity instead of only showing the last global debug document.
+- Reduced the `pod-web` main runtime HUD to a shorter gameplay-facing line and remapped authoritative event copy so combat and world outcomes read as player feedback instead of raw protocol labels.
+- Added `FocusedEntityDebugSummary` in `pod-core` and shard-side focused summary/document generation in `pod-server`, so retained telemetry archives can produce a TOON summary for the currently inspected entity without replaying the whole shard stream.
