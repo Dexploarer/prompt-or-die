@@ -77,6 +77,8 @@ enum SubscriptionProfile {
     Editor,
     /// Editor/dashboards with debug telemetry streams enabled.
     EditorDebug,
+    /// Editor/dashboards with entity-scoped raw debug telemetry.
+    EditorDebugEntities(Vec<u64>),
     /// Player mode for a single controlled entity + public events.
     Player(u64),
     /// Caller-supplied custom query set.
@@ -109,6 +111,10 @@ impl SpacetimeSubscriptionManager {
 
     fn set_editor_debug(&mut self) -> bool {
         self.set_profile(SubscriptionProfile::EditorDebug)
+    }
+
+    fn set_editor_debug_entities(&mut self, entity_ids: Vec<u64>) -> bool {
+        self.set_profile(SubscriptionProfile::EditorDebugEntities(entity_ids))
     }
 
     fn set_player(&mut self, entity_id: u64) -> bool {
@@ -169,6 +175,9 @@ impl SpacetimeSubscriptionManager {
                 .map(ToString::to_string)
                 .collect(),
             SubscriptionProfile::EditorDebug => Subscriptions::editor_with_debug_telemetry(),
+            SubscriptionProfile::EditorDebugEntities(entity_ids) => {
+                Subscriptions::editor_with_debug_telemetry_for_entities(entity_ids)
+            }
             SubscriptionProfile::Player(entity_id) => Subscriptions::player_agent(*entity_id)
                 .into_iter()
                 .collect(),
@@ -777,6 +786,18 @@ impl SpacetimeDBClient {
     /// Configure subscriptions for editor dashboards with raw debug telemetry.
     pub fn subscribe_as_editor_with_debug_telemetry(&mut self) -> Result<bool, StdbClientError> {
         self.subscriptions.set_editor_debug();
+        self.subscriptions
+            .ensure_subscriptions_applied(&mut self.inner)
+    }
+
+    /// Configure subscriptions for editor dashboards with raw debug telemetry
+    /// scoped to a selected set of agent entities.
+    pub fn subscribe_as_editor_with_debug_telemetry_for_entities(
+        &mut self,
+        entity_ids: impl IntoIterator<Item = u64>,
+    ) -> Result<bool, StdbClientError> {
+        let entity_ids = entity_ids.into_iter().collect::<Vec<_>>();
+        self.subscriptions.set_editor_debug_entities(entity_ids);
         self.subscriptions
             .ensure_subscriptions_applied(&mut self.inner)
     }
@@ -1626,6 +1647,37 @@ mod tests {
         assert!(queries
             .iter()
             .any(|query| query.contains("agent_tick_rollup")));
+    }
+
+    #[test]
+    fn test_editor_debug_entity_profile_filters_telemetry_queries() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client
+            .subscriptions
+            .set_editor_debug_entities(vec![44, 77, 44]);
+        let queries = client.subscriptions.queries_for_profile();
+
+        assert!(queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = 44"));
+        assert!(
+            queries
+                .iter()
+                .any(|query| query
+                    == "SELECT * FROM agent_tool_call_event WHERE agent_entity_id = 77")
+        );
+        assert!(queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tick_rollup WHERE agent_entity_id = 44"));
+        assert!(!queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick"));
+        assert!(!queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tool_call_event"));
+        assert!(!queries
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tick_rollup"));
     }
 
     #[test]

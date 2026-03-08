@@ -676,6 +676,30 @@ impl Subscriptions {
         ]
     }
 
+    /// Subscribe to debug-only telemetry rows for a specific set of agent entities.
+    ///
+    /// This is the safer default for editor/debug tooling that is focused on a
+    /// known selection, because it avoids subscribing to full-shard raw telemetry.
+    pub fn debug_telemetry_for_entities(entity_ids: &[u64]) -> Vec<String> {
+        let mut queries = Vec::new();
+
+        for entity_id in entity_ids.iter().copied() {
+            queries.push(format!(
+                "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = {entity_id}"
+            ));
+            queries.push(format!(
+                "SELECT * FROM agent_tool_call_event WHERE agent_entity_id = {entity_id}"
+            ));
+            queries.push(format!(
+                "SELECT * FROM agent_tick_rollup WHERE agent_entity_id = {entity_id}"
+            ));
+        }
+
+        queries.sort_unstable();
+        queries.dedup();
+        queries
+    }
+
     /// Subscribe to editor world state plus debug telemetry streams.
     pub fn editor_with_debug_telemetry() -> Vec<String> {
         let mut queries = Self::editor()
@@ -683,6 +707,18 @@ impl Subscriptions {
             .map(str::to_string)
             .collect::<Vec<String>>();
         queries.extend(Self::debug_telemetry().into_iter().map(str::to_string));
+        queries.sort_unstable();
+        queries.dedup();
+        queries
+    }
+
+    /// Subscribe to editor world state plus entity-scoped debug telemetry streams.
+    pub fn editor_with_debug_telemetry_for_entities(entity_ids: &[u64]) -> Vec<String> {
+        let mut queries = Self::editor()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<String>>();
+        queries.extend(Self::debug_telemetry_for_entities(entity_ids));
         queries.sort_unstable();
         queries.dedup();
         queries
@@ -2094,6 +2130,41 @@ mod tests {
             .iter()
             .any(|q| q.contains("agent_tool_call_event")));
         assert!(editor_debug.iter().any(|q| q.contains("agent_tick_rollup")));
+
+        let entity_scoped_debug = Subscriptions::debug_telemetry_for_entities(&[44, 77, 44]);
+        assert_eq!(entity_scoped_debug.len(), 6);
+        assert!(entity_scoped_debug
+            .iter()
+            .all(|query| query.contains("WHERE agent_entity_id = ")));
+        assert!(entity_scoped_debug
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = 44"));
+        assert!(
+            entity_scoped_debug
+                .iter()
+                .any(|query| query
+                    == "SELECT * FROM agent_tool_call_event WHERE agent_entity_id = 77")
+        );
+        assert!(entity_scoped_debug
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tick_rollup WHERE agent_entity_id = 44"));
+
+        let editor_debug_scoped = Subscriptions::editor_with_debug_telemetry_for_entities(&[44]);
+        assert!(editor_debug_scoped
+            .iter()
+            .any(|query| query.contains("FROM world_state")));
+        assert!(editor_debug_scoped
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = 44"));
+        assert!(!editor_debug_scoped
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_telemetry_tick"));
+        assert!(!editor_debug_scoped
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tool_call_event"));
+        assert!(!editor_debug_scoped
+            .iter()
+            .any(|query| query == "SELECT * FROM agent_tick_rollup"));
     }
 
     #[test]
