@@ -1054,5 +1054,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 105
-**Current focus**: Iteration 106 richer traversal/combat feedback, further gameplay-first HUD reduction, and deeper focused-debug presentation parity across browser, editor, and shard runtime consumers
+### Iteration 106
+- [x] Moved focused-entity debug summary synthesis down into `pod-stdb::client`, so raw shard-debug consumers now receive explicit focused-summary events instead of depending on adapter-local document rebuilding.
+- [x] Simplified the `pod-net` SpacetimeDB adapter to forward `FocusedEntityDebugSummaryReceived` events through the retained `DebugDocument` surface while preserving raw tool-call and rollup documents.
+- [x] Added deterministic `pod-stdb` and `pod-net` coverage proving focused summary documents are emitted with tool-call metadata first and then refreshed with authoritative rollup metrics.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-net --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 106
+**Current focus**: Iteration 107 richer traversal/combat feedback, further gameplay-first HUD reduction, and more gameplay-facing browser/editor debug presentation on top of the stabilized shard-focused telemetry path
