@@ -56,6 +56,7 @@ let didReportInlineFnWarning = false;
 
 export interface PodThreeRendererStats {
   backend: "webgpu" | "webgl2";
+  renderThread: "main" | "worker";
   qualityPreset: PodThreeQualityPreset;
   pixelRatio: number;
   drawCalls: number;
@@ -517,6 +518,7 @@ export class PodThreeWorldRenderer {
 
     return {
       backend: this.backend,
+      renderThread: "main",
       qualityPreset: this.quality.preset,
       pixelRatio: this.renderer.getPixelRatio(),
       drawCalls: this.renderer.info.render.calls,

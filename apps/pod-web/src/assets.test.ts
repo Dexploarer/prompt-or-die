@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { BoxGeometry, NoColorSpace, SphereGeometry, Texture } from "three";
 
 import {
+  createProceduralSpriteTexture,
   createMeshMaterial,
   DefaultPodThreeAssetRegistry,
   ManifestBackedPodThreeAssetRegistry,
@@ -61,6 +62,19 @@ describe("createMeshMaterial", () => {
       QUALITY
     );
     expect(material.type).toBe("MeshStandardMaterial");
+  });
+});
+
+describe("createProceduralSpriteTexture", () => {
+  test("creates a worker-safe ring texture for SVG overlay assets", () => {
+    const texture = createProceduralSpriteTexture("/assets/textures/selection-ring.svg");
+    const image = texture.image as { data: Uint8Array; width: number; height: number };
+    const centerIndex = ((Math.floor(image.height / 2) * image.width) + Math.floor(image.width / 2)) * 4 + 3;
+    const ringIndex = ((Math.floor(image.height / 2) * image.width) + Math.floor(image.width * 0.88)) * 4 + 3;
+
+    expect(texture.name).toContain("selection-ring");
+    expect(image.data[centerIndex]).toBeLessThan(32);
+    expect(image.data[ringIndex]).toBeGreaterThan(image.data[centerIndex]);
   });
 });
 
@@ -261,6 +275,48 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
 
     expect(paths).toEqual(["/assets/textures/selection-ring.svg:none"]);
     expect(resolved.texture.colorSpace).toBe(NoColorSpace);
+  });
+
+  test("keeps a fallback sprite resident after a load failure instead of retrying every frame", async () => {
+    let attempts = 0;
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load() {
+          return new BoxGeometry(1, 1, 1);
+        }
+      },
+      textureLoader: {
+        async load() {
+          attempts += 1;
+          throw new Error("worker image decode failed");
+        }
+      }
+    });
+
+    try {
+      const first = await registry.resolveSpriteTexture({ texture: "selection-ring", frame: 0 }, 2);
+      const second = await registry.resolveSpriteTexture({ texture: "selection-ring", frame: 0 }, 2);
+
+      expect(first.texture).toBe(second.texture);
+      expect(attempts).toBe(1);
+      expect(warnings).toHaveLength(1);
+      expect(registry.getResidencyStats?.()).toEqual({
+        residentGeometryAssets: 0,
+        residentSpriteAssets: 1,
+        pendingGeometryAssets: 0,
+        pendingSpriteAssets: 0
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   test("prefetches unique mesh assets in parallel and reports residency", async () => {

@@ -11,6 +11,7 @@ It consumes the `pod-render` browser frame contract and provides:
 - CPU-side frustum and distance culling before instance upload
 - adaptive resolution scaling and quality presets for different hardware classes
 - parallel mesh/texture prewarming with live asset residency stats in the HUD
+- optional `OffscreenCanvas` render-worker path for creator benchmarking and future main-thread relief
 - ACES tone mapping, tuned shadows, cached materials, and a richer atmospheric scene baseline
 - a 2D overlay scene for the legacy `RenderFrame` contract
 - a demo bridge via `window.podRender.*` so the app is useful before the Rust wasm entrypoint is wired in
@@ -34,6 +35,12 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 ```
 
 `server` may be `host:port`, `ws://host:port`, or `wss://host:port`.
+
+### Render thread selection
+
+- default: main-thread rendering
+- `?renderThread=worker`: transfers the canvas to a dedicated render worker via `OffscreenCanvas`
+- `?renderThread=main`: forces the existing main-thread path
 
 ### Browser controls
 
