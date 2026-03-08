@@ -29,3 +29,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added a deterministic Playwright smoke harness for `pod-web` that proves both main-thread and worker-thread routes accept movement input under automation, using `?backend=webgl2` as the stable parity backend for browser CI/debug runs.
 - Wired `pod-editor` selected-entity telemetry consumption to raw SpacetimeDB tool-call and rollup docs, so narrow entity-scoped debug subscriptions still produce useful per-selection telemetry and export data even without full tick frames.
 - Added a `pod-net` helper that mirrors editor selection into the active entity-scoped SpacetimeDB debug subscription profile, reducing consumer-side profile plumbing.
+- Added retained per-entity live-debug state in `pod-web`, so browser runtime/tooling can keep focused tool-call and rollup summaries for the selected target or controlled entity instead of only showing the last global debug document.
