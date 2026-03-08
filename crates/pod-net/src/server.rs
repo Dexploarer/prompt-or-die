@@ -17,8 +17,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
-    Action, AgentTickRollup, AgentToolCallEvent, GameEvent, IdleAgent, TelemetryArchive,
-    TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry, World,
+    summarize_focused_entity_debug, Action, AgentTickRollup, AgentToolCallEvent, GameEvent,
+    IdleAgent, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry,
+    World,
 };
 
 use crate::protocol::{
@@ -39,6 +40,7 @@ struct ClientSession {
     last_action_tick: Option<u64>,
     last_processed_action_tick: Option<u64>,
     debug_telemetry_enabled: bool,
+    debug_focus_entity: Option<u64>,
     last_sent_snapshot: Option<WorldSnapshot>,
 }
 
@@ -53,6 +55,7 @@ impl ClientSession {
             last_action_tick: None,
             last_processed_action_tick: None,
             debug_telemetry_enabled: false,
+            debug_focus_entity: None,
             last_sent_snapshot: None,
         }
     }
@@ -64,6 +67,7 @@ struct ClientBroadcastTarget {
     agent_id: Option<pod_core::AgentId>,
     acknowledged_action_tick: Option<u64>,
     debug_telemetry_enabled: bool,
+    debug_focus_entity: Option<u64>,
     last_sent_snapshot: Option<WorldSnapshot>,
 }
 
@@ -669,6 +673,12 @@ impl GameServer {
                             session.debug_telemetry_enabled = enabled;
                         }
                     }
+                    ClientMessage::SetDebugFocus { entity_id } => {
+                        let mut clients = self.clients.write().await;
+                        if let Some(session) = clients.get_mut(&client_id) {
+                            session.debug_focus_entity = entity_id;
+                        }
+                    }
                     ClientMessage::Ping { timestamp } => {
                         self.send_to_client(
                             client_id,
@@ -712,6 +722,7 @@ impl GameServer {
                     agent_id: session.agent_id,
                     acknowledged_action_tick: session.last_processed_action_tick,
                     debug_telemetry_enabled: session.debug_telemetry_enabled,
+                    debug_focus_entity: session.debug_focus_entity,
                     last_sent_snapshot: session.last_sent_snapshot.clone(),
                 })
                 .collect::<Vec<_>>()
@@ -807,11 +818,25 @@ impl GameServer {
             }
 
             if target.debug_telemetry_enabled {
-                let debug_documents = self.debug_documents_for_interest(
+                let mut debug_documents = self.debug_documents_for_interest(
                     &self.pending_debug_documents,
                     &interest,
                     &interested_entities,
                 );
+                if let Some(focus_entity) = target
+                    .debug_focus_entity
+                    .filter(|entity_id| {
+                        interest.is_unbounded() || interested_entities.contains(entity_id)
+                    })
+                {
+                    if let Some(summary) = summarize_focused_entity_debug(
+                        "direct-connect",
+                        &self.debug_archive,
+                        focus_entity,
+                    ) {
+                        debug_documents.push(summary.to_toon_document());
+                    }
+                }
                 for document in debug_documents {
                     let sent = self
                         .send_to_client(target.client_id, ServerMessage::DebugDocument { document })
@@ -1130,6 +1155,7 @@ impl GameServer {
                         session.last_action_tick = prev.last_action_tick;
                         session.last_processed_action_tick = prev.last_processed_action_tick;
                         session.debug_telemetry_enabled = prev.debug_telemetry_enabled;
+                        session.debug_focus_entity = prev.debug_focus_entity;
                         session.pending_actions.clear();
                         session.last_sent_snapshot = None;
                     } else if session.player_name.is_none() {
@@ -1201,6 +1227,9 @@ impl GameServer {
                 .await;
             if sent {
                 if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                    if session.debug_focus_entity.is_none() {
+                        session.debug_focus_entity = controlled_entity;
+                    }
                     session.last_sent_snapshot = Some(snapshot);
                 }
             }
@@ -1219,6 +1248,7 @@ impl GameServer {
                 session.player_name = Some(player_name);
                 session.agent_id = Some(agent_id);
                 session.last_action_tick = None;
+                session.debug_focus_entity = Some(entity.id() as u64);
             }
         }
 
@@ -1389,6 +1419,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: true,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1446,6 +1477,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: true,
+                debug_focus_entity: Some(alpha_entity.id() as u64),
                 last_sent_snapshot: None,
             },
         );
@@ -1461,42 +1493,44 @@ mod tests {
             0,
             Some("timeout".into()),
         );
+        let telemetry_frame = TickTelemetryFrame {
+            tick: 7,
+            agents: vec![
+                AgentTelemetryFrame {
+                    tick: 7,
+                    agent_id: server.world.agents[alpha_slot].agent.id(),
+                    entity_id: Some(pod_core::EntityId(alpha_entity.id() as u64)),
+                    runtime_profile: AgentRuntimeProfile::default(),
+                    visible_entity_count: 2,
+                    audible_event_count: 1,
+                    message_count: 0,
+                    available_action_count: 3,
+                    objective_count: 1,
+                    encounter: None,
+                    trajectory: None,
+                    action_trace: Vec::new(),
+                    tool_calls: vec![alpha_trace.clone()],
+                },
+                AgentTelemetryFrame {
+                    tick: 7,
+                    agent_id: server.world.agents[spire_slot].agent.id(),
+                    entity_id: Some(pod_core::EntityId(spire_entity.id() as u64)),
+                    runtime_profile: AgentRuntimeProfile::default(),
+                    visible_entity_count: 3,
+                    audible_event_count: 0,
+                    message_count: 0,
+                    available_action_count: 3,
+                    objective_count: 1,
+                    encounter: None,
+                    trajectory: None,
+                    action_trace: Vec::new(),
+                    tool_calls: vec![spire_trace.clone()],
+                },
+            ],
+        };
+        server.debug_archive.record_tick(telemetry_frame.clone());
         server.pending_debug_documents = vec![
-            PendingDebugDocument::TickTelemetry(VersionedTickTelemetry::new(TickTelemetryFrame {
-                tick: 7,
-                agents: vec![
-                    AgentTelemetryFrame {
-                        tick: 7,
-                        agent_id: server.world.agents[alpha_slot].agent.id(),
-                        entity_id: Some(pod_core::EntityId(alpha_entity.id() as u64)),
-                        runtime_profile: AgentRuntimeProfile::default(),
-                        visible_entity_count: 2,
-                        audible_event_count: 1,
-                        message_count: 0,
-                        available_action_count: 3,
-                        objective_count: 1,
-                        encounter: None,
-                        trajectory: None,
-                        action_trace: Vec::new(),
-                        tool_calls: vec![alpha_trace.clone()],
-                    },
-                    AgentTelemetryFrame {
-                        tick: 7,
-                        agent_id: server.world.agents[spire_slot].agent.id(),
-                        entity_id: Some(pod_core::EntityId(spire_entity.id() as u64)),
-                        runtime_profile: AgentRuntimeProfile::default(),
-                        visible_entity_count: 3,
-                        audible_event_count: 0,
-                        message_count: 0,
-                        available_action_count: 3,
-                        objective_count: 1,
-                        encounter: None,
-                        trajectory: None,
-                        action_trace: Vec::new(),
-                        tool_calls: vec![spire_trace.clone()],
-                    },
-                ],
-            })),
+            PendingDebugDocument::TickTelemetry(VersionedTickTelemetry::new(telemetry_frame)),
             PendingDebugDocument::AgentToolCallEvent(AgentToolCallEvent::new(
                 alpha_entity.id() as u64,
                 alpha_trace,
@@ -1516,7 +1550,7 @@ mod tests {
             }
         }
 
-        assert_eq!(documents.len(), 2);
+        assert_eq!(documents.len(), 3);
         let tick_doc = documents
             .iter()
             .find(|document| document.contains("versioned_tick_telemetry"))
@@ -1537,6 +1571,14 @@ mod tests {
                 .map(|value| {
                     value["document_type"] == "agent_tool_call_event"
                         && value["payload"]["agent_entity_id"] == alpha_entity.id() as u64
+                })
+                .unwrap_or(false)
+        }));
+        assert!(documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| {
+                    value["document_type"] == "focused_entity_debug_summary"
+                        && value["payload"]["entity_id"] == alpha_entity.id() as u64
                 })
                 .unwrap_or(false)
         }));
@@ -1595,6 +1637,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1608,6 +1651,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1669,6 +1713,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1744,6 +1789,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1757,6 +1803,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );
@@ -1825,6 +1872,7 @@ mod tests {
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                debug_focus_entity: None,
                 last_sent_snapshot: None,
             },
         );

@@ -383,9 +383,9 @@ mod stats {
     use pod_core::action::Action;
     use pod_core::telemetry::ToolCallStatus;
     use pod_core::{
-        AgentTickRollup, AgentToolCallEvent, FocusedEntityDebugSummary, IncidentSeverity,
-        ShardIncidentSummary,
-        TelemetryArchive, TelemetryConfig, VersionedTickTelemetry,
+        summarize_focused_entity_debug, AgentTickRollup, AgentToolCallEvent,
+        FocusedEntityDebugSummary, IncidentSeverity, ShardIncidentSummary, TelemetryArchive,
+        TelemetryConfig, VersionedTickTelemetry,
     };
     use std::collections::{HashMap, VecDeque};
     use std::time::Instant;
@@ -728,93 +728,7 @@ mod stats {
         }
 
         pub fn focused_entity_summary(&self, entity_id: u64) -> Option<FocusedEntityDebugSummary> {
-            let mut latest_tick = 0;
-            let mut tool_call_count = 0usize;
-            let mut tool_error_count = 0usize;
-            let mut total_tool_latency_ms = 0u64;
-            let mut rejected_action_count = 0usize;
-            let mut total_distance = 0.0f32;
-            let mut visible_entity_count = 0usize;
-            let mut audible_event_count = 0usize;
-            let mut message_count = 0usize;
-            let mut latest_tool_name = None;
-            let mut latest_tool_status = None;
-            let mut latest_tool_error = None;
-
-            for frame in self.archive.frames() {
-                for agent in &frame.agents {
-                    let Some(agent_entity_id) = agent.entity_id else {
-                        continue;
-                    };
-                    if agent_entity_id.0 != entity_id {
-                        continue;
-                    }
-
-                    latest_tick = latest_tick.max(frame.tick);
-                    visible_entity_count = agent.visible_entity_count;
-                    audible_event_count = agent.audible_event_count;
-                    message_count = agent.message_count;
-                    if let Some(trajectory) = &agent.trajectory {
-                        total_distance += trajectory.distance_travelled;
-                    }
-                    rejected_action_count += agent
-                        .action_trace
-                        .iter()
-                        .filter(|trace| {
-                            matches!(trace.stage, pod_core::ActionLifecycleStage::Rejected)
-                        })
-                        .count();
-                    for trace in &agent.tool_calls {
-                        tool_call_count += 1;
-                        total_tool_latency_ms += trace.latency_ms as u64;
-                        latest_tool_name = Some(trace.tool_name.clone());
-                        latest_tool_status = Some(format!("{:?}", trace.status));
-                        latest_tool_error = trace.error_message.clone();
-                        if !matches!(
-                            trace.status,
-                            ToolCallStatus::Succeeded | ToolCallStatus::Requested
-                        ) {
-                            tool_error_count += 1;
-                        }
-                    }
-                }
-            }
-
-            if latest_tick == 0 && tool_call_count == 0 && rejected_action_count == 0 {
-                return None;
-            }
-
-            let average_tool_latency_ms = if tool_call_count == 0 {
-                0.0
-            } else {
-                total_tool_latency_ms as f32 / tool_call_count as f32
-            };
-
-            let mut notes = Vec::new();
-            if tool_error_count > 0 {
-                notes.push(format!("{tool_error_count} tool-call errors retained"));
-            }
-            if rejected_action_count > 0 {
-                notes.push(format!("{rejected_action_count} rejected actions retained"));
-            }
-
-            Some(FocusedEntityDebugSummary {
-                shard_id: self.shard_id.clone(),
-                entity_id,
-                latest_tick,
-                tool_call_count,
-                tool_error_count,
-                rejected_action_count,
-                total_distance,
-                average_tool_latency_ms,
-                visible_entity_count,
-                audible_event_count,
-                message_count,
-                latest_tool_name,
-                latest_tool_status,
-                latest_tool_error,
-                notes,
-            })
+            summarize_focused_entity_debug(self.shard_id.clone(), &self.archive, entity_id)
         }
 
         pub fn focused_entity_document(&self, entity_id: u64) -> Option<String> {

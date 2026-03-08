@@ -343,6 +343,24 @@ export interface ShardIncidentSummary {
   notes: string[];
 }
 
+export interface FocusedEntityDebugSummaryDocument {
+  shard_id: string;
+  entity_id: number;
+  latest_tick: number;
+  tool_call_count: number;
+  tool_error_count: number;
+  rejected_action_count: number;
+  total_distance: number;
+  average_tool_latency_ms: number;
+  visible_entity_count: number;
+  audible_event_count: number;
+  message_count: number;
+  latest_tool_name?: string | null;
+  latest_tool_status?: string | null;
+  latest_tool_error?: string | null;
+  notes: string[];
+}
+
 export interface AgentToolCallEventDocument {
   tick: number;
   agent_entity_id: number;
@@ -393,6 +411,7 @@ export type LiveDebugDocument =
   | { kind: "tickTelemetry"; documentType: string; payload: TickTelemetryEnvelope }
   | { kind: "toolCallEvent"; documentType: string; payload: AgentToolCallEventDocument }
   | { kind: "tickRollup"; documentType: string; payload: AgentTickRollupDocument }
+  | { kind: "focusedSummary"; documentType: string; payload: FocusedEntityDebugSummaryDocument }
   | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
   | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
 
@@ -1878,6 +1897,29 @@ export function parseAgentTickRollup(
   throw new Error("Invalid agent tick rollup payload");
 }
 
+export function parseFocusedEntityDebugSummary(
+  summary: string | FocusedEntityDebugSummaryDocument
+): FocusedEntityDebugSummaryDocument {
+  const parsed =
+    typeof summary === "string" ? decodeStructuredString(summary) : summary;
+  const focusedDocument = documentEnvelope(parsed);
+
+  if (focusedDocument?.document_type === "focused_entity_debug_summary") {
+    return focusedDocument.payload as FocusedEntityDebugSummaryDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.shard_id === "string" &&
+    typeof parsed.entity_id === "number" &&
+    typeof parsed.latest_tick === "number"
+  ) {
+    return parsed as unknown as FocusedEntityDebugSummaryDocument;
+  }
+
+  throw new Error("Invalid focused entity debug summary payload");
+}
+
 export function summarizeAgentTickRollup(
   rollup: AgentTickRollupDocument
 ): TickRollupSummary {
@@ -1919,6 +1961,12 @@ export function parseLiveDebugDocument(document: string): LiveDebugDocument {
         kind: "tickRollup",
         documentType: envelope.document_type,
         payload: parseAgentTickRollup(document)
+      };
+    case "focused_entity_debug_summary":
+      return {
+        kind: "focusedSummary",
+        documentType: envelope.document_type,
+        payload: parseFocusedEntityDebugSummary(document)
       };
     case "replay_file":
       return {
@@ -2059,6 +2107,16 @@ export function encodeDirectConnectDebugTelemetryMessage(enabled: boolean): stri
   return JSON.stringify({
     SetDebugTelemetry: {
       enabled
+    }
+  });
+}
+
+export function encodeDirectConnectDebugFocusMessage(
+  entityId?: number | null
+): string {
+  return JSON.stringify({
+    SetDebugFocus: {
+      entity_id: entityId ?? null
     }
   });
 }

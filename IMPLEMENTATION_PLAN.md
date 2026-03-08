@@ -1031,5 +1031,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-server --bin pod-server`
   - `git diff --check`
 
-**Last updated**: Iteration 103
-**Current focus**: Iteration 104 richer traversal/combat feedback, deeper shard/runtime consumers for focused debug summaries, and further gameplay-first HUD reduction
+### Iteration 104
+- [x] Added shared focused-entity debug aggregation in `pod-core`, so both direct-connect runtime code and shard ops tooling derive the same TOON summary from retained telemetry archives.
+- [x] Extended `pod-net` with `SetDebugFocus { entity_id }`, per-session focused debug state, and focused summary delivery for debug subscribers without widening gameplay interest windows.
+- [x] Wired focused debug summary parsing/retention into `pod-web` and `pod-editor`, so browser and editor consumers can render selected-entity debug state directly from the new document type.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/direct-connect.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `git diff --check`
+
+**Last updated**: Iteration 104
+**Current focus**: Iteration 105 richer traversal/combat feedback, further gameplay-first HUD reduction, and deeper server/runtime debug focus parity across direct-connect and SpacetimeDB paths

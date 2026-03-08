@@ -1,6 +1,7 @@
 import type {
   AgentTickRollupDocument,
   AgentToolCallEventDocument,
+  FocusedEntityDebugSummaryDocument,
   LiveDebugDocument,
   TickRollupSummary,
   ToolCallEventSummary
@@ -13,30 +14,36 @@ import {
 export interface LiveDebugState {
   latestToolEventSummary: ToolCallEventSummary | null;
   latestRollupSummary: TickRollupSummary | null;
+  latestFocusedSummary: FocusedEntityDebugSummaryDocument | null;
   liveReplayDocuments: number;
   liveIncidentDocuments: number;
   toolEventsByEntity: Map<number, ToolCallEventSummary>;
   rollupsByEntity: Map<number, TickRollupSummary>;
+  focusedSummariesByEntity: Map<number, FocusedEntityDebugSummaryDocument>;
 }
 
 export function createLiveDebugState(): LiveDebugState {
   return {
     latestToolEventSummary: null,
     latestRollupSummary: null,
+    latestFocusedSummary: null,
     liveReplayDocuments: 0,
     liveIncidentDocuments: 0,
     toolEventsByEntity: new Map(),
-    rollupsByEntity: new Map()
+    rollupsByEntity: new Map(),
+    focusedSummariesByEntity: new Map()
   };
 }
 
 export function resetLiveDebugState(state: LiveDebugState): void {
   state.latestToolEventSummary = null;
   state.latestRollupSummary = null;
+  state.latestFocusedSummary = null;
   state.liveReplayDocuments = 0;
   state.liveIncidentDocuments = 0;
   state.toolEventsByEntity.clear();
   state.rollupsByEntity.clear();
+  state.focusedSummariesByEntity.clear();
 }
 
 export function recordLiveDebugDocument(
@@ -60,6 +67,13 @@ export function recordLiveDebugDocument(
       state.rollupsByEntity.set(
         state.latestRollupSummary.agentEntityId,
         state.latestRollupSummary
+      );
+      break;
+    case "focusedSummary":
+      state.latestFocusedSummary = document.payload as FocusedEntityDebugSummaryDocument;
+      state.focusedSummariesByEntity.set(
+        state.latestFocusedSummary.entity_id,
+        state.latestFocusedSummary
       );
       break;
     case "replay":
@@ -91,4 +105,16 @@ export function selectedTickRollupSummary(
     return state.latestRollupSummary;
   }
   return state.rollupsByEntity.get(entityId) ?? state.latestRollupSummary;
+}
+
+export function selectedFocusedDebugSummary(
+  state: LiveDebugState,
+  entityId: number | null
+): FocusedEntityDebugSummaryDocument | null {
+  if (entityId == null) {
+    return state.latestFocusedSummary;
+  }
+  return (
+    state.focusedSummariesByEntity.get(entityId) ?? state.latestFocusedSummary
+  );
 }

@@ -3,6 +3,7 @@ import {
   buildAuthoritativeWorldFrame,
   encodeDirectConnectActionBatch,
   encodeDirectConnectConnectMessage,
+  encodeDirectConnectDebugFocusMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
   parseDirectConnectServerMessage,
@@ -128,6 +129,7 @@ export class PodWebDirectConnectClient {
   private pendingActionBatches: PendingActionBatch[] = [];
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
+  private debugFocusEntity: number | null = null;
   private status: DirectConnectStatus;
   private actionState: DirectConnectActionState;
 
@@ -170,6 +172,7 @@ export class PodWebDirectConnectClient {
       if (this.debugTelemetryEnabled) {
         socket.send(encodeDirectConnectDebugTelemetryMessage(true));
       }
+      socket.send(encodeDirectConnectDebugFocusMessage(this.debugFocusEntity));
     });
 
     socket.addEventListener("message", (event) => {
@@ -212,6 +215,13 @@ export class PodWebDirectConnectClient {
     this.debugTelemetryEnabled = enabled;
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(encodeDirectConnectDebugTelemetryMessage(enabled));
+    }
+  }
+
+  setDebugFocusEntity(entityId: number | null): void {
+    this.debugFocusEntity = entityId;
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(encodeDirectConnectDebugFocusMessage(entityId));
     }
   }
 

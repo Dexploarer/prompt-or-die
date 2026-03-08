@@ -6,6 +6,7 @@ import {
   buildAuthoritativeWorldFrame,
   encodeDirectConnectActionBatch,
   encodeDirectConnectConnectMessage,
+  encodeDirectConnectDebugFocusMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
   type NetworkEntityMetadataSnapshot,
@@ -319,6 +320,30 @@ describe("TOON contract parsing", () => {
       throw new Error("expected tick telemetry document");
     }
     expect(telemetry.payload.tickTelemetry.tick).toBe(9);
+
+    const focused = parseLiveDebugDocument(
+      encode({
+        document_type: "focused_entity_debug_summary",
+        payload: {
+          shard_id: "direct-connect",
+          entity_id: 44,
+          latest_tick: 18,
+          tool_call_count: 2,
+          tool_error_count: 1,
+          rejected_action_count: 1,
+          total_distance: 14.25,
+          average_tool_latency_ms: 38,
+          visible_entity_count: 12,
+          audible_event_count: 3,
+          message_count: 2,
+          latest_tool_name: "llm.complete",
+          latest_tool_status: "Succeeded",
+          latest_tool_error: null,
+          notes: ["1 rejected action retained"]
+        }
+      })
+    );
+    expect(focused.kind).toBe("focusedSummary");
   });
 
   test("parses direct-connect welcome and delta messages", () => {
@@ -1067,6 +1092,12 @@ describe("TOON contract parsing", () => {
     expect(JSON.parse(encodeDirectConnectDebugTelemetryMessage(true))).toEqual({
       SetDebugTelemetry: {
         enabled: true
+      }
+    });
+
+    expect(JSON.parse(encodeDirectConnectDebugFocusMessage(44))).toEqual({
+      SetDebugFocus: {
+        entity_id: 44
       }
     });
 

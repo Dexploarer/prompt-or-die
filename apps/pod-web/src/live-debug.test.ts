@@ -9,6 +9,7 @@ import {
   createLiveDebugState,
   recordLiveDebugDocument,
   resetLiveDebugState,
+  selectedFocusedDebugSummary,
   selectedTickRollupSummary,
   selectedToolEventSummary
 } from "./live-debug";
@@ -48,6 +49,26 @@ function sampleRollup(agentEntityId: number, tickEnd = 60): AgentTickRollupDocum
   };
 }
 
+function sampleFocusedSummary(agentEntityId: number) {
+  return {
+    shard_id: "direct-connect",
+    entity_id: agentEntityId,
+    latest_tick: 60,
+    tool_call_count: 2,
+    tool_error_count: 1,
+    rejected_action_count: 1,
+    total_distance: 22.75,
+    average_tool_latency_ms: 41,
+    visible_entity_count: 12,
+    audible_event_count: 3,
+    message_count: 2,
+    latest_tool_name: "llm.complete",
+    latest_tool_status: "Succeeded",
+    latest_tool_error: null,
+    notes: ["1 rejected action retained"]
+  };
+}
+
 describe("live debug state", () => {
   test("retains entity-scoped summaries and falls back to latest when unfocused", () => {
     const state = createLiveDebugState();
@@ -67,6 +88,19 @@ describe("live debug state", () => {
     expect(selectedToolEventSummary(state, null)?.agentEntityId).toBe(1001);
     expect(selectedTickRollupSummary(state, null)?.agentEntityId).toBe(1002);
     expect(selectedToolEventSummary(state, 9999)?.agentEntityId).toBe(1001);
+  });
+
+  test("retains focused entity summaries alongside tool and rollup docs", () => {
+    const state = createLiveDebugState();
+    recordLiveDebugDocument(state, {
+      kind: "focusedSummary",
+      documentType: "focused_entity_debug_summary",
+      payload: sampleFocusedSummary(1002)
+    } satisfies LiveDebugDocument);
+
+    expect(selectedFocusedDebugSummary(state, 1002)?.entity_id).toBe(1002);
+    expect(selectedFocusedDebugSummary(state, null)?.total_distance).toBe(22.75);
+    expect(selectedFocusedDebugSummary(state, 9999)?.entity_id).toBe(1002);
   });
 
   test("tracks replay and incident stream counts and resets cleanly", () => {
@@ -120,5 +154,6 @@ describe("live debug state", () => {
     expect(state.liveIncidentDocuments).toBe(0);
     expect(selectedToolEventSummary(state, null)).toBeNull();
     expect(selectedTickRollupSummary(state, null)).toBeNull();
+    expect(selectedFocusedDebugSummary(state, null)).toBeNull();
   });
 });
