@@ -495,6 +495,7 @@ impl WorldSnapshot {
 
         for (entity, (transform,)) in world.ecs.query::<(&Transform,)>().iter() {
             let id = entity.id();
+            let streaming = world.resolve_streaming_metadata(transform.position);
             let velocity = world
                 .ecs
                 .get::<&Velocity>(entity)
@@ -538,6 +539,15 @@ impl WorldSnapshot {
                 combat_loadout.as_deref(),
                 health_opt.as_deref(),
             );
+            let mut quest_graph_ids = quest_anchor
+                .as_ref()
+                .map(|value| value.quest_ids.clone())
+                .unwrap_or_default();
+            for quest_graph_id in &streaming.quest_graph_ids {
+                if !quest_graph_ids.contains(quest_graph_id) {
+                    quest_graph_ids.push(quest_graph_id.clone());
+                }
+            }
 
             entities.push(EntitySnapshot {
                 id: id as u64,
@@ -550,18 +560,19 @@ impl WorldSnapshot {
                 label,
                 metadata: EntityMetadataSnapshot {
                     kind,
-                    chunk_key: None,
-                    region_id: None,
-                    region_name: None,
+                    chunk_key: Some(streaming.chunk_key.clone()),
+                    region_id: streaming.region_id.clone(),
+                    region_name: streaming.region_name.clone(),
                     team_id,
-                    quest_graph_ids: quest_anchor
+                    quest_graph_ids,
+                    faction_track_id: faction
                         .as_ref()
-                        .map(|value| value.quest_ids.clone())
-                        .unwrap_or_default(),
-                    faction_track_id: faction.as_ref().map(|value| value.faction_id.clone()),
+                        .map(|value| value.faction_id.clone())
+                        .or_else(|| streaming.faction_track_id.clone()),
                     encounter_table_id: encounter_profile
                         .as_ref()
-                        .map(|value| value.table_id.clone()),
+                        .map(|value| value.table_id.clone())
+                        .or_else(|| streaming.encounter_table_id.clone()),
                     combat_style: combat_loadout.as_ref().map(|loadout| loadout.style),
                     species_id: creature
                         .as_ref()
@@ -1392,7 +1403,8 @@ mod tests {
     use pod_core::{
         ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout, CombatPresentation,
         CreatureIdentity, EncounterProfile, FactionAffiliation, FactionDisposition, IdleAgent,
-        LootContainer, QuestAnchor, ResourceNode, SpawnProfile,
+        LootContainer, QuestAnchor, ResourceNode, SpawnProfile, WorldChunkDefinition,
+        WorldRegionDefinition,
     };
 
     #[test]
@@ -1605,6 +1617,99 @@ mod tests {
                 .as_ref()
                 .map(|quest| quest.primary_prompt.as_str()),
             Some("Inspect the spire")
+        );
+    }
+
+    #[test]
+    fn test_capture_derives_region_and_chunk_metadata_from_world_catalog() {
+        let mut world = pod_core::World::new(11);
+
+        let mut heart_chunk = WorldChunkDefinition::new("0:0", "verdant-heart", "verdant-hollow");
+        heart_chunk.quest_graph_ids.push("verdant-intro".into());
+        heart_chunk.faction_track_ids.push("verdant-wardens".into());
+        heart_chunk
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
+
+        let mut heart_region =
+            WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
+        heart_region.chunk_keys.push("0:0".into());
+        heart_region
+            .active_quest_graph_ids
+            .push("verdant-intro".into());
+        heart_region.dominant_faction_track_id = "verdant-wardens".into();
+        heart_region
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
+
+        world.set_streaming_metadata(8.0, vec![heart_chunk], vec![heart_region]);
+
+        world
+            .spawn_at(2.0, 2.0)
+            .with_label("Quest Stela", Team::None)
+            .build();
+        world
+            .spawn_at(3.0, 3.0)
+            .with_label("Wild Lynx", Team::None)
+            .with_faction_affiliation(FactionAffiliation {
+                faction_id: "verdant-wilds".into(),
+                role_id: "hunter".into(),
+                disposition: FactionDisposition::Hostile,
+                influence_radius: 16.0,
+            })
+            .with_encounter_profile(EncounterProfile {
+                table_id: "lynx-pack".into(),
+                difficulty_tier: 2,
+                recommended_party_size: 1,
+                respawn_ticks: 600,
+            })
+            .with_quest_anchor(QuestAnchor {
+                quest_ids: vec!["lynx-patrol".into()],
+                primary_prompt: "Track the wild lynx".into(),
+                stage_tags: vec!["hunt".into()],
+            })
+            .build();
+
+        let snapshot = WorldSnapshot::capture(&world);
+
+        let stela = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.label.as_deref() == Some("Quest Stela"))
+            .expect("stela present");
+        assert_eq!(stela.metadata.chunk_key.as_deref(), Some("0:0"));
+        assert_eq!(stela.metadata.region_id.as_deref(), Some("verdant-heart"));
+        assert_eq!(stela.metadata.region_name.as_deref(), Some("Verdant Heart"));
+        assert_eq!(
+            stela.metadata.quest_graph_ids,
+            vec!["verdant-intro".to_string()]
+        );
+        assert_eq!(
+            stela.metadata.faction_track_id.as_deref(),
+            Some("verdant-wardens")
+        );
+        assert_eq!(
+            stela.metadata.encounter_table_id.as_deref(),
+            Some("verdant-heart-wildlife")
+        );
+
+        let lynx = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.label.as_deref() == Some("Wild Lynx"))
+            .expect("lynx present");
+        assert_eq!(lynx.metadata.chunk_key.as_deref(), Some("0:0"));
+        assert_eq!(
+            lynx.metadata.quest_graph_ids,
+            vec!["lynx-patrol".to_string(), "verdant-intro".to_string()]
+        );
+        assert_eq!(
+            lynx.metadata.faction_track_id.as_deref(),
+            Some("verdant-wilds")
+        );
+        assert_eq!(
+            lynx.metadata.encounter_table_id.as_deref(),
+            Some("lynx-pack")
         );
     }
 
