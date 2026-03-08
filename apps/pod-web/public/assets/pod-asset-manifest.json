@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "meshes": {
+    "adventurer-avatar": {
+      "path": "/assets/meshes/adventurer-avatar.gltf",
+      "aliases": [
+        "adventurer",
+        "npc",
+        "player",
+        "traveler"
+      ],
+      "category": "character",
+      "tags": [
+        "humanoid",
+        "avatar",
+        "npc"
+      ]
+    },
+    "adventurer-hero": {
+      "path": "/assets/meshes/adventurer-hero.gltf",
+      "aliases": [
+        "hero",
+        "controlled-player",
+        "main-player"
+      ],
+      "category": "character",
+      "tags": [
+        "humanoid",
+        "avatar",
+        "hero"
+      ]
+    },
+    "basalt-column": {
+      "path": "/assets/meshes/basalt-column.gltf",
+      "aliases": [
+        "column",
+        "pillar",
+        "wall",
+        "obsidian-wall"
+      ],
+      "category": "structure",
+      "tags": [
+        "basalt",
+        "stone",
+        "structure"
+      ]
+    },
+    "canopy-tree": {
+      "path": "/assets/meshes/canopy-tree.gltf",
+      "aliases": [
+        "tree",
+        "pine-tree",
+        "forest-resource"
+      ],
+      "category": "flora",
+      "tags": [
+        "woodcutting",
+        "forest",
+        "resource"
+      ]
+    },
+    "glass-spire": {
+      "path": "/assets/meshes/glass-spire.gltf",
+      "aliases": [
+        "spire",
+        "crystal",
+        "obelisk"
+      ],
+      "category": "structure",
+      "tags": [
+        "glass",
+        "tower",
+        "magic"
+      ]
+    },
+    "rift-beast": {
+      "path": "/assets/meshes/rift-beast.gltf",
+      "aliases": [
+        "monster",
+        "creature",
+        "beast",
+        "wolf"
+      ],
+      "category": "creature",
+      "tags": [
+        "wild",
+        "combat",
+        "enemy"
+      ]
+    },
+    "spirit-companion": {
+      "path": "/assets/meshes/spirit-companion.gltf",
+      "aliases": [
+        "companion",
+        "pet",
+        "summon",
+        "spirit"
+      ],
+      "category": "companion",
+      "tags": [
+        "ally",
+        "summon",
+        "creature"
+      ]
+    },
+    "supply-crate": {
+      "path": "/assets/meshes/supply-crate.gltf",
+      "aliases": [
+        "crate",
+        "cache",
+        "loot",
+        "chest"
+      ],
+      "category": "loot",
+      "tags": [
+        "container",
+        "supply",
+        "reward"
+      ]
+    },
+    "weathered-boulder": {
+      "path": "/assets/meshes/weathered-boulder.gltf",
+      "aliases": [
+        "rock",
+        "boulder",
+        "ore-vein",
+        "resource-stone"
+      ],
+      "category": "resource",
+      "tags": [
+        "stone",
+        "ore",
+        "resource"
+      ]
+    }
+  },
+  "sprites": {
+    "danger-ring": {
+      "path": "/assets/textures/danger-ring.svg",
+      "aliases": [
+        "critical-ring",
+        "hostile-ring"
+      ],
+      "category": "ui",
+      "tags": [
+        "danger",
+        "warning",
+        "ground-ring"
+      ],
+      "colorSpace": "srgb"
+    },
+    "mist-ring": {
+      "path": "/assets/textures/mist-ring.svg",
+      "aliases": [
+        "fog-ring",
+        "shimmer-ring"
+      ],
+      "category": "effect",
+      "tags": [
+        "mist",
+        "magic",
+        "atmosphere"
+      ],
+      "colorSpace": "srgb"
+    },
+    "selection-ring": {
+      "path": "/assets/textures/selection-ring.svg",
+      "aliases": [
+        "target-ring",
+        "focus-ring"
+      ],
+      "category": "ui",
+      "tags": [
+        "selection",
+        "focus",
+        "ground-ring"
+      ],
+      "colorSpace": "srgb"
+    }
+  }
+}

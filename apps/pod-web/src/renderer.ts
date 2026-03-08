@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 import {
+  createManifestBackedAssetRegistry,
   createMeshMaterial,
   createSpriteMaterial,
   DefaultPodThreeAssetRegistry,
@@ -76,11 +77,20 @@ export interface PodThreeWorldRendererOptions {
 
 export class PodThreeWorldRenderer {
   static async create(
-    canvas: HTMLCanvasElement,
+    canvas: HTMLCanvasElement | OffscreenCanvas,
     options: PodThreeWorldRendererOptions = {}
   ): Promise<PodThreeWorldRenderer> {
     const { renderer, backend } = await createRenderer(canvas, options);
-    return new PodThreeWorldRenderer(canvas, renderer, backend, options);
+    const assetRegistry =
+      options.assetRegistry ??
+      (await createManifestBackedAssetRegistry({
+        renderer,
+        fallbackRegistry: new DefaultPodThreeAssetRegistry()
+      }));
+    return new PodThreeWorldRenderer(canvas, renderer, backend, {
+      ...options,
+      assetRegistry
+    });
   }
 
   readonly scene = new THREE.Scene();
@@ -96,7 +106,7 @@ export class PodThreeWorldRenderer {
   private readonly meshMaterialCache = new Map<string, THREE.Material>();
   private readonly spriteMaterialCache = new Map<string, THREE.Material>();
   private readonly overlayObjects = new Array<THREE.Object3D>();
-  private readonly resizeObserver: ResizeObserver;
+  private readonly resizeObserver: ResizeObserver | null;
   private readonly options: PodThreeWorldRendererOptions;
   private adaptivePixelRatio: number;
   private smoothedFrameMs = 16.7;
@@ -105,7 +115,7 @@ export class PodThreeWorldRenderer {
     null;
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
     private readonly renderer: RuntimeRenderer,
     backend: "webgpu" | "webgl2",
     options: PodThreeWorldRendererOptions
@@ -116,9 +126,9 @@ export class PodThreeWorldRenderer {
     const baseQuality = resolveQualityProfile({
       backend,
       preferredPreset: options.qualityPreset,
-      hardwareConcurrency: navigator.hardwareConcurrency,
+      hardwareConcurrency: readNavigatorHardwareConcurrency(),
       deviceMemory,
-      devicePixelRatio: window.devicePixelRatio
+      devicePixelRatio: readDevicePixelRatio()
     });
     this.quality = {
       ...baseQuality,
@@ -140,8 +150,12 @@ export class PodThreeWorldRenderer {
     this.adaptivePixelRatio = this.quality.maxPixelRatio;
 
     this.bootstrapScenes();
-    this.resizeObserver = new ResizeObserver(() => this.resize());
-    this.resizeObserver.observe(canvas);
+    const htmlCanvas =
+      isHtmlCanvasElement(canvas) && typeof ResizeObserver !== "undefined" ? canvas : null;
+    this.resizeObserver = htmlCanvas ? new ResizeObserver(() => this.resize()) : null;
+    if (htmlCanvas && this.resizeObserver) {
+      this.resizeObserver.observe(htmlCanvas);
+    }
     this.resize();
   }
 
@@ -164,7 +178,7 @@ export class PodThreeWorldRenderer {
   }
 
   dispose(): void {
-    this.resizeObserver.disconnect();
+    this.resizeObserver?.disconnect();
 
     for (const entry of this.meshEntries.values()) {
       disposeInstancedEntry(entry);
@@ -480,9 +494,8 @@ export class PodThreeWorldRenderer {
   }
 
   private resize(): void {
-    const width = this.canvas.clientWidth || window.innerWidth;
-    const height = this.canvas.clientHeight || window.innerHeight;
-    const pixelRatio = Math.min(window.devicePixelRatio, this.adaptivePixelRatio);
+    const { width, height } = readRenderSurfaceSize(this.canvas);
+    const pixelRatio = Math.min(readDevicePixelRatio(), this.adaptivePixelRatio);
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
@@ -599,7 +612,7 @@ export class PodThreeWorldRenderer {
 }
 
 async function createRenderer(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
   options: PodThreeWorldRendererOptions
 ): Promise<{ renderer: RuntimeRenderer; backend: "webgpu" | "webgl2" }> {
   installThreeConsoleFilter();
@@ -741,8 +754,54 @@ function createStarfieldGeometry(count: number, radius: number): THREE.BufferGeo
 }
 
 function readNavigatorDeviceMemory(): number | undefined {
+  if (typeof navigator !== "object") {
+    return undefined;
+  }
   const navigatorWithMemory = navigator as Navigator & { deviceMemory?: number };
   return navigatorWithMemory.deviceMemory;
+}
+
+function readNavigatorHardwareConcurrency(): number {
+  return typeof navigator === "object" && typeof navigator.hardwareConcurrency === "number"
+    ? navigator.hardwareConcurrency
+    : 4;
+}
+
+function readDevicePixelRatio(): number {
+  if (typeof window === "object" && typeof window.devicePixelRatio === "number") {
+    return window.devicePixelRatio;
+  }
+
+  const scopeWithDevicePixelRatio = globalThis as typeof globalThis & {
+    devicePixelRatio?: number;
+  };
+  return scopeWithDevicePixelRatio.devicePixelRatio ?? 1;
+}
+
+function readRenderSurfaceSize(
+  canvas: HTMLCanvasElement | OffscreenCanvas
+): { width: number; height: number } {
+  if (isHtmlCanvasElement(canvas)) {
+    return {
+      width:
+        canvas.clientWidth ||
+        (typeof window === "object" ? window.innerWidth : canvas.width || 1),
+      height:
+        canvas.clientHeight ||
+        (typeof window === "object" ? window.innerHeight : canvas.height || 1)
+    };
+  }
+
+  return {
+    width: Math.max(canvas.width, 1),
+    height: Math.max(canvas.height, 1)
+  };
+}
+
+function isHtmlCanvasElement(
+  canvas: HTMLCanvasElement | OffscreenCanvas
+): canvas is HTMLCanvasElement {
+  return "clientWidth" in canvas;
 }
 
 function installThreeConsoleFilter(): void {

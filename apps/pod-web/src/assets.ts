@@ -6,6 +6,7 @@ import {
   DataTexture,
   DodecahedronGeometry,
   FrontSide,
+  Mesh,
   MeshBasicMaterial,
   MeshToonMaterial,
   MeshStandardMaterial,
@@ -14,7 +15,8 @@ import {
   PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
-  Texture
+  Texture,
+  TextureLoader
 } from "three";
 import type { BufferGeometry, Material, Side } from "three";
 
@@ -41,6 +43,79 @@ export interface PodThreeAssetRegistry {
     batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
     anisotropy?: number
   ): ResolvedSpriteTexture | Promise<ResolvedSpriteTexture>;
+}
+
+export type PodThreeAssetCategory =
+  | "character"
+  | "companion"
+  | "creature"
+  | "effect"
+  | "flora"
+  | "loot"
+  | "resource"
+  | "structure"
+  | "ui";
+
+export interface PodThreeMeshAssetDescriptor {
+  path: string;
+  lods?: Partial<Record<0 | 1 | 2, string>>;
+  aliases?: string[];
+  category?: PodThreeAssetCategory;
+  tags?: string[];
+}
+
+export interface PodThreeSpriteAssetDescriptor {
+  path: string;
+  ktx2Path?: string;
+  aliases?: string[];
+  category?: PodThreeAssetCategory;
+  tags?: string[];
+  repeat?: [number, number];
+  offset?: [number, number];
+  colorSpace?: "srgb" | "none";
+}
+
+export interface PodThreeAssetManifest {
+  version: 1;
+  meshes: Record<string, PodThreeMeshAssetDescriptor>;
+  sprites: Record<string, PodThreeSpriteAssetDescriptor>;
+}
+
+export interface PodThreeGeometryLoader {
+  load(path: string): Promise<BufferGeometry>;
+}
+
+export interface PodThreeTextureLoader {
+  load(
+    path: string,
+    options: {
+      anisotropy: number;
+      colorSpace: "srgb" | "none";
+    }
+  ): Promise<Texture>;
+}
+
+export interface PodThreeCompressedTextureLoader {
+  load(path: string, anisotropy: number): Promise<Texture>;
+}
+
+export interface ManifestBackedPodThreeAssetRegistryOptions {
+  manifest: PodThreeAssetManifest;
+  fallbackRegistry?: PodThreeAssetRegistry;
+  geometryLoader: PodThreeGeometryLoader;
+  textureLoader: PodThreeTextureLoader;
+  compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
+}
+
+export interface RuntimePodThreeAssetRegistryOptions {
+  renderer: unknown;
+  manifestUrl?: string;
+  basisTranscoderPath?: string;
+  fallbackRegistry?: PodThreeAssetRegistry;
+  fetchImpl?: typeof fetch;
+  geometryLoader?: PodThreeGeometryLoader;
+  textureLoader?: PodThreeTextureLoader;
+  compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
 }
 
 export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
@@ -103,6 +178,183 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
     this.textureCache.set(key, texture);
     return { texture };
   }
+}
+
+export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistry {
+  private readonly fallbackRegistry: PodThreeAssetRegistry;
+  private readonly geometryCache = new Map<string, Promise<BufferGeometry>>();
+  private readonly textureCache = new Map<string, Promise<ResolvedSpriteTexture>>();
+  private readonly meshDescriptorCache = new Map<string, PodThreeMeshAssetDescriptor | null>();
+  private readonly spriteDescriptorCache = new Map<string, PodThreeSpriteAssetDescriptor | null>();
+
+  constructor(private readonly options: ManifestBackedPodThreeAssetRegistryOptions) {
+    this.fallbackRegistry = options.fallbackRegistry ?? new DefaultPodThreeAssetRegistry();
+  }
+
+  resolveGeometry(
+    batch: ThreeJsMeshBatch,
+    lodLevel: 0 | 1 | 2 = 0
+  ): BufferGeometry | Promise<BufferGeometry> {
+    const descriptor = this.resolveMeshDescriptor(batch.mesh);
+    if (!descriptor) {
+      return this.fallbackRegistry.resolveGeometry(batch, lodLevel);
+    }
+
+    const assetPath = descriptor.lods?.[lodLevel] ?? descriptor.path;
+    const cacheKey = `${assetPath}|lod:${lodLevel}`;
+    const cached = this.geometryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const pending = this.options.geometryLoader.load(assetPath).catch(async (error) => {
+      this.geometryCache.delete(cacheKey);
+      console.warn(`Falling back to procedural mesh asset for ${batch.mesh}`, error);
+      return await Promise.resolve(this.fallbackRegistry.resolveGeometry(batch, lodLevel));
+    });
+    this.geometryCache.set(cacheKey, pending);
+    return pending;
+  }
+
+  resolveSpriteTexture(
+    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
+    anisotropy = 1
+  ): ResolvedSpriteTexture | Promise<ResolvedSpriteTexture> {
+    const descriptor = this.resolveSpriteDescriptor(batch.texture);
+    if (!descriptor) {
+      return this.fallbackRegistry.resolveSpriteTexture(batch, anisotropy);
+    }
+
+    const assetPath =
+      descriptor.ktx2Path && this.options.compressedTextureLoader ? descriptor.ktx2Path : descriptor.path;
+    const cacheKey = `${assetPath}|anisotropy:${anisotropy}`;
+    const cached = this.textureCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const pending = this.loadSpriteTexture(descriptor, assetPath, anisotropy).catch(async (error) => {
+      this.textureCache.delete(cacheKey);
+      console.warn(`Falling back to procedural sprite asset for ${batch.texture}`, error);
+      return await Promise.resolve(this.fallbackRegistry.resolveSpriteTexture(batch, anisotropy));
+    });
+    this.textureCache.set(cacheKey, pending);
+    return pending;
+  }
+
+  private async loadSpriteTexture(
+    descriptor: PodThreeSpriteAssetDescriptor,
+    assetPath: string,
+    anisotropy: number
+  ): Promise<ResolvedSpriteTexture> {
+    const texture =
+      descriptor.ktx2Path &&
+      this.options.compressedTextureLoader &&
+      assetPath === descriptor.ktx2Path
+        ? await this.options.compressedTextureLoader.load(assetPath, anisotropy)
+        : await this.options.textureLoader.load(assetPath, {
+            anisotropy,
+            colorSpace: descriptor.colorSpace ?? "srgb"
+          });
+
+    return {
+      texture,
+      repeat: descriptor.repeat,
+      offset: descriptor.offset
+    };
+  }
+
+  private resolveMeshDescriptor(requested: string): PodThreeMeshAssetDescriptor | null {
+    const cacheKey = normalizeAssetKey(requested);
+    if (this.meshDescriptorCache.has(cacheKey)) {
+      return this.meshDescriptorCache.get(cacheKey) ?? null;
+    }
+
+    const descriptor = resolveManifestMeshAsset(this.options.manifest, requested);
+    this.meshDescriptorCache.set(cacheKey, descriptor);
+    return descriptor;
+  }
+
+  private resolveSpriteDescriptor(requested: string): PodThreeSpriteAssetDescriptor | null {
+    const cacheKey = normalizeAssetKey(requested);
+    if (this.spriteDescriptorCache.has(cacheKey)) {
+      return this.spriteDescriptorCache.get(cacheKey) ?? null;
+    }
+
+    const descriptor = resolveManifestSpriteAsset(this.options.manifest, requested);
+    this.spriteDescriptorCache.set(cacheKey, descriptor);
+    return descriptor;
+  }
+}
+
+export async function createManifestBackedAssetRegistry(
+  options: RuntimePodThreeAssetRegistryOptions
+): Promise<PodThreeAssetRegistry> {
+  const fallbackRegistry = options.fallbackRegistry ?? new DefaultPodThreeAssetRegistry();
+  const fetchImpl =
+    options.fetchImpl ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
+  if (!fetchImpl) {
+    return fallbackRegistry;
+  }
+
+  try {
+    const response = await fetchImpl(options.manifestUrl ?? "/assets/pod-asset-manifest.json");
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const manifest = parsePodThreeAssetManifest(await response.json());
+    const runtimeLoaders = await createRuntimeAssetLoaders({
+      renderer: options.renderer,
+      basisTranscoderPath: options.basisTranscoderPath ?? "/assets/basis/"
+    });
+
+    return new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry,
+      geometryLoader: options.geometryLoader ?? runtimeLoaders.geometryLoader,
+      textureLoader: options.textureLoader ?? runtimeLoaders.textureLoader,
+      compressedTextureLoader:
+        options.compressedTextureLoader ?? runtimeLoaders.compressedTextureLoader
+    });
+  } catch (error) {
+    console.warn("Falling back to procedural pod-web assets", error);
+    return fallbackRegistry;
+  }
+}
+
+export function parsePodThreeAssetManifest(input: unknown): PodThreeAssetManifest {
+  if (!isRecord(input)) {
+    throw new Error("Invalid POD asset manifest: expected object root");
+  }
+
+  return {
+    version: 1,
+    meshes: parseAssetRecord(input.meshes, parseMeshDescriptor),
+    sprites: parseAssetRecord(input.sprites, parseSpriteDescriptor)
+  };
+}
+
+export function resolveManifestMeshAsset(
+  manifest: PodThreeAssetManifest,
+  requested: string
+): PodThreeMeshAssetDescriptor | null {
+  return findBestAssetDescriptor(manifest.meshes, requested);
+}
+
+export function resolveManifestSpriteAsset(
+  manifest: PodThreeAssetManifest,
+  requested: string
+): PodThreeSpriteAssetDescriptor | null {
+  return findBestAssetDescriptor(manifest.sprites, requested);
+}
+
+export function normalizeAssetKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function createMeshMaterial(
@@ -258,4 +510,250 @@ function shouldUseToonShading(batch: ThreeJsMeshBatch): boolean {
       token
     )
   );
+}
+
+function parseAssetRecord<T>(
+  input: unknown,
+  parseDescriptor: (input: unknown) => T
+): Record<string, T> {
+  if (!isRecord(input)) {
+    return {};
+  }
+
+  const output: Record<string, T> = {};
+  for (const [key, value] of Object.entries(input)) {
+    output[key] = parseDescriptor(value);
+  }
+  return output;
+}
+
+function parseMeshDescriptor(input: unknown): PodThreeMeshAssetDescriptor {
+  if (!isRecord(input) || typeof input.path !== "string") {
+    throw new Error("Invalid POD mesh asset descriptor");
+  }
+
+  return {
+    path: input.path,
+    lods: parseLodRecord(input.lods),
+    aliases: parseStringArray(input.aliases),
+    category: parseAssetCategory(input.category),
+    tags: parseStringArray(input.tags)
+  };
+}
+
+function parseSpriteDescriptor(input: unknown): PodThreeSpriteAssetDescriptor {
+  if (!isRecord(input) || typeof input.path !== "string") {
+    throw new Error("Invalid POD sprite asset descriptor");
+  }
+
+  return {
+    path: input.path,
+    ktx2Path: typeof input.ktx2Path === "string" ? input.ktx2Path : undefined,
+    aliases: parseStringArray(input.aliases),
+    category: parseAssetCategory(input.category),
+    tags: parseStringArray(input.tags),
+    repeat: parseTuple2(input.repeat),
+    offset: parseTuple2(input.offset),
+    colorSpace: input.colorSpace === "none" ? "none" : "srgb"
+  };
+}
+
+function parseLodRecord(input: unknown): Partial<Record<0 | 1 | 2, string>> | undefined {
+  if (!isRecord(input)) {
+    return undefined;
+  }
+
+  const lods: Partial<Record<0 | 1 | 2, string>> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if ((key === "0" || key === "1" || key === "2") && typeof value === "string") {
+      lods[Number(key) as 0 | 1 | 2] = value;
+    }
+  }
+  return Object.keys(lods).length > 0 ? lods : undefined;
+}
+
+function parseStringArray(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  const values = input.filter((value): value is string => typeof value === "string");
+  return values.length > 0 ? values : undefined;
+}
+
+function parseTuple2(input: unknown): [number, number] | undefined {
+  if (
+    Array.isArray(input) &&
+    input.length === 2 &&
+    typeof input[0] === "number" &&
+    typeof input[1] === "number"
+  ) {
+    return [input[0], input[1]];
+  }
+  return undefined;
+}
+
+function parseAssetCategory(input: unknown): PodThreeAssetCategory | undefined {
+  const normalized = typeof input === "string" ? normalizeAssetKey(input) : null;
+  switch (normalized) {
+    case "character":
+    case "companion":
+    case "creature":
+    case "effect":
+    case "flora":
+    case "loot":
+    case "resource":
+    case "structure":
+    case "ui":
+      return normalized;
+    default:
+      return undefined;
+  }
+}
+
+function findBestAssetDescriptor<T extends { aliases?: string[]; tags?: string[]; category?: string }>(
+  record: Record<string, T>,
+  requested: string
+): T | null {
+  const normalizedRequested = normalizeAssetKey(requested);
+  if (!normalizedRequested) {
+    return null;
+  }
+
+  let bestScore = 0;
+  let bestDescriptor: T | null = null;
+  for (const [key, descriptor] of Object.entries(record)) {
+    const score = scoreAssetDescriptor(key, descriptor, normalizedRequested);
+    if (score > bestScore) {
+      bestScore = score;
+      bestDescriptor = descriptor;
+    }
+  }
+
+  return bestScore >= 8 ? bestDescriptor : null;
+}
+
+function scoreAssetDescriptor(
+  key: string,
+  descriptor: { aliases?: string[]; tags?: string[]; category?: string },
+  requested: string
+): number {
+  const normalizedKey = normalizeAssetKey(key);
+  if (normalizedKey === requested) {
+    return 100;
+  }
+
+  const aliases = descriptor.aliases?.map(normalizeAssetKey) ?? [];
+  if (aliases.includes(requested)) {
+    return 96;
+  }
+
+  const requestedTokens = requested.split("-").filter(Boolean);
+  let score = 0;
+
+  const candidates = [
+    normalizedKey,
+    ...aliases,
+    ...(descriptor.tags?.map(normalizeAssetKey) ?? []),
+    descriptor.category ? normalizeAssetKey(descriptor.category) : ""
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate.includes(requested) || requested.includes(candidate)) {
+      score = Math.max(score, 72);
+    }
+
+    const candidateTokens = candidate.split("-").filter(Boolean);
+    let overlap = 0;
+    for (const token of requestedTokens) {
+      if (candidateTokens.includes(token)) {
+        overlap += 1;
+      }
+    }
+    score = Math.max(score, overlap * 12);
+  }
+
+  return score;
+}
+
+async function createRuntimeAssetLoaders(options: {
+  renderer: unknown;
+  basisTranscoderPath: string;
+}): Promise<{
+  geometryLoader: PodThreeGeometryLoader;
+  textureLoader: PodThreeTextureLoader;
+  compressedTextureLoader: PodThreeCompressedTextureLoader | null;
+}> {
+  const [{ GLTFLoader }, { KTX2Loader }, { MeshoptDecoder }] = await Promise.all([
+    import("three/examples/jsm/loaders/GLTFLoader.js"),
+    import("three/examples/jsm/loaders/KTX2Loader.js"),
+    import("three/examples/jsm/libs/meshopt_decoder.module.js")
+  ]);
+
+  const textureLoader = new TextureLoader();
+  const ktx2Loader = new KTX2Loader();
+  ktx2Loader.setTranscoderPath(options.basisTranscoderPath);
+  ktx2Loader.detectSupport(options.renderer as never);
+
+  const geometryLoader = new GLTFLoader();
+  geometryLoader.setMeshoptDecoder(MeshoptDecoder);
+  geometryLoader.setKTX2Loader(ktx2Loader);
+
+  return {
+    geometryLoader: {
+      async load(path: string): Promise<BufferGeometry> {
+        const asset = await geometryLoader.loadAsync(path);
+        return extractPrimaryGeometry(asset.scene, path);
+      }
+    },
+    textureLoader: {
+      async load(
+        path: string,
+        loaderOptions: { anisotropy: number; colorSpace: "srgb" | "none" }
+      ): Promise<Texture> {
+        const texture = await textureLoader.loadAsync(path);
+        texture.colorSpace =
+          loaderOptions.colorSpace === "none" ? NoColorSpace : SRGBColorSpace;
+        texture.anisotropy = loaderOptions.anisotropy;
+        texture.name = `pod-runtime-texture:${path}`;
+        return texture;
+      }
+    },
+    compressedTextureLoader: {
+      async load(path: string, anisotropy: number): Promise<Texture> {
+        const texture = await ktx2Loader.loadAsync(path);
+        texture.colorSpace = SRGBColorSpace;
+        texture.anisotropy = anisotropy;
+        texture.name = `pod-runtime-ktx2:${path}`;
+        return texture;
+      }
+    }
+  };
+}
+
+function extractPrimaryGeometry(root: { traverse: Mesh["traverse"] }, path: string): BufferGeometry {
+  let primaryGeometry: BufferGeometry | null = null;
+
+  root.traverse((node) => {
+    if (primaryGeometry || !(node instanceof Mesh)) {
+      return;
+    }
+
+    node.updateWorldMatrix(true, false);
+    const geometry = node.geometry.clone();
+    geometry.applyMatrix4(node.matrixWorld);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    primaryGeometry = geometry;
+  });
+
+  if (!primaryGeometry) {
+    throw new Error(`No mesh geometry found in ${path}`);
+  }
+
+  return primaryGeometry;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
 }
