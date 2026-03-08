@@ -4,6 +4,12 @@ import type { CameraState, NetworkEntitySnapshot, Vec2Tuple } from "./contracts"
 import { buildCameraPose } from "./frame-plan";
 import { sampleTerrainHeight } from "./landscape";
 
+export interface GameplaySurface {
+  tabIndex?: number;
+  focus?: (options?: { preventScroll?: boolean }) => void;
+  setAttribute?: (name: string, value: string) => void;
+}
+
 function normalizeDirection(x: number, y: number): Vec2Tuple | null {
   const length = Math.hypot(x, y);
   if (length <= Number.EPSILON) {
@@ -38,6 +44,47 @@ export function cameraRelativeMovementDirection(
     forwardX * forwardIntent + rightX * strafeIntent,
     forwardY * forwardIntent + rightY * strafeIntent
   );
+}
+
+export function isGameplayKeyCode(code: string): boolean {
+  return (
+    code === "Tab" ||
+    code === "Space" ||
+    code === "Enter" ||
+    code === "KeyE" ||
+    code === "KeyG" ||
+    code === "KeyR" ||
+    code === "KeyC" ||
+    code === "KeyF" ||
+    code === "KeyP" ||
+    code === "Digit1" ||
+    code === "KeyW" ||
+    code === "KeyA" ||
+    code === "KeyS" ||
+    code === "KeyD" ||
+    code === "ArrowUp" ||
+    code === "ArrowDown" ||
+    code === "ArrowLeft" ||
+    code === "ArrowRight"
+  );
+}
+
+export function focusGameplaySurface(surface: GameplaySurface | null | undefined): boolean {
+  if (!surface) {
+    return false;
+  }
+
+  if (typeof surface.tabIndex === "number" && surface.tabIndex < 0) {
+    surface.tabIndex = 0;
+  }
+  surface.setAttribute?.("aria-label", "Game world");
+
+  if (typeof surface.focus === "function") {
+    surface.focus({ preventScroll: true });
+    return true;
+  }
+
+  return false;
 }
 
 export function pickWorldGroundPoint(
