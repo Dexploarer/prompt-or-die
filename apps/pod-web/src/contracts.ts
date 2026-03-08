@@ -363,6 +363,65 @@ export type LiveDebugDocument =
   | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
   | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
 
+export type NetworkEntityKind =
+  | "Unknown"
+  | "Player"
+  | "Npc"
+  | "WildCreature"
+  | "Companion"
+  | "ResourceNode"
+  | "LootContainer"
+  | "Scenery";
+
+export type NetworkCombatStyle = "Melee" | "Ranged" | "Magic" | "Summoning";
+
+export type NetworkSkillKind =
+  | "Attack"
+  | "Strength"
+  | "Defence"
+  | "Ranged"
+  | "Magic"
+  | "Constitution"
+  | "Mining"
+  | "Woodcutting"
+  | "Fishing"
+  | "Cooking"
+  | "Smithing"
+  | "Crafting"
+  | "Slayer"
+  | "Taming"
+  | "Bonding";
+
+export type NetworkEncounterKind =
+  | "OpenWorld"
+  | "Duel"
+  | "WildCreature"
+  | "Boss"
+  | "Raid";
+
+export interface NetworkEntityInteractionHints {
+  canInspect: boolean;
+  canInteract: boolean;
+  canAttack: boolean;
+  canGather: boolean;
+  canLoot: boolean;
+  canCapture: boolean;
+  canCommandCompanion: boolean;
+  canChat: boolean;
+}
+
+export interface NetworkEntityMetadataSnapshot {
+  kind: NetworkEntityKind;
+  teamId: number | null;
+  combatStyle: NetworkCombatStyle | null;
+  speciesId: string | null;
+  speciesName: string | null;
+  resourceSkill: NetworkSkillKind | null;
+  resourceTier: number | null;
+  encounterKind: NetworkEncounterKind | null;
+  interaction: NetworkEntityInteractionHints;
+}
+
 export interface NetworkEntitySnapshot {
   id: number;
   position: Vec2Tuple;
@@ -372,6 +431,7 @@ export interface NetworkEntitySnapshot {
   maxHealth?: number | null;
   movementSpeed?: number | null;
   label?: string | null;
+  metadata: NetworkEntityMetadataSnapshot;
 }
 
 export interface NetworkWorldSnapshot {
@@ -569,8 +629,130 @@ function parseNetworkEntitySnapshot(value: unknown): NetworkEntitySnapshot | nul
     health: optionalNumber(value.health),
     maxHealth: optionalNumber(value.max_health ?? value.maxHealth),
     movementSpeed: optionalNumber(value.movement_speed ?? value.movementSpeed),
-    label: optionalString(value.label) ?? null
+    label: optionalString(value.label) ?? null,
+    metadata: parseNetworkEntityMetadata(value.metadata)
   };
+}
+
+function parseNetworkEntityMetadata(value: unknown): NetworkEntityMetadataSnapshot {
+  if (!isRecord(value)) {
+    return defaultNetworkEntityMetadata();
+  }
+
+  const combatStyle = value.combat_style ?? value.combatStyle;
+  const resourceSkill = value.resource_skill ?? value.resourceSkill;
+  const encounterKind = value.encounter_kind ?? value.encounterKind;
+
+  return {
+    kind: isEntityKind(value.kind) ? value.kind : "Unknown",
+    teamId: optionalNumber(value.team_id ?? value.teamId) ?? null,
+    combatStyle: isCombatStyle(combatStyle) ? combatStyle : null,
+    speciesId: optionalString(value.species_id ?? value.speciesId) ?? null,
+    speciesName: optionalString(value.species_name ?? value.speciesName) ?? null,
+    resourceSkill: isSkillKind(resourceSkill) ? resourceSkill : null,
+    resourceTier: optionalNumber(value.resource_tier ?? value.resourceTier) ?? null,
+    encounterKind: isEncounterKind(encounterKind) ? encounterKind : null,
+    interaction: parseInteractionHints(value.interaction)
+  };
+}
+
+function parseInteractionHints(value: unknown): NetworkEntityInteractionHints {
+  if (!isRecord(value)) {
+    return defaultInteractionHints();
+  }
+
+  return {
+    canInspect: Boolean(value.can_inspect ?? value.canInspect),
+    canInteract: Boolean(value.can_interact ?? value.canInteract),
+    canAttack: Boolean(value.can_attack ?? value.canAttack),
+    canGather: Boolean(value.can_gather ?? value.canGather),
+    canLoot: Boolean(value.can_loot ?? value.canLoot),
+    canCapture: Boolean(value.can_capture ?? value.canCapture),
+    canCommandCompanion: Boolean(
+      value.can_command_companion ?? value.canCommandCompanion
+    ),
+    canChat: Boolean(value.can_chat ?? value.canChat)
+  };
+}
+
+function defaultInteractionHints(): NetworkEntityInteractionHints {
+  return {
+    canInspect: false,
+    canInteract: false,
+    canAttack: false,
+    canGather: false,
+    canLoot: false,
+    canCapture: false,
+    canCommandCompanion: false,
+    canChat: false
+  };
+}
+
+function defaultNetworkEntityMetadata(): NetworkEntityMetadataSnapshot {
+  return {
+    kind: "Unknown",
+    teamId: null,
+    combatStyle: null,
+    speciesId: null,
+    speciesName: null,
+    resourceSkill: null,
+    resourceTier: null,
+    encounterKind: null,
+    interaction: defaultInteractionHints()
+  };
+}
+
+function isEntityKind(value: unknown): value is NetworkEntityKind {
+  return (
+    typeof value === "string" &&
+    [
+      "Unknown",
+      "Player",
+      "Npc",
+      "WildCreature",
+      "Companion",
+      "ResourceNode",
+      "LootContainer",
+      "Scenery"
+    ].includes(value)
+  );
+}
+
+function isCombatStyle(value: unknown): value is NetworkCombatStyle {
+  return (
+    typeof value === "string" &&
+    ["Melee", "Ranged", "Magic", "Summoning"].includes(value)
+  );
+}
+
+function isSkillKind(value: unknown): value is NetworkSkillKind {
+  return (
+    typeof value === "string" &&
+    [
+      "Attack",
+      "Strength",
+      "Defence",
+      "Ranged",
+      "Magic",
+      "Constitution",
+      "Mining",
+      "Woodcutting",
+      "Fishing",
+      "Cooking",
+      "Smithing",
+      "Crafting",
+      "Slayer",
+      "Taming",
+      "Bonding"
+    ].includes(value)
+  );
+}
+
+function isEncounterKind(value: unknown): value is NetworkEncounterKind {
+  return (
+    typeof value === "string" &&
+    ["OpenWorld", "Duel", "WildCreature", "Boss", "Raid"].includes(value)
+  );
 }
 
 function parseNetworkWorldSnapshot(value: unknown): NetworkWorldSnapshot | null {
@@ -1388,12 +1570,119 @@ function healthBand(entity: NetworkEntitySnapshot): "healthy" | "wounded" | "cri
   return "healthy";
 }
 
+function entityKind(entity: NetworkEntitySnapshot): NetworkEntityKind {
+  return entity.metadata.kind;
+}
+
+function fallbackLabel(entity: NetworkEntitySnapshot): string {
+  return entity.label?.toLowerCase() ?? "";
+}
+
+function teamTint(teamId: number | null, controlled: boolean): RgbaTuple {
+  if (controlled) {
+    return [0.92, 0.84, 0.58, 1];
+  }
+
+  if (teamId == null) {
+    return [0.36, 0.66, 0.88, 1];
+  }
+
+  const palette: RgbaTuple[] = [
+    [0.78, 0.52, 0.34, 1],
+    [0.38, 0.72, 0.94, 1],
+    [0.54, 0.84, 0.48, 1],
+    [0.88, 0.46, 0.46, 1]
+  ];
+  return palette[teamId % palette.length] ?? palette[0];
+}
+
 function entityRenderProfile(
   entity: NetworkEntitySnapshot,
   controlledEntity: number | null
 ): EntityRenderProfile {
-  const label = entity.label?.toLowerCase() ?? "";
+  const kind = entityKind(entity);
+  const label = fallbackLabel(entity);
   const band = healthBand(entity);
+  const isControlled = controlledEntity != null && entity.id === controlledEntity;
+
+  if (kind === "ResourceNode") {
+    const isWood = entity.metadata.resourceSkill === "Woodcutting";
+    return {
+      mesh: isWood ? "canopy-tree" : "weathered-boulder",
+      material: isWood ? "forest-resource" : "ore-vein",
+      tint: isWood ? [0.28, 0.62, 0.34, 1] : [0.74, 0.54, 0.28, 1],
+      emissive: isWood ? [0.02, 0.05, 0.02] : [0.08, 0.04, 0.01],
+      scale: isWood ? [2.4, 4.8, 2.4] : [2.4, 1.7, 2.2],
+      layer: 1,
+      renderOrder: 1,
+      roughness: isWood ? 0.9 : 0.86,
+      metallic: isWood ? 0.04 : 0.1
+    };
+  }
+
+  if (kind === "LootContainer") {
+    return {
+      mesh: "supply-crate",
+      material: "bronze-cache",
+      tint: [0.78, 0.58, 0.34, 1],
+      emissive: [0.03, 0.02, 0.01],
+      scale: [1.6, 1.1, 1.2],
+      layer: 2,
+      renderOrder: 2,
+      roughness: 0.8,
+      metallic: 0.12
+    };
+  }
+
+  if (kind === "WildCreature") {
+    return {
+      mesh: "rift-beast",
+      material: `rift-hide:${band}:${entity.metadata.speciesId ?? "wild"}`,
+      tint:
+        band === "critical"
+          ? [0.86, 0.34, 0.28, 1]
+          : band === "wounded"
+            ? [0.82, 0.56, 0.34, 1]
+            : [0.72, 0.52, 0.4, 1],
+      emissive: band === "critical" ? [0.12, 0.03, 0.02] : [0.04, 0.02, 0.01],
+      scale: [1.6, 1.9, 1.6],
+      layer: 3,
+      renderOrder: 3,
+      roughness: 0.82,
+      metallic: 0.08
+    };
+  }
+
+  if (kind === "Companion") {
+    return {
+      mesh: "spirit-companion",
+      material: `summon-shell:${band}:${entity.metadata.speciesId ?? "companion"}`,
+      tint: [0.42, 0.88, 0.74, 1],
+      emissive: [0.06, 0.16, 0.12],
+      scale: [1.0, 1.35, 1.0],
+      layer: 4,
+      renderOrder: 4,
+      roughness: 0.42,
+      metallic: 0.12
+    };
+  }
+
+  if (kind === "Npc") {
+    return {
+      mesh: "adventurer-avatar",
+      material: `npc-cloth:${band}:${entity.metadata.combatStyle ?? "Melee"}`,
+      tint:
+        band === "critical"
+          ? [0.82, 0.38, 0.34, 1]
+          : teamTint(entity.metadata.teamId, false),
+      emissive: [0.02, 0.03, 0.05],
+      scale: [1.1, 1.9, 1.1],
+      layer: 5,
+      renderOrder: 5,
+      roughness: 0.66,
+      metallic: 0.08
+    };
+  }
 
   if (label.includes("wall")) {
     return {
@@ -1424,14 +1713,15 @@ function entityRenderProfile(
   }
 
   if (
-    label.includes("monster") ||
-    label.includes("creature") ||
-    label.includes("beast") ||
-    label.includes("npc")
+    kind === "Unknown" &&
+    (label.includes("monster") ||
+      label.includes("creature") ||
+      label.includes("beast") ||
+      label.includes("npc"))
   ) {
     return {
-      mesh: "rift-beast",
-      material: `rift-hide:${band}`,
+      mesh: label.includes("npc") ? "adventurer-avatar" : "rift-beast",
+      material: label.includes("npc") ? `npc-cloth:${band}:legacy` : `rift-hide:${band}:legacy`,
       tint:
         band === "critical"
           ? [0.86, 0.34, 0.28, 1]
@@ -1439,48 +1729,46 @@ function entityRenderProfile(
             ? [0.82, 0.56, 0.34, 1]
             : [0.72, 0.52, 0.4, 1],
       emissive: band === "critical" ? [0.12, 0.03, 0.02] : [0.04, 0.02, 0.01],
-      scale: [1.6, 1.9, 1.6],
-      layer: 2,
-      renderOrder: 2,
+      scale: label.includes("npc") ? [1.1, 1.9, 1.1] : [1.6, 1.9, 1.6],
+      layer: label.includes("npc") ? 5 : 3,
+      renderOrder: label.includes("npc") ? 5 : 3,
       roughness: 0.82,
       metallic: 0.08
     };
   }
 
   if (
-    label.includes("companion") ||
-    label.includes("pet") ||
-    label.includes("summon") ||
-    label.includes("spirit")
+    kind === "Unknown" &&
+    (label.includes("companion") ||
+      label.includes("pet") ||
+      label.includes("summon") ||
+      label.includes("spirit"))
   ) {
     return {
       mesh: "spirit-companion",
-      material: `summon-shell:${band}`,
+      material: `summon-shell:${band}:legacy`,
       tint: [0.42, 0.88, 0.74, 1],
       emissive: [0.06, 0.16, 0.12],
       scale: [1.0, 1.35, 1.0],
-      layer: 3,
-      renderOrder: 3,
+      layer: 4,
+      renderOrder: 4,
       roughness: 0.42,
       metallic: 0.12
     };
   }
-
-  const isControlled = controlledEntity != null && entity.id === controlledEntity;
   return {
     mesh: isControlled ? "adventurer-hero" : "adventurer-avatar",
-    material: `traveler-cloth:${band}:${isControlled ? "hero" : "party"}`,
-    tint: isControlled
-      ? [0.92, 0.84, 0.58, 1]
-      : band === "critical"
+    material: `traveler-cloth:${band}:${isControlled ? "hero" : kind.toLowerCase()}`,
+    tint:
+      band === "critical"
         ? [0.82, 0.38, 0.34, 1]
         : band === "wounded"
           ? [0.44, 0.76, 0.92, 1]
-          : [0.36, 0.66, 0.88, 1],
+          : teamTint(entity.metadata.teamId, isControlled),
     emissive: isControlled ? [0.08, 0.06, 0.02] : [0.02, 0.03, 0.05],
     scale: isControlled ? [1.2, 2.0, 1.2] : [1.05, 1.85, 1.05],
-    layer: 4,
-    renderOrder: 4,
+    layer: 6,
+    renderOrder: 6,
     roughness: 0.64,
     metallic: 0.08
   };

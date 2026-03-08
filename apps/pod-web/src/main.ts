@@ -261,6 +261,12 @@ function targetableEntities(): NetworkEntitySnapshot[] {
   return latestSnapshot.entities
     .filter((entity) => entity.id !== selfId)
     .filter((entity) => {
+      if (entity.metadata.kind === "Scenery") {
+        return false;
+      }
+      if (entity.metadata.kind !== "Unknown") {
+        return true;
+      }
       const label = entity.label?.toLowerCase() ?? "";
       return !label.includes("wall") && !label.includes("obstacle");
     })

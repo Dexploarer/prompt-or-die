@@ -697,5 +697,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 74
-**Current focus**: Iteration 75 broader flagship MMO loop completion, starting with richer shard-side world metadata for browser clients, stronger creator inspection affordances, and continued convergence on the browser-first live world path
+### Iteration 75
+- [x] Expanded authoritative `pod-net` snapshots with gameplay metadata (`EntityKind`, interaction hints, team/combat/species/resource/encounter fields) so browser and creator tooling can consume shard-side meaning instead of guessing from labels.
+- [x] Fixed a deeper snapshot coverage gap by capturing all transformed entities, including non-moving resource nodes, loot containers, and static world props that previously fell out of direct-connect snapshots.
+- [x] Upgraded `apps/pod-web` target summaries, affordances, target filtering, and render profile selection to use authoritative metadata first while preserving legacy label fallbacks for older payloads.
+- [x] Added deterministic Rust and Bun coverage for static-entity snapshot capture, metadata parsing, and metadata-driven browser affordances/render planning.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cargo fmt --all`
+  - `git diff --check`
+
+**Last updated**: Iteration 75
+**Current focus**: Iteration 76 browser-first flagship world delivery, starting with asset-backed WebGPU rendering (`GLTFLoader` + `KTX2Loader` + `Meshopt`), worker-ready/offscreen render preparation, and a plan to replace emulated SpacetimeDB client paths with generated typed bindings

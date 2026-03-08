@@ -885,6 +885,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: crate::snapshot::EntityMetadataSnapshot::default(),
             }],
         };
         let predicted = WorldSnapshot {
@@ -898,6 +899,7 @@ mod tests {
                 max_health: None,
                 movement_speed: Some(120.0),
                 label: Some("player".into()),
+                metadata: crate::snapshot::EntityMetadataSnapshot::default(),
             }],
         };
         let mut render_buffer = SnapshotInterpolationBuffer::default();

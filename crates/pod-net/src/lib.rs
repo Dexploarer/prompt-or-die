@@ -68,10 +68,11 @@ pub use protocol::{
 };
 pub use snapshot::{
     apply_authoritative_update, build_catch_up_diagnostics, build_rollback_preview,
-    compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntitySnapshot,
-    InterpolatedSnapshot, InterpolationConfig, PredictedActionBatch, ReconciliationReport,
-    RecoveryRequestState, RenderClock, RollbackPreview, SnapshotInterpolationBuffer,
-    SnapshotSampleMode, SnapshotUpdateError, StateDelta, WorldSnapshot,
+    compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntityInteractionHints,
+    EntityKind, EntityMetadataSnapshot, EntitySnapshot, InterpolatedSnapshot, InterpolationConfig,
+    PredictedActionBatch, ReconciliationReport, RecoveryRequestState, RenderClock, RollbackPreview,
+    SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
+    WorldSnapshot,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
