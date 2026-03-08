@@ -137,6 +137,29 @@
         margin-top: 14px;
       }
 
+      .hud__heatmap {
+        margin-top: 14px;
+      }
+
+      .hud__heatmap-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      #population-heatmap {
+        display: block;
+        width: 100%;
+        height: 138px;
+        border: 1px solid rgba(138, 245, 207, 0.14);
+        border-radius: 14px;
+        background: rgba(5, 9, 15, 0.66);
+      }
+
       .hud__chat input {
         width: 100%;
         border: 1px solid rgba(138, 245, 207, 0.18);
@@ -192,6 +215,13 @@
           <dt>Bridge</dt>
           <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
         </dl>
+        <div class="hud__heatmap">
+          <div class="hud__heatmap-header">
+            <span>Population heatmap</span>
+            <span id="population-heatmap-legend">Awaiting shard population</span>
+          </div>
+          <canvas id="population-heatmap"></canvas>
+        </div>
         <form class="hud__chat" id="chat-form">
           <input id="chat-input" type="text" maxlength="120" placeholder="Say something to the shard…" />
           <button type="submit">Send</button>

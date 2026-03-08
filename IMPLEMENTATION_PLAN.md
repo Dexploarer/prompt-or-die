@@ -861,5 +861,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 87
-**Current focus**: Iteration 88 browser/editor population heatmaps and creator balancing controls on top of authoritative shard respawn state, followed by richer flagship biome authoring and denser multi-region shard content
+### Iteration 88
+- [x] Added a real browser-side population heatmap in `apps/pod-web`, driven directly from authoritative chunk population state and focused on the controlled entity's current chunk/region instead of relying on static text summaries alone.
+- [x] Added deterministic Bun coverage for chunk-key parsing, focused heatmap selection, intensity weighting, and legend formatting so the new browser heatmap stays testable without a DOM renderer.
+- [x] Added creator-facing encounter balancing previews in `pod-editor`, derived from authored `RegionEncounterTable` contracts plus authoritative shard population pressure, pending respawns, and effective cap across attached chunks.
+- [x] Added editor-side ambient-cap balancing controls and a compact chunk-pressure heat section in the Spacetime dashboard so creators can spot hotspots and tune encounter density directly from live shard data.
+- [x] Added deterministic editor regression coverage for encounter balance previews and ambient-cap adjustment/clamping.
+- [x] Validated touched targets:
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/local-world.test.ts ./src/affordances.test.ts ./src/population-heatmap.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 88
+**Current focus**: Iteration 89 richer flagship biome authoring, denser multi-region shard content, and stronger creator-facing progression balancing on top of the new streamed population tooling

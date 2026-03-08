@@ -41,6 +41,11 @@ import {
   setTelemetryEnabled,
   telemetryStats
 } from "./telemetry";
+import {
+  buildPopulationHeatmapModel,
+  formatPopulationHeatmapLegend,
+  renderPopulationHeatmap
+} from "./population-heatmap";
 
 declare global {
   interface Window {
@@ -72,6 +77,10 @@ const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
 const populationLabel = document.querySelector<HTMLElement>("#population-label");
+const populationHeatmapCanvas =
+  document.querySelector<HTMLCanvasElement>("#population-heatmap");
+const populationHeatmapLegend =
+  document.querySelector<HTMLElement>("#population-heatmap-legend");
 const targetLabel = document.querySelector<HTMLElement>("#target-label");
 const affordanceLabel = document.querySelector<HTMLElement>("#affordance-label");
 const actionStatusLabel = document.querySelector<HTMLElement>("#action-status-label");
@@ -110,6 +119,8 @@ if (
   !connectionLabel ||
   !worldLabel ||
   !populationLabel ||
+  !populationHeatmapCanvas ||
+  !populationHeatmapLegend ||
   !targetLabel ||
   !affordanceLabel ||
   !actionStatusLabel ||
@@ -143,6 +154,8 @@ const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
 const populationNode = populationLabel;
+const populationHeatmapCanvasNode = populationHeatmapCanvas;
+const populationHeatmapLegendNode = populationHeatmapLegend;
 const targetNode = targetLabel;
 const affordanceNode = affordanceLabel;
 const actionStatusNode = actionStatusLabel;
@@ -292,6 +305,18 @@ function currentPopulationSummary(): string {
       )} · respawns ${region.pendingRespawns}${region.nextRespawnTick != null ? ` @${region.nextRespawnTick}` : ""}`
     : "unassigned region";
   return `${regionSummary} · ${chunkSummary}`;
+}
+
+function currentPopulationHeatmap() {
+  if (!latestSnapshot) {
+    return null;
+  }
+
+  const controlled = controlledEntity();
+  return buildPopulationHeatmapModel(latestSnapshot.population, {
+    chunkKey: controlled?.metadata.chunkKey ?? null,
+    regionId: controlled?.metadata.regionId ?? null
+  });
 }
 
 function targetableEntities(): NetworkEntitySnapshot[] {
@@ -812,6 +837,7 @@ function renderTelemetryHud(): void {
   const stats = telemetryStats(telemetryState);
   const target = selectedTarget();
   const controlled = controlledEntity();
+  const populationHeatmap = currentPopulationHeatmap();
   connectionNode.textContent = liveConnectionStatus
     ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
     : "offline demo / bridge mode";
@@ -825,6 +851,9 @@ function renderTelemetryHud(): void {
         }`
     : "demo scene";
   populationNode.textContent = currentPopulationSummary();
+  populationHeatmapLegendNode.textContent =
+    formatPopulationHeatmapLegend(populationHeatmap);
+  renderPopulationHeatmap(populationHeatmapCanvasNode, populationHeatmap);
   targetNode.textContent = formatTargetSummary(target, controlled);
   affordanceNode.textContent = describeTargetAffordances(target);
   actionStatusNode.textContent = formatActionStatus();
