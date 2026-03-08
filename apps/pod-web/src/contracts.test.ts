@@ -2,8 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { encode } from "@toon-format/toon";
 
 import {
+  applyNetworkStateDelta,
+  buildAuthoritativeWorldFrame,
+  encodeDirectConnectConnectMessage,
+  encodeDirectConnectDebugTelemetryMessage,
+  encodeDirectConnectFullSnapshotRequest,
+  type NetworkWorldSnapshot,
   parseAgentTickRollup,
   parseAgentToolCallEvent,
+  parseDirectConnectServerMessage,
   parseLiveDebugDocument,
   parseReplayFile,
   parseShardIncidentSummary,
@@ -220,5 +227,151 @@ describe("TOON contract parsing", () => {
       throw new Error("expected tick telemetry document");
     }
     expect(telemetry.payload.tickTelemetry.tick).toBe(9);
+  });
+
+  test("parses direct-connect welcome and delta messages", () => {
+    const welcome = parseDirectConnectServerMessage(
+      JSON.stringify({
+        Welcome: {
+          client_id: "client-1",
+          reconnect_token: "reconnect-1",
+          tick: 12,
+          controlled_entity: 44,
+          authoritative_digest: 991,
+          snapshot: {
+            tick: 12,
+            entities: [
+              {
+                id: 44,
+                position: [12, 18],
+                velocity: [1, 0],
+                rotation: 0.4,
+                label: "Hero"
+              }
+            ]
+          }
+        }
+      })
+    );
+
+    expect(welcome.kind).toBe("welcome");
+    if (welcome.kind !== "welcome") {
+      throw new Error("expected welcome");
+    }
+    expect(welcome.snapshot.entities[0]?.position).toEqual([12, 18]);
+
+    const delta = parseDirectConnectServerMessage(
+      JSON.stringify({
+        StateDelta: {
+          tick: 13,
+          acknowledged_action_tick: 12,
+          authoritative_digest: 992,
+          is_full_snapshot: false,
+          delta: {
+            tick: 13,
+            updated: [
+              {
+                id: 44,
+                position: { x: 14, y: 19 },
+                velocity: [2, 0],
+                rotation: 0.55,
+                label: "Hero"
+              }
+            ],
+            destroyed: [99]
+          }
+        }
+      })
+    );
+
+    expect(delta.kind).toBe("stateDelta");
+    if (delta.kind !== "stateDelta") {
+      throw new Error("expected delta");
+    }
+    expect(delta.delta.updated[0]?.position).toEqual([14, 19]);
+    expect(delta.acknowledgedActionTick).toBe(12);
+  });
+
+  test("applies authoritative state deltas and builds a live world frame", () => {
+    const baseline: NetworkWorldSnapshot = {
+      tick: 10,
+      entities: [
+        {
+          id: 1,
+          position: [10, 10],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Hero"
+        },
+        {
+          id: 2,
+          position: [20, 12],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Wall-East"
+        }
+      ]
+    };
+
+    const next = applyNetworkStateDelta(
+      baseline,
+      {
+        tick: 11,
+        updated: [
+          {
+            id: 1,
+            position: [14, 12],
+            velocity: [4, 0],
+            rotation: 0.3,
+            label: "Hero"
+          },
+          {
+            id: 3,
+            position: [18, 20],
+            velocity: [0, 0],
+            rotation: 0,
+            label: "Monster-Wolf"
+          }
+        ],
+        destroyed: [2]
+      },
+      false
+    );
+
+    expect(next.tick).toBe(11);
+    expect(next.entities.map((entity) => entity.id)).toEqual([1, 3]);
+
+    const frame = buildAuthoritativeWorldFrame(next, {
+      controlledEntity: 1,
+      viewportWidth: 1440,
+      viewportHeight: 900
+    });
+
+    expect(frame.camera.viewportWidth).toBe(1440);
+    expect(frame.meshBatches.some((batch) => batch.mesh.includes("adventurer"))).toBe(true);
+    expect(frame.meshBatches.some((batch) => batch.mesh.includes("rift-beast"))).toBe(true);
+    expect(frame.spriteBatches.some((batch) => batch.texture === "selection-ring")).toBe(true);
+  });
+
+  test("encodes browser direct-connect client messages with Rust enum tags", () => {
+    expect(JSON.parse(encodeDirectConnectConnectMessage("WebPlayer", "resume-1"))).toEqual({
+      Connect: {
+        player_name: "WebPlayer",
+        reconnect_token: "resume-1"
+      }
+    });
+
+    expect(JSON.parse(encodeDirectConnectDebugTelemetryMessage(true))).toEqual({
+      SetDebugTelemetry: {
+        enabled: true
+      }
+    });
+
+    expect(JSON.parse(encodeDirectConnectFullSnapshotRequest(42, 99))).toEqual({
+      RequestFullSnapshot: {
+        last_known_tick: 42,
+        last_known_digest: 99
+      }
+    });
   });
 });

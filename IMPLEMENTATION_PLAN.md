@@ -639,5 +639,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-server --bin pod-server`
   - `git diff --check`
 
-**Last updated**: Iteration 69
-**Current focus**: Iteration 70 browser/world vertical-slice completion on top of the real WebSocket direct-connect path, starting with streamed world payloads and the pod-web runtime hook-up for authoritative shard debug streams
+### Iteration 70
+- [x] Added typed direct-connect protocol parsing in `apps/pod-web` for authoritative `Welcome`, `StateDelta`, `TickTelemetry`, `DebugDocument`, `Rejected`, and `Pong` websocket payloads emitted by the Rust server.
+- [x] Added browser-side authoritative snapshot handling in `apps/pod-web`, including full-snapshot recovery requests, reconnect-token aware websocket reconnects, and opt-in live debug-telemetry subscriptions on the same direct-connect socket.
+- [x] Added live world-to-frame adaptation in `apps/pod-web` so authoritative world snapshots and deltas render as stylized WebGPU `ThreeJsWebGpuFrame` content instead of leaving the browser client in demo-only mode.
+- [x] Wired the existing browser telemetry overlay to live authoritative websocket debug documents, and surfaced connection/world status directly in the HUD for browser-first shard inspection.
+- [x] Added deterministic Bun coverage for browser-side direct-connect config parsing, Rust enum-tagged message parsing, authoritative delta application, browser frame generation, and websocket client message encoding.
+- [x] Verified the browser runtime against a real live `pod-server` session over `ws://127.0.0.1:7778`, confirming authoritative rendering and live TOON telemetry ingestion in the browser HUD.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `cargo run -p pod-server --bin pod-server`
+  - `git diff --check`
+
+**Last updated**: Iteration 70
+**Current focus**: Iteration 71 MMO world/runtime completion beyond snapshot visualization, starting with browser-side action submission, chat/combat loop interaction, and richer streamed world presentation on top of the live authoritative socket

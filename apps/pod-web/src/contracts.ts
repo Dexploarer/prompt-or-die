@@ -363,6 +363,59 @@ export type LiveDebugDocument =
   | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
   | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
 
+export interface NetworkEntitySnapshot {
+  id: number;
+  position: Vec2Tuple;
+  velocity: Vec2Tuple;
+  rotation: number;
+  health?: number | null;
+  maxHealth?: number | null;
+  movementSpeed?: number | null;
+  label?: string | null;
+}
+
+export interface NetworkWorldSnapshot {
+  tick: number;
+  entities: NetworkEntitySnapshot[];
+}
+
+export interface NetworkStateDelta {
+  tick: number;
+  updated: NetworkEntitySnapshot[];
+  destroyed: number[];
+}
+
+export type DirectConnectServerMessage =
+  | {
+      kind: "welcome";
+      clientId: string;
+      reconnectToken: string;
+      tick: number;
+      controlledEntity: number | null;
+      authoritativeDigest: number;
+      snapshot: NetworkWorldSnapshot;
+    }
+  | {
+      kind: "stateDelta";
+      tick: number;
+      acknowledgedActionTick: number | null;
+      authoritativeDigest: number;
+      isFullSnapshot: boolean;
+      delta: NetworkStateDelta;
+    }
+  | { kind: "eventBatch"; tick: number; events: unknown[] }
+  | { kind: "tickTelemetry"; frameJson: string }
+  | { kind: "debugDocument"; document: string }
+  | { kind: "pong"; clientTimestamp: number; serverTimestamp: number }
+  | { kind: "rejected"; reason: string };
+
+export interface AuthoritativeWorldFrameOptions {
+  controlledEntity?: number | null;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  backgroundColor?: RgbaTuple;
+}
+
 interface ToonDocumentEnvelope<T = unknown> {
   document_type: string;
   payload: T;
@@ -372,6 +425,55 @@ type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function optionalNumber(value: unknown): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  return asNumber(value);
+}
+
+function optionalString(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  return asString(value);
+}
+
+function vec2Tuple(value: unknown): Vec2Tuple | null {
+  if (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number"
+  ) {
+    return [value[0], value[1]];
+  }
+
+  if (isRecord(value)) {
+    const x = asNumber(value.x);
+    const y = asNumber(value.y);
+    if (x != null && y != null) {
+      return [x, y];
+    }
+  }
+
+  return null;
 }
 
 function decodeStructuredString(value: string): unknown {
@@ -392,6 +494,81 @@ function documentEnvelope(value: unknown): ToonDocumentEnvelope | null {
   }
 
   return value as unknown as ToonDocumentEnvelope;
+}
+
+function variantPayload(value: unknown, variant: string): unknown | null {
+  if (!isRecord(value) || !(variant in value)) {
+    return null;
+  }
+
+  return value[variant];
+}
+
+function parseNetworkEntitySnapshot(value: unknown): NetworkEntitySnapshot | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = asNumber(value.id);
+  const position = vec2Tuple(value.position);
+  const velocity = vec2Tuple(value.velocity);
+  const rotation = asNumber(value.rotation);
+
+  if (id == null || position == null || velocity == null || rotation == null) {
+    return null;
+  }
+
+  return {
+    id,
+    position,
+    velocity,
+    rotation,
+    health: optionalNumber(value.health),
+    maxHealth: optionalNumber(value.max_health ?? value.maxHealth),
+    movementSpeed: optionalNumber(value.movement_speed ?? value.movementSpeed),
+    label: optionalString(value.label) ?? null
+  };
+}
+
+function parseNetworkWorldSnapshot(value: unknown): NetworkWorldSnapshot | null {
+  if (!isRecord(value) || typeof value.tick !== "number" || !Array.isArray(value.entities)) {
+    return null;
+  }
+
+  const entities = value.entities
+    .map((entity) => parseNetworkEntitySnapshot(entity))
+    .filter((entity): entity is NetworkEntitySnapshot => entity != null)
+    .sort((left, right) => left.id - right.id);
+
+  return {
+    tick: value.tick,
+    entities
+  };
+}
+
+function parseNetworkStateDelta(value: unknown): NetworkStateDelta | null {
+  if (!isRecord(value) || typeof value.tick !== "number") {
+    return null;
+  }
+
+  const updated = Array.isArray(value.updated)
+    ? value.updated
+        .map((entity) => parseNetworkEntitySnapshot(entity))
+        .filter((entity): entity is NetworkEntitySnapshot => entity != null)
+    : null;
+  const destroyed = Array.isArray(value.destroyed)
+    ? value.destroyed.filter((entityId): entityId is number => typeof entityId === "number")
+    : null;
+
+  if (updated == null || destroyed == null) {
+    return null;
+  }
+
+  return {
+    tick: value.tick,
+    updated,
+    destroyed
+  };
 }
 
 function directTickTelemetryFrame(value: unknown): TickTelemetryFrame | null {
@@ -678,6 +855,483 @@ export function parseLiveDebugDocument(document: string): LiveDebugDocument {
   }
 }
 
+export function parseDirectConnectServerMessage(
+  message: string | DirectConnectServerMessage
+): DirectConnectServerMessage {
+  if (typeof message !== "string") {
+    return message;
+  }
+
+  const parsed = decodeStructuredString(message);
+
+  const welcome = variantPayload(parsed, "Welcome");
+  if (isRecord(welcome)) {
+    const snapshot = parseNetworkWorldSnapshot(welcome.snapshot);
+    if (
+      snapshot &&
+      typeof welcome.client_id === "string" &&
+      typeof welcome.reconnect_token === "string" &&
+      typeof welcome.tick === "number" &&
+      typeof welcome.authoritative_digest === "number"
+    ) {
+      return {
+        kind: "welcome",
+        clientId: welcome.client_id,
+        reconnectToken: welcome.reconnect_token,
+        tick: welcome.tick,
+        controlledEntity: optionalNumber(welcome.controlled_entity) ?? null,
+        authoritativeDigest: welcome.authoritative_digest,
+        snapshot
+      };
+    }
+  }
+
+  const stateDelta = variantPayload(parsed, "StateDelta");
+  if (isRecord(stateDelta)) {
+    const delta = parseNetworkStateDelta(stateDelta.delta);
+    if (
+      delta &&
+      typeof stateDelta.tick === "number" &&
+      typeof stateDelta.authoritative_digest === "number" &&
+      typeof stateDelta.is_full_snapshot === "boolean"
+    ) {
+      return {
+        kind: "stateDelta",
+        tick: stateDelta.tick,
+        acknowledgedActionTick: optionalNumber(stateDelta.acknowledged_action_tick) ?? null,
+        authoritativeDigest: stateDelta.authoritative_digest,
+        isFullSnapshot: stateDelta.is_full_snapshot,
+        delta
+      };
+    }
+  }
+
+  const eventBatch = variantPayload(parsed, "EventBatch");
+  if (
+    isRecord(eventBatch) &&
+    typeof eventBatch.tick === "number" &&
+    Array.isArray(eventBatch.events)
+  ) {
+    return {
+      kind: "eventBatch",
+      tick: eventBatch.tick,
+      events: eventBatch.events
+    };
+  }
+
+  const tickTelemetry = variantPayload(parsed, "TickTelemetry");
+  if (isRecord(tickTelemetry) && typeof tickTelemetry.frame_json === "string") {
+    return {
+      kind: "tickTelemetry",
+      frameJson: tickTelemetry.frame_json
+    };
+  }
+
+  const debugDocument = variantPayload(parsed, "DebugDocument");
+  if (isRecord(debugDocument) && typeof debugDocument.document === "string") {
+    return {
+      kind: "debugDocument",
+      document: debugDocument.document
+    };
+  }
+
+  const pong = variantPayload(parsed, "Pong");
+  if (
+    isRecord(pong) &&
+    typeof pong.client_ts === "number" &&
+    typeof pong.server_ts === "number"
+  ) {
+    return {
+      kind: "pong",
+      clientTimestamp: pong.client_ts,
+      serverTimestamp: pong.server_ts
+    };
+  }
+
+  const rejected = variantPayload(parsed, "Rejected");
+  if (isRecord(rejected) && typeof rejected.reason === "string") {
+    return {
+      kind: "rejected",
+      reason: rejected.reason
+    };
+  }
+
+  throw new Error("Invalid direct-connect server message payload");
+}
+
+export function encodeDirectConnectConnectMessage(
+  playerName: string,
+  reconnectToken?: string | null
+): string {
+  return JSON.stringify({
+    Connect: {
+      player_name: playerName,
+      reconnect_token: reconnectToken ?? null
+    }
+  });
+}
+
+export function encodeDirectConnectDebugTelemetryMessage(enabled: boolean): string {
+  return JSON.stringify({
+    SetDebugTelemetry: {
+      enabled
+    }
+  });
+}
+
+export function encodeDirectConnectFullSnapshotRequest(
+  lastKnownTick?: number | null,
+  lastKnownDigest?: number | null
+): string {
+  return JSON.stringify({
+    RequestFullSnapshot: {
+      last_known_tick: lastKnownTick ?? null,
+      last_known_digest: lastKnownDigest ?? null
+    }
+  });
+}
+
+export function applyNetworkStateDelta(
+  currentSnapshot: NetworkWorldSnapshot | null,
+  delta: NetworkStateDelta,
+  isFullSnapshot: boolean
+): NetworkWorldSnapshot {
+  if (isFullSnapshot) {
+    return {
+      tick: delta.tick,
+      entities: delta.updated.slice().sort((left, right) => left.id - right.id)
+    };
+  }
+
+  if (currentSnapshot == null) {
+    throw new Error("Cannot apply delta update without a baseline snapshot");
+  }
+
+  const entitiesById = new Map<number, NetworkEntitySnapshot>();
+  for (const entity of currentSnapshot.entities) {
+    entitiesById.set(entity.id, entity);
+  }
+  for (const entity of delta.updated) {
+    entitiesById.set(entity.id, entity);
+  }
+  for (const entityId of delta.destroyed) {
+    entitiesById.delete(entityId);
+  }
+
+  return {
+    tick: delta.tick,
+    entities: Array.from(entitiesById.values()).sort((left, right) => left.id - right.id)
+  };
+}
+
+const WORLD_TO_RENDER_SCALE = 0.08;
+const GROUND_RING_ROTATION: Vec4Tuple = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+
+interface EntityRenderProfile {
+  mesh: string;
+  material: string;
+  tint: RgbaTuple;
+  emissive: Vec3Tuple;
+  scale: Vec3Tuple;
+  layer: number;
+  renderOrder: number;
+  roughness: number;
+  metallic: number;
+}
+
+function yawQuaternion(yaw: number): Vec4Tuple {
+  return [0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5)];
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function defaultViewportWidth(): number {
+  if (typeof window === "undefined") {
+    return 1280;
+  }
+  return window.innerWidth;
+}
+
+function defaultViewportHeight(): number {
+  if (typeof window === "undefined") {
+    return 720;
+  }
+  return window.innerHeight;
+}
+
+function defaultFrameHints(): ThreeJsWebGpuHints {
+  return {
+    renderer: "three/webgpu",
+    preferredBackend: "webgpu",
+    fallbackBackend: "webgl2",
+    useInstancing: true,
+    sortMetric: "world-z",
+    sortOpaqueFrontToBack: true,
+    preserveInstanceOrder: true,
+    sortTransparentBackToFront: true,
+    transparentInstancingStrategy: "shared-sort-depth",
+    opaqueDepthWrite: true,
+    transparentDepthWrite: false,
+    maxPixelRatio: 2
+  };
+}
+
+function healthBand(entity: NetworkEntitySnapshot): "healthy" | "wounded" | "critical" | "neutral" {
+  if (entity.health == null || entity.maxHealth == null || entity.maxHealth <= 0) {
+    return "neutral";
+  }
+
+  const ratio = entity.health / entity.maxHealth;
+  if (ratio < 0.35) {
+    return "critical";
+  }
+  if (ratio < 0.7) {
+    return "wounded";
+  }
+  return "healthy";
+}
+
+function entityRenderProfile(
+  entity: NetworkEntitySnapshot,
+  controlledEntity: number | null
+): EntityRenderProfile {
+  const label = entity.label?.toLowerCase() ?? "";
+  const band = healthBand(entity);
+
+  if (label.includes("wall")) {
+    return {
+      mesh: "basalt-column",
+      material: "obsidian-wall",
+      tint: [0.24, 0.3, 0.38, 1],
+      emissive: [0.01, 0.02, 0.03],
+      scale: [3.8, 3.4, 1.1],
+      layer: 0,
+      renderOrder: 0,
+      roughness: 0.94,
+      metallic: 0.06
+    };
+  }
+
+  if (label.includes("obstacle") || label.includes("rock") || label.includes("boulder")) {
+    return {
+      mesh: "weathered-boulder",
+      material: "arena-stone",
+      tint: [0.5, 0.42, 0.32, 1],
+      emissive: [0.02, 0.015, 0.01],
+      scale: [2.1, 1.6, 2.1],
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.96,
+      metallic: 0.04
+    };
+  }
+
+  if (
+    label.includes("monster") ||
+    label.includes("creature") ||
+    label.includes("beast") ||
+    label.includes("npc")
+  ) {
+    return {
+      mesh: "rift-beast",
+      material: `rift-hide:${band}`,
+      tint:
+        band === "critical"
+          ? [0.86, 0.34, 0.28, 1]
+          : band === "wounded"
+            ? [0.82, 0.56, 0.34, 1]
+            : [0.72, 0.52, 0.4, 1],
+      emissive: band === "critical" ? [0.12, 0.03, 0.02] : [0.04, 0.02, 0.01],
+      scale: [1.6, 1.9, 1.6],
+      layer: 2,
+      renderOrder: 2,
+      roughness: 0.82,
+      metallic: 0.08
+    };
+  }
+
+  if (
+    label.includes("companion") ||
+    label.includes("pet") ||
+    label.includes("summon") ||
+    label.includes("spirit")
+  ) {
+    return {
+      mesh: "spirit-companion",
+      material: `summon-shell:${band}`,
+      tint: [0.42, 0.88, 0.74, 1],
+      emissive: [0.06, 0.16, 0.12],
+      scale: [1.0, 1.35, 1.0],
+      layer: 3,
+      renderOrder: 3,
+      roughness: 0.42,
+      metallic: 0.12
+    };
+  }
+
+  const isControlled = controlledEntity != null && entity.id === controlledEntity;
+  return {
+    mesh: isControlled ? "adventurer-hero" : "adventurer-avatar",
+    material: `traveler-cloth:${band}:${isControlled ? "hero" : "party"}`,
+    tint: isControlled
+      ? [0.92, 0.84, 0.58, 1]
+      : band === "critical"
+        ? [0.82, 0.38, 0.34, 1]
+        : band === "wounded"
+          ? [0.44, 0.76, 0.92, 1]
+          : [0.36, 0.66, 0.88, 1],
+    emissive: isControlled ? [0.08, 0.06, 0.02] : [0.02, 0.03, 0.05],
+    scale: isControlled ? [1.2, 2.0, 1.2] : [1.05, 1.85, 1.05],
+    layer: 4,
+    renderOrder: 4,
+    roughness: 0.64,
+    metallic: 0.08
+  };
+}
+
+function meshBatchKey(profile: EntityRenderProfile): string {
+  return [
+    profile.mesh,
+    profile.material,
+    profile.layer,
+    profile.renderOrder,
+    profile.tint.join(":")
+  ].join("|");
+}
+
+export function buildAuthoritativeWorldFrame(
+  snapshot: NetworkWorldSnapshot,
+  options: AuthoritativeWorldFrameOptions = {}
+): ThreeJsWebGpuFrame {
+  const controlledEntity = options.controlledEntity ?? null;
+  const controlled = snapshot.entities.find((entity) => entity.id === controlledEntity) ?? null;
+  const focus = controlled ?? snapshot.entities[0] ?? null;
+  const focusPosition = focus
+    ? [focus.position[0] * WORLD_TO_RENDER_SCALE, focus.position[1] * WORLD_TO_RENDER_SCALE]
+    : [0, 0];
+
+  let maxDistance = 10;
+  for (const entity of snapshot.entities) {
+    const dx = (entity.position[0] * WORLD_TO_RENDER_SCALE) - focusPosition[0];
+    const dz = (entity.position[1] * WORLD_TO_RENDER_SCALE) - focusPosition[1];
+    maxDistance = Math.max(maxDistance, Math.hypot(dx, dz));
+  }
+
+  const meshBatches = new Map<string, ThreeJsMeshBatch>();
+  const spriteBatches = new Array<ThreeJsSpriteBatch>();
+
+  for (const entity of snapshot.entities) {
+    const profile = entityRenderProfile(entity, controlledEntity);
+    const position: Vec3Tuple = [
+      entity.position[0] * WORLD_TO_RENDER_SCALE,
+      profile.scale[1] * 0.5,
+      entity.position[1] * WORLD_TO_RENDER_SCALE
+    ];
+    const instance: ThreeJsInstance = {
+      position,
+      rotation: yawQuaternion(entity.rotation),
+      scale: profile.scale,
+      sourceEntity: entity.id
+    };
+
+    const batchKey = meshBatchKey(profile);
+    const batch = meshBatches.get(batchKey);
+    if (batch) {
+      batch.instances.push(instance);
+    } else {
+      meshBatches.set(batchKey, {
+        mesh: profile.mesh,
+        material: profile.material,
+        layer: profile.layer,
+        phase: "opaque",
+        sortDepth: 0,
+        renderOrder: profile.renderOrder,
+        transparent: false,
+        doubleSided: false,
+        castShadows: true,
+        receiveShadows: true,
+        tint: profile.tint,
+        roughness: profile.roughness,
+        metallic: profile.metallic,
+        emissive: profile.emissive,
+        depthWrite: true,
+        depthTest: true,
+        instances: [instance]
+      });
+    }
+
+    const band = healthBand(entity);
+    if (controlledEntity != null && entity.id === controlledEntity) {
+      spriteBatches.push({
+        texture: "selection-ring",
+        frame: 0,
+        layer: 8,
+        billboard: false,
+        phase: "transparent",
+        sortDepth: position[2],
+        renderOrder: 24,
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        instances: [
+          {
+            position: [position[0], 0.08, position[2]],
+            rotation: GROUND_RING_ROTATION,
+            scale: [2.6, 2.6, 1],
+            color: [0.62, 0.98, 0.84, 0.34],
+            sourceEntity: entity.id
+          }
+        ]
+      });
+    } else if (band === "critical") {
+      spriteBatches.push({
+        texture: "danger-ring",
+        frame: 0,
+        layer: 7,
+        billboard: false,
+        phase: "transparent",
+        sortDepth: position[2],
+        renderOrder: 20,
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        instances: [
+          {
+            position: [position[0], 0.06, position[2]],
+            rotation: GROUND_RING_ROTATION,
+            scale: [2.1, 2.1, 1],
+            color: [0.92, 0.34, 0.3, 0.22],
+            sourceEntity: entity.id
+          }
+        ]
+      });
+    }
+  }
+
+  return {
+    camera: {
+      x: focusPosition[0],
+      y: focusPosition[1],
+      zoom: clamp(1.45 - maxDistance * 0.025, 0.6, 1.45),
+      rotation: focus?.rotation ?? 0.35,
+      viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
+      viewportHeight: options.viewportHeight ?? defaultViewportHeight()
+    },
+    backgroundColor: options.backgroundColor ?? [0.04, 0.06, 0.1, 1],
+    overlayCommands: [],
+    meshBatches: Array.from(meshBatches.values()).sort((left, right) => {
+      if (left.renderOrder !== right.renderOrder) {
+        return left.renderOrder - right.renderOrder;
+      }
+      return left.material.localeCompare(right.material);
+    }),
+    spriteBatches,
+    hints: defaultFrameHints()
+  };
+}
+
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {
   return {
     camera: frame.camera,
@@ -685,19 +1339,6 @@ export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFram
     overlayCommands: frame.commands.filter((command) => command.visible),
     meshBatches: [],
     spriteBatches: [],
-    hints: {
-      renderer: "three/webgpu",
-      preferredBackend: "webgpu",
-      fallbackBackend: "webgl2",
-      useInstancing: true,
-      sortMetric: "world-z",
-      sortOpaqueFrontToBack: true,
-      preserveInstanceOrder: true,
-      sortTransparentBackToFront: true,
-      transparentInstancingStrategy: "shared-sort-depth",
-      opaqueDepthWrite: true,
-      transparentDepthWrite: false,
-      maxPixelRatio: 2
-    }
+    hints: defaultFrameHints()
   };
 }
