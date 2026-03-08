@@ -60,6 +60,8 @@ The local shard includes:
 - default: main-thread rendering
 - `?renderThread=worker`: transfers the canvas to a dedicated render worker via `OffscreenCanvas`
 - `?renderThread=main`: forces the existing main-thread path
+- `?backend=webgl2`: forces the WebGL2 renderer path for deterministic browser smoke testing and fallback debugging
+- `?backend=webgpu`: forces the WebGPU path when available
 - worker mode now mirrors the main thread's logical viewport size and device pixel ratio, so it should not look softer than the main-thread path on high-DPI displays
 
 ### Browser controls
@@ -86,7 +88,15 @@ cd apps/pod-web
 bun run typecheck
 bun test
 bun run build
+bun run test:smoke
 ```
+
+`bun run test:smoke` boots the local shard at `http://127.0.0.1:4178` and uses Playwright to prove that both:
+
+- `/?backend=webgl2`
+- `/?renderThread=worker&backend=webgl2`
+
+can claim gameplay focus and move the controlled entity under automated input.
 
 ## Bridge surface
 

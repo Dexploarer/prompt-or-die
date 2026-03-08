@@ -103,21 +103,23 @@ describe("pod-web controls", () => {
 
   test("focuses and labels the gameplay surface", () => {
     let focused = false;
+    const attrs = new Map<string, string>();
     const surface = {
       tabIndex: -1,
       focus() {
         focused = true;
       },
       setAttribute(name: string, value: string) {
-        if (name === "aria-label") {
-          expect(value).toBe("Game world");
-        }
+        attrs.set(name, value);
       }
     };
 
     expect(focusGameplaySurface(surface)).toBe(true);
     expect(surface.tabIndex).toBe(0);
     expect(focused).toBe(true);
+    expect(attrs.get("aria-label")).toBe("Game world");
+    expect(attrs.get("role")).toBe("application");
+    expect(attrs.get("data-gameplay-surface")).toBe("true");
   });
 
   test("projects a center-screen click onto the ground near the camera focus", () => {

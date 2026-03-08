@@ -74,9 +74,21 @@ declare global {
       streamShardIncidentSummary: (document: string) => void;
       resetTelemetry: () => void;
       resetDemo: () => void;
+      requestGameplayFocus: () => boolean;
       getBackend: () => string;
       getStats: () => ReturnType<PodThreeRenderRuntime["getStats"]>;
       getTelemetryStats: () => ReturnType<typeof telemetryStats>;
+      getGameplayState: () => {
+        renderThread: string;
+        frameSource: string;
+        focused: boolean;
+        controlledEntityId: number | null;
+        controlledPosition: [number, number] | null;
+        selectedTargetId: number | null;
+        clickMoveTarget: [number, number] | null;
+        movementSignature: string;
+        latestFeedback: string;
+      };
       getReplaySummary: () => ReplaySummary | null;
       getIncidentSummary: () => ShardIncidentSummary | null;
     };
@@ -292,6 +304,11 @@ const cameraRig = {
   zoom: 1.08,
   desiredZoom: 1.08
 };
+
+function clearPressedKeys(): void {
+  pressedKeys.clear();
+  lastMovementSignature = "stop";
+}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return (
@@ -769,6 +786,9 @@ window.addEventListener("keydown", (event) => {
   if (event.target === renderCanvas) {
     return;
   }
+  if (!isEditableTarget(event.target) && isGameplayKeyCode(event.code)) {
+    focusGameplaySurface(renderCanvas);
+  }
   handleGameplayKeyDown(event);
 });
 
@@ -905,6 +925,16 @@ renderCanvas.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 });
 
+window.addEventListener("blur", () => {
+  clearPressedKeys();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    clearPressedKeys();
+  }
+});
+
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
   liveClient?.setDebugTelemetry(telemetryState.enabled);
@@ -980,6 +1010,9 @@ window.podRender = {
     liveFrameSource = "demo";
     frameSourceNode.textContent = "demo frame";
   },
+  requestGameplayFocus() {
+    return focusGameplaySurface(renderCanvas);
+  },
   getBackend() {
     return renderer.backend;
   },
@@ -988,6 +1021,22 @@ window.podRender = {
   },
   getTelemetryStats() {
     return telemetryStats(telemetryState);
+  },
+  getGameplayState() {
+    const controlled = controlledEntity();
+    return {
+      renderThread: renderer.getStats().renderThread,
+      frameSource: liveFrameSource,
+      focused: document.activeElement === renderCanvas,
+      controlledEntityId: liveConnectionStatus?.controlledEntity ?? null,
+      controlledPosition: controlled
+        ? ([controlled.position[0], controlled.position[1]] as [number, number])
+        : null,
+      selectedTargetId,
+      clickMoveTarget,
+      movementSignature: lastMovementSignature,
+      latestFeedback
+    };
   },
   getReplaySummary() {
     return latestReplaySummary;
