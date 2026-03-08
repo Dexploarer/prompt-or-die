@@ -12,6 +12,7 @@ import {
 import {
   buildCameraPose,
   buildFramePlan,
+  composeAnimatedInstanceMatrix,
   planningOptionsFromQuality,
   type PodThreeCameraRigOptions,
   type PlannedMeshBatch,
@@ -19,6 +20,7 @@ import {
 } from "./frame-plan";
 import {
   legacyFrameToThreeJsFrame,
+  type NetworkGameEvent,
   type RenderCommand,
   type RenderFrame,
   type TelemetryTrajectorySample,
@@ -478,6 +480,7 @@ export class PodThreeWorldRenderer {
   private lastCameraUpdateAt = 0;
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
+  private readonly entityPulseUntilMs = new Map<number, number>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -544,6 +547,29 @@ export class PodThreeWorldRenderer {
 
   async applyLegacyFrame(frame: RenderFrame): Promise<void> {
     await this.applyFrame(legacyFrameToThreeJsFrame(frame));
+  }
+
+  notifyWorldEvents(events: NetworkGameEvent[]): void {
+    if (events.length === 0) {
+      return;
+    }
+
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+
+    for (const event of events) {
+      const durationMs = pulseDurationForEvent(event);
+      if (durationMs <= 0) {
+        continue;
+      }
+
+      for (const entityId of event.entityIds) {
+        const existing = this.entityPulseUntilMs.get(entityId) ?? 0;
+        this.entityPulseUntilMs.set(entityId, Math.max(existing, now + durationMs));
+      }
+    }
   }
 
   dispose(): void {
@@ -938,6 +964,12 @@ export class PodThreeWorldRenderer {
 
   private async syncMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    const elapsedSeconds = now / 1000;
+    pruneExpiredPulses(this.entityPulseUntilMs, now);
 
     for (const planned of batches) {
       if (planned.visibleCount === 0) {
@@ -962,20 +994,31 @@ export class PodThreeWorldRenderer {
         existing,
         geometry,
         material,
-        planned.matrices.length,
+        planned.instances.length,
         planned.key
       );
 
       entry.mesh.castShadow = planned.batch.castShadows;
       entry.mesh.receiveShadow = planned.batch.receiveShadows;
-      entry.mesh.count = planned.matrices.length;
+      entry.mesh.count = planned.instances.length;
       entry.mesh.renderOrder = planned.batch.renderOrder;
       entry.mesh.visible = true;
       entry.mesh.name = planned.key;
       entry.mesh.frustumCulled = false;
 
-      for (let index = 0; index < planned.matrices.length; index += 1) {
-        entry.mesh.setMatrixAt(index, planned.matrices[index]);
+      for (let index = 0; index < planned.instances.length; index += 1) {
+        const instance = planned.instances[index];
+        if (!instance) {
+          continue;
+        }
+        entry.mesh.setMatrixAt(
+          index,
+          composeAnimatedInstanceMatrix(
+            instance,
+            elapsedSeconds,
+            pulseStrengthForEntity(this.entityPulseUntilMs, instance.sourceEntity, now)
+          )
+        );
       }
       entry.mesh.instanceMatrix.needsUpdate = true;
       this.meshEntries.set(planned.key, entry);
@@ -986,6 +1029,11 @@ export class PodThreeWorldRenderer {
 
   private async syncSpriteBatches(batches: PlannedSpriteBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    const elapsedSeconds = now / 1000;
 
     for (const planned of batches) {
       if (planned.visibleCount === 0) {
@@ -1005,19 +1053,31 @@ export class PodThreeWorldRenderer {
         existing,
         SPRITE_PLANE_GEOMETRY,
         material,
-        planned.matrices.length,
+        planned.instances.length,
         planned.key
       );
 
       entry.mesh.castShadow = false;
       entry.mesh.receiveShadow = false;
-      entry.mesh.count = planned.matrices.length;
+      entry.mesh.count = planned.instances.length;
       entry.mesh.renderOrder = planned.batch.renderOrder;
       entry.mesh.visible = true;
       entry.mesh.frustumCulled = false;
 
-      for (let index = 0; index < planned.matrices.length; index += 1) {
-        entry.mesh.setMatrixAt(index, planned.matrices[index]);
+      for (let index = 0; index < planned.instances.length; index += 1) {
+        const instance = planned.instances[index];
+        if (!instance) {
+          continue;
+        }
+        entry.mesh.setMatrixAt(
+          index,
+          composeAnimatedInstanceMatrix(
+            instance,
+            elapsedSeconds,
+            pulseStrengthForEntity(this.entityPulseUntilMs, instance.sourceEntity, now),
+            planned.batch.billboard ? this.camera.quaternion : undefined
+          )
+        );
       }
       entry.mesh.instanceMatrix.needsUpdate = true;
       this.spriteEntries.set(planned.key, entry);
@@ -1440,6 +1500,55 @@ function cleanupUnusedEntries(
     disposeInstancedEntry(entry);
     entries.delete(key);
   }
+}
+
+function pruneExpiredPulses(pulses: Map<number, number>, now: number): void {
+  for (const [entityId, untilMs] of pulses) {
+    if (untilMs <= now) {
+      pulses.delete(entityId);
+    }
+  }
+}
+
+function pulseStrengthForEntity(
+  pulses: Map<number, number>,
+  entityId: number | undefined,
+  now: number
+): number {
+  if (entityId == null) {
+    return 0;
+  }
+
+  const untilMs = pulses.get(entityId);
+  if (!untilMs || untilMs <= now) {
+    return 0;
+  }
+
+  return clamp((untilMs - now) / 260, 0, 1);
+}
+
+function pulseDurationForEvent(event: NetworkGameEvent): number {
+  const kind = event.kind.toLowerCase();
+  if (
+    kind.includes("damage") ||
+    kind.includes("attack") ||
+    kind.includes("hit") ||
+    kind.includes("capture") ||
+    kind.includes("defeat")
+  ) {
+    return 260;
+  }
+
+  if (
+    kind.includes("loot") ||
+    kind.includes("gather") ||
+    kind.includes("summon") ||
+    kind.includes("command")
+  ) {
+    return 180;
+  }
+
+  return 0;
 }
 
 function disposeInstancedEntry(entry: InstancedEntry): void {

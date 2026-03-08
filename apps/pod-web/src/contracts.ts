@@ -68,6 +68,10 @@ export interface ThreeJsInstance {
   scale: Vec3Tuple;
   color?: RgbaTuple;
   sourceEntity?: number;
+  animationSetId?: string;
+  motionSpeed?: number;
+  healthRatio?: number | null;
+  controlled?: boolean;
 }
 
 export type ThreeJsRenderPhase = "opaque" | "transparent";
@@ -2277,6 +2281,47 @@ function healthBand(entity: NetworkEntitySnapshot): "healthy" | "wounded" | "cri
   return "healthy";
 }
 
+function healthRatio(entity: NetworkEntitySnapshot): number | null {
+  if (entity.health == null || entity.maxHealth == null || entity.maxHealth <= 0) {
+    return null;
+  }
+
+  return clamp(entity.health / entity.maxHealth, 0, 1);
+}
+
+function motionSpeed(entity: NetworkEntitySnapshot): number {
+  const speed = Math.hypot(entity.velocity[0], entity.velocity[1]);
+  const maxSpeed = entity.movementSpeed ?? 0;
+  if (maxSpeed > 0.001) {
+    return clamp(speed / maxSpeed, 0, 1.6);
+  }
+
+  return clamp(speed / 6, 0, 1.6);
+}
+
+function resolveAnimationSetId(entity: NetworkEntitySnapshot): string {
+  const actorPresentationId = entity.metadata.actorPresentation?.animationSetId?.trim();
+  if (actorPresentationId) {
+    return actorPresentationId;
+  }
+
+  switch (entity.metadata.kind) {
+    case "Player":
+    case "Npc":
+      return "humanoid-explorer";
+    case "WildCreature":
+      return "beast-stalker";
+    case "Companion":
+      return "companion-hover";
+    case "Scenery":
+    case "ResourceNode":
+    case "LootContainer":
+      return "static-prop";
+    default:
+      return "humanoid-idle";
+  }
+}
+
 function entityKind(entity: NetworkEntitySnapshot): NetworkEntityKind {
   return entity.metadata.kind;
 }
@@ -2703,7 +2748,11 @@ export function buildAuthoritativeWorldFrame(
       position,
       rotation: yawQuaternion(entity.rotation),
       scale: profile.scale,
-      sourceEntity: entity.id
+      sourceEntity: entity.id,
+      animationSetId: resolveAnimationSetId(entity),
+      motionSpeed: motionSpeed(entity),
+      healthRatio: healthRatio(entity),
+      controlled: controlledEntity != null && entity.id === controlledEntity
     };
 
     const batchKey = meshBatchKey(profile);
@@ -2755,7 +2804,8 @@ export function buildAuthoritativeWorldFrame(
               1
             ],
             color: profile.auraColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "aura-ring"
           }
         ]
       });
@@ -2778,7 +2828,9 @@ export function buildAuthoritativeWorldFrame(
             rotation: GROUND_RING_ROTATION,
             scale: [profile.selectionRingScale, profile.selectionRingScale, 1],
             color: profile.selectionRingColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "selection-ring",
+            controlled: true
           }
         ]
       });
@@ -2804,7 +2856,9 @@ export function buildAuthoritativeWorldFrame(
               1
             ],
             color: profile.criticalRingColor,
-            sourceEntity: entity.id
+            sourceEntity: entity.id,
+            animationSetId: "critical-ring",
+            healthRatio: healthRatio(entity)
           }
         ]
       });

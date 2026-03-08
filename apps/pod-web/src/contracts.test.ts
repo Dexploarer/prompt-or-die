@@ -708,7 +708,7 @@ describe("TOON contract parsing", () => {
         {
           id: 1,
           position: [8, 10],
-          velocity: [0, 0],
+          velocity: [2.2, 0.4],
           rotation: 0.25,
           label: "Hero",
           metadata: typedEntityMetadata("Player", {
@@ -797,11 +797,18 @@ describe("TOON contract parsing", () => {
     expect(frame.environment.biomeId).toBe("verdant-hollow");
     expect(frame.environment.fogFar).toBe(130);
     expect(frame.meshBatches.some((batch) => batch.material.includes(":verdant"))).toBe(true);
+    const heroInstance = frame.meshBatches
+      .flatMap((batch) => batch.instances)
+      .find((instance) => instance.sourceEntity === 1);
+    expect(heroInstance?.animationSetId).toBe("hero-runescape");
+    expect(heroInstance?.motionSpeed).toBeGreaterThan(0.3);
+    expect(heroInstance?.controlled).toBe(true);
     const selectionRing = frame.spriteBatches.find(
       (batch) => batch.texture === "selection-ring"
     );
     expect(selectionRing?.instances[0]?.scale).toEqual([3.2, 3.2, 1]);
     expect(selectionRing?.instances[0]?.color).toEqual([0.62, 0.98, 0.84, 0.55]);
+    expect(selectionRing?.instances[0]?.animationSetId).toBe("selection-ring");
 
     const auraRing = frame.spriteBatches.find((batch) => batch.texture === "mist-ring");
     expect(auraRing?.instances[0]?.color).toEqual([0.32, 0.86, 0.74, 0.28]);

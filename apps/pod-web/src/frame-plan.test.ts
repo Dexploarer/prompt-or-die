@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ThreeJsWebGpuFrame } from "./contracts";
-import { buildCameraPose, buildFramePlan, splitSpriteBatchesByTint } from "./frame-plan";
+import {
+  buildCameraPose,
+  buildFramePlan,
+  sampleAnimatedInstanceTransform,
+  splitSpriteBatchesByTint
+} from "./frame-plan";
 import { sampleTerrainHeight } from "./landscape";
 import { resolveQualityProfile } from "./quality";
 
@@ -487,6 +492,73 @@ describe("buildFramePlan", () => {
     ]);
     expect(plan.prewarmSpriteRequests).toHaveLength(1);
     expect(plan.prewarmSpriteRequests[0]?.batch.texture).toBe("mist");
+  });
+});
+
+describe("sampleAnimatedInstanceTransform", () => {
+  test("keeps static props grounded while animating hovering companions", () => {
+    const staticProp = sampleAnimatedInstanceTransform(
+      {
+        position: [12, 4, -6],
+        rotation: [0, 0, 0, 1],
+        scale: [2, 3, 2],
+        sourceEntity: 44,
+        animationSetId: "static-prop",
+        motionSpeed: 0
+      },
+      2.4
+    );
+    const hoveringCompanion = sampleAnimatedInstanceTransform(
+      {
+        position: [12, 4, -6],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1.2, 1],
+        sourceEntity: 9,
+        animationSetId: "companion-hover",
+        motionSpeed: 0.2
+      },
+      2.4
+    );
+
+    expect(staticProp.position).toEqual([12, 4, -6]);
+    expect(hoveringCompanion.position[1]).toBeGreaterThan(4.12);
+    expect(hoveringCompanion.scale[1]).not.toBeCloseTo(1.2, 4);
+  });
+
+  test("adds gait bounce and event pulse response to moving humanoids", () => {
+    const neutral = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 2, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 2, 1],
+        sourceEntity: 3,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.9,
+        controlled: true,
+        healthRatio: 0.82
+      },
+      1.8,
+      0
+    );
+    const pulsed = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 2, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 2, 1],
+        sourceEntity: 3,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.9,
+        controlled: true,
+        healthRatio: 0.82
+      },
+      1.8,
+      1
+    );
+
+    expect(neutral.position[1]).toBeGreaterThan(2);
+    expect(neutral.scale[1]).toBeLessThan(2);
+    expect(pulsed.position[1]).toBeGreaterThan(neutral.position[1]);
+    expect(pulsed.scale[0]).toBeGreaterThan(neutral.scale[0]);
   });
 });
 

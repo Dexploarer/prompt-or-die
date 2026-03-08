@@ -493,6 +493,7 @@ function applyAuthoritativeEventBatch(batch: NetworkEventBatch): void {
     return;
   }
 
+  renderer.notifyWorldEvents(batch.events);
   recentWorldEvents = [...recentWorldEvents, ...batch.events].slice(-6);
 
   const controlledId = liveConnectionStatus?.controlledEntity ?? null;
