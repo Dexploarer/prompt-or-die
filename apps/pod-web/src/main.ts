@@ -15,6 +15,7 @@ import {
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
+  withInteractionMarkers,
   type ThreeJsWebGpuFrame,
   type TickRollupSummary,
   type ToolCallEventSummary,
@@ -451,6 +452,7 @@ function currentCameraYaw(): number {
 function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame {
   syncCameraRig(baseFrame.camera);
   const controlled = controlledEntity();
+  const target = selectedTarget();
   const speed = controlled
     ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
     : 0;
@@ -460,7 +462,8 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
   const leadY =
     controlled && speed > 0.05 ? (controlled.velocity[1] / speed) * leadDistance : 0;
 
-  return {
+  return withInteractionMarkers(
+    {
     ...baseFrame,
     camera: {
       ...baseFrame.camera,
@@ -473,7 +476,13 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
       leadX,
       leadY
     }
-  };
+    },
+    {
+      moveTarget: clickMoveTarget,
+      selectedTarget: target,
+      controlledEntity: liveConnectionStatus?.controlledEntity ?? null
+    }
+  );
 }
 
 function selectedTarget(): NetworkEntitySnapshot | null {

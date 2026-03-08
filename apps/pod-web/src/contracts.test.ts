@@ -19,7 +19,8 @@ import {
   parseTickTelemetryEnvelope,
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
-  summarizeReplayFile
+  summarizeReplayFile,
+  withInteractionMarkers
 } from "./contracts";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
@@ -820,6 +821,100 @@ describe("TOON contract parsing", () => {
     );
     expect(criticalRing?.instances[0]?.scale).toEqual([4.2, 4.2, 1]);
     expect(criticalRing?.instances[0]?.color).toEqual([1, 0.18, 0.16, 0.5]);
+  });
+
+  test("adds point-click and target selection markers without mutating the base frame", () => {
+    const target = {
+      id: 12,
+      position: [14, -6],
+      velocity: [0, 0],
+      rotation: 0,
+      health: 18,
+      maxHealth: 24,
+      movementSpeed: 4,
+      label: "Verdant Lynx",
+      metadata: typedEntityMetadata("WildCreature", {
+        actorPresentation: {
+          profileId: "lynx",
+          meshAssetId: "rift-beast",
+          materialPaletteId: "default",
+          animationSetId: "beast-stalker",
+          scaleMultiplier: 1,
+          footprintRadius: 1.2,
+          selectionRingScale: 2.8,
+          auraColor: [0, 0, 0, 0]
+        }
+      })
+    } satisfies NetworkWorldSnapshot["entities"][number];
+    const baseFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: 0.4,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      environment: {
+        biomeId: "verdant-hollow",
+        skyColor: [0.64, 0.8, 0.98, 1],
+        fogColor: [0.72, 0.84, 0.78, 1],
+        fogNear: 30,
+        fogFar: 196,
+        ambientColor: [0.82, 0.92, 0.88],
+        ambientIntensity: 1.4,
+        sunColor: [1, 0.96, 0.84],
+        sunIntensity: 2.95,
+        sunDirection: [30, 48, 18],
+        fillColor: [0.48, 0.76, 0.94],
+        fillIntensity: 0.88,
+        fillDirection: [-18, 14, -10],
+        rimColor: [0.4, 0.88, 0.78],
+        rimIntensity: 8.5,
+        groundColor: [0.19, 0.33, 0.21, 1],
+        starfieldIntensity: 0.08
+      },
+      overlayCommands: [],
+      meshBatches: [],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    } satisfies Parameters<typeof withInteractionMarkers>[0];
+
+    const decorated = withInteractionMarkers(baseFrame, {
+      moveTarget: [6, -4],
+      selectedTarget: target,
+      controlledEntity: 1
+    });
+
+    expect(baseFrame.spriteBatches).toHaveLength(0);
+    expect(decorated.spriteBatches).toHaveLength(2);
+    expect(
+      decorated.spriteBatches.some((batch) =>
+        batch.instances.some((instance) => instance.animationSetId === "destination-ring")
+      )
+    ).toBe(true);
+    expect(
+      decorated.spriteBatches.some((batch) =>
+        batch.instances.some(
+          (instance) =>
+            instance.animationSetId === "target-ring" && instance.sourceEntity === 12
+        )
+      )
+    ).toBe(true);
   });
 
   test("encodes browser direct-connect client messages with Rust enum tags", () => {
