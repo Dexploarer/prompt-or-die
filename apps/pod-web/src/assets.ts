@@ -59,6 +59,16 @@ export interface PodThreeAssetResidencyStats {
   pendingSpriteAssets: number;
 }
 
+export function shouldUseProceduralSpriteTexture(assetPath: string): boolean {
+  const normalized = normalizeAssetKey(assetPath);
+  return (
+    assetPath.trim().toLowerCase().endsWith(".svg") &&
+    (normalized.includes("selection-ring") ||
+      normalized.includes("danger-ring") ||
+      normalized.includes("mist-ring"))
+  );
+}
+
 export type PodThreeAssetCategory =
   | "character"
   | "companion"
@@ -855,7 +865,9 @@ async function createRuntimeAssetLoaders(options: {
         loaderOptions: { anisotropy: number; colorSpace: "srgb" | "none" }
       ): Promise<Texture> {
         const texture =
-          typeof document === "object"
+          shouldUseProceduralSpriteTexture(path)
+            ? createProceduralSpriteTexture(path)
+            : typeof document === "object"
             ? await textureLoader.loadAsync(path)
             : path.endsWith(".svg")
               ? createProceduralSpriteTexture(path)

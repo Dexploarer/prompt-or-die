@@ -32,6 +32,8 @@ export interface PodThreePlanningOptions extends PodThreeCameraRigOptions {
   highDetailDistance?: number;
   mediumDetailDistance?: number;
   shadowDistance?: number;
+  worldChunkSize?: number;
+  preloadChunkRadius?: number;
 }
 
 export interface PlannedCameraPose {
@@ -60,10 +62,27 @@ export interface PlannedSpriteBatch {
   matrices: Matrix4[];
 }
 
+export interface PlannedMeshPrewarmRequest {
+  key: string;
+  batch: ThreeJsMeshBatch;
+  lodLevel: 0 | 1 | 2;
+  chunkKey: string;
+}
+
+export interface PlannedSpritePrewarmRequest {
+  key: string;
+  batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">;
+  chunkKey: string;
+}
+
 export interface PlannedFrame {
   camera: PlannedCameraPose;
   meshBatches: PlannedMeshBatch[];
   spriteBatches: PlannedSpriteBatch[];
+  visibleWorldChunks: string[];
+  preloadedWorldChunks: string[];
+  prewarmMeshRequests: PlannedMeshPrewarmRequest[];
+  prewarmSpriteRequests: PlannedSpritePrewarmRequest[];
 }
 
 export function buildCameraPose(
@@ -114,26 +133,69 @@ export function buildFramePlan(
   const highDetailDistance = options.highDetailDistance ?? 36;
   const mediumDetailDistance = options.mediumDetailDistance ?? 108;
   const shadowDistance = options.shadowDistance ?? 72;
+  const worldChunkSize = options.worldChunkSize ?? 24;
+  const preloadChunkRadius = options.preloadChunkRadius ?? 1;
+  const visibleWorldChunks = new Set<string>();
+  const meshPrewarmDistance =
+    Number.isFinite(meshCullDistance)
+      ? meshCullDistance + worldChunkSize * Math.max(preloadChunkRadius, 1)
+      : Number.POSITIVE_INFINITY;
+  const spritePrewarmDistance =
+    Number.isFinite(spriteCullDistance)
+      ? spriteCullDistance + worldChunkSize * Math.max(preloadChunkRadius, 1)
+      : Number.POSITIVE_INFINITY;
+  const meshBatches = planMeshBatches(
+    frame.meshBatches,
+    frustum,
+    cameraPosition,
+    highDetailDistance,
+    mediumDetailDistance,
+    meshCullDistance,
+    shadowDistance,
+    frustumCulling,
+    visibleWorldChunks,
+    worldChunkSize
+  );
+  const spriteBatches = planSpriteBatches(
+    frame.spriteBatches,
+    frustum,
+    cameraPosition,
+    spriteCullDistance,
+    camera.quaternion,
+    frustumCulling,
+    visibleWorldChunks,
+    worldChunkSize
+  );
+  const cameraChunkKey = chunkKeyFromCoordinates(frame.camera.x, frame.camera.y, worldChunkSize);
+  const preloadedWorldChunks = expandChunkKeys(
+    visibleWorldChunks.size > 0 ? visibleWorldChunks : [cameraChunkKey],
+    preloadChunkRadius,
+    cameraChunkKey
+  );
 
   return {
     camera,
-    meshBatches: planMeshBatches(
+    meshBatches,
+    spriteBatches,
+    visibleWorldChunks: Array.from(visibleWorldChunks).sort((left, right) =>
+      left.localeCompare(right)
+    ),
+    preloadedWorldChunks,
+    prewarmMeshRequests: collectMeshPrewarmRequests(
       frame.meshBatches,
-      frustum,
+      preloadedWorldChunks,
       cameraPosition,
       highDetailDistance,
       mediumDetailDistance,
-      meshCullDistance,
-      shadowDistance,
-      frustumCulling
+      meshPrewarmDistance,
+      worldChunkSize
     ),
-    spriteBatches: planSpriteBatches(
+    prewarmSpriteRequests: collectSpritePrewarmRequests(
       frame.spriteBatches,
-      frustum,
+      preloadedWorldChunks,
+      spritePrewarmDistance,
       cameraPosition,
-      spriteCullDistance,
-      camera.quaternion,
-      frustumCulling
+      worldChunkSize
     )
   };
 }
@@ -282,7 +344,9 @@ function planMeshBatches(
   mediumDetailDistance: number,
   meshCullDistance: number,
   shadowDistance: number,
-  frustumCulling: boolean
+  frustumCulling: boolean,
+  visibleWorldChunks: Set<string>,
+  worldChunkSize: number
 ): PlannedMeshBatch[] {
   const planned = new Array<PlannedMeshBatch>();
 
@@ -309,6 +373,7 @@ function planMeshBatches(
         continue;
       }
 
+      visibleWorldChunks.add(chunkKeyFromInstance(instance, worldChunkSize));
       const lodLevel = classifyLod(distance, highDetailDistance, mediumDetailDistance);
       const group = lodGroups.get(lodLevel) ?? {
         matrices: [],
@@ -357,7 +422,9 @@ function planSpriteBatches(
   cameraPosition: Vector3,
   spriteCullDistance: number,
   cameraQuaternion: Quaternion,
-  frustumCulling: boolean
+  frustumCulling: boolean,
+  visibleWorldChunks: Set<string>,
+  worldChunkSize: number
 ): PlannedSpriteBatch[] {
   const visibleBatches = batches
     .map((batch) => ({
@@ -371,7 +438,12 @@ function planSpriteBatches(
           return false;
         }
 
-        return !frustumCulling || frustum.intersectsSphere(new Sphere(center, radius));
+        const visible =
+          !frustumCulling || frustum.intersectsSphere(new Sphere(center, radius));
+        if (visible) {
+          visibleWorldChunks.add(chunkKeyFromInstance(instance, worldChunkSize));
+        }
+        return visible;
       })
     }))
     .filter((batch) => batch.instances.length > 0);
@@ -406,4 +478,132 @@ function classifyLod(
 
 function estimateInstanceRadius(instance: ThreeJsInstance): number {
   return Math.max(...instance.scale) * DEFAULT_RADIUS;
+}
+
+function collectMeshPrewarmRequests(
+  batches: ThreeJsMeshBatch[],
+  preloadedChunkKeys: string[],
+  cameraPosition: Vector3,
+  highDetailDistance: number,
+  mediumDetailDistance: number,
+  meshPrewarmDistance: number,
+  worldChunkSize: number
+): PlannedMeshPrewarmRequest[] {
+  const requests = new Map<string, PlannedMeshPrewarmRequest>();
+  const preloadedChunkSet = new Set(preloadedChunkKeys);
+
+  for (const batch of batches) {
+    for (const instance of batch.instances) {
+      const chunkKey = chunkKeyFromInstance(instance, worldChunkSize);
+      if (!preloadedChunkSet.has(chunkKey)) {
+        continue;
+      }
+
+      const distance = new Vector3(...instance.position).distanceTo(cameraPosition);
+      if (distance - estimateInstanceRadius(instance) > meshPrewarmDistance) {
+        continue;
+      }
+
+      const lodLevel = classifyLod(distance, highDetailDistance, mediumDetailDistance);
+      const key = createMeshBatchKey(batch, lodLevel);
+      if (!requests.has(key)) {
+        requests.set(key, {
+          key,
+          batch,
+          lodLevel,
+          chunkKey
+        });
+      }
+    }
+  }
+
+  return Array.from(requests.values()).sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function collectSpritePrewarmRequests(
+  batches: ThreeJsSpriteBatch[],
+  preloadedChunkKeys: string[],
+  spritePrewarmDistance: number,
+  cameraPosition: Vector3,
+  worldChunkSize: number
+): PlannedSpritePrewarmRequest[] {
+  const requests = new Map<string, PlannedSpritePrewarmRequest>();
+  const preloadedChunkSet = new Set(preloadedChunkKeys);
+
+  for (const batch of batches) {
+    for (const instance of batch.instances) {
+      const chunkKey = chunkKeyFromInstance(instance, worldChunkSize);
+      if (!preloadedChunkSet.has(chunkKey)) {
+        continue;
+      }
+
+      const distance = new Vector3(...instance.position).distanceTo(cameraPosition);
+      if (distance - estimateInstanceRadius(instance) > spritePrewarmDistance) {
+        continue;
+      }
+
+      const key = `${batch.texture}:frame:${batch.frame}`;
+      if (!requests.has(key)) {
+        requests.set(key, {
+          key,
+          batch: {
+            texture: batch.texture,
+            frame: batch.frame
+          },
+          chunkKey
+        });
+      }
+    }
+  }
+
+  return Array.from(requests.values()).sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function expandChunkKeys(
+  sourceKeys: Iterable<string>,
+  radius: number,
+  fallbackChunkKey: string
+): string[] {
+  const expanded = new Set<string>();
+  const normalizedRadius = Math.max(Math.floor(radius), 0);
+  let didExpand = false;
+
+  for (const sourceKey of sourceKeys) {
+    didExpand = true;
+    const [chunkX, chunkZ] = parseChunkKey(sourceKey);
+    for (let offsetX = -normalizedRadius; offsetX <= normalizedRadius; offsetX += 1) {
+      for (let offsetZ = -normalizedRadius; offsetZ <= normalizedRadius; offsetZ += 1) {
+        expanded.add(formatChunkKey(chunkX + offsetX, chunkZ + offsetZ));
+      }
+    }
+  }
+
+  if (!didExpand) {
+    expanded.add(fallbackChunkKey);
+  }
+
+  return Array.from(expanded).sort((left, right) => left.localeCompare(right));
+}
+
+function chunkKeyFromInstance(
+  instance: Pick<ThreeJsInstance, "position">,
+  worldChunkSize: number
+): string {
+  return chunkKeyFromCoordinates(instance.position[0], instance.position[2], worldChunkSize);
+}
+
+function chunkKeyFromCoordinates(x: number, z: number, worldChunkSize: number): string {
+  return formatChunkKey(
+    Math.floor(x / Math.max(worldChunkSize, 1)),
+    Math.floor(z / Math.max(worldChunkSize, 1))
+  );
+}
+
+function formatChunkKey(chunkX: number, chunkZ: number): string {
+  return `${chunkX}:${chunkZ}`;
+}
+
+function parseChunkKey(chunkKey: string): [number, number] {
+  const [rawX = "0", rawZ = "0"] = chunkKey.split(":");
+  return [Number.parseInt(rawX, 10) || 0, Number.parseInt(rawZ, 10) || 0];
 }
