@@ -958,5 +958,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 96
-**Current focus**: Iteration 97 server-side event interest filtering, then worker-route gameplay-input parity proof and richer traversal/combat feedback
+### Iteration 97
+- [x] Extended `pod-net` server delivery with per-client authoritative event filtering, so `EventBatch` traffic now follows the same shard-interest window as snapshot state instead of broadcasting every event to every client.
+- [x] Reused `SnapshotInterest` to scope event visibility by controlled-entity position, radius, and authored chunk membership, keeping direct-connect event delivery aligned with chunk-streamed MMO regions.
+- [x] Added deterministic server coverage proving clients in different shard regions receive different authoritative event batches while spectators/unbounded clients retain full event visibility.
+- [x] Revalidated native, SpacetimeDB-enabled, and wasm `pod-net` targets after the event-interest change.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 97
+**Current focus**: Iteration 98 worker-route gameplay-input parity proof, then further HUD reduction, richer traversal/combat feedback, and shard-side interest partitioning for debug/telemetry streams
