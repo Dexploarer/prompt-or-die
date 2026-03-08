@@ -2110,7 +2110,7 @@ export function applyNetworkStateDelta(
   };
 }
 
-const WORLD_TO_RENDER_SCALE = 0.08;
+const WORLD_TO_RENDER_SCALE = 1;
 const GROUND_RING_ROTATION: Vec4Tuple = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
 
 interface EntityRenderProfile {
@@ -2408,7 +2408,7 @@ function entityRenderProfile(
       material: isWood ? "forest-resource" : "ore-vein",
       tint: isWood ? [0.28, 0.62, 0.34, 1] : [0.74, 0.54, 0.28, 1],
       emissive: isWood ? [0.02, 0.05, 0.02] : [0.08, 0.04, 0.01],
-      scale: isWood ? [2.4, 4.8, 2.4] : [2.4, 1.7, 2.2],
+      scale: isWood ? [2.0, 4.2, 2.0] : [1.85, 1.3, 1.7],
       layer: 1,
       renderOrder: 1,
       roughness: isWood ? 0.9 : 0.86,
@@ -2422,7 +2422,7 @@ function entityRenderProfile(
       material: "bronze-cache",
       tint: [0.78, 0.58, 0.34, 1],
       emissive: [0.03, 0.02, 0.01],
-      scale: [1.6, 1.1, 1.2],
+      scale: [1.18, 0.82, 0.92],
       layer: 2,
       renderOrder: 2,
       roughness: 0.8,
@@ -2486,7 +2486,7 @@ function entityRenderProfile(
       material: "obsidian-wall",
       tint: [0.24, 0.3, 0.38, 1],
       emissive: [0.01, 0.02, 0.03],
-      scale: [3.8, 3.4, 1.1],
+      scale: [3.2, 2.8, 0.95],
       layer: 0,
       renderOrder: 0,
       roughness: 0.94,
@@ -2500,7 +2500,7 @@ function entityRenderProfile(
       material: "glass-shrine",
       tint: [0.54, 0.76, 0.94, 1],
       emissive: [0.08, 0.14, 0.2],
-      scale: [2.2, 4.8, 2.2],
+      scale: [1.7, 4.0, 1.7],
       layer: 1,
       renderOrder: 1,
       roughness: 0.22,
@@ -2514,7 +2514,7 @@ function entityRenderProfile(
       material: "forest-canopy",
       tint: [0.34, 0.66, 0.4, 1],
       emissive: [0.02, 0.05, 0.02],
-      scale: [2.6, 5.0, 2.6],
+      scale: [2.1, 4.3, 2.1],
       layer: 1,
       renderOrder: 1,
       roughness: 0.9,
@@ -2528,7 +2528,7 @@ function entityRenderProfile(
       material: "rift-pillar",
       tint: [0.34, 0.38, 0.46, 1],
       emissive: [0.02, 0.03, 0.05],
-      scale: [1.8, 4.4, 1.8],
+      scale: [1.4, 3.6, 1.4],
       layer: 1,
       renderOrder: 1,
       roughness: 0.9,
@@ -2542,7 +2542,7 @@ function entityRenderProfile(
       material: "arena-stone",
       tint: [0.5, 0.42, 0.32, 1],
       emissive: [0.02, 0.015, 0.01],
-      scale: [2.1, 1.6, 2.1],
+      scale: [1.55, 1.12, 1.55],
       layer: 1,
       renderOrder: 1,
       roughness: 0.96,
@@ -2633,13 +2633,35 @@ export function buildAuthoritativeWorldFrame(
   const focusPosition = focus
     ? [focus.position[0] * WORLD_TO_RENDER_SCALE, focus.position[1] * WORLD_TO_RENDER_SCALE]
     : [0, 0];
+  const focusChunkKey = focus?.metadata.chunkKey ?? null;
+  const focusRegionId = focus?.metadata.regionId ?? null;
+  const cameraDistances = new Array<number>();
 
-  let maxDistance = 10;
   for (const entity of snapshot.entities) {
     const dx = (entity.position[0] * WORLD_TO_RENDER_SCALE) - focusPosition[0];
     const dz = (entity.position[1] * WORLD_TO_RENDER_SCALE) - focusPosition[1];
-    maxDistance = Math.max(maxDistance, Math.hypot(dx, dz));
+    const distance = Math.hypot(dx, dz);
+    const sameChunk = focusChunkKey != null && entity.metadata.chunkKey === focusChunkKey;
+    const sameRegion = focusRegionId != null && entity.metadata.regionId === focusRegionId;
+    const isImmediateInterest =
+      entity.id === focus?.id ||
+      distance <= 16 ||
+      sameChunk ||
+      (sameRegion && entity.metadata.kind !== "Scenery" && distance <= 22);
+
+    if (isImmediateInterest) {
+      cameraDistances.push(distance);
+    }
   }
+
+  cameraDistances.sort((left, right) => left - right);
+  const cameraReferenceDistance =
+    cameraDistances.length === 0
+      ? 8
+      : cameraDistances[
+          Math.min(cameraDistances.length - 1, Math.floor(cameraDistances.length * 0.75))
+        ] ?? 8;
+  const cameraZoom = clamp(1.22 - cameraReferenceDistance * 0.016, 0.98, 1.18);
 
   const meshBatches = new Map<string, ThreeJsMeshBatch>();
   const spriteBatches = new Array<ThreeJsSpriteBatch>();
@@ -2767,8 +2789,8 @@ export function buildAuthoritativeWorldFrame(
     camera: {
       x: focusPosition[0],
       y: focusPosition[1],
-      zoom: clamp(1.45 - maxDistance * 0.025, 0.6, 1.45),
-      rotation: focus?.rotation ?? 0.35,
+      zoom: cameraZoom,
+      rotation: focus?.rotation ?? 0.48,
       viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
       viewportHeight: options.viewportHeight ?? defaultViewportHeight()
     },

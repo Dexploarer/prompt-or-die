@@ -47,42 +47,114 @@
       .hud {
         position: absolute;
         inset: 20px auto auto 20px;
-        width: min(360px, calc(100vw - 40px));
-        padding: 16px 18px;
+        width: min(352px, calc(100vw - 40px));
+        padding: 16px 16px 14px;
         border: 1px solid var(--panel-border);
-        border-radius: 18px;
-        background: var(--panel-bg);
-        backdrop-filter: blur(18px);
-        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+        border-radius: 20px;
+        background:
+          linear-gradient(180deg, rgba(10, 16, 26, 0.84), rgba(7, 11, 18, 0.72)),
+          var(--panel-bg);
+        backdrop-filter: blur(22px);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
       }
 
       .hud--telemetry {
-        inset: 20px 20px auto auto;
-        width: min(420px, calc(100vw - 40px));
+        inset: auto 20px 20px auto;
+        width: min(320px, calc(100vw - 40px));
+        max-height: min(52vh, 460px);
+        overflow: auto;
       }
 
       .hud h1 {
-        margin: 0 0 8px;
-        font-size: 1.1rem;
-        letter-spacing: 0.04em;
+        margin: 0;
+        font-size: 1.18rem;
+        letter-spacing: 0.03em;
         text-transform: uppercase;
       }
 
       .hud p {
         margin: 0;
         color: var(--muted);
-        line-height: 1.45;
+        line-height: 1.38;
+        font-size: 0.94rem;
       }
 
       .hud strong {
         color: var(--panel-accent);
       }
 
+      .hud__eyebrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hud__badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .hud__badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(138, 245, 207, 0.16);
+        border-radius: 999px;
+        background: rgba(138, 245, 207, 0.08);
+        color: var(--copy);
+        padding: 6px 10px;
+        font-size: 0.8rem;
+      }
+
+      .hud__stack {
+        display: grid;
+        gap: 9px;
+        margin-top: 12px;
+      }
+
+      .hud__card {
+        border: 1px solid rgba(130, 170, 255, 0.16);
+        border-radius: 15px;
+        background: rgba(3, 7, 12, 0.46);
+        padding: 10px 12px;
+      }
+
+      .hud__card-label {
+        color: var(--muted);
+        font-size: 0.76rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hud__card-value {
+        display: block;
+        margin-top: 4px;
+        color: var(--copy);
+        font-size: 0.98rem;
+        line-height: 1.28;
+      }
+
+      .hud__card-meta {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        line-height: 1.28;
+        font-size: 0.86rem;
+      }
+
       .hud dl {
         display: grid;
         grid-template-columns: auto 1fr;
         gap: 8px 12px;
-        margin: 14px 0 0;
+        margin: 12px 0 0;
       }
 
       .hud dt {
@@ -103,7 +175,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        margin-top: 14px;
+        margin-top: 10px;
       }
 
       .hud__controls-group {
@@ -134,11 +206,11 @@
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 8px;
-        margin-top: 14px;
+        margin-top: 12px;
       }
 
       .hud__heatmap {
-        margin-top: 14px;
+        margin-top: 12px;
       }
 
       .hud__heatmap-header {
@@ -154,10 +226,28 @@
       #population-heatmap {
         display: block;
         width: 100%;
-        height: 138px;
+        height: 112px;
         border: 1px solid rgba(138, 245, 207, 0.14);
         border-radius: 14px;
         background: rgba(5, 9, 15, 0.66);
+      }
+
+      .hud__details {
+        margin-top: 12px;
+        border-top: 1px solid rgba(130, 170, 255, 0.14);
+        padding-top: 10px;
+      }
+
+      .hud__details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.84rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .hud__details[open] summary {
+        color: var(--panel-accent);
       }
 
       .hud__chat input {
@@ -171,7 +261,22 @@
       }
 
       #telemetry-panel[data-telemetry-enabled="false"] .telemetry-debug-only {
-        opacity: 0.56;
+        display: none;
+      }
+
+      #telemetry-panel[data-telemetry-enabled="false"] {
+        width: auto;
+        max-height: none;
+        padding: 12px 14px;
+      }
+
+      #telemetry-panel[data-telemetry-enabled="false"] h1,
+      #telemetry-panel[data-telemetry-enabled="false"] p {
+        display: none;
+      }
+
+      #telemetry-panel[data-telemetry-enabled="false"] .hud__controls {
+        margin-top: 0;
       }
     </style>
   </head>
@@ -179,53 +284,59 @@
     <div id="app">
       <canvas id="pod-web-canvas"></canvas>
       <section class="hud">
-        <h1>Prompt or Die Browser Client</h1>
-        <p>
-          Real <strong>Three.js</strong> scene consumption for the
-          <strong>pod-render</strong> WebGPU frame contract, with instanced 3D
-          batches, billboards, and a 2D overlay pass.
+        <div class="hud__eyebrow">
+          <span>Verdant Hollow live shard</span>
+          <span id="backend-label">starting…</span>
+        </div>
+        <h1>Prompt or Die</h1>
+        <p id="feedback-label">
+          Awaiting authoritative outcomes
         </p>
-        <dl>
-          <dt>Backend</dt>
-          <dd id="backend-label">starting…</dd>
-          <dt>Connection</dt>
-          <dd id="connection-label">offline demo / bridge mode</dd>
-          <dt>World</dt>
-          <dd id="world-label">demo scene</dd>
-          <dt>Population</dt>
-          <dd id="population-label">No authoritative population state yet</dd>
-          <dt>Target</dt>
-          <dd id="target-label">No target selected</dd>
-          <dt>Suggested</dt>
-          <dd id="affordance-label">Tab to cycle targets</dd>
-          <dt>Action</dt>
-          <dd id="action-status-label">idle</dd>
-          <dt>Feedback</dt>
-          <dd id="feedback-label">Awaiting authoritative outcomes</dd>
-          <dt>Events</dt>
-          <dd class="hud__multiline" id="event-feed-label">No authoritative events yet</dd>
-          <dt>Quality</dt>
-          <dd id="quality-label">auto</dd>
-          <dt>Source</dt>
-          <dd id="frame-source">demo frame</dd>
-          <dt>Stats</dt>
-          <dd id="stats-label">warming up…</dd>
-          <dt>Controls</dt>
-          <dd><code>WASD</code> move · <code>Tab</code> target · <code>Space</code> attack · <code>E</code> interact · <code>Enter</code> chat</dd>
-          <dt>Bridge</dt>
-          <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
-        </dl>
-        <div class="hud__heatmap">
-          <div class="hud__heatmap-header">
-            <span>Population heatmap</span>
-            <span id="population-heatmap-legend">Awaiting shard population</span>
+        <div class="hud__badge-row">
+          <span class="hud__badge" id="connection-label">offline demo / bridge mode</span>
+          <span class="hud__badge" id="quality-label">auto</span>
+        </div>
+        <div class="hud__stack">
+          <div class="hud__card">
+            <span class="hud__card-label">World</span>
+            <strong class="hud__card-value" id="world-label">demo scene</strong>
+            <span class="hud__card-meta" id="population-label">No authoritative population state yet</span>
           </div>
-          <canvas id="population-heatmap"></canvas>
+          <div class="hud__card">
+            <span class="hud__card-label">Target</span>
+            <strong class="hud__card-value" id="target-label">No target selected</strong>
+            <span class="hud__card-meta" id="affordance-label">Tab to cycle targets</span>
+          </div>
+          <div class="hud__card">
+            <span class="hud__card-label">Action</span>
+            <strong class="hud__card-value" id="action-status-label">idle</strong>
+            <span class="hud__card-meta hud__multiline" id="event-feed-label">No authoritative events yet</span>
+          </div>
         </div>
         <form class="hud__chat" id="chat-form">
           <input id="chat-input" type="text" maxlength="120" placeholder="Say something to the shard…" />
           <button type="submit">Send</button>
         </form>
+        <details class="hud__details">
+          <summary>World diagnostics and controls</summary>
+          <div class="hud__heatmap">
+            <div class="hud__heatmap-header">
+              <span>Population heatmap</span>
+              <span id="population-heatmap-legend">Awaiting shard population</span>
+            </div>
+            <canvas id="population-heatmap"></canvas>
+          </div>
+          <dl>
+            <dt>Source</dt>
+            <dd id="frame-source">demo frame</dd>
+            <dt>Stats</dt>
+            <dd id="stats-label">warming up…</dd>
+            <dt>Controls</dt>
+            <dd><code>WASD</code> move · <code>Tab</code> target · <code>Space</code> attack · <code>E</code> interact · <code>Enter</code> chat</dd>
+            <dt>Bridge</dt>
+            <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
+          </dl>
+        </details>
       </section>
       <section class="hud hud--telemetry" id="telemetry-panel" data-telemetry-enabled="false">
         <h1>Debug Telemetry</h1>

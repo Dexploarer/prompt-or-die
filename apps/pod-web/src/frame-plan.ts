@@ -89,12 +89,12 @@ export function buildCameraPose(
   camera: CameraState,
   options: PodThreeCameraRigOptions = {}
 ): PlannedCameraPose {
-  const pitch = options.pitch ?? Math.PI / 5;
-  const baseDistance = options.baseDistance ?? 54;
-  const minDistance = options.minDistance ?? 12;
-  const maxDistance = options.maxDistance ?? 180;
+  const pitch = options.pitch ?? 0.42;
+  const baseDistance = options.baseDistance ?? 28;
+  const minDistance = options.minDistance ?? 18;
+  const maxDistance = options.maxDistance ?? 48;
   const distance = clamp(baseDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
-  const heightOffset = options.height ?? 12;
+  const heightOffset = options.height ?? 3.5;
   const target = new Vector3(camera.x, 0, camera.y);
   const azimuth = camera.rotation;
   const horizontalDistance = Math.cos(pitch) * distance;
@@ -111,7 +111,7 @@ export function buildCameraPose(
     position: position.toArray(),
     target: target.toArray(),
     quaternion,
-    fov: options.fov ?? 55,
+    fov: options.fov ?? 52,
     near: options.near ?? 0.1,
     far: options.far ?? 1024
   };
