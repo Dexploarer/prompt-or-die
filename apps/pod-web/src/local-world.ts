@@ -28,7 +28,9 @@ const COMPANION_RANGE = 2.8;
 const PLAYER_ATTACK_COOLDOWN = 30;
 const CREATURE_ATTACK_COOLDOWN = 40;
 const COMPANION_ATTACK_COOLDOWN = 26;
-const WORLD_LIMIT = 11.5;
+const WORLD_LIMIT = 18.5;
+const LOCAL_WORLD_CHUNK_SIZE = 8;
+const LOCAL_ACTIVE_CHUNK_RADIUS = 1;
 
 type LocalEntityRole =
   | "player"
@@ -76,6 +78,103 @@ interface PendingActionBatch {
   summary: string;
 }
 
+interface LocalActionResult {
+  rejection: string | null;
+  progressionDirty: boolean;
+}
+
+interface LocalQuestStageDefinition {
+  stageId: string;
+  title: string;
+  objectives: string[];
+  stageTags: string[];
+  nextStageId: string | null;
+}
+
+interface LocalQuestGraphState {
+  graphId: string;
+  displayName: string;
+  repeatable: boolean;
+  currentStageId: string;
+  completedStageIds: string[];
+  stages: LocalQuestStageDefinition[];
+}
+
+interface LocalFactionReputationTier {
+  tierId: string;
+  label: string;
+  minimumScore: number;
+  perkTags: string[];
+}
+
+interface LocalFactionTrackState {
+  trackId: string;
+  displayName: string;
+  score: number;
+  tiers: LocalFactionReputationTier[];
+}
+
+interface LocalEncounterSpawnEntry {
+  archetypeId: string;
+  weight: number;
+  minCount: number;
+  maxCount: number;
+  requiredStageTags: string[];
+  requiredReputationTiers: string[];
+}
+
+interface LocalEncounterTableState {
+  tableId: string;
+  biomeId: string;
+  spawnGroup: string;
+  ambientCap: number;
+  entries: LocalEncounterSpawnEntry[];
+}
+
+interface LocalRegionState {
+  regionId: string;
+  displayName: string;
+  primaryBiomeId: string;
+  chunkKeys: string[];
+  activeQuestGraphIds: string[];
+  dominantFactionTrackId: string;
+  encounterTableIds: string[];
+}
+
+interface LocalPersistedEntityRecord {
+  entity: LocalEntity | null;
+  removedAtTick: number | null;
+  respawnTemplate: boolean;
+  chunkKey: string;
+}
+
+export interface LocalWorldDebugState {
+  activeChunkKeys: string[];
+  currentRegionId: string | null;
+  currentRegionName: string | null;
+  questGraphs: Array<{
+    graphId: string;
+    displayName: string;
+    currentStageId: string;
+    currentStageTitle: string;
+    currentStageTags: string[];
+    completed: boolean;
+  }>;
+  factionReputation: Array<{
+    trackId: string;
+    displayName: string;
+    score: number;
+    tierId: string;
+    tierLabel: string;
+  }>;
+  encounterTables: Array<{
+    tableId: string;
+    biomeId: string;
+    spawnGroup: string;
+    ambientCap: number;
+  }>;
+}
+
 interface LocalWorldState {
   tick: number;
   entities: LocalEntity[];
@@ -83,6 +182,15 @@ interface LocalWorldState {
   companionRoster: CompanionRosterEntry[];
   activeCompanionId: number | null;
   autoRetaliate: boolean;
+  activeChunkKeys: string[];
+  templateEntities: Map<number, LocalEntity>;
+  templateChunkEntityIds: Map<string, number[]>;
+  persistedEntities: Map<number, LocalPersistedEntityRecord>;
+  dynamicChunkEntityIds: Map<string, Set<number>>;
+  regions: Map<string, LocalRegionState>;
+  questGraphs: Map<string, LocalQuestGraphState>;
+  factionTracks: Map<string, LocalFactionTrackState>;
+  encounterTables: Map<string, LocalEncounterTableState>;
 }
 
 export class PodWebLocalWorld {
@@ -192,14 +300,56 @@ export class PodWebLocalWorld {
     return this.state.companionRoster.slice();
   }
 
+  currentDebugState(): LocalWorldDebugState {
+    const player = this.findEntity(PLAYER_ID);
+    const currentRegionId = player?.metadata.regionId ?? null;
+    const currentRegionName = player?.metadata.regionName ?? null;
+
+    return {
+      activeChunkKeys: this.state.activeChunkKeys.slice(),
+      currentRegionId,
+      currentRegionName,
+      questGraphs: Array.from(this.state.questGraphs.values()).map((graph) => {
+        const stage = graph.stages.find((entry) => entry.stageId === graph.currentStageId);
+        return {
+          graphId: graph.graphId,
+          displayName: graph.displayName,
+          currentStageId: graph.currentStageId,
+          currentStageTitle: stage?.title ?? graph.currentStageId,
+          currentStageTags: stage?.stageTags ?? [],
+          completed: graph.completedStageIds.includes(graph.currentStageId) && stage?.nextStageId == null
+        };
+      }),
+      factionReputation: Array.from(this.state.factionTracks.values()).map((track) => {
+        const tier = currentFactionTier(track);
+        return {
+          trackId: track.trackId,
+          displayName: track.displayName,
+          score: track.score,
+          tierId: tier.tierId,
+          tierLabel: tier.label
+        };
+      }),
+      encounterTables: Array.from(this.state.encounterTables.values()).map((table) => ({
+        tableId: table.tableId,
+        biomeId: table.biomeId,
+        spawnGroup: table.spawnGroup,
+        ambientCap: table.ambientCap
+      }))
+    };
+  }
+
   private runTick(): void {
     this.state.tick += 1;
     const events: NetworkGameEvent[] = [];
+    let progressionDirty = false;
 
-    this.processPendingActions(events);
+    progressionDirty = this.processPendingActions(events) || progressionDirty;
     this.updateAutonomousBehaviors();
     this.integrateMovement();
+    this.syncStreamingMetadataForActiveEntities();
     this.resolveCombat(events);
+    this.updateChunkResidency(progressionDirty);
 
     if (events.length > 0) {
       this.pendingEvents.push(...events);
@@ -214,14 +364,17 @@ export class PodWebLocalWorld {
     };
   }
 
-  private processPendingActions(events: NetworkGameEvent[]): void {
+  private processPendingActions(events: NetworkGameEvent[]): boolean {
     const ready = this.pendingActions.filter((batch) => batch.tick <= this.state.tick);
     this.pendingActions = this.pendingActions.filter((batch) => batch.tick > this.state.tick);
+    let progressionDirty = false;
 
     for (const batch of ready) {
       let rejectedReason: string | null = null;
       for (const action of batch.actions) {
-        const rejection = this.applyAction(action, events);
+        const outcome = this.applyAction(action, events);
+        const rejection = outcome.rejection;
+        progressionDirty = progressionDirty || outcome.progressionDirty;
         if (!rejectedReason && rejection) {
           rejectedReason = rejection;
         }
@@ -245,67 +398,70 @@ export class PodWebLocalWorld {
         };
       }
     }
+
+    return progressionDirty;
   }
 
-  private applyAction(action: BrowserAction, events: NetworkGameEvent[]): string | null {
+  private applyAction(action: BrowserAction, events: NetworkGameEvent[]): LocalActionResult {
     const player = requireEntity(this.state, PLAYER_ID);
 
     switch (action.kind) {
       case "move":
         player.desiredMove = normalize(action.direction);
-        return null;
+        return accepted();
       case "stop":
         player.desiredMove = null;
         player.combatTargetId = null;
-        return null;
+        return accepted();
       case "rotate":
         player.rotation = action.angle;
-        return null;
+        return accepted();
       case "lookAt":
         player.rotation = angleBetween(player.position, action.target);
-        return null;
+        return accepted();
       case "attack":
-        return "Select a target before attacking";
+        return rejected("Select a target before attacking");
       case "attackTarget": {
         const target = this.findEntity(action.target);
         if (!target || !target.metadata.interaction.canAttack) {
-          return "Target cannot be attacked";
+          return rejected("Target cannot be attacked");
         }
         if (!withinRange(player.position, target.position, MELEE_RANGE)) {
-          return "Move closer to attack";
+          return rejected("Move closer to attack");
         }
         player.combatTargetId = target.id;
         if (target.role === "wild") {
           target.combatTargetId = player.id;
         }
         this.performAttack(player, target, events, MELEE_RANGE, PLAYER_ATTACK_COOLDOWN);
-        return null;
+        return accepted();
       }
       case "interact":
-        return "Select a target before interacting";
+        return rejected("Select a target before interacting");
       case "interactWith": {
         const target = this.findEntity(action.target);
         if (!target || !target.metadata.interaction.canInspect) {
-          return "Target cannot be inspected";
+          return rejected("Target cannot be inspected");
         }
         if (!withinRange(player.position, target.position, target.interactionRadius + 0.8)) {
-          return "Move closer to inspect";
+          return rejected("Move closer to inspect");
         }
         events.push(eventRecord(this.state.tick, player.position, "Interact", describeInteraction(target), [
           player.id,
           target.id
         ]));
-        return null;
+        return this.handleInteractionProgression(player, target, events);
       }
       case "gatherResource": {
         const target = this.findEntity(action.target);
         if (!target || target.role !== "resource" || !target.metadata.interaction.canGather) {
-          return "Target cannot be gathered";
+          return rejected("Target cannot be gathered");
         }
         if (!withinRange(player.position, target.position, target.interactionRadius)) {
-          return "Move closer to gather";
+          return rejected("Move closer to gather");
         }
         target.resourceRemaining = Math.max(0, target.resourceRemaining - 1);
+        const depleted = target.resourceRemaining === 0;
         if (target.resourceRemaining === 0) {
           target.metadata.interaction.canGather = false;
           target.label = `Depleted ${target.label}`;
@@ -319,15 +475,19 @@ export class PodWebLocalWorld {
             [player.id, target.id]
           )
         );
-        return null;
+        if (depleted) {
+          this.destroyEntity(target.id);
+        }
+        this.adjustFactionReputation("verdant-wardens", 2, target.position, "Gather support", events);
+        return accepted(true);
       }
       case "loot": {
         const target = this.findEntity(action.target);
         if (!target || target.role !== "loot" || !target.metadata.interaction.canLoot) {
-          return "Target has no loot";
+          return rejected("Target has no loot");
         }
         if (!withinRange(player.position, target.position, target.interactionRadius)) {
-          return "Move closer to loot";
+          return rejected("Move closer to loot");
         }
         events.push(
           eventRecord(
@@ -338,22 +498,26 @@ export class PodWebLocalWorld {
             [player.id, target.id]
           )
         );
+        if (target.label === "Expedition Chest") {
+          this.advanceQuestGraph("ember-charm-recovery", target.position, events);
+          this.adjustFactionReputation("ancient-spirekeepers", 4, target.position, "Recovered relic cache", events);
+        }
         this.destroyEntity(target.id);
-        return null;
+        return accepted(target.label === "Expedition Chest");
       }
       case "captureCreature": {
         const target = this.findEntity(action.target);
         if (!target || target.role !== "wild" || !target.metadata.interaction.canCapture) {
-          return "Target cannot be captured";
+          return rejected("Target cannot be captured");
         }
         if (!withinRange(player.position, target.position, target.interactionRadius)) {
-          return "Move closer to capture";
+          return rejected("Move closer to capture");
         }
         if ((target.health ?? 0) > (target.maxHealth ?? 0) * 0.5) {
-          return "Weaken the creature first";
+          return rejected("Weaken the creature first");
         }
         if (this.state.companionRoster.length >= 3) {
-          return "Companion roster is full";
+          return rejected("Companion roster is full");
         }
         this.state.companionRoster.push({
           speciesId: target.metadata.speciesId ?? slug(target.label),
@@ -368,17 +532,20 @@ export class PodWebLocalWorld {
             [player.id, target.id]
           )
         );
+        this.advanceQuestGraph("lynx-patrol", target.position, events);
+        this.adjustFactionReputation("verdant-wardens", 6, target.position, "Captured hostile wildlife", events);
+        this.adjustFactionReputation("verdant-wilds", -4, target.position, "Captured apex creature", events);
         this.destroyEntity(target.id);
         player.combatTargetId = null;
-        return null;
+        return accepted(true);
       }
       case "summonCompanion": {
         const companion = this.state.companionRoster[action.slot];
         if (!companion) {
-          return "No companion in that slot";
+          return rejected("No companion in that slot");
         }
         if (this.state.activeCompanionId != null && this.findEntity(this.state.activeCompanionId)) {
-          return "A companion is already active";
+          return rejected("A companion is already active");
         }
         const entity = this.spawnCompanion(companion, action.slot, player.position);
         this.state.activeCompanionId = entity.id;
@@ -391,14 +558,14 @@ export class PodWebLocalWorld {
             [player.id, entity.id]
           )
         );
-        return null;
+        return accepted();
       }
       case "commandCompanion": {
         const companion = this.state.activeCompanionId != null
           ? this.findEntity(this.state.activeCompanionId)
           : null;
         if (!companion || companion.role !== "companion") {
-          return "No active companion";
+          return rejected("No active companion");
         }
         if (action.command === "Recall") {
           events.push(
@@ -412,7 +579,7 @@ export class PodWebLocalWorld {
           );
           this.destroyEntity(companion.id);
           this.state.activeCompanionId = null;
-          return null;
+          return accepted();
         }
         companion.companionMode = action.command;
         companion.combatTargetId =
@@ -426,7 +593,7 @@ export class PodWebLocalWorld {
             [player.id, companion.id, ...(action.target != null ? [action.target] : [])]
           )
         );
-        return null;
+        return accepted();
       }
       case "speak":
         events.push(
@@ -438,7 +605,7 @@ export class PodWebLocalWorld {
             [player.id]
           )
         );
-        return null;
+        return accepted();
       case "setAutoRetaliate":
         this.state.autoRetaliate = action.enabled;
         events.push(
@@ -450,10 +617,323 @@ export class PodWebLocalWorld {
             [player.id]
           )
         );
-        return null;
+        return accepted();
       case "idle":
-        return null;
+        return accepted();
     }
+  }
+
+  private handleInteractionProgression(
+    player: LocalEntity,
+    target: LocalEntity,
+    events: NetworkGameEvent[]
+  ): LocalActionResult {
+    let progressionDirty = false;
+
+    switch (target.label) {
+      case "Archivist Mara":
+        progressionDirty = this.advanceQuestGraph("verdant-intro", target.position, events) || progressionDirty;
+        break;
+      case "Forgekeeper Ivo":
+        progressionDirty = this.advanceQuestGraph("tempered-trail", target.position, events) || progressionDirty;
+        break;
+      case "Warden Selene":
+        progressionDirty = this.advanceQuestGraph("lynx-patrol", target.position, events) || progressionDirty;
+        break;
+      case "glass spire":
+        progressionDirty = this.advanceQuestGraph("verdant-intro", target.position, events) || progressionDirty;
+        progressionDirty = this.advanceQuestGraph("spire-attunement", target.position, events) || progressionDirty;
+        progressionDirty =
+          this.adjustFactionReputation(
+            "ancient-spirekeepers",
+            6,
+            target.position,
+            "Attuned the glass spire",
+            events
+          ) || progressionDirty;
+        break;
+      default:
+        break;
+    }
+
+    if (target.metadata.factionTrackId) {
+      progressionDirty =
+        this.adjustFactionReputation(
+          target.metadata.factionTrackId,
+          target.label === "glass spire" ? 0 : 1,
+          player.position,
+          `Interacted with ${target.label}`,
+          events
+        ) || progressionDirty;
+    }
+
+    return accepted(progressionDirty);
+  }
+
+  private advanceQuestGraph(
+    graphId: string,
+    origin: Vec2Tuple,
+    events: NetworkGameEvent[]
+  ): boolean {
+    const graph = this.state.questGraphs.get(graphId);
+    if (!graph) {
+      return false;
+    }
+
+    const currentStage = graph.stages.find((stage) => stage.stageId === graph.currentStageId);
+    if (!currentStage) {
+      return false;
+    }
+
+    if (!graph.completedStageIds.includes(currentStage.stageId)) {
+      graph.completedStageIds.push(currentStage.stageId);
+    }
+
+    if (currentStage.nextStageId == null) {
+      if (!graph.repeatable) {
+        events.push(
+          eventRecord(
+            this.state.tick,
+            origin,
+            "QuestCompleted",
+            `${graph.displayName} completed`,
+            [PLAYER_ID]
+          )
+        );
+        return true;
+      }
+      graph.currentStageId = graph.stages[0]?.stageId ?? currentStage.stageId;
+      events.push(
+        eventRecord(
+          this.state.tick,
+          origin,
+          "QuestReset",
+          `${graph.displayName} reset`,
+          [PLAYER_ID]
+        )
+      );
+      return true;
+    }
+
+    graph.currentStageId = currentStage.nextStageId;
+    const nextStage = graph.stages.find((stage) => stage.stageId === graph.currentStageId);
+    events.push(
+      eventRecord(
+        this.state.tick,
+        origin,
+        "QuestAdvanced",
+        `${graph.displayName} -> ${nextStage?.title ?? graph.currentStageId}`,
+        [PLAYER_ID]
+      )
+    );
+    return true;
+  }
+
+  private adjustFactionReputation(
+    trackId: string,
+    delta: number,
+    origin: Vec2Tuple,
+    reason: string,
+    events: NetworkGameEvent[]
+  ): boolean {
+    if (delta === 0) {
+      return false;
+    }
+
+    const track = this.state.factionTracks.get(trackId);
+    if (!track) {
+      return false;
+    }
+
+    const previousTier = currentFactionTier(track);
+    track.score += delta;
+    const nextTier = currentFactionTier(track);
+    events.push(
+      eventRecord(
+        this.state.tick,
+        origin,
+        "FactionReputationChanged",
+        `${track.displayName} ${delta > 0 ? "+" : ""}${delta} (${reason})`,
+        [PLAYER_ID]
+      )
+    );
+
+    if (previousTier.tierId !== nextTier.tierId) {
+      events.push(
+        eventRecord(
+          this.state.tick,
+          origin,
+          "FactionTierChanged",
+          `${track.displayName} -> ${nextTier.label}`,
+          [PLAYER_ID]
+        )
+      );
+    }
+
+    return true;
+  }
+
+  private syncStreamingMetadataForActiveEntities(): void {
+    for (const entity of this.state.entities) {
+      syncStreamingMetadataForEntity(entity, this.state);
+    }
+  }
+
+  private updateChunkResidency(forceRefresh: boolean): void {
+    const player = requireEntity(this.state, PLAYER_ID);
+    const desiredChunks = expandDesiredChunkKeys(
+      chunkKeyFromPosition(player.position),
+      LOCAL_ACTIVE_CHUNK_RADIUS
+    );
+    const currentChunks = new Set(this.state.activeChunkKeys);
+
+    for (const chunkKey of this.state.activeChunkKeys) {
+      if (!desiredChunks.includes(chunkKey)) {
+        this.deactivateChunk(chunkKey);
+      }
+    }
+
+    for (const chunkKey of desiredChunks) {
+      if (!currentChunks.has(chunkKey)) {
+        this.activateChunk(chunkKey);
+      } else if (forceRefresh) {
+        this.reconcileChunk(chunkKey);
+      }
+    }
+
+    this.state.activeChunkKeys = desiredChunks;
+  }
+
+  private deactivateChunk(chunkKey: string): void {
+    const removedIds = new Set<number>();
+    for (const entity of this.state.entities) {
+      if (
+        entity.id === PLAYER_ID ||
+        entity.role === "companion" ||
+        entity.metadata.chunkKey !== chunkKey
+      ) {
+        continue;
+      }
+
+      this.state.persistedEntities.set(entity.id, {
+        entity: cloneEntity(entity),
+        removedAtTick: null,
+        respawnTemplate: this.state.templateEntities.has(entity.id),
+        chunkKey
+      });
+      removedIds.add(entity.id);
+    }
+
+    if (removedIds.size === 0) {
+      return;
+    }
+
+    const player = requireEntity(this.state, PLAYER_ID);
+    if (player.combatTargetId != null && removedIds.has(player.combatTargetId)) {
+      player.combatTargetId = null;
+    }
+
+    const companion =
+      this.state.activeCompanionId != null ? this.findEntity(this.state.activeCompanionId) : null;
+    if (companion?.combatTargetId != null && removedIds.has(companion.combatTargetId)) {
+      companion.combatTargetId = null;
+    }
+
+    this.state.entities = this.state.entities.filter((entity) => !removedIds.has(entity.id));
+  }
+
+  private activateChunk(chunkKey: string): void {
+    const templateIds = this.state.templateChunkEntityIds.get(chunkKey) ?? [];
+    for (const entityId of templateIds) {
+      if (this.findEntity(entityId)) {
+        continue;
+      }
+      const template = this.state.templateEntities.get(entityId);
+      if (!template || !shouldTemplateEntityBeActive(template, this.state)) {
+        continue;
+      }
+      const entity = this.instantiateChunkEntity(entityId, chunkKey);
+      if (entity) {
+        this.state.entities.push(entity);
+      }
+    }
+
+    const dynamicIds = this.state.dynamicChunkEntityIds.get(chunkKey);
+    if (!dynamicIds) {
+      return;
+    }
+    for (const entityId of dynamicIds) {
+      if (this.findEntity(entityId) || this.state.templateEntities.has(entityId)) {
+        continue;
+      }
+      const record = this.state.persistedEntities.get(entityId);
+      if (record?.entity) {
+        const entity = cloneEntity(record.entity);
+        syncStreamingMetadataForEntity(entity, this.state);
+        this.state.entities.push(entity);
+      }
+    }
+  }
+
+  private reconcileChunk(chunkKey: string): void {
+    const templateIds = this.state.templateChunkEntityIds.get(chunkKey) ?? [];
+
+    for (const entityId of templateIds) {
+      const activeEntity = this.findEntity(entityId);
+      const template = this.state.templateEntities.get(entityId);
+      if (!template) {
+        continue;
+      }
+
+      const shouldBeActive = shouldTemplateEntityBeActive(template, this.state);
+      if (activeEntity && !shouldBeActive) {
+        this.deactivateChunkEntity(activeEntity, chunkKey);
+      } else if (!activeEntity && shouldBeActive) {
+        const entity = this.instantiateChunkEntity(entityId, chunkKey);
+        if (entity) {
+          this.state.entities.push(entity);
+        }
+      }
+    }
+  }
+
+  private deactivateChunkEntity(entity: LocalEntity, chunkKey: string): void {
+    this.state.persistedEntities.set(entity.id, {
+      entity: cloneEntity(entity),
+      removedAtTick: null,
+      respawnTemplate: this.state.templateEntities.has(entity.id),
+      chunkKey
+    });
+    this.state.entities = this.state.entities.filter((candidate) => candidate.id !== entity.id);
+  }
+
+  private instantiateChunkEntity(entityId: number, chunkKey: string): LocalEntity | null {
+    const template = this.state.templateEntities.get(entityId);
+    if (!template) {
+      return null;
+    }
+
+    const record = this.state.persistedEntities.get(entityId);
+    if (record) {
+      if (record.entity) {
+        const entity = cloneEntity(record.entity);
+        syncStreamingMetadataForEntity(entity, this.state);
+        return entity;
+      }
+
+      if (
+        !record.respawnTemplate ||
+        record.removedAtTick == null ||
+        !canRespawnTemplate(template, record.removedAtTick, this.state.tick)
+      ) {
+        return null;
+      }
+    }
+
+    const entity = cloneEntity(template);
+    syncStreamingMetadataForEntity(entity, this.state);
+    this.state.persistedEntities.delete(entityId);
+    return entity;
   }
 
   private updateAutonomousBehaviors(): void {
@@ -651,6 +1131,14 @@ export class PodWebLocalWorld {
       "beast-bone"
     );
     this.state.nextEntityId += 1;
+    syncStreamingMetadataForEntity(loot, this.state);
+    const chunkKey = loot.metadata.chunkKey ?? chunkKeyFromPosition(loot.position);
+    let dynamicIds = this.state.dynamicChunkEntityIds.get(chunkKey);
+    if (!dynamicIds) {
+      dynamicIds = new Set<number>();
+      this.state.dynamicChunkEntityIds.set(chunkKey, dynamicIds);
+    }
+    dynamicIds.add(loot.id);
     this.state.entities.push(loot);
   }
 
@@ -667,12 +1155,28 @@ export class PodWebLocalWorld {
       companion.speciesId
     );
     this.state.nextEntityId += 1;
+    syncStreamingMetadataForEntity(entity, this.state);
     this.state.entities.push(entity);
     return entity;
   }
 
   private destroyEntity(entityId: number): void {
-    this.state.entities = this.state.entities.filter((entity) => entity.id !== entityId);
+    const entity = this.findEntity(entityId);
+    if (!entity) {
+      return;
+    }
+
+    const chunkKey = entity.metadata.chunkKey ?? chunkKeyFromPosition(entity.position);
+    if (entity.role !== "player" && entity.role !== "companion") {
+      this.state.persistedEntities.set(entity.id, {
+        entity: null,
+        removedAtTick: this.state.tick,
+        respawnTemplate: this.state.templateEntities.has(entity.id),
+        chunkKey
+      });
+    }
+
+    this.state.entities = this.state.entities.filter((candidate) => candidate.id !== entityId);
   }
 
   private findEntity(entityId: number): LocalEntity | null {
@@ -687,7 +1191,8 @@ export function renderGameToText(
   actionState: DirectConnectActionState,
   feedback: string,
   recentEvents: NetworkGameEvent[],
-  companionRoster: CompanionRosterEntry[]
+  companionRoster: CompanionRosterEntry[],
+  debugState: LocalWorldDebugState
 ): string {
   const player = snapshot.entities.find((entity) => entity.id === controlledEntity) ?? null;
   const target = snapshot.entities.find((entity) => entity.id === selectedTargetId) ?? null;
@@ -718,6 +1223,17 @@ export function renderGameToText(
         }
       : null,
     companions: companionRoster,
+    streaming: {
+      chunkSize: LOCAL_WORLD_CHUNK_SIZE,
+      activeChunks: debugState.activeChunkKeys,
+      currentRegionId: debugState.currentRegionId,
+      currentRegionName: debugState.currentRegionName
+    },
+    progression: {
+      questGraphs: debugState.questGraphs,
+      factionReputation: debugState.factionReputation,
+      encounterTables: debugState.encounterTables
+    },
     actionState,
     feedback,
     events: recentEvents.slice(-4).map((event) => event.summary),
@@ -742,27 +1258,84 @@ export function renderGameToText(
 }
 
 function createInitialState(playerName: string): LocalWorldState {
-  const entities: LocalEntity[] = [
-    createPlayerEntity(playerName),
+  const player = createPlayerEntity(playerName);
+  const regions = createRegionCatalog();
+  const questGraphs = createQuestGraphCatalog();
+  const factionTracks = createFactionTrackCatalog();
+  const encounterTables = createEncounterTableCatalog();
+  const templates = authoredTemplateEntities();
+  const templateEntities = new Map<number, LocalEntity>();
+  const templateChunkEntityIds = new Map<string, number[]>();
+
+  const draftState: LocalWorldState = {
+    tick: 0,
+    entities: [player],
+    nextEntityId: 60,
+    companionRoster: [],
+    activeCompanionId: null,
+    autoRetaliate: true,
+    activeChunkKeys: [],
+    templateEntities,
+    templateChunkEntityIds,
+    persistedEntities: new Map<number, LocalPersistedEntityRecord>(),
+    dynamicChunkEntityIds: new Map<string, Set<number>>(),
+    regions,
+    questGraphs,
+    factionTracks,
+    encounterTables
+  };
+
+  syncStreamingMetadataForEntity(player, draftState);
+
+  for (const template of templates) {
+    syncStreamingMetadataForEntity(template, draftState);
+    templateEntities.set(template.id, template);
+    const chunkKey = template.metadata.chunkKey ?? chunkKeyFromPosition(template.position);
+    const chunkEntityIds = templateChunkEntityIds.get(chunkKey) ?? [];
+    chunkEntityIds.push(template.id);
+    templateChunkEntityIds.set(chunkKey, chunkEntityIds);
+  }
+
+  draftState.activeChunkKeys = expandDesiredChunkKeys(
+    chunkKeyFromPosition(player.position),
+    LOCAL_ACTIVE_CHUNK_RADIUS
+  );
+
+  for (const chunkKey of draftState.activeChunkKeys) {
+    const ids = templateChunkEntityIds.get(chunkKey) ?? [];
+    for (const entityId of ids) {
+      const template = templateEntities.get(entityId);
+      if (!template || !shouldTemplateEntityBeActive(template, draftState)) {
+        continue;
+      }
+      draftState.entities.push(cloneEntity(template));
+    }
+  }
+
+  return draftState;
+}
+
+function authoredTemplateEntities(): LocalEntity[] {
+  return [
     createNpcEntity(2, "Archivist Mara", [-2.1, -2.9]),
     createNpcEntity(8, "Forgekeeper Ivo", [2.5, -2.4]),
     createNpcEntity(9, "Warden Selene", [0.8, 3.3]),
     createWildCreatureEntity(3, "Verdant Lynx", [5.8, 1.9], 18, 32),
     createWildCreatureEntity(4, "Cinder Hare", [7.2, -5.8], 22, 30),
-    createWildCreatureEntity(10, "Rift Stag", [1.8, 7.2], 26, 36),
+    createWildCreatureEntity(10, "Rift Stag", [1.8, 8.8], 26, 36),
     createResourceEntity(5, "Copper Vein", [3.8, -1.4], "Mining", "copper-ore"),
     createResourceEntity(6, "Ancient Pine", [-6.3, 4.8], "Woodcutting", "pine-log"),
-    createResourceEntity(11, "Moonstone Outcrop", [6.4, 5.8], "Mining", "moonstone-shard"),
+    createResourceEntity(11, "Moonstone Outcrop", [6.4, 8.6], "Mining", "moonstone-shard"),
     createResourceEntity(12, "Silver Birch", [-7.4, 1.8], "Woodcutting", "birch-log"),
     createLootEntity(7, "Supply Cache", [-2.5, 1.8], 48, "travel-ration"),
-    createLootEntity(13, "Expedition Chest", [4.8, 7.4], 96, "ember-charm"),
+    createLootEntity(13, "Expedition Chest", [4.8, 9.4], 96, "ember-charm"),
     createSceneryEntity(20, "wall north", [0, -10.8], [0, 0]),
     createSceneryEntity(21, "wall south", [0, 10.8], [0, 0]),
     createSceneryEntity(22, "wall west", [-11.2, 0], [0, 0]),
     createSceneryEntity(23, "wall east", [11.2, 0], [0, 0]),
     createSceneryEntity(24, "weathered boulder", [5.8, 5.6], [0, 0]),
     createSceneryEntity(25, "weathered boulder", [-5.4, -6.1], [0, 0]),
-    createSceneryEntity(26, "glass spire", [0.1, 6.0], [0, 0]),
+    createSceneryEntity(26, "glass spire", [0.1, 8.4], [0, 0]),
     createSceneryEntity(27, "canopy tree", [-4.6, 5.7], [0, 0]),
     createSceneryEntity(28, "canopy tree", [-7.6, 3.8], [0, 0]),
     createSceneryEntity(29, "basalt pillar", [4.5, -8.1], [0, 0]),
@@ -777,15 +1350,390 @@ function createInitialState(playerName: string): LocalWorldState {
     createSceneryEntity(38, "canopy tree", [-9.0, -3.2], [0, 0]),
     createSceneryEntity(39, "wall shrine", [0, -8.7], [0, 0])
   ];
+}
 
-  return {
-    tick: 0,
-    entities,
-    nextEntityId: 60,
-    companionRoster: [],
-    activeCompanionId: null,
-    autoRetaliate: true
-  };
+function createRegionCatalog(): Map<string, LocalRegionState> {
+  return new Map<string, LocalRegionState>([
+    [
+      "verdant-heart",
+      {
+        regionId: "verdant-heart",
+        displayName: "Verdant Heart",
+        primaryBiomeId: "verdant-hollow",
+        chunkKeys: ["-1:-1", "-1:0", "0:-1", "0:0"],
+        activeQuestGraphIds: ["verdant-intro", "tempered-trail"],
+        dominantFactionTrackId: "verdant-wardens",
+        encounterTableIds: ["verdant-heart-wildlife", "verdant-heart-resources"]
+      }
+    ],
+    [
+      "spirewatch",
+      {
+        regionId: "spirewatch",
+        displayName: "Spirewatch Rise",
+        primaryBiomeId: "verdant-hollow",
+        chunkKeys: ["-1:1", "0:1"],
+        activeQuestGraphIds: ["spire-attunement", "ember-charm-recovery"],
+        dominantFactionTrackId: "ancient-spirekeepers",
+        encounterTableIds: ["spirewatch-encounters", "spirewatch-resources"]
+      }
+    ],
+    [
+      "ashen-steppe",
+      {
+        regionId: "ashen-steppe",
+        displayName: "Ashen Steppe",
+        primaryBiomeId: "ashen-steppe",
+        chunkKeys: ["0:-2", "1:-1", "1:0"],
+        activeQuestGraphIds: ["lynx-patrol"],
+        dominantFactionTrackId: "verdant-wilds",
+        encounterTableIds: ["ashen-steppe-encounters"]
+      }
+    ],
+    [
+      "gloamwood-edge",
+      {
+        regionId: "gloamwood-edge",
+        displayName: "Gloamwood Edge",
+        primaryBiomeId: "gloamwood",
+        chunkKeys: ["-2:-1", "-2:0"],
+        activeQuestGraphIds: ["lynx-patrol"],
+        dominantFactionTrackId: "verdant-wilds",
+        encounterTableIds: ["gloamwood-encounters", "gloamwood-resources"]
+      }
+    ]
+  ]);
+}
+
+function createQuestGraphCatalog(): Map<string, LocalQuestGraphState> {
+  return new Map<string, LocalQuestGraphState>([
+    [
+      "verdant-intro",
+      {
+        graphId: "verdant-intro",
+        displayName: "Verdant Introduction",
+        repeatable: false,
+        currentStageId: "speak-to-mara",
+        completedStageIds: [],
+        stages: [
+          {
+            stageId: "speak-to-mara",
+            title: "Speak to Archivist Mara",
+            objectives: ["Report to Mara in the Verdant Heart"],
+            stageTags: ["intro", "hub"],
+            nextStageId: "attune-spire"
+          },
+          {
+            stageId: "attune-spire",
+            title: "Attune the Glass Spire",
+            objectives: ["Inspect the glass spire in Spirewatch Rise"],
+            stageTags: ["attunement"],
+            nextStageId: "wardens-briefing"
+          },
+          {
+            stageId: "wardens-briefing",
+            title: "Return to the Wardens",
+            objectives: ["Brief Warden Selene after the attunement"],
+            stageTags: ["attuned", "patrol"],
+            nextStageId: null
+          }
+        ]
+      }
+    ],
+    [
+      "lynx-patrol",
+      {
+        graphId: "lynx-patrol",
+        displayName: "Lynx Patrol",
+        repeatable: false,
+        currentStageId: "report-to-selene",
+        completedStageIds: [],
+        stages: [
+          {
+            stageId: "report-to-selene",
+            title: "Report to Warden Selene",
+            objectives: ["Check in with Selene about patrol routes"],
+            stageTags: ["patrol"],
+            nextStageId: "capture-lynx"
+          },
+          {
+            stageId: "capture-lynx",
+            title: "Capture a Verdant Lynx",
+            objectives: ["Weaken and capture a Verdant Lynx"],
+            stageTags: ["hunt"],
+            nextStageId: "return-to-selene"
+          },
+          {
+            stageId: "return-to-selene",
+            title: "Return with a Companion",
+            objectives: ["Show Selene the captured companion"],
+            stageTags: ["companions"],
+            nextStageId: null
+          }
+        ]
+      }
+    ],
+    [
+      "tempered-trail",
+      {
+        graphId: "tempered-trail",
+        displayName: "Tempered Trail",
+        repeatable: false,
+        currentStageId: "meet-ivo",
+        completedStageIds: [],
+        stages: [
+          {
+            stageId: "meet-ivo",
+            title: "Meet Forgekeeper Ivo",
+            objectives: ["Receive a supply list from Ivo"],
+            stageTags: ["crafting"],
+            nextStageId: "gather-copper"
+          },
+          {
+            stageId: "gather-copper",
+            title: "Gather Copper Ore",
+            objectives: ["Mine copper from the Verdant Heart vein"],
+            stageTags: ["gathering"],
+            nextStageId: null
+          }
+        ]
+      }
+    ],
+    [
+      "spire-attunement",
+      {
+        graphId: "spire-attunement",
+        displayName: "Spire Attunement",
+        repeatable: false,
+        currentStageId: "inspect-spire",
+        completedStageIds: [],
+        stages: [
+          {
+            stageId: "inspect-spire",
+            title: "Inspect the Glass Spire",
+            objectives: ["Reach the spire and attune to it"],
+            stageTags: ["exploration"],
+            nextStageId: "awaken-resonance"
+          },
+          {
+            stageId: "awaken-resonance",
+            title: "Awaken the Resonance",
+            objectives: ["Unlock the moonstone outcrop"],
+            stageTags: ["attuned", "resonance"],
+            nextStageId: null
+          }
+        ]
+      }
+    ],
+    [
+      "ember-charm-recovery",
+      {
+        graphId: "ember-charm-recovery",
+        displayName: "Ember Charm Recovery",
+        repeatable: false,
+        currentStageId: "search-expedition",
+        completedStageIds: [],
+        stages: [
+          {
+            stageId: "search-expedition",
+            title: "Search the Expedition Grounds",
+            objectives: ["Locate the expedition chest in Spirewatch Rise"],
+            stageTags: ["ruins"],
+            nextStageId: "recover-charm"
+          },
+          {
+            stageId: "recover-charm",
+            title: "Recover the Ember Charm",
+            objectives: ["Loot the expedition chest"],
+            stageTags: ["artifact"],
+            nextStageId: null
+          }
+        ]
+      }
+    ]
+  ]);
+}
+
+function createFactionTrackCatalog(): Map<string, LocalFactionTrackState> {
+  return new Map<string, LocalFactionTrackState>([
+    [
+      "verdant-wardens",
+      {
+        trackId: "verdant-wardens",
+        displayName: "Verdant Wardens",
+        score: 18,
+        tiers: [
+          { tierId: "outsider", label: "Outsider", minimumScore: -99, perkTags: [] },
+          { tierId: "ally", label: "Ally", minimumScore: 0, perkTags: ["field-support"] },
+          { tierId: "trusted", label: "Trusted", minimumScore: 24, perkTags: ["supply-discounts"] },
+          { tierId: "warden-sworn", label: "Warden Sworn", minimumScore: 48, perkTags: ["elite-patrols"] }
+        ]
+      }
+    ],
+    [
+      "verdant-wilds",
+      {
+        trackId: "verdant-wilds",
+        displayName: "Verdant Wilds",
+        score: -8,
+        tiers: [
+          { tierId: "hostile", label: "Hostile", minimumScore: -99, perkTags: [] },
+          { tierId: "watched", label: "Watched", minimumScore: -10, perkTags: ["reduced-aggro"] },
+          { tierId: "calmed", label: "Calmed", minimumScore: 12, perkTags: ["rare-spawns"] }
+        ]
+      }
+    ],
+    [
+      "ancient-spirekeepers",
+      {
+        trackId: "ancient-spirekeepers",
+        displayName: "Ancient Spirekeepers",
+        score: 0,
+        tiers: [
+          { tierId: "unknown", label: "Unknown", minimumScore: -99, perkTags: [] },
+          { tierId: "noticed", label: "Noticed", minimumScore: 4, perkTags: ["spire-lore"] },
+          { tierId: "resonant", label: "Resonant", minimumScore: 10, perkTags: ["moonstone-access"] }
+        ]
+      }
+    ]
+  ]);
+}
+
+function createEncounterTableCatalog(): Map<string, LocalEncounterTableState> {
+  return new Map<string, LocalEncounterTableState>([
+    [
+      "verdant-heart-wildlife",
+      {
+        tableId: "verdant-heart-wildlife",
+        biomeId: "verdant-hollow",
+        spawnGroup: "wildlife",
+        ambientCap: 4,
+        entries: [
+          {
+            archetypeId: "verdant-lynx",
+            weight: 8,
+            minCount: 1,
+            maxCount: 2,
+            requiredStageTags: [],
+            requiredReputationTiers: []
+          }
+        ]
+      }
+    ],
+    [
+      "verdant-heart-resources",
+      {
+        tableId: "verdant-heart-resources",
+        biomeId: "verdant-hollow",
+        spawnGroup: "resources",
+        ambientCap: 4,
+        entries: [
+          {
+            archetypeId: "copper-vein-resource",
+            weight: 10,
+            minCount: 1,
+            maxCount: 1,
+            requiredStageTags: [],
+            requiredReputationTiers: []
+          }
+        ]
+      }
+    ],
+    [
+      "spirewatch-encounters",
+      {
+        tableId: "spirewatch-encounters",
+        biomeId: "verdant-hollow",
+        spawnGroup: "wildlife",
+        ambientCap: 3,
+        entries: [
+          {
+            archetypeId: "rift-stag",
+            weight: 5,
+            minCount: 1,
+            maxCount: 1,
+            requiredStageTags: ["patrol"],
+            requiredReputationTiers: []
+          }
+        ]
+      }
+    ],
+    [
+      "spirewatch-resources",
+      {
+        tableId: "spirewatch-resources",
+        biomeId: "verdant-hollow",
+        spawnGroup: "resources",
+        ambientCap: 2,
+        entries: [
+          {
+            archetypeId: "moonstone-outcrop-resource",
+            weight: 3,
+            minCount: 1,
+            maxCount: 1,
+            requiredStageTags: ["attuned"],
+            requiredReputationTiers: ["noticed"]
+          }
+        ]
+      }
+    ],
+    [
+      "ashen-steppe-encounters",
+      {
+        tableId: "ashen-steppe-encounters",
+        biomeId: "ashen-steppe",
+        spawnGroup: "wildlife",
+        ambientCap: 3,
+        entries: [
+          {
+            archetypeId: "cinder-hare",
+            weight: 9,
+            minCount: 1,
+            maxCount: 2,
+            requiredStageTags: [],
+            requiredReputationTiers: []
+          }
+        ]
+      }
+    ],
+    [
+      "gloamwood-encounters",
+      {
+        tableId: "gloamwood-encounters",
+        biomeId: "gloamwood",
+        spawnGroup: "wildlife",
+        ambientCap: 2,
+        entries: []
+      }
+    ],
+    [
+      "gloamwood-resources",
+      {
+        tableId: "gloamwood-resources",
+        biomeId: "gloamwood",
+        spawnGroup: "resources",
+        ambientCap: 3,
+        entries: [
+          {
+            archetypeId: "silver-birch-resource",
+            weight: 7,
+            minCount: 1,
+            maxCount: 1,
+            requiredStageTags: [],
+            requiredReputationTiers: []
+          },
+          {
+            archetypeId: "ancient-pine-resource",
+            weight: 5,
+            minCount: 1,
+            maxCount: 1,
+            requiredStageTags: ["crafting"],
+            requiredReputationTiers: []
+          }
+        ]
+      }
+    ]
+  ]);
 }
 
 function createPlayerEntity(playerName: string): LocalEntity {
@@ -1213,7 +2161,13 @@ function metadata(
 ): NetworkEntityMetadataSnapshot {
   return {
     kind,
+    chunkKey: null,
+    regionId: null,
+    regionName: null,
     teamId: null,
+    questGraphIds: [],
+    factionTrackId: null,
+    encounterTableId: null,
     combatStyle: null,
     speciesId: null,
     speciesName: null,
@@ -1348,6 +2302,203 @@ function createActionState(): DirectConnectActionState {
     lastRejectedReason: null,
     lastActionSummary: null
   };
+}
+
+function accepted(progressionDirty = false): LocalActionResult {
+  return {
+    rejection: null,
+    progressionDirty
+  };
+}
+
+function rejected(reason: string): LocalActionResult {
+  return {
+    rejection: reason,
+    progressionDirty: false
+  };
+}
+
+function cloneEntity(entity: LocalEntity): LocalEntity {
+  return {
+    ...entity,
+    position: [...entity.position],
+    velocity: [...entity.velocity],
+    metadata: {
+      ...entity.metadata,
+      questGraphIds: entity.metadata.questGraphIds.slice(),
+      faction: entity.metadata.faction ? { ...entity.metadata.faction } : null,
+      questAnchor: entity.metadata.questAnchor
+        ? {
+            ...entity.metadata.questAnchor,
+            questIds: entity.metadata.questAnchor.questIds.slice(),
+            stageTags: entity.metadata.questAnchor.stageTags.slice()
+          }
+        : null,
+      encounterProfile: entity.metadata.encounterProfile
+        ? { ...entity.metadata.encounterProfile }
+        : null,
+      spawnProfile: entity.metadata.spawnProfile ? { ...entity.metadata.spawnProfile } : null,
+      atmosphere: entity.metadata.atmosphere ? { ...entity.metadata.atmosphere } : null,
+      atmosphereVolume: entity.metadata.atmosphereVolume
+        ? { ...entity.metadata.atmosphereVolume }
+        : null,
+      actorPresentation: entity.metadata.actorPresentation
+        ? { ...entity.metadata.actorPresentation }
+        : null,
+      combatPresentation: entity.metadata.combatPresentation
+        ? { ...entity.metadata.combatPresentation }
+        : null,
+      interaction: { ...entity.metadata.interaction }
+    },
+    spawn: [...entity.spawn],
+    desiredMove: entity.desiredMove ? [...entity.desiredMove] : null,
+    anchor: entity.anchor ? [...entity.anchor] : null
+  };
+}
+
+function currentFactionTier(track: LocalFactionTrackState): LocalFactionReputationTier {
+  return track.tiers
+    .slice()
+    .sort((left, right) => right.minimumScore - left.minimumScore)
+    .find((tier) => track.score >= tier.minimumScore) ?? track.tiers[0];
+}
+
+function activeQuestStageTags(state: LocalWorldState): Set<string> {
+  const tags = new Set<string>();
+  for (const graph of state.questGraphs.values()) {
+    const stage = graph.stages.find((entry) => entry.stageId === graph.currentStageId);
+    for (const tag of stage?.stageTags ?? []) {
+      tags.add(tag);
+    }
+  }
+  return tags;
+}
+
+function activeReputationTierIds(state: LocalWorldState): Set<string> {
+  const tiers = new Set<string>();
+  for (const track of state.factionTracks.values()) {
+    tiers.add(currentFactionTier(track).tierId);
+  }
+  return tiers;
+}
+
+function chunkKeyFromPosition(position: Vec2Tuple): string {
+  return `${Math.floor(position[0] / LOCAL_WORLD_CHUNK_SIZE)}:${Math.floor(
+    position[1] / LOCAL_WORLD_CHUNK_SIZE
+  )}`;
+}
+
+function expandDesiredChunkKeys(centerChunkKey: string, radius: number): string[] {
+  const [centerX, centerY] = parseChunkKey(centerChunkKey);
+  const keys = new Set<string>();
+  for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
+    for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+      keys.add(`${centerX + offsetX}:${centerY + offsetY}`);
+    }
+  }
+  return Array.from(keys).sort((left, right) => left.localeCompare(right));
+}
+
+function parseChunkKey(chunkKey: string): [number, number] {
+  const [rawX = "0", rawY = "0"] = chunkKey.split(":");
+  return [Number.parseInt(rawX, 10) || 0, Number.parseInt(rawY, 10) || 0];
+}
+
+function regionForChunkKey(
+  chunkKey: string,
+  regions: Map<string, LocalRegionState>
+): LocalRegionState | null {
+  for (const region of regions.values()) {
+    if (region.chunkKeys.includes(chunkKey)) {
+      return region;
+    }
+  }
+  return null;
+}
+
+function entityArchetypeId(entity: LocalEntity): string {
+  if (entity.metadata.speciesId) {
+    return entity.metadata.speciesId;
+  }
+  if (entity.metadata.spawnProfile) {
+    return entity.metadata.spawnProfile.profileId;
+  }
+  if (entity.role === "resource") {
+    return `${slug(entity.label)}-resource`;
+  }
+  return slug(entity.label);
+}
+
+function syncStreamingMetadataForEntity(entity: LocalEntity, state: LocalWorldState): void {
+  const chunkKey = chunkKeyFromPosition(entity.position);
+  const region = regionForChunkKey(chunkKey, state.regions);
+  const encounterTableId =
+    entity.metadata.encounterProfile?.tableId ??
+    findEncounterTableIdForEntity(entity, region, state.encounterTables);
+
+  entity.metadata.chunkKey = chunkKey;
+  entity.metadata.regionId = region?.regionId ?? null;
+  entity.metadata.regionName = region?.displayName ?? null;
+  entity.metadata.factionTrackId =
+    entity.metadata.faction?.factionId ?? region?.dominantFactionTrackId ?? null;
+  entity.metadata.questGraphIds = Array.from(
+    new Set([
+      ...(entity.metadata.questAnchor?.questIds ?? []),
+      ...(region?.activeQuestGraphIds ?? [])
+    ])
+  );
+  entity.metadata.encounterTableId = encounterTableId;
+}
+
+function findEncounterTableIdForEntity(
+  entity: LocalEntity,
+  region: LocalRegionState | null,
+  encounterTables: Map<string, LocalEncounterTableState>
+): string | null {
+  for (const tableId of region?.encounterTableIds ?? []) {
+    const table = encounterTables.get(tableId);
+    if (!table) {
+      continue;
+    }
+    if (table.entries.some((entry) => entry.archetypeId === entityArchetypeId(entity))) {
+      return tableId;
+    }
+  }
+  return null;
+}
+
+function shouldTemplateEntityBeActive(entity: LocalEntity, state: LocalWorldState): boolean {
+  const tableId = entity.metadata.encounterTableId;
+  if (!tableId) {
+    return true;
+  }
+
+  const table = state.encounterTables.get(tableId);
+  if (!table) {
+    return true;
+  }
+
+  const entry = table.entries.find((candidate) => candidate.archetypeId === entityArchetypeId(entity));
+  if (!entry) {
+    return true;
+  }
+
+  const activeTags = activeQuestStageTags(state);
+  const activeTiers = activeReputationTierIds(state);
+  return (
+    entry.requiredStageTags.every((tag) => activeTags.has(tag)) &&
+    entry.requiredReputationTiers.every((tierId) => activeTiers.has(tierId))
+  );
+}
+
+function canRespawnTemplate(
+  entity: LocalEntity,
+  removedAtTick: number,
+  currentTick: number
+): boolean {
+  const respawnTicks =
+    entity.metadata.spawnProfile?.respawnTicks ?? entity.metadata.encounterProfile?.respawnTicks ?? null;
+  return respawnTicks != null && currentTick >= removedAtTick + respawnTicks;
 }
 
 function toSnapshot(entity: LocalEntity): NetworkEntitySnapshot {

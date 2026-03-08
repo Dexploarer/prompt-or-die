@@ -508,7 +508,13 @@ export interface NetworkCombatPresentation {
 
 export interface NetworkEntityMetadataSnapshot {
   kind: NetworkEntityKind;
+  chunkKey: string | null;
+  regionId: string | null;
+  regionName: string | null;
   teamId: number | null;
+  questGraphIds: string[];
+  factionTrackId: string | null;
+  encounterTableId: string | null;
   combatStyle: NetworkCombatStyle | null;
   speciesId: string | null;
   speciesName: string | null;
@@ -787,7 +793,15 @@ function parseNetworkEntityMetadata(value: unknown): NetworkEntityMetadataSnapsh
 
   return {
     kind: isEntityKind(value.kind) ? value.kind : "Unknown",
+    chunkKey: optionalString(value.chunk_key ?? value.chunkKey) ?? null,
+    regionId: optionalString(value.region_id ?? value.regionId) ?? null,
+    regionName: optionalString(value.region_name ?? value.regionName) ?? null,
     teamId: optionalNumber(value.team_id ?? value.teamId) ?? null,
+    questGraphIds: parseStringArray(value.quest_graph_ids ?? value.questGraphIds) ?? [],
+    factionTrackId:
+      optionalString(value.faction_track_id ?? value.factionTrackId) ?? null,
+    encounterTableId:
+      optionalString(value.encounter_table_id ?? value.encounterTableId) ?? null,
     combatStyle: isCombatStyle(combatStyle) ? combatStyle : null,
     speciesId: optionalString(value.species_id ?? value.speciesId) ?? null,
     speciesName: optionalString(value.species_name ?? value.speciesName) ?? null,
@@ -1118,7 +1132,13 @@ function defaultInteractionHints(): NetworkEntityInteractionHints {
 function defaultNetworkEntityMetadata(): NetworkEntityMetadataSnapshot {
   return {
     kind: "Unknown",
+    chunkKey: null,
+    regionId: null,
+    regionName: null,
     teamId: null,
+    questGraphIds: [],
+    factionTrackId: null,
+    encounterTableId: null,
     combatStyle: null,
     speciesId: null,
     speciesName: null,

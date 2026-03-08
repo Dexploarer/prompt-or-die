@@ -638,7 +638,15 @@ window.render_game_to_text = () => {
       latestActionStatus,
       latestFeedback,
       recentWorldEvents,
-      localSandbox?.companionRoster() ?? []
+      localSandbox?.companionRoster() ?? [],
+      localSandbox?.currentDebugState() ?? {
+        activeChunkKeys: [],
+        currentRegionId: null,
+        currentRegionName: null,
+        questGraphs: [],
+        factionReputation: [],
+        encounterTables: []
+      }
     );
   }
 
