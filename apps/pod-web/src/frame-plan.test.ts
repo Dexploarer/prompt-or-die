@@ -478,6 +478,7 @@ describe("buildFramePlan", () => {
       preloadChunkRadius: 1
     });
 
+    expect(plan.worldChunkSize).toBe(24);
     expect(plan.visibleWorldChunks).toEqual(["0:0"]);
     expect(plan.preloadedWorldChunks).toContain("1:0");
     expect(plan.preloadedWorldChunks).toHaveLength(9);

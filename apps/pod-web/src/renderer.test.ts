@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { buildAmbientChunkDressingPlan } from "./renderer";
 import {
   describeEnvironmentPreset,
   sampleLakeMask,
@@ -73,5 +74,66 @@ describe("pod-web renderer landscape helpers", () => {
 
     expect(morning.timeOfDayHours).toBeGreaterThanOrEqual(0);
     expect(noon.environment.sunDirection[1]).toBeGreaterThan(morning.environment.sunDirection[1]);
+  });
+
+  test("builds deterministic ambient chunk dressing outside the lagoon and hub", () => {
+    const left = buildAmbientChunkDressingPlan({
+      visibleChunkKeys: ["0:0", "1:0", "0:1"],
+      preloadedChunkKeys: ["0:0", "1:0", "0:1", "1:1"],
+      cameraPosition: [12, 0, 8],
+      qualityPreset: "high",
+      worldChunkSize: 24,
+      highDetailDistance: 34,
+      mediumDetailDistance: 110
+    });
+    const right = buildAmbientChunkDressingPlan({
+      visibleChunkKeys: ["0:0", "1:0", "0:1"],
+      preloadedChunkKeys: ["0:0", "1:0", "0:1", "1:1"],
+      cameraPosition: [12, 0, 8],
+      qualityPreset: "high",
+      worldChunkSize: 24,
+      highDetailDistance: 34,
+      mediumDetailDistance: 110
+    });
+
+    expect(left.totalInstances).toBeGreaterThan(0);
+    expect(
+      left.meshBatches.map((batch) => ({
+        key: batch.key,
+        visibleCount: batch.visibleCount,
+        positions: batch.instances.map((instance) => instance.position.map((value) => Number(value.toFixed(3))))
+      }))
+    ).toEqual(
+      right.meshBatches.map((batch) => ({
+        key: batch.key,
+        visibleCount: batch.visibleCount,
+        positions: batch.instances.map((instance) => instance.position.map((value) => Number(value.toFixed(3))))
+      }))
+    );
+
+    for (const batch of left.meshBatches) {
+      for (const instance of batch.instances) {
+        const [x, _y, z] = instance.position;
+        expect(Math.hypot(x, z)).toBeGreaterThan(11.99);
+        expect(sampleLakeMask(x, z)).toBeLessThan(0.21);
+      }
+    }
+  });
+
+  test("prewarms chunk dressing assets for nearby streamed regions", () => {
+    const plan = buildAmbientChunkDressingPlan({
+      visibleChunkKeys: ["0:0"],
+      preloadedChunkKeys: ["0:0", "0:1", "1:0", "1:1"],
+      cameraPosition: [6, 0, 6],
+      qualityPreset: "ultra",
+      worldChunkSize: 24,
+      highDetailDistance: 42,
+      mediumDetailDistance: 132
+    });
+
+    const meshes = new Set(plan.prewarmRequests.map((request) => request.batch.mesh));
+    expect(meshes.has("canopy-tree")).toBe(true);
+    expect(meshes.has("weathered-boulder")).toBe(true);
+    expect(meshes.has("glass-spire")).toBe(true);
   });
 });

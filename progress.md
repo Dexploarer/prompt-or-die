@@ -13,3 +13,5 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Verified in Playwright that click-to-move still advances the player, assets fully warm, and keyboard movement follows the rotated camera after orbit input.
 - Added a stronger flagship biome read: elevated ridge/backdrop shaping, brighter shoreline separation, richer water texture, and a less dominant main HUD.
 - Fixed the timelapse boot state so the world now starts in readable daylight instead of sometimes loading into near-night on first paint.
+- Added deterministic ambient chunk dressing driven by streamed chunk keys instead of hand-placed demo clutter: trees, boulders, basalt columns, and spires now populate visible/warm regions without overlapping the lagoon or central hub.
+- Verified live in Playwright that the flagship sandbox now renders with ambient density on WebGPU (`ambient 14`, `117277 tris`, `14 resident assets`, `0 pending`) while staying in daylight and loading cleanly.
