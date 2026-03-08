@@ -937,5 +937,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 94
-**Current focus**: Iteration 95 worker-route gameplay-input parity proof, then richer traversal/combat feedback and less intrusive flagship HUD chrome
+### Iteration 95
+- [x] Fixed `pod-web` terrain anchoring for centered sample meshes by replacing the old `scaleY * 0.5` lift assumption with mesh-specific half-height calibration, so characters, creatures, props, and structures stop rendering partially below the terrain surface.
+- [x] Added deterministic contract coverage for the corrected hero and beast world-space height placement in `contracts.test.ts`, grounded against the shared terrain sampler instead of visual guesswork.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/direct-connect.test.ts ./src/frame-plan.test.ts ./src/renderer.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 95
+**Current focus**: Iteration 96 worker-route gameplay-input parity proof, then further HUD reduction and richer traversal/combat feedback
