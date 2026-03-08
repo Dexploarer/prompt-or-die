@@ -76,6 +76,11 @@
 use crate::types::*;
 use std::collections::{HashMap, VecDeque};
 
+use pod_core::{
+    decode_toon_document, AgentTickRollup, AgentToolCallEvent, FocusedEntityDebugSummary,
+    ToolCallStatus,
+};
+
 // ============================================================
 // CONFIGURATION
 // ============================================================
@@ -245,6 +250,11 @@ pub enum StdbEvent {
     AgentTickRollupReceived {
         tick_start: u64,
         tick_end: u64,
+        agent_entity_id: u64,
+        document: String,
+    },
+    /// Focused debug summary synthesized from tool-call/rollup streams.
+    FocusedEntityDebugSummaryReceived {
         agent_entity_id: u64,
         document: String,
     },
@@ -775,6 +785,8 @@ pub struct StdbClient {
     active_queries: Vec<String>,
     /// Monotonic entity id source for local reducer emulation.
     next_entity_id: u64,
+    /// Retained focused debug summaries synthesized from tool-call and rollup docs.
+    focused_debug_summaries: HashMap<u64, FocusedEntityDebugSummary>,
 
     // ── Metrics ──
     frames_processed: u64,
@@ -795,6 +807,7 @@ impl StdbClient {
             controlled_entity: None,
             active_queries: Vec::new(),
             next_entity_id: 1,
+            focused_debug_summaries: HashMap::new(),
             frames_processed: 0,
             reducers_called: 0,
             events_received: 0,
@@ -1926,6 +1939,17 @@ impl StdbClient {
                 document,
             });
         self.events_received += 1;
+
+        if let Some(summary_document) =
+            self.update_focused_summary_from_tool_call_document(agent_entity_id)
+        {
+            self.events
+                .push_back(StdbEvent::FocusedEntityDebugSummaryReceived {
+                    agent_entity_id,
+                    document: summary_document,
+                });
+            self.events_received += 1;
+        }
     }
 
     /// Store a received aggregate telemetry rollup for debug/editor subscriptions.
@@ -1943,6 +1967,131 @@ impl StdbClient {
             document,
         });
         self.events_received += 1;
+
+        if let Some(summary_document) =
+            self.update_focused_summary_from_rollup_document(agent_entity_id)
+        {
+            self.events
+                .push_back(StdbEvent::FocusedEntityDebugSummaryReceived {
+                    agent_entity_id,
+                    document: summary_document,
+                });
+            self.events_received += 1;
+        }
+    }
+
+    fn focused_debug_summary_entry(&mut self, entity_id: u64) -> &mut FocusedEntityDebugSummary {
+        let shard_id = self.config.db_name.clone();
+        self.focused_debug_summaries
+            .entry(entity_id)
+            .or_insert_with(|| FocusedEntityDebugSummary {
+                shard_id,
+                entity_id,
+                ..Default::default()
+            })
+    }
+
+    fn refresh_focused_summary_notes(summary: &mut FocusedEntityDebugSummary) {
+        summary.notes.clear();
+        if summary.tool_error_count > 0 {
+            summary
+                .notes
+                .push(format!("{} tool-call errors retained", summary.tool_error_count));
+        }
+        if summary.rejected_action_count > 0 {
+            summary.notes.push(format!(
+                "{} rejected actions retained",
+                summary.rejected_action_count
+            ));
+        }
+    }
+
+    fn update_focused_summary_from_tool_call_document(
+        &mut self,
+        agent_entity_id: u64,
+    ) -> Option<String> {
+        let tool_document = self
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                StdbEvent::AgentToolCallEventReceived {
+                    agent_entity_id: current_entity_id,
+                    document,
+                    ..
+                } if *current_entity_id == agent_entity_id => Some(document.as_str()),
+                _ => None,
+            })?;
+        let event: AgentToolCallEvent =
+            match decode_toon_document(tool_document, "agent_tool_call_event") {
+                Ok(event) => event,
+                Err(error) => {
+                    log::warn!(
+                        "[pod-stdb client] Failed to decode agent_tool_call_event for focused summary synthesis: {error}"
+                    );
+                    return None;
+                }
+            };
+
+        let summary = self.focused_debug_summary_entry(event.agent_entity_id);
+        let prior_tool_count = summary.tool_call_count;
+        summary.latest_tick = summary.latest_tick.max(event.tick);
+        summary.tool_call_count += 1;
+        summary.average_tool_latency_ms = if prior_tool_count == 0 {
+            event.trace.latency_ms as f32
+        } else {
+            ((summary.average_tool_latency_ms * prior_tool_count as f32)
+                + event.trace.latency_ms as f32)
+                / summary.tool_call_count as f32
+        };
+        summary.latest_tool_name = Some(event.trace.tool_name.clone());
+        summary.latest_tool_status = Some(format!("{:?}", event.trace.status));
+        summary.latest_tool_error = event.trace.error_message.clone();
+        if !matches!(
+            event.trace.status,
+            ToolCallStatus::Requested | ToolCallStatus::Succeeded
+        ) {
+            summary.tool_error_count += 1;
+        }
+        Self::refresh_focused_summary_notes(summary);
+        Some(summary.to_toon_document())
+    }
+
+    fn update_focused_summary_from_rollup_document(
+        &mut self,
+        agent_entity_id: u64,
+    ) -> Option<String> {
+        let rollup_document = self.events.iter().rev().find_map(|event| match event {
+            StdbEvent::AgentTickRollupReceived {
+                agent_entity_id: current_entity_id,
+                document,
+                ..
+            } if *current_entity_id == agent_entity_id => Some(document.as_str()),
+            _ => None,
+        })?;
+        let rollup: AgentTickRollup = match decode_toon_document(rollup_document, "agent_tick_rollup")
+        {
+            Ok(rollup) => rollup,
+            Err(error) => {
+                log::warn!(
+                    "[pod-stdb client] Failed to decode agent_tick_rollup for focused summary synthesis: {error}"
+                );
+                return None;
+            }
+        };
+
+        let summary = self.focused_debug_summary_entry(rollup.agent_entity_id);
+        summary.latest_tick = summary.latest_tick.max(rollup.tick_end);
+        summary.tool_call_count = rollup.tool_call_count as usize;
+        summary.tool_error_count = rollup.tool_error_count as usize;
+        summary.rejected_action_count = rollup.rejected_action_count as usize;
+        summary.total_distance = rollup.total_distance;
+        summary.average_tool_latency_ms = rollup.average_tool_latency_ms;
+        summary.visible_entity_count = rollup.visible_entity_count as usize;
+        summary.audible_event_count = rollup.audible_event_count as usize;
+        summary.message_count = rollup.message_count as usize;
+        Self::refresh_focused_summary_notes(summary);
+        Some(summary.to_toon_document())
     }
 }
 
@@ -2170,8 +2319,8 @@ mod tests {
     #[test]
     fn test_receive_debug_telemetry_events() {
         use pod_core::{
-            AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace, TickTelemetryFrame,
-            VersionedTickTelemetry,
+            decode_toon_document, AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace,
+            FocusedEntityDebugSummary, TickTelemetryFrame, VersionedTickTelemetry,
         };
 
         let mut client = StdbClient::new(StdbClientConfig::default());
@@ -2234,6 +2383,13 @@ mod tests {
         ));
         assert!(matches!(
             &events[2],
+            StdbEvent::FocusedEntityDebugSummaryReceived {
+                agent_entity_id: 41,
+                document,
+            } if document.contains("focused_entity_debug_summary")
+        ));
+        assert!(matches!(
+            &events[3],
             StdbEvent::AgentTickRollupReceived {
                 tick_start: 1,
                 tick_end: 60,
@@ -2241,6 +2397,20 @@ mod tests {
                 document,
             } if document.contains("agent_tick_rollup")
         ));
+        let focused_summary = match &events[4] {
+            StdbEvent::FocusedEntityDebugSummaryReceived { document, .. } => {
+                decode_toon_document::<FocusedEntityDebugSummary>(
+                    document,
+                    "focused_entity_debug_summary",
+                )
+                .expect("focused summary document should decode")
+            }
+            other => panic!("expected focused summary event, got {other:?}"),
+        };
+        assert_eq!(focused_summary.latest_tick, 60);
+        assert_eq!(focused_summary.tool_call_count, 2);
+        assert_eq!(focused_summary.latest_tool_name.as_deref(), Some("llm.complete"));
+        assert_eq!(focused_summary.latest_tool_status.as_deref(), Some("Succeeded"));
     }
 
     #[test]
