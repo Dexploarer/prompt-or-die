@@ -820,5 +820,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 84
-**Current focus**: Iteration 85 browser-first flagship world delivery, continuing with real shard-side region/chunk metadata, creator/editor graph tooling for quests and faction reputation, and higher-density streamed world population beyond the local sandbox
+### Iteration 85
+- [x] Added editor-native streamed-world graph state in `pod-editor` with seeded `WorldRegionDefinition`, `WorldChunkDefinition`, `QuestStateGraph`, `FactionReputationTrack`, and `RegionEncounterTable` contracts so creators can inspect and export authored world structure directly from the editor instead of only from runtime snapshots.
+- [x] Added deterministic editor-side entity-to-world bindings derived from hierarchy and 2D transforms, including chunk key, region id/name, quest graph ids, faction track id, and encounter table id for the selected entity.
+- [x] Surfaced the world graph into existing editor tooling by extending the inspector, Spacetime dashboard, and world-building snapshot export with selected-entity binding data and full graph TOON export.
+- [x] Added editor helper APIs to sync regions, chunks, quests, factions, and encounter tables programmatically without forcing creators to rebuild graph state by hand.
+- [x] Added deterministic coverage for default streamed bindings, movement-driven chunk reassignment, synced graph exports, and TOON world-graph document output.
+- [x] Validated touched targets:
+  - `cargo test -p pod-editor --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 85
+**Current focus**: Iteration 86 shard-side streamed population rules and browser/editor consumption of authoritative region population state, followed by denser flagship world authoring beyond the local sandbox
