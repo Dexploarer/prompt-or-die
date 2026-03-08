@@ -77,6 +77,14 @@ describe("direct-connect runtime config", () => {
     const frames: number[] = [];
     const eventSummaries: string[] = [];
     const debugDocuments: string[] = [];
+    const actionStates: Array<{
+      pendingCount: number;
+      lastSubmittedTick: number | null;
+      lastAcknowledgedTick: number | null;
+      lastRejectedTick: number | null;
+      lastRejectedReason: string | null;
+      lastActionSummary: string | null;
+    }> = [];
 
     try {
       const client = new PodWebDirectConnectClient(
@@ -95,6 +103,9 @@ describe("direct-connect runtime config", () => {
           },
           onDebugDocument(document) {
             debugDocuments.push(document);
+          },
+          onActionState(state) {
+            actionStates.push(state);
           },
           onStatus() {}
         }
@@ -155,6 +166,63 @@ describe("direct-connect runtime config", () => {
           }
         })
       );
+      expect(actionStates.at(-1)).toEqual({
+        pendingCount: 1,
+        lastSubmittedTick: 19,
+        lastAcknowledgedTick: null,
+        lastRejectedTick: null,
+        lastRejectedReason: null,
+        lastActionSummary: "move"
+      });
+
+      socket?.emitMessage(
+        JSON.stringify({
+          StateDelta: {
+            tick: 19,
+            acknowledged_action_tick: 19,
+            authoritative_digest: 1001,
+            is_full_snapshot: false,
+            delta: {
+              tick: 19,
+              updated: [
+                {
+                  id: 12,
+                  position: [11, 10],
+                  velocity: [1, 0],
+                  rotation: 0,
+                  label: "Hero"
+                }
+              ],
+              destroyed: []
+            }
+          }
+        })
+      );
+      expect(actionStates.at(-1)).toEqual({
+        pendingCount: 0,
+        lastSubmittedTick: 19,
+        lastAcknowledgedTick: 19,
+        lastRejectedTick: null,
+        lastRejectedReason: null,
+        lastActionSummary: "move"
+      });
+
+      client.submitActions([{ kind: "speak", message: "hello", volume: "Normal" }]);
+      socket?.emitMessage(
+        JSON.stringify({
+          Rejected: {
+            reason: "speak cooldown"
+          }
+        })
+      );
+      expect(actionStates.at(-1)).toEqual({
+        pendingCount: 0,
+        lastSubmittedTick: 20,
+        lastAcknowledgedTick: 19,
+        lastRejectedTick: 20,
+        lastRejectedReason: "speak cooldown",
+        lastActionSummary: "speak"
+      });
 
       socket?.emitMessage(
         JSON.stringify({
