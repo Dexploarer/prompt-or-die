@@ -71,7 +71,7 @@ pub use snapshot::{
     compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntityInteractionHints,
     EntityKind, EntityMetadataSnapshot, EntitySnapshot, InterpolatedSnapshot, InterpolationConfig,
     PredictedActionBatch, ReconciliationReport, RecoveryRequestState, RenderClock, RollbackPreview,
-    SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
+    SnapshotInterest, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
     WorldSnapshot,
 };
 

@@ -17,14 +17,14 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
-    Action, AgentTickRollup, AgentToolCallEvent, IdleAgent, TelemetryArchive, TelemetryConfig,
-    VersionedTickTelemetry, World, GameEvent,
+    Action, AgentTickRollup, AgentToolCallEvent, GameEvent, IdleAgent, TelemetryArchive,
+    TelemetryConfig, VersionedTickTelemetry, World,
 };
 
 use crate::protocol::{
     ClientId, ClientMessage, ReconnectToken, ServerConfig as ProtoServerConfig, ServerMessage,
 };
-use crate::snapshot::{StateDelta, WorldSnapshot};
+use crate::snapshot::{SnapshotInterest, StateDelta, WorldSnapshot};
 
 // ============================================================
 // CLIENT SESSION STATE
@@ -39,6 +39,7 @@ struct ClientSession {
     last_action_tick: Option<u64>,
     last_processed_action_tick: Option<u64>,
     debug_telemetry_enabled: bool,
+    last_sent_snapshot: Option<WorldSnapshot>,
 }
 
 impl ClientSession {
@@ -52,8 +53,18 @@ impl ClientSession {
             last_action_tick: None,
             last_processed_action_tick: None,
             debug_telemetry_enabled: false,
+            last_sent_snapshot: None,
         }
     }
+}
+
+#[derive(Clone)]
+struct ClientBroadcastTarget {
+    client_id: ClientId,
+    agent_id: Option<pod_core::AgentId>,
+    acknowledged_action_tick: Option<u64>,
+    debug_telemetry_enabled: bool,
+    last_sent_snapshot: Option<WorldSnapshot>,
 }
 
 #[derive(Debug)]
@@ -667,95 +678,136 @@ impl GameServer {
 
     /// Broadcast world updates to all connected clients
     async fn broadcast_updates(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Decide whether to send full snapshot or delta
         let should_snapshot =
             (self.tick - self.last_snapshot_tick) >= self.config.snapshot_interval;
-        let current_snapshot = WorldSnapshot::capture(&self.world);
-        let authoritative_digest = current_snapshot.digest();
-
-        let is_full_snapshot = should_snapshot || self.last_snapshot.is_none();
-        let delta = if is_full_snapshot {
-            StateDelta {
-                tick: self.tick,
-                updated: current_snapshot.entities.clone(),
-                destroyed: vec![],
-                population: current_snapshot.population.clone(),
-            }
-        } else {
-            StateDelta::diff(
-                self.last_snapshot
-                    .as_ref()
-                    .expect("last_snapshot checked above"),
-                &current_snapshot,
-            )
-        };
-
-        let has_state_update = should_snapshot || delta.change_count() > 0;
+        let authoritative_snapshot = WorldSnapshot::capture(&self.world);
+        let has_authoritative_baseline = self.last_snapshot.is_some();
         let has_event_update = !self.pending_events.is_empty();
-        let clients = self.clients.read().await;
-        let has_debug_subscribers = clients
-            .values()
-            .any(|session| session.debug_telemetry_enabled);
+        let client_targets = {
+            let clients = self.clients.read().await;
+            clients
+                .iter()
+                .map(|(client_id, session)| ClientBroadcastTarget {
+                    client_id: *client_id,
+                    agent_id: session.agent_id,
+                    acknowledged_action_tick: session.last_processed_action_tick,
+                    debug_telemetry_enabled: session.debug_telemetry_enabled,
+                    last_sent_snapshot: session.last_sent_snapshot.clone(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let has_debug_subscribers = client_targets
+            .iter()
+            .any(|target| target.debug_telemetry_enabled);
 
-        if !has_state_update && !has_debug_subscribers && !has_event_update {
+        if !has_authoritative_baseline
+            && client_targets.is_empty()
+            && !has_debug_subscribers
+            && !has_event_update
+        {
             self.pending_events.clear();
             self.pending_debug_documents.clear();
             return Ok(());
         }
 
-        for (client_id, session) in clients.iter() {
-            if has_state_update {
-                let msg = ServerMessage::StateDelta {
+        let mut updated_client_snapshots = Vec::new();
+        let had_missing_client_baseline = client_targets
+            .iter()
+            .any(|target| target.last_sent_snapshot.is_none());
+        let mut any_state_update = !has_authoritative_baseline;
+
+        for target in &client_targets {
+            let filtered_snapshot =
+                self.snapshot_for_client(&authoritative_snapshot, target.agent_id);
+            let authoritative_digest = filtered_snapshot.digest();
+            let is_full_snapshot = should_snapshot || target.last_sent_snapshot.is_none();
+            let delta = if is_full_snapshot {
+                StateDelta {
                     tick: self.tick,
-                    acknowledged_action_tick: session.last_processed_action_tick,
-                    authoritative_digest,
-                    is_full_snapshot,
-                    delta: delta.clone(),
-                };
-                if let Some(tx) = self.client_tx.read().await.get(client_id) {
-                    if let Err(e) = tx.send(msg).await {
-                        error!("Failed to send update to client {}: {}", client_id.0, e);
-                    }
+                    updated: filtered_snapshot.entities.clone(),
+                    destroyed: vec![],
+                    population: filtered_snapshot.population.clone(),
+                }
+            } else {
+                StateDelta::diff(
+                    target
+                        .last_sent_snapshot
+                        .as_ref()
+                        .expect("client baseline checked above"),
+                    &filtered_snapshot,
+                )
+            };
+
+            let population_changed = target
+                .last_sent_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.population != filtered_snapshot.population)
+                .unwrap_or(true);
+            let has_state_update =
+                is_full_snapshot || delta.change_count() > 0 || population_changed;
+
+            if has_state_update {
+                any_state_update = true;
+                let sent = self
+                    .send_to_client(
+                        target.client_id,
+                        ServerMessage::StateDelta {
+                            tick: self.tick,
+                            acknowledged_action_tick: target.acknowledged_action_tick,
+                            authoritative_digest,
+                            is_full_snapshot,
+                            delta,
+                        },
+                    )
+                    .await;
+                if sent {
+                    updated_client_snapshots.push((target.client_id, filtered_snapshot));
                 }
             }
 
             if has_event_update {
-                let msg = ServerMessage::EventBatch {
-                    tick: self.tick,
-                    events: self.pending_events.clone(),
-                };
-                if let Some(tx) = self.client_tx.read().await.get(client_id) {
-                    if let Err(e) = tx.send(msg).await {
-                        error!("Failed to send event batch to client {}: {}", client_id.0, e);
-                    }
-                }
+                let _ = self
+                    .send_to_client(
+                        target.client_id,
+                        ServerMessage::EventBatch {
+                            tick: self.tick,
+                            events: self.pending_events.clone(),
+                        },
+                    )
+                    .await;
             }
 
-            if session.debug_telemetry_enabled {
-                if let Some(tx) = self.client_tx.read().await.get(client_id) {
-                    for document in &self.pending_debug_documents {
-                        if let Err(e) = tx
-                            .send(ServerMessage::DebugDocument {
+            if target.debug_telemetry_enabled {
+                for document in &self.pending_debug_documents {
+                    let sent = self
+                        .send_to_client(
+                            target.client_id,
+                            ServerMessage::DebugDocument {
                                 document: document.clone(),
-                            })
-                            .await
-                        {
-                            error!(
-                                "Failed to send debug document to client {}: {}",
-                                client_id.0, e
-                            );
-                            break;
-                        }
+                            },
+                        )
+                        .await;
+                    if !sent {
+                        break;
                     }
                 }
             }
         }
 
-        if has_state_update && is_full_snapshot {
+        if !updated_client_snapshots.is_empty() {
+            let mut clients = self.clients.write().await;
+            for (client_id, snapshot) in updated_client_snapshots {
+                if let Some(session) = clients.get_mut(&client_id) {
+                    session.last_sent_snapshot = Some(snapshot);
+                }
+            }
+        }
+
+        if should_snapshot || had_missing_client_baseline {
             self.last_snapshot_tick = self.tick;
         }
-        if has_state_update {
-            self.last_snapshot = Some(current_snapshot);
+        if any_state_update {
+            self.last_snapshot = Some(authoritative_snapshot);
         }
         self.pending_events.clear();
         self.pending_debug_documents.clear();
@@ -791,16 +843,21 @@ impl GameServer {
         info!("Client {} disconnected: {}", client_id.0, reason);
     }
 
-    async fn send_to_client(&self, client_id: ClientId, message: ServerMessage) {
+    async fn send_to_client(&self, client_id: ClientId, message: ServerMessage) -> bool {
         if let Some(tx) = self.client_tx.read().await.get(&client_id) {
             if let Err(err) = tx.send(message).await {
                 warn!("Failed to send message to {}: {}", client_id.0, err);
+                return false;
             }
         }
+        true
     }
 
-    fn build_full_snapshot_message(&self, acknowledged_action_tick: Option<u64>) -> ServerMessage {
-        let snapshot = WorldSnapshot::capture(&self.world);
+    fn build_full_snapshot_message(
+        &self,
+        snapshot: WorldSnapshot,
+        acknowledged_action_tick: Option<u64>,
+    ) -> ServerMessage {
         let authoritative_digest = snapshot.digest();
         ServerMessage::StateDelta {
             tick: self.tick,
@@ -816,18 +873,99 @@ impl GameServer {
         }
     }
 
-    async fn send_full_snapshot_to_client(&self, client_id: ClientId) {
-        let acknowledged_action_tick = self
+    fn controlled_entity_for_agent(&self, agent_id: pod_core::AgentId) -> Option<u64> {
+        self.world
+            .agents
+            .iter()
+            .find(|slot| slot.agent.id() == agent_id)
+            .and_then(|slot| slot.entity_id)
+            .map(|entity| entity.id() as u64)
+    }
+
+    fn snapshot_interest_for_controlled_entity(
+        &self,
+        authoritative_snapshot: &WorldSnapshot,
+        controlled_entity: Option<u64>,
+    ) -> SnapshotInterest {
+        let Some(controlled_entity) = controlled_entity else {
+            return SnapshotInterest::default();
+        };
+        let Some(entity) = authoritative_snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == controlled_entity)
+        else {
+            return SnapshotInterest::default();
+        };
+
+        let mut chunk_keys = Vec::new();
+        if let Some(chunk_key) = entity.metadata.chunk_key.as_deref() {
+            chunk_keys.push(chunk_key.to_string());
+            if let Some(chunk) = self
+                .world
+                .streaming
+                .chunks
+                .iter()
+                .find(|chunk| chunk.chunk_key == chunk_key)
+            {
+                chunk_keys.extend(chunk.neighbor_chunk_keys.iter().cloned());
+            }
+        }
+        if chunk_keys.is_empty() {
+            if let Some(region_id) = entity.metadata.region_id.as_deref() {
+                if let Some(region) = self
+                    .world
+                    .streaming
+                    .regions
+                    .iter()
+                    .find(|region| region.region_id == region_id)
+                {
+                    chunk_keys.extend(region.chunk_keys.iter().cloned());
+                }
+            }
+        }
+
+        SnapshotInterest::new(
+            Some(controlled_entity),
+            Some(entity.position),
+            Some(self.world.streaming.chunk_size.max(0.001) * 1.75),
+            chunk_keys,
+        )
+    }
+
+    fn snapshot_for_client(
+        &self,
+        authoritative_snapshot: &WorldSnapshot,
+        agent_id: Option<pod_core::AgentId>,
+    ) -> WorldSnapshot {
+        let controlled_entity =
+            agent_id.and_then(|agent_id| self.controlled_entity_for_agent(agent_id));
+        let interest =
+            self.snapshot_interest_for_controlled_entity(authoritative_snapshot, controlled_entity);
+        authoritative_snapshot.for_interest(&interest)
+    }
+
+    async fn send_full_snapshot_to_client(&mut self, client_id: ClientId) {
+        let (acknowledged_action_tick, agent_id) = self
             .clients
             .read()
             .await
             .get(&client_id)
-            .and_then(|session| session.last_processed_action_tick);
-        self.send_to_client(
-            client_id,
-            self.build_full_snapshot_message(acknowledged_action_tick),
-        )
-        .await;
+            .map(|session| (session.last_processed_action_tick, session.agent_id))
+            .unwrap_or((None, None));
+        let authoritative_snapshot = WorldSnapshot::capture(&self.world);
+        let snapshot = self.snapshot_for_client(&authoritative_snapshot, agent_id);
+        let sent = self
+            .send_to_client(
+                client_id,
+                self.build_full_snapshot_message(snapshot.clone(), acknowledged_action_tick),
+            )
+            .await;
+        if sent {
+            if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                session.last_sent_snapshot = Some(snapshot);
+            }
+        }
     }
 
     async fn attach_remote_agent(
@@ -859,6 +997,7 @@ impl GameServer {
                         session.last_processed_action_tick = prev.last_processed_action_tick;
                         session.debug_telemetry_enabled = prev.debug_telemetry_enabled;
                         session.pending_actions.clear();
+                        session.last_sent_snapshot = None;
                     } else if session.player_name.is_none() {
                         session.player_name = Some(player_name.clone());
                     }
@@ -896,34 +1035,41 @@ impl GameServer {
             .is_some();
 
         if already_attached {
-            let snapshot = WorldSnapshot::capture(&self.world);
-            let authoritative_digest = snapshot.digest();
             let controlled_entity = self
                 .clients
                 .read()
                 .await
                 .get(&client_id)
                 .and_then(|session| session.agent_id)
-                .and_then(|agent_id| {
-                    self.world
-                        .agents
-                        .iter()
-                        .find(|slot| slot.agent.id() == agent_id)
-                        .and_then(|slot| slot.entity_id)
-                        .map(|entity| entity.id() as u64)
-                });
-            self.send_to_client(
-                client_id,
-                ServerMessage::Welcome {
+                .and_then(|agent_id| self.controlled_entity_for_agent(agent_id));
+            let authoritative_snapshot = WorldSnapshot::capture(&self.world);
+            let snapshot = self.snapshot_for_client(
+                &authoritative_snapshot,
+                self.clients
+                    .read()
+                    .await
+                    .get(&client_id)
+                    .and_then(|session| session.agent_id),
+            );
+            let authoritative_digest = snapshot.digest();
+            let sent = self
+                .send_to_client(
                     client_id,
-                    reconnect_token,
-                    tick: self.tick,
-                    controlled_entity,
-                    authoritative_digest,
-                    snapshot,
-                },
-            )
-            .await;
+                    ServerMessage::Welcome {
+                        client_id,
+                        reconnect_token,
+                        tick: self.tick,
+                        controlled_entity,
+                        authoritative_digest,
+                        snapshot: snapshot.clone(),
+                    },
+                )
+                .await;
+            if sent {
+                if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                    session.last_sent_snapshot = Some(snapshot);
+                }
+            }
             return Ok(());
         }
 
@@ -942,20 +1088,27 @@ impl GameServer {
             }
         }
 
-        let snapshot = WorldSnapshot::capture(&self.world);
+        let authoritative_snapshot = WorldSnapshot::capture(&self.world);
+        let snapshot = self.snapshot_for_client(&authoritative_snapshot, Some(agent_id));
         let authoritative_digest = snapshot.digest();
-        self.send_to_client(
-            client_id,
-            ServerMessage::Welcome {
+        let sent = self
+            .send_to_client(
                 client_id,
-                reconnect_token,
-                tick: self.tick,
-                controlled_entity: Some(entity.id() as u64),
-                authoritative_digest,
-                snapshot,
-            },
-        )
-        .await;
+                ServerMessage::Welcome {
+                    client_id,
+                    reconnect_token,
+                    tick: self.tick,
+                    controlled_entity: Some(entity.id() as u64),
+                    authoritative_digest,
+                    snapshot: snapshot.clone(),
+                },
+            )
+            .await;
+        if sent {
+            if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                session.last_sent_snapshot = Some(snapshot);
+            }
+        }
 
         Ok(())
     }
@@ -1019,11 +1172,11 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {}
 
 #[cfg(test)]
-    mod tests {
-        use super::*;
-        use pod_core::decode_toon_value;
-        use tokio_tungstenite::{connect_async, tungstenite::Message};
-        use pod_core::action::SpeakVolume;
+mod tests {
+    use super::*;
+    use pod_core::action::SpeakVolume;
+    use pod_core::decode_toon_value;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
 
     fn next_available_port() -> u16 {
         std::net::TcpListener::bind("127.0.0.1:0")
@@ -1058,8 +1211,9 @@ impl std::error::Error for ServerError {}
         let config = ProtoServerConfig::default();
         let world = World::new(42);
         let server = GameServer::new(config, world);
+        let snapshot = WorldSnapshot::capture(&server.world);
 
-        let message = server.build_full_snapshot_message(Some(12));
+        let message = server.build_full_snapshot_message(snapshot, Some(12));
         match message {
             ServerMessage::StateDelta {
                 tick,
@@ -1101,6 +1255,7 @@ impl std::error::Error for ServerError {}
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: true,
+                last_sent_snapshot: None,
             },
         );
 
@@ -1124,6 +1279,112 @@ impl std::error::Error for ServerError {}
     }
 
     #[tokio::test]
+    async fn test_broadcast_updates_filters_snapshots_per_client_interest() {
+        let config = ProtoServerConfig::default();
+        let mut world = World::new(42);
+        let (alpha_slot, alpha_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        let (spire_slot, spire_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(alpha_entity)
+            .expect("alpha transform")
+            .position = glam::Vec2::new(1.0, 1.0);
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(spire_entity)
+            .expect("spire transform")
+            .position = glam::Vec2::new(30.0, 1.0);
+        let near_resource = world
+            .spawn_at(2.0, 1.0)
+            .with_label("Near Resource", pod_core::Team::None)
+            .build();
+        let far_resource = world
+            .spawn_at(31.0, 1.0)
+            .with_label("Far Resource", pod_core::Team::None)
+            .build();
+
+        let mut server = GameServer::new(config, world);
+        let alpha_client = ClientId::new();
+        let spire_client = ClientId::new();
+        let (alpha_tx, mut alpha_rx) = mpsc::channel(8);
+        let (spire_tx, mut spire_rx) = mpsc::channel(8);
+        server
+            .client_tx
+            .write()
+            .await
+            .insert(alpha_client, alpha_tx);
+        server
+            .client_tx
+            .write()
+            .await
+            .insert(spire_client, spire_tx);
+        server.clients.write().await.insert(
+            alpha_client,
+            ClientSession {
+                player_name: Some("alpha".into()),
+                agent_id: Some(server.world.agents[alpha_slot].agent.id()),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
+            },
+        );
+        server.clients.write().await.insert(
+            spire_client,
+            ClientSession {
+                player_name: Some("spire".into()),
+                agent_id: Some(server.world.agents[spire_slot].agent.id()),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
+            },
+        );
+
+        server.broadcast_updates().await.unwrap();
+
+        let alpha_state = loop {
+            match alpha_rx.try_recv() {
+                Ok(ServerMessage::StateDelta { delta, .. }) => break delta,
+                Ok(_) => continue,
+                Err(err) => panic!("missing alpha state delta: {err}"),
+            }
+        };
+        let spire_state = loop {
+            match spire_rx.try_recv() {
+                Ok(ServerMessage::StateDelta { delta, .. }) => break delta,
+                Ok(_) => continue,
+                Err(err) => panic!("missing spire state delta: {err}"),
+            }
+        };
+
+        let alpha_ids = alpha_state
+            .updated
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        let spire_ids = spire_state
+            .updated
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+
+        assert!(alpha_ids.contains(&(alpha_entity.id() as u64)));
+        assert!(alpha_ids.contains(&(near_resource.id() as u64)));
+        assert!(!alpha_ids.contains(&(spire_entity.id() as u64)));
+        assert!(!alpha_ids.contains(&(far_resource.id() as u64)));
+
+        assert!(spire_ids.contains(&(spire_entity.id() as u64)));
+        assert!(spire_ids.contains(&(far_resource.id() as u64)));
+        assert!(!spire_ids.contains(&(alpha_entity.id() as u64)));
+        assert!(!spire_ids.contains(&(near_resource.id() as u64)));
+    }
+
+    #[tokio::test]
     async fn test_broadcast_updates_emits_authoritative_event_batches() {
         let config = ProtoServerConfig::default();
         let world = World::new(42);
@@ -1141,6 +1402,7 @@ impl std::error::Error for ServerError {}
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
             },
         );
         server.tick = 12;
@@ -1193,33 +1455,31 @@ impl std::error::Error for ServerError {}
                 last_action_tick: None,
                 last_processed_action_tick: None,
                 debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
             },
         );
-        server
-            .world
-            .submit_external_action(
-                agent_id,
-                Action::Speak {
-                    message: "authoritative hello".into(),
-                    volume: SpeakVolume::Normal,
-                },
-            );
+        server.world.submit_external_action(
+            agent_id,
+            Action::Speak {
+                message: "authoritative hello".into(),
+                volume: SpeakVolume::Normal,
+            },
+        );
 
         server.step_tick().await.unwrap();
-        assert!(server.pending_events.iter().any(|event| matches!(
-            event.event,
-            pod_core::Event::AgentSpoke { .. }
-        )));
+        assert!(server
+            .pending_events
+            .iter()
+            .any(|event| matches!(event.event, pod_core::Event::AgentSpoke { .. })));
 
         server.broadcast_updates().await.unwrap();
 
         let mut saw_spoken_event = false;
         while let Ok(message) = rx.try_recv() {
             if let ServerMessage::EventBatch { events, .. } = message {
-                saw_spoken_event = events.iter().any(|event| matches!(
-                    event.event,
-                    pod_core::Event::AgentSpoke { .. }
-                ));
+                saw_spoken_event = events
+                    .iter()
+                    .any(|event| matches!(event.event, pod_core::Event::AgentSpoke { .. }));
             }
         }
 

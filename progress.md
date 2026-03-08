@@ -19,3 +19,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Differentiated the browser animation sampler so critical rings, destination breadcrumbs, companions, beasts, idle humanoids, and moving humanoids each read with distinct motion cues instead of all sharing one generic wobble profile.
 - Reworked the browser boot shell so first paint now reflects the actual startup mode: local sandbox pages no longer flash `demo` / `offline bridge` placeholders, and direct-connect URLs prelabel themselves as shard boot before the module finishes loading.
 - Corrected world-frame terrain anchoring for centered sample meshes by calibrating lift against each shipped asset’s real half-height, which removes the major “loaded below the ground” placement error for heroes, beasts, props, and structures.
+- Added per-client interest-filtered authoritative snapshots in `pod-net`, so shard clients now diff against their own visible world instead of one global full-world baseline.
+- Welcome and full-resync snapshot paths now use the same filtered authoritative interest window, keeping reconnect/recovery correctness aligned with the new network scaling path.
+- Added deterministic network coverage for chunk-window snapshot filtering and server-side per-client broadcast partitioning, and revalidated native, wasm, and SpacetimeDB-enabled `pod-net` targets.
