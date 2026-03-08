@@ -12,8 +12,8 @@ use pod_core::{
     Action, ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout,
     CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterProfile,
     EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer, Movement,
-    QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform,
-    Velocity, WorldPopulationState,
+    QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
+    WorldPopulationState,
 };
 
 const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
@@ -111,6 +111,72 @@ pub struct EntityMetadataSnapshot {
     pub actor_presentation: Option<ActorPresentation>,
     pub combat_presentation: Option<CombatPresentation>,
     pub interaction: EntityInteractionHints,
+}
+
+/// Per-client interest window used to derive filtered authoritative snapshots.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SnapshotInterest {
+    pub controlled_entity: Option<u64>,
+    pub center: Option<Vec2>,
+    pub radius: Option<f32>,
+    pub chunk_keys: Vec<String>,
+}
+
+impl SnapshotInterest {
+    pub fn new(
+        controlled_entity: Option<u64>,
+        center: Option<Vec2>,
+        radius: Option<f32>,
+        chunk_keys: Vec<String>,
+    ) -> Self {
+        let mut chunk_keys = chunk_keys;
+        chunk_keys.sort();
+        chunk_keys.dedup();
+        Self {
+            controlled_entity,
+            center,
+            radius,
+            chunk_keys,
+        }
+    }
+
+    fn is_unbounded(&self) -> bool {
+        self.controlled_entity.is_none()
+            && self.center.is_none()
+            && self.radius.is_none()
+            && self.chunk_keys.is_empty()
+    }
+
+    fn chunk_key_set(&self) -> HashSet<&str> {
+        self.chunk_keys.iter().map(String::as_str).collect()
+    }
+
+    fn matches_entity(&self, entity: &EntitySnapshot) -> bool {
+        if self
+            .controlled_entity
+            .map(|controlled| controlled == entity.id)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+
+        let chunk_keys = self.chunk_key_set();
+        if !chunk_keys.is_empty()
+            && entity
+                .metadata
+                .chunk_key
+                .as_deref()
+                .map(|chunk_key| chunk_keys.contains(chunk_key))
+                .unwrap_or(false)
+        {
+            return true;
+        }
+
+        self.center
+            .zip(self.radius)
+            .map(|(center, radius)| center.distance(entity.position) <= radius.max(0.0))
+            .unwrap_or(false)
+    }
 }
 
 /// Efficient delta — only changed entities
@@ -609,6 +675,27 @@ impl WorldSnapshot {
         }
     }
 
+    /// Filters an authoritative snapshot to the subset relevant for one client.
+    pub fn for_interest(&self, interest: &SnapshotInterest) -> Self {
+        if interest.is_unbounded() {
+            return self.clone();
+        }
+
+        let chunk_keys = interest.chunk_key_set();
+        let entities = self
+            .entities
+            .iter()
+            .filter(|entity| interest.matches_entity(entity))
+            .cloned()
+            .collect();
+
+        Self {
+            tick: self.tick,
+            entities,
+            population: filter_population_for_interest(&self.population, &chunk_keys),
+        }
+    }
+
     /// Apply a snapshot to a world (for client-side reconciliation)
     pub fn apply(&self, _world: &mut pod_core::World) {
         // For now, we'll just log this — full reconciliation
@@ -770,6 +857,107 @@ fn entity_changed(old: &EntitySnapshot, new: &EntitySnapshot) -> bool {
         || old.movement_speed != new.movement_speed
         || old.label != new.label
         || old.metadata != new.metadata
+}
+
+fn filter_population_for_interest(
+    population: &WorldPopulationState,
+    chunk_keys: &HashSet<&str>,
+) -> WorldPopulationState {
+    if chunk_keys.is_empty() {
+        return population.clone();
+    }
+
+    let chunks = population
+        .chunks
+        .iter()
+        .filter(|chunk| chunk_keys.contains(chunk.chunk_key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let chunk_map = chunks
+        .iter()
+        .map(|chunk| (chunk.chunk_key.as_str(), chunk))
+        .collect::<HashMap<_, _>>();
+
+    let regions = population
+        .regions
+        .iter()
+        .filter_map(|region| {
+            let matched_chunks = region
+                .chunk_keys
+                .iter()
+                .filter_map(|chunk_key| chunk_map.get(chunk_key.as_str()).copied())
+                .collect::<Vec<_>>();
+
+            if matched_chunks.is_empty() {
+                return None;
+            }
+
+            let mut filtered = region.clone();
+            filtered.chunk_keys = matched_chunks
+                .iter()
+                .map(|chunk| chunk.chunk_key.clone())
+                .collect();
+            filtered.active_chunk_count = filtered.chunk_keys.len() as u32;
+            filtered.counts = aggregate_population_breakdown(&matched_chunks);
+            filtered.ambient_population_cap = matched_chunks
+                .iter()
+                .map(|chunk| chunk.ambient_population_cap)
+                .sum();
+            filtered.pending_respawns = matched_chunks
+                .iter()
+                .map(|chunk| chunk.pending_respawns)
+                .sum();
+            filtered.next_respawn_tick = matched_chunks
+                .iter()
+                .filter_map(|chunk| chunk.next_respawn_tick)
+                .min();
+            refresh_region_metrics(&mut filtered);
+            Some(filtered)
+        })
+        .collect();
+
+    WorldPopulationState {
+        tick: population.tick,
+        chunks,
+        regions,
+    }
+}
+
+fn aggregate_population_breakdown(
+    chunks: &[&pod_core::ChunkPopulationState],
+) -> pod_core::PopulationBreakdown {
+    let mut total = pod_core::PopulationBreakdown::default();
+    for chunk in chunks {
+        total.players += chunk.counts.players;
+        total.npcs += chunk.counts.npcs;
+        total.wild_creatures += chunk.counts.wild_creatures;
+        total.companions += chunk.counts.companions;
+        total.resource_nodes += chunk.counts.resource_nodes;
+        total.loot_containers += chunk.counts.loot_containers;
+        total.scenery += chunk.counts.scenery;
+    }
+    total
+}
+
+fn refresh_region_metrics(region: &mut pod_core::RegionPopulationState) {
+    region.active_entity_count = region.counts.players
+        + region.counts.npcs
+        + region.counts.wild_creatures
+        + region.counts.companions
+        + region.counts.resource_nodes
+        + region.counts.loot_containers
+        + region.counts.scenery;
+
+    let active_spawned = region.counts.players
+        + region.counts.npcs
+        + region.counts.wild_creatures
+        + region.counts.companions;
+    region.spawn_budget_remaining = region.ambient_population_cap.saturating_sub(active_spawned);
+    region.population_pressure = if region.ambient_population_cap == 0 {
+        0.0
+    } else {
+        active_spawned as f32 / region.ambient_population_cap as f32
+    };
 }
 
 /// Applies an authoritative state update and validates its digest.
@@ -1498,6 +1686,18 @@ mod tests {
         }
     }
 
+    fn snapshot_with_population(
+        tick: u64,
+        entities: Vec<EntitySnapshot>,
+        population: WorldPopulationState,
+    ) -> WorldSnapshot {
+        WorldSnapshot {
+            tick,
+            entities,
+            population,
+        }
+    }
+
     fn delta_with_updates(
         tick: u64,
         updated: Vec<EntitySnapshot>,
@@ -1516,6 +1716,170 @@ mod tests {
         let snap = WorldSnapshot::default();
         assert_eq!(snap.tick, 0);
         assert_eq!(snap.entity_count(), 0);
+    }
+
+    #[test]
+    fn test_snapshot_interest_filters_entities_and_population_by_chunk_window() {
+        let population = WorldPopulationState {
+            tick: 9,
+            chunks: vec![
+                pod_core::ChunkPopulationState {
+                    chunk_key: "0:0".into(),
+                    region_id: Some("verdant-heart".into()),
+                    region_name: Some("Verdant Heart".into()),
+                    counts: pod_core::PopulationBreakdown {
+                        players: 1,
+                        npcs: 1,
+                        ..Default::default()
+                    },
+                    active_entity_count: 2,
+                    ambient_population_cap: 6,
+                    spawn_budget_remaining: 4,
+                    population_pressure: 0.33,
+                    ..Default::default()
+                },
+                pod_core::ChunkPopulationState {
+                    chunk_key: "1:0".into(),
+                    region_id: Some("verdant-heart".into()),
+                    region_name: Some("Verdant Heart".into()),
+                    counts: pod_core::PopulationBreakdown {
+                        wild_creatures: 2,
+                        ..Default::default()
+                    },
+                    active_entity_count: 2,
+                    ambient_population_cap: 4,
+                    spawn_budget_remaining: 2,
+                    population_pressure: 0.5,
+                    ..Default::default()
+                },
+                pod_core::ChunkPopulationState {
+                    chunk_key: "3:0".into(),
+                    region_id: Some("spirewatch".into()),
+                    region_name: Some("Spirewatch".into()),
+                    counts: pod_core::PopulationBreakdown {
+                        npcs: 3,
+                        ..Default::default()
+                    },
+                    active_entity_count: 3,
+                    ambient_population_cap: 3,
+                    spawn_budget_remaining: 0,
+                    population_pressure: 1.0,
+                    ..Default::default()
+                },
+            ],
+            regions: vec![
+                pod_core::RegionPopulationState {
+                    region_id: "verdant-heart".into(),
+                    region_name: "Verdant Heart".into(),
+                    primary_biome_id: "verdant-hollow".into(),
+                    chunk_keys: vec!["0:0".into(), "1:0".into()],
+                    active_chunk_count: 2,
+                    counts: pod_core::PopulationBreakdown {
+                        players: 1,
+                        npcs: 1,
+                        wild_creatures: 2,
+                        ..Default::default()
+                    },
+                    active_entity_count: 4,
+                    ambient_population_cap: 10,
+                    spawn_budget_remaining: 6,
+                    population_pressure: 0.4,
+                    ..Default::default()
+                },
+                pod_core::RegionPopulationState {
+                    region_id: "spirewatch".into(),
+                    region_name: "Spirewatch".into(),
+                    primary_biome_id: "spirewatch".into(),
+                    chunk_keys: vec!["3:0".into()],
+                    active_chunk_count: 1,
+                    counts: pod_core::PopulationBreakdown {
+                        npcs: 3,
+                        ..Default::default()
+                    },
+                    active_entity_count: 3,
+                    ambient_population_cap: 3,
+                    spawn_budget_remaining: 0,
+                    population_pressure: 1.0,
+                    ..Default::default()
+                },
+            ],
+        };
+        let snapshot = snapshot_with_population(
+            9,
+            vec![
+                EntitySnapshot {
+                    id: 10,
+                    position: Vec2::new(1.0, 1.0),
+                    velocity: Vec2::ZERO,
+                    rotation: 0.0,
+                    health: None,
+                    max_health: None,
+                    movement_speed: Some(200.0),
+                    label: Some("player".into()),
+                    metadata: EntityMetadataSnapshot {
+                        chunk_key: Some("0:0".into()),
+                        region_id: Some("verdant-heart".into()),
+                        ..EntityMetadataSnapshot::default()
+                    },
+                },
+                EntitySnapshot {
+                    id: 11,
+                    position: Vec2::new(8.5, 1.0),
+                    velocity: Vec2::ZERO,
+                    rotation: 0.0,
+                    health: None,
+                    max_health: None,
+                    movement_speed: None,
+                    label: Some("neighbor".into()),
+                    metadata: EntityMetadataSnapshot {
+                        chunk_key: Some("1:0".into()),
+                        region_id: Some("verdant-heart".into()),
+                        ..EntityMetadataSnapshot::default()
+                    },
+                },
+                EntitySnapshot {
+                    id: 12,
+                    position: Vec2::new(30.0, 1.0),
+                    velocity: Vec2::ZERO,
+                    rotation: 0.0,
+                    health: None,
+                    max_health: None,
+                    movement_speed: None,
+                    label: Some("far".into()),
+                    metadata: EntityMetadataSnapshot {
+                        chunk_key: Some("3:0".into()),
+                        region_id: Some("spirewatch".into()),
+                        ..EntityMetadataSnapshot::default()
+                    },
+                },
+            ],
+            population,
+        );
+
+        let filtered = snapshot.for_interest(&SnapshotInterest::new(
+            Some(10),
+            Some(Vec2::new(1.0, 1.0)),
+            Some(12.0),
+            vec!["0:0".into(), "1:0".into()],
+        ));
+
+        let retained_ids = filtered
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        assert_eq!(retained_ids, vec![10, 11]);
+        assert_eq!(filtered.population.chunks.len(), 2);
+        assert_eq!(filtered.population.regions.len(), 1);
+        assert_eq!(
+            filtered.population.regions[0].chunk_keys,
+            vec!["0:0".to_string(), "1:0".to_string()]
+        );
+        assert_eq!(filtered.population.regions[0].counts.players, 1);
+        assert_eq!(filtered.population.regions[0].counts.npcs, 1);
+        assert_eq!(filtered.population.regions[0].counts.wild_creatures, 2);
+        assert_eq!(filtered.population.regions[0].ambient_population_cap, 10);
+        assert_eq!(filtered.population.regions[0].spawn_budget_remaining, 6);
     }
 
     #[test]

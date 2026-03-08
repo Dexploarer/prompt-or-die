@@ -946,5 +946,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 95
-**Current focus**: Iteration 96 worker-route gameplay-input parity proof, then further HUD reduction and richer traversal/combat feedback
+### Iteration 96
+- [x] Added per-client authoritative snapshot interest filtering in `pod-net`, so direct-connect and native clients no longer receive the same full-world delta when they control different shard regions.
+- [x] Introduced `SnapshotInterest` plus filtered population derivation in `snapshot.rs`, keeping controlled entities always visible while scoping chunk and region population summaries to the client’s actual interest window.
+- [x] Reworked `GameServer` session state to keep `last_sent_snapshot` per client and compute deltas against each client’s last visible world instead of one global shard baseline.
+- [x] Updated welcome and full-resync paths to send filtered authoritative snapshots, preserving digest/reconciliation correctness after reconnects and recovery requests.
+- [x] Added deterministic coverage for snapshot filtering and per-client server broadcasts, then validated native, wasm, and SpacetimeDB-enabled `pod-net` targets.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 96
+**Current focus**: Iteration 97 server-side event interest filtering, then worker-route gameplay-input parity proof and richer traversal/combat feedback
