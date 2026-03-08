@@ -43,6 +43,20 @@ export interface PodThreeAssetRegistry {
     batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
     anisotropy?: number
   ): ResolvedSpriteTexture | Promise<ResolvedSpriteTexture>;
+  prefetchMeshes?(
+    requests: Array<{ batch: ThreeJsMeshBatch; lodLevel: 0 | 1 | 2 }>
+  ): Promise<void>;
+  prefetchSprites?(
+    requests: Array<{ batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">; anisotropy: number }>
+  ): Promise<void>;
+  getResidencyStats?(): PodThreeAssetResidencyStats;
+}
+
+export interface PodThreeAssetResidencyStats {
+  residentGeometryAssets: number;
+  residentSpriteAssets: number;
+  pendingGeometryAssets: number;
+  pendingSpriteAssets: number;
 }
 
 export type PodThreeAssetCategory =
@@ -186,6 +200,8 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
   private readonly textureCache = new Map<string, Promise<ResolvedSpriteTexture>>();
   private readonly meshDescriptorCache = new Map<string, PodThreeMeshAssetDescriptor | null>();
   private readonly spriteDescriptorCache = new Map<string, PodThreeSpriteAssetDescriptor | null>();
+  private readonly residentGeometryAssets = new Set<string>();
+  private readonly residentSpriteAssets = new Set<string>();
 
   constructor(private readonly options: ManifestBackedPodThreeAssetRegistryOptions) {
     this.fallbackRegistry = options.fallbackRegistry ?? new DefaultPodThreeAssetRegistry();
@@ -209,8 +225,12 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
 
     const pending = this.options.geometryLoader.load(assetPath).catch(async (error) => {
       this.geometryCache.delete(cacheKey);
+      this.residentGeometryAssets.delete(cacheKey);
       console.warn(`Falling back to procedural mesh asset for ${batch.mesh}`, error);
       return await Promise.resolve(this.fallbackRegistry.resolveGeometry(batch, lodLevel));
+    });
+    void pending.then(() => {
+      this.residentGeometryAssets.add(cacheKey);
     });
     this.geometryCache.set(cacheKey, pending);
     return pending;
@@ -235,11 +255,59 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
 
     const pending = this.loadSpriteTexture(descriptor, assetPath, anisotropy).catch(async (error) => {
       this.textureCache.delete(cacheKey);
+      this.residentSpriteAssets.delete(cacheKey);
       console.warn(`Falling back to procedural sprite asset for ${batch.texture}`, error);
       return await Promise.resolve(this.fallbackRegistry.resolveSpriteTexture(batch, anisotropy));
     });
+    void pending.then(() => {
+      this.residentSpriteAssets.add(cacheKey);
+    });
     this.textureCache.set(cacheKey, pending);
     return pending;
+  }
+
+  async prefetchMeshes(
+    requests: Array<{ batch: ThreeJsMeshBatch; lodLevel: 0 | 1 | 2 }>
+  ): Promise<void> {
+    const tasks = dedupeBy(
+      requests.map(({ batch, lodLevel }) => ({
+        cacheKey: `${this.meshCachePath(batch.mesh, lodLevel) ?? batch.mesh}|lod:${lodLevel}`,
+        batch,
+        lodLevel
+      })),
+      (entry) => entry.cacheKey
+    ).map(({ batch, lodLevel }) => Promise.resolve(this.resolveGeometry(batch, lodLevel)).then(() => undefined));
+
+    await Promise.all(tasks);
+  }
+
+  async prefetchSprites(
+    requests: Array<{ batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">; anisotropy: number }>
+  ): Promise<void> {
+    const tasks = dedupeBy(
+      requests.map(({ batch, anisotropy }) => ({
+        cacheKey: `${this.spriteCachePath(batch.texture, anisotropy) ?? batch.texture}|anisotropy:${anisotropy}`,
+        batch,
+        anisotropy
+      })),
+      (entry) => entry.cacheKey
+    ).map(({ batch, anisotropy }) =>
+      Promise.resolve(this.resolveSpriteTexture(batch, anisotropy)).then(() => undefined)
+    );
+
+    await Promise.all(tasks);
+  }
+
+  getResidencyStats(): PodThreeAssetResidencyStats {
+    return {
+      residentGeometryAssets: this.residentGeometryAssets.size,
+      residentSpriteAssets: this.residentSpriteAssets.size,
+      pendingGeometryAssets: Math.max(
+        this.geometryCache.size - this.residentGeometryAssets.size,
+        0
+      ),
+      pendingSpriteAssets: Math.max(this.textureCache.size - this.residentSpriteAssets.size, 0)
+    };
   }
 
   private async loadSpriteTexture(
@@ -284,6 +352,21 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
     const descriptor = resolveManifestSpriteAsset(this.options.manifest, requested);
     this.spriteDescriptorCache.set(cacheKey, descriptor);
     return descriptor;
+  }
+
+  private meshCachePath(requested: string, lodLevel: 0 | 1 | 2): string | null {
+    const descriptor = this.resolveMeshDescriptor(requested);
+    return descriptor ? descriptor.lods?.[lodLevel] ?? descriptor.path : null;
+  }
+
+  private spriteCachePath(requested: string, anisotropy: number): string | null {
+    const descriptor = this.resolveSpriteDescriptor(requested);
+    if (!descriptor) {
+      return null;
+    }
+    return descriptor.ktx2Path && this.options.compressedTextureLoader
+      ? descriptor.ktx2Path
+      : descriptor.path;
   }
 }
 
@@ -756,4 +839,18 @@ function extractPrimaryGeometry(root: { traverse: Mesh["traverse"] }, path: stri
 
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function dedupeBy<T>(values: T[], keySelector: (value: T) => string): T[] {
+  const seen = new Set<string>();
+  const output: T[] = [];
+  for (const value of values) {
+    const key = keySelector(value);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(value);
+  }
+  return output;
 }

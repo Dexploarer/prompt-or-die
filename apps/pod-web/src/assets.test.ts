@@ -262,4 +262,36 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
     expect(paths).toEqual(["/assets/textures/selection-ring.svg:none"]);
     expect(resolved.texture.colorSpace).toBe(NoColorSpace);
   });
+
+  test("prefetches unique mesh assets in parallel and reports residency", async () => {
+    const loadedPaths: string[] = [];
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load(path: string) {
+          loadedPaths.push(path);
+          return new SphereGeometry(1.2, 6, 4);
+        }
+      },
+      textureLoader: {
+        async load() {
+          return new Texture();
+        }
+      }
+    });
+
+    await registry.prefetchMeshes?.([
+      { batch: meshBatch({ mesh: "monster" }), lodLevel: 0 },
+      { batch: meshBatch({ mesh: "rift-beast" }), lodLevel: 0 }
+    ]);
+
+    expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.gltf"]);
+    expect(registry.getResidencyStats?.()).toEqual({
+      residentGeometryAssets: 1,
+      residentSpriteAssets: 0,
+      pendingGeometryAssets: 0,
+      pendingSpriteAssets: 0
+    });
+  });
 });
