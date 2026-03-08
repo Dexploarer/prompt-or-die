@@ -71,6 +71,7 @@ const backendLabel = document.querySelector<HTMLElement>("#backend-label");
 const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
+const populationLabel = document.querySelector<HTMLElement>("#population-label");
 const targetLabel = document.querySelector<HTMLElement>("#target-label");
 const affordanceLabel = document.querySelector<HTMLElement>("#affordance-label");
 const actionStatusLabel = document.querySelector<HTMLElement>("#action-status-label");
@@ -108,6 +109,7 @@ if (
   !frameSourceLabel ||
   !connectionLabel ||
   !worldLabel ||
+  !populationLabel ||
   !targetLabel ||
   !affordanceLabel ||
   !actionStatusLabel ||
@@ -140,6 +142,7 @@ const renderCanvas = canvas;
 const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
+const populationNode = populationLabel;
 const targetNode = targetLabel;
 const affordanceNode = affordanceLabel;
 const actionStatusNode = actionStatusLabel;
@@ -259,6 +262,36 @@ function controlledEntity(): NetworkEntitySnapshot | null {
   }
 
   return latestSnapshot.entities.find((entity) => entity.id === controlledId) ?? null;
+}
+
+function currentPopulationSummary(): string {
+  if (!latestSnapshot) {
+    return "No authoritative population state yet";
+  }
+
+  const controlled = controlledEntity();
+  const regionId = controlled?.metadata.regionId ?? null;
+  const chunkKey = controlled?.metadata.chunkKey ?? null;
+  const region = regionId
+    ? latestSnapshot.population.regions.find((entry) => entry.regionId === regionId) ?? null
+    : null;
+  const chunk = chunkKey
+    ? latestSnapshot.population.chunks.find((entry) => entry.chunkKey === chunkKey) ?? null
+    : null;
+
+  if (!region && !chunk) {
+    return `${latestSnapshot.population.regions.length} regions · ${latestSnapshot.population.chunks.length} chunks`;
+  }
+
+  const chunkSummary = chunk
+    ? `${chunk.chunkKey} ${chunk.activeEntityCount} active · cap ${chunk.ambientPopulationCap} · budget ${chunk.spawnBudgetRemaining}`
+    : "unassigned chunk";
+  const regionSummary = region
+    ? `${region.regionName} ${region.activeEntityCount} active · ${region.activeChunkCount}/${region.chunkKeys.length} chunks hot · pressure ${region.populationPressure.toFixed(
+        2
+      )}`
+    : "unassigned region";
+  return `${regionSummary} · ${chunkSummary}`;
 }
 
 function targetableEntities(): NetworkEntitySnapshot[] {
@@ -791,6 +824,7 @@ function renderTelemetryHud(): void {
             : `controlled E(${liveConnectionStatus.controlledEntity})`
         }`
     : "demo scene";
+  populationNode.textContent = currentPopulationSummary();
   targetNode.textContent = formatTargetSummary(target, controlled);
   affordanceNode.textContent = describeTargetAffordances(target);
   actionStatusNode.textContent = formatActionStatus();

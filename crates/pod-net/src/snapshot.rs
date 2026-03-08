@@ -12,7 +12,8 @@ use pod_core::{
     Action, ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout,
     CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterProfile,
     EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer, Movement,
-    QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
+    QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform,
+    Velocity, WorldPopulationState,
 };
 
 const FIXED_TICK_DURATION_SECS: f32 = 1.0 / 60.0;
@@ -30,6 +31,8 @@ pub struct WorldSnapshot {
     pub tick: u64,
     /// All entity states
     pub entities: Vec<EntitySnapshot>,
+    /// Authoritative streamed-world population state derived by the shard.
+    pub population: WorldPopulationState,
 }
 
 /// A serialized entity state
@@ -119,6 +122,8 @@ pub struct StateDelta {
     pub updated: Vec<EntitySnapshot>,
     /// Destroyed entity IDs
     pub destroyed: Vec<u64>,
+    /// Authoritative region/chunk population summary for the target tick.
+    pub population: WorldPopulationState,
 }
 
 /// Tick-aligned locally predicted actions that have been sent to the server but
@@ -487,6 +492,7 @@ impl WorldSnapshot {
     /// Capture current world state into a snapshot
     pub fn capture(world: &pod_core::World) -> Self {
         let mut entities = Vec::new();
+        let population = world.population_state();
         let controlled_entities = world
             .agents
             .iter()
@@ -599,6 +605,7 @@ impl WorldSnapshot {
         Self {
             tick: world.tick,
             entities,
+            population,
         }
     }
 
@@ -639,6 +646,8 @@ impl WorldSnapshot {
             hash_option_str(&mut hash, entity.label.as_deref());
             hash_entity_metadata(&mut hash, &entity.metadata);
         }
+
+        hash_population_state(&mut hash, &self.population);
 
         hash
     }
@@ -715,6 +724,7 @@ impl StateDelta {
             tick: new.tick,
             updated,
             destroyed,
+            population: new.population.clone(),
         }
     }
 
@@ -737,6 +747,7 @@ impl StateDelta {
         WorldSnapshot {
             tick: self.tick,
             entities,
+            population: self.population.clone(),
         }
     }
 
@@ -773,6 +784,7 @@ pub fn apply_authoritative_update(
         WorldSnapshot {
             tick,
             entities: delta.updated.clone(),
+            population: delta.population.clone(),
         }
     } else {
         let previous = previous.ok_or(SnapshotUpdateError::MissingBaseline { tick })?;
@@ -931,6 +943,11 @@ fn interpolate_snapshots(
     WorldSnapshot {
         tick: target_tick.floor().max(0.0) as u64,
         entities,
+        population: if factor < 0.5 {
+            lower.population.clone()
+        } else {
+            upper.population.clone()
+        },
     }
 }
 
@@ -1244,6 +1261,51 @@ fn hash_option_u8(hash: &mut u64, value: Option<u8>) {
     }
 }
 
+fn hash_population_breakdown(hash: &mut u64, counts: &pod_core::PopulationBreakdown) {
+    hash_u64(hash, counts.players as u64);
+    hash_u64(hash, counts.npcs as u64);
+    hash_u64(hash, counts.wild_creatures as u64);
+    hash_u64(hash, counts.companions as u64);
+    hash_u64(hash, counts.resource_nodes as u64);
+    hash_u64(hash, counts.loot_containers as u64);
+    hash_u64(hash, counts.scenery as u64);
+}
+
+fn hash_population_state(hash: &mut u64, population: &WorldPopulationState) {
+    hash_u64(hash, population.tick);
+    hash_u64(hash, population.chunks.len() as u64);
+    for chunk in &population.chunks {
+        hash_option_str(hash, Some(chunk.chunk_key.as_str()));
+        hash_option_str(hash, chunk.region_id.as_deref());
+        hash_option_str(hash, chunk.region_name.as_deref());
+        hash_option_str(hash, chunk.biome_id.as_deref());
+        hash_string_list(hash, &chunk.quest_graph_ids);
+        hash_option_str(hash, chunk.faction_track_id.as_deref());
+        hash_string_list(hash, &chunk.encounter_table_ids);
+        hash_population_breakdown(hash, &chunk.counts);
+        hash_u64(hash, chunk.active_entity_count as u64);
+        hash_u64(hash, chunk.ambient_population_cap as u64);
+        hash_u64(hash, chunk.spawn_budget_remaining as u64);
+        hash_f32(hash, chunk.population_pressure);
+    }
+    hash_u64(hash, population.regions.len() as u64);
+    for region in &population.regions {
+        hash_option_str(hash, Some(region.region_id.as_str()));
+        hash_option_str(hash, Some(region.region_name.as_str()));
+        hash_option_str(hash, Some(region.primary_biome_id.as_str()));
+        hash_string_list(hash, &region.chunk_keys);
+        hash_string_list(hash, &region.active_quest_graph_ids);
+        hash_option_str(hash, region.dominant_faction_track_id.as_deref());
+        hash_string_list(hash, &region.encounter_table_ids);
+        hash_u64(hash, region.active_chunk_count as u64);
+        hash_population_breakdown(hash, &region.counts);
+        hash_u64(hash, region.active_entity_count as u64);
+        hash_u64(hash, region.ambient_population_cap as u64);
+        hash_u64(hash, region.spawn_budget_remaining as u64);
+        hash_f32(hash, region.population_pressure);
+    }
+}
+
 fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_option_str(hash, Some(entity_kind_name(metadata.kind)));
     hash_option_str(hash, metadata.chunk_key.as_deref());
@@ -1403,9 +1465,37 @@ mod tests {
     use pod_core::{
         ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout, CombatPresentation,
         CreatureIdentity, EncounterProfile, FactionAffiliation, FactionDisposition, IdleAgent,
-        LootContainer, QuestAnchor, ResourceNode, SpawnProfile, WorldChunkDefinition,
-        WorldRegionDefinition,
+        LootContainer, QuestAnchor, RegionEncounterTable, ResourceNode, SpawnProfile,
+        WorldChunkDefinition, WorldRegionDefinition,
     };
+
+    fn empty_population(tick: u64) -> WorldPopulationState {
+        WorldPopulationState {
+            tick,
+            ..Default::default()
+        }
+    }
+
+    fn snapshot_with_entities(tick: u64, entities: Vec<EntitySnapshot>) -> WorldSnapshot {
+        WorldSnapshot {
+            tick,
+            entities,
+            population: empty_population(tick),
+        }
+    }
+
+    fn delta_with_updates(
+        tick: u64,
+        updated: Vec<EntitySnapshot>,
+        destroyed: Vec<u64>,
+    ) -> StateDelta {
+        StateDelta {
+            tick,
+            updated,
+            destroyed,
+            population: empty_population(tick),
+        }
+    }
 
     #[test]
     fn test_snapshot_default() {
@@ -1642,7 +1732,17 @@ mod tests {
             .encounter_table_ids
             .push("verdant-heart-wildlife".into());
 
-        world.set_streaming_metadata(8.0, vec![heart_chunk], vec![heart_region]);
+        world.set_streaming_metadata(
+            8.0,
+            vec![heart_chunk],
+            vec![heart_region],
+            vec![RegionEncounterTable::new(
+                "verdant-heart-wildlife",
+                "verdant-hollow",
+                "wildlife",
+                vec![],
+            )],
+        );
 
         world
             .spawn_at(2.0, 2.0)
@@ -1761,9 +1861,9 @@ mod tests {
             metadata: EntityMetadataSnapshot::default(),
         });
 
-        let delta = StateDelta {
-            tick: 1,
-            updated: vec![EntitySnapshot {
+        let delta = delta_with_updates(
+            1,
+            vec![EntitySnapshot {
                 id: 2,
                 position: Vec2::new(5.0, 5.0),
                 velocity: Vec2::ZERO,
@@ -1774,8 +1874,8 @@ mod tests {
                 label: None,
                 metadata: EntityMetadataSnapshot::default(),
             }],
-            destroyed: vec![],
-        };
+            vec![],
+        );
 
         let snap2 = delta.apply_to(&snap1);
         assert_eq!(snap2.entities.len(), 2);
@@ -1846,11 +1946,7 @@ mod tests {
         assert_eq!(delta.updated.len(), 1);
         assert_eq!(delta.updated[0].label.as_deref(), Some("sprite3d"));
 
-        let delta_with_destroy = StateDelta {
-            tick: 2,
-            updated: delta.updated.clone(),
-            destroyed: vec![12],
-        };
+        let delta_with_destroy = delta_with_updates(2, delta.updated.clone(), vec![12]);
 
         let applied = delta_with_destroy.apply_to(&base);
         assert_eq!(applied.entities.len(), 1);
@@ -1885,9 +1981,9 @@ mod tests {
             metadata: EntityMetadataSnapshot::default(),
         });
 
-        let delta = StateDelta {
-            tick: 10,
-            updated: vec![EntitySnapshot {
+        let delta = delta_with_updates(
+            10,
+            vec![EntitySnapshot {
                 id: 10,
                 position: Vec2::new(5.0, 5.0),
                 velocity: Vec2::ZERO,
@@ -1898,8 +1994,8 @@ mod tests {
                 label: Some("updated".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-            destroyed: vec![11, 99_999],
-        };
+            vec![11, 99_999],
+        );
 
         let applied = delta.apply_to(&base);
         assert_eq!(applied.entities.len(), 1);
@@ -1942,23 +2038,17 @@ mod tests {
             metadata: EntityMetadataSnapshot::default(),
         };
 
-        let snapshot_a = WorldSnapshot {
-            tick: 4,
-            entities: vec![entity_a.clone(), entity_b.clone()],
-        };
-        let snapshot_b = WorldSnapshot {
-            tick: 4,
-            entities: vec![entity_b, entity_a],
-        };
+        let snapshot_a = snapshot_with_entities(4, vec![entity_a.clone(), entity_b.clone()]);
+        let snapshot_b = snapshot_with_entities(4, vec![entity_b, entity_a]);
 
         assert_eq!(snapshot_a.digest(), snapshot_b.digest());
     }
 
     #[test]
     fn test_replay_predicted_actions_replays_move_and_stop() {
-        let snapshot = WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        let snapshot = snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 7,
                 position: Vec2::ZERO,
                 velocity: Vec2::ZERO,
@@ -1969,7 +2059,7 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        };
+        );
 
         let predicted = snapshot.replay_predicted_actions(
             Some(7),
@@ -1995,9 +2085,9 @@ mod tests {
     fn test_interpolation_buffer_replaces_same_tick_snapshot() {
         let mut buffer = SnapshotInterpolationBuffer::default();
 
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        buffer.push(snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::ZERO,
                 velocity: Vec2::ZERO,
@@ -2008,10 +2098,10 @@ mod tests {
                 label: Some("old".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        ));
+        buffer.push(snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(5.0, 0.0),
                 velocity: Vec2::ZERO,
@@ -2022,7 +2112,7 @@ mod tests {
                 label: Some("new".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
+        ));
 
         let sampled = buffer.sample(10.0).unwrap();
         assert_eq!(sampled.mode, SnapshotSampleMode::Exact);
@@ -2034,9 +2124,9 @@ mod tests {
     #[test]
     fn test_interpolation_buffer_lerps_shared_entities() {
         let mut buffer = SnapshotInterpolationBuffer::default();
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        buffer.push(snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(0.0, 0.0),
                 velocity: Vec2::new(10.0, 0.0),
@@ -2047,10 +2137,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
-        buffer.push(WorldSnapshot {
-            tick: 12,
-            entities: vec![EntitySnapshot {
+        ));
+        buffer.push(snapshot_with_entities(
+            12,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(12.0, 0.0),
                 velocity: Vec2::new(14.0, 0.0),
@@ -2061,7 +2151,7 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
+        ));
 
         let sampled = buffer.sample(11.0).unwrap();
         let entity = &sampled.snapshot.entities[0];
@@ -2077,9 +2167,9 @@ mod tests {
     #[test]
     fn test_interpolation_buffer_extrapolates_latest_snapshot() {
         let mut buffer = SnapshotInterpolationBuffer::default();
-        buffer.push(WorldSnapshot {
-            tick: 5,
-            entities: vec![EntitySnapshot {
+        buffer.push(snapshot_with_entities(
+            5,
+            vec![EntitySnapshot {
                 id: 9,
                 position: Vec2::new(1.0, 2.0),
                 velocity: Vec2::new(60.0, 0.0),
@@ -2090,7 +2180,7 @@ mod tests {
                 label: Some("npc".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
+        ));
 
         let sampled = buffer.sample(6.0).unwrap();
         let entity = &sampled.snapshot.entities[0];
@@ -2106,9 +2196,9 @@ mod tests {
             max_extrapolation_ticks: 1.0,
             ..InterpolationConfig::default()
         });
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        buffer.push(snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(5.0, 0.0),
                 velocity: Vec2::new(30.0, 0.0),
@@ -2119,7 +2209,7 @@ mod tests {
                 label: None,
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
+        ));
 
         let past = buffer.sample(9.0).unwrap();
         assert_eq!(past.mode, SnapshotSampleMode::ClampedPast);
@@ -2145,18 +2235,9 @@ mod tests {
     #[test]
     fn test_interpolation_buffer_rewind_returns_latest_snapshot_before_tick() {
         let mut buffer = SnapshotInterpolationBuffer::default();
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![],
-        });
-        buffer.push(WorldSnapshot {
-            tick: 15,
-            entities: vec![],
-        });
-        buffer.push(WorldSnapshot {
-            tick: 20,
-            entities: vec![],
-        });
+        buffer.push(snapshot_with_entities(10, vec![]));
+        buffer.push(snapshot_with_entities(15, vec![]));
+        buffer.push(snapshot_with_entities(20, vec![]));
 
         assert_eq!(buffer.rewind_to(16).unwrap().tick, 15);
         assert_eq!(buffer.rewind_to(8).unwrap().tick, 10);
@@ -2165,9 +2246,9 @@ mod tests {
     #[test]
     fn test_build_rollback_preview_replays_batches_after_rewind_tick() {
         let mut buffer = SnapshotInterpolationBuffer::default();
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: vec![EntitySnapshot {
+        buffer.push(snapshot_with_entities(
+            10,
+            vec![EntitySnapshot {
                 id: 7,
                 position: Vec2::ZERO,
                 velocity: Vec2::ZERO,
@@ -2178,10 +2259,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
-        buffer.push(WorldSnapshot {
-            tick: 12,
-            entities: vec![EntitySnapshot {
+        ));
+        buffer.push(snapshot_with_entities(
+            12,
+            vec![EntitySnapshot {
                 id: 7,
                 position: Vec2::new(2.0, 0.0),
                 velocity: Vec2::ZERO,
@@ -2192,7 +2273,7 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        });
+        ));
 
         let preview = build_rollback_preview(
             &buffer,
@@ -2241,9 +2322,9 @@ mod tests {
 
     #[test]
     fn test_build_catch_up_diagnostics_reports_drift_and_history_window() {
-        let authoritative = WorldSnapshot {
-            tick: 12,
-            entities: vec![EntitySnapshot {
+        let authoritative = snapshot_with_entities(
+            12,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(6.0, 0.0),
                 velocity: Vec2::ZERO,
@@ -2254,10 +2335,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        };
-        let predicted = WorldSnapshot {
-            tick: 13,
-            entities: vec![EntitySnapshot {
+        );
+        let predicted = snapshot_with_entities(
+            13,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(8.0, 0.0),
                 velocity: Vec2::new(120.0, 0.0),
@@ -2268,16 +2349,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        };
+        );
         let mut buffer = SnapshotInterpolationBuffer::default();
-        buffer.push(WorldSnapshot {
-            tick: 10,
-            entities: authoritative.entities.clone(),
-        });
-        buffer.push(WorldSnapshot {
-            tick: 11,
-            entities: authoritative.entities.clone(),
-        });
+        buffer.push(snapshot_with_entities(10, authoritative.entities.clone()));
+        buffer.push(snapshot_with_entities(11, authoritative.entities.clone()));
         buffer.push(authoritative.clone());
 
         let mut clock = RenderClock::default();
@@ -2342,9 +2417,9 @@ mod tests {
         let sampled = InterpolatedSnapshot {
             target_tick: 12.0,
             mode: SnapshotSampleMode::Interpolated,
-            snapshot: WorldSnapshot {
-                tick: 12,
-                entities: vec![
+            snapshot: snapshot_with_entities(
+                12,
+                vec![
                     EntitySnapshot {
                         id: 1,
                         position: Vec2::new(5.0, 0.0),
@@ -2368,11 +2443,11 @@ mod tests {
                         metadata: EntityMetadataSnapshot::default(),
                     },
                 ],
-            },
+            ),
         };
-        let predicted_local = WorldSnapshot {
-            tick: 13,
-            entities: vec![EntitySnapshot {
+        let predicted_local = snapshot_with_entities(
+            13,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(8.0, 1.0),
                 velocity: Vec2::new(3.0, 0.0),
@@ -2383,7 +2458,7 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-        };
+        );
 
         let composed = compose_presentation_snapshot(sampled, Some(&predicted_local), Some(1));
 
@@ -2400,11 +2475,7 @@ mod tests {
 
     #[test]
     fn test_apply_authoritative_update_requires_baseline_for_delta() {
-        let delta = StateDelta {
-            tick: 5,
-            updated: vec![],
-            destroyed: vec![],
-        };
+        let delta = delta_with_updates(5, vec![], vec![]);
 
         let error = apply_authoritative_update(None, 5, false, &delta, 0).unwrap_err();
         assert_eq!(error, SnapshotUpdateError::MissingBaseline { tick: 5 });
@@ -2412,9 +2483,9 @@ mod tests {
 
     #[test]
     fn test_apply_authoritative_update_accepts_full_snapshot() {
-        let full = StateDelta {
-            tick: 5,
-            updated: vec![EntitySnapshot {
+        let full = delta_with_updates(
+            5,
+            vec![EntitySnapshot {
                 id: 1,
                 position: Vec2::new(2.0, 3.0),
                 velocity: Vec2::X,
@@ -2425,12 +2496,13 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
-            destroyed: vec![],
-        };
+            vec![],
+        );
 
         let expected_snapshot = WorldSnapshot {
             tick: 5,
             entities: full.updated.clone(),
+            population: full.population.clone(),
         };
 
         let applied =

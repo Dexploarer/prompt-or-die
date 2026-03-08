@@ -10,7 +10,11 @@ import type {
   NetworkEntitySnapshot,
   NetworkEventBatch,
   NetworkGameEvent,
+  NetworkPopulationBreakdown,
+  NetworkChunkPopulationState,
+  NetworkRegionPopulationState,
   NetworkSkillKind,
+  NetworkWorldPopulationState,
   NetworkWorldSnapshot,
   Vec2Tuple
 } from "./contracts";
@@ -263,11 +267,19 @@ export class PodWebLocalWorld {
   }
 
   snapshotState(): NetworkWorldSnapshot {
+    const entities = this.state.entities
+      .map((entity) => toSnapshot(entity))
+      .sort((left, right) => left.id - right.id);
+
     return {
       tick: this.state.tick,
-      entities: this.state.entities
-        .map((entity) => toSnapshot(entity))
-        .sort((left, right) => left.id - right.id)
+      entities,
+      population: summarizePopulationState(
+        this.state.tick,
+        entities,
+        this.state.regions,
+        this.state.encounterTables
+      )
     };
   }
 
@@ -1227,7 +1239,13 @@ export function renderGameToText(
       chunkSize: LOCAL_WORLD_CHUNK_SIZE,
       activeChunks: debugState.activeChunkKeys,
       currentRegionId: debugState.currentRegionId,
-      currentRegionName: debugState.currentRegionName
+      currentRegionName: debugState.currentRegionName,
+      regionPopulation:
+        player?.metadata.regionId == null
+          ? null
+          : snapshot.population.regions.find(
+              (region) => region.regionId === player.metadata.regionId
+            ) ?? null
     },
     progression: {
       questGraphs: debugState.questGraphs,
@@ -2380,6 +2398,195 @@ function activeReputationTierIds(state: LocalWorldState): Set<string> {
     tiers.add(currentFactionTier(track).tierId);
   }
   return tiers;
+}
+
+function emptyPopulationBreakdown(): NetworkPopulationBreakdown {
+  return {
+    players: 0,
+    npcs: 0,
+    wildCreatures: 0,
+    companions: 0,
+    resourceNodes: 0,
+    lootContainers: 0,
+    scenery: 0
+  };
+}
+
+function incrementPopulationBreakdown(
+  counts: NetworkPopulationBreakdown,
+  entity: NetworkEntitySnapshot
+): void {
+  switch (entity.metadata.kind) {
+    case "Player":
+      counts.players += 1;
+      break;
+    case "Npc":
+      counts.npcs += 1;
+      break;
+    case "WildCreature":
+      counts.wildCreatures += 1;
+      break;
+    case "Companion":
+      counts.companions += 1;
+      break;
+    case "ResourceNode":
+      counts.resourceNodes += 1;
+      break;
+    case "LootContainer":
+      counts.lootContainers += 1;
+      break;
+    default:
+      counts.scenery += 1;
+      break;
+  }
+}
+
+function totalPopulationBreakdown(counts: NetworkPopulationBreakdown): number {
+  return (
+    counts.players +
+    counts.npcs +
+    counts.wildCreatures +
+    counts.companions +
+    counts.resourceNodes +
+    counts.lootContainers +
+    counts.scenery
+  );
+}
+
+function activeSpawnedActors(counts: NetworkPopulationBreakdown): number {
+  return counts.players + counts.npcs + counts.wildCreatures + counts.companions;
+}
+
+function finalizeChunkPopulation(state: NetworkChunkPopulationState): void {
+  state.activeEntityCount = totalPopulationBreakdown(state.counts);
+  const activeActors = activeSpawnedActors(state.counts);
+  state.spawnBudgetRemaining = Math.max(0, state.ambientPopulationCap - activeActors);
+  state.populationPressure =
+    state.ambientPopulationCap <= 0 ? 0 : activeActors / state.ambientPopulationCap;
+}
+
+function finalizeRegionPopulation(state: NetworkRegionPopulationState): void {
+  state.activeEntityCount = totalPopulationBreakdown(state.counts);
+  const activeActors = activeSpawnedActors(state.counts);
+  state.spawnBudgetRemaining = Math.max(0, state.ambientPopulationCap - activeActors);
+  state.populationPressure =
+    state.ambientPopulationCap <= 0 ? 0 : activeActors / state.ambientPopulationCap;
+}
+
+function summarizePopulationState(
+  tick: number,
+  entities: NetworkEntitySnapshot[],
+  regions: Map<string, LocalRegionState>,
+  encounterTables: Map<string, LocalEncounterTableState>
+): NetworkWorldPopulationState {
+  const chunks = new Map<string, NetworkChunkPopulationState>();
+
+  for (const region of regions.values()) {
+    for (const chunkKey of region.chunkKeys) {
+      const ambientPopulationCap = region.encounterTableIds.reduce(
+        (total, tableId) => total + (encounterTables.get(tableId)?.ambientCap ?? 0),
+        0
+      );
+      chunks.set(chunkKey, {
+        chunkKey,
+        regionId: region.regionId,
+        regionName: region.displayName,
+        biomeId: region.primaryBiomeId,
+        questGraphIds: [...region.activeQuestGraphIds],
+        factionTrackId: region.dominantFactionTrackId || null,
+        encounterTableIds: [...region.encounterTableIds],
+        counts: emptyPopulationBreakdown(),
+        activeEntityCount: 0,
+        ambientPopulationCap,
+        spawnBudgetRemaining: ambientPopulationCap,
+        populationPressure: 0
+      });
+    }
+  }
+
+  for (const entity of entities) {
+    const chunkKey = entity.metadata.chunkKey ?? chunkKeyFromPosition(entity.position);
+    const region = entity.metadata.regionId
+      ? regions.get(entity.metadata.regionId)
+      : regionForChunkKey(chunkKey, regions);
+    const chunkState =
+      chunks.get(chunkKey) ??
+      {
+        chunkKey,
+        regionId: entity.metadata.regionId ?? region?.regionId ?? null,
+        regionName: entity.metadata.regionName ?? region?.displayName ?? null,
+        biomeId: region?.primaryBiomeId ?? entity.metadata.spawnProfile?.biomeId ?? null,
+        questGraphIds: entity.metadata.questGraphIds.slice(),
+        factionTrackId:
+          entity.metadata.factionTrackId ?? region?.dominantFactionTrackId ?? null,
+        encounterTableIds: entity.metadata.encounterTableId
+          ? [entity.metadata.encounterTableId]
+          : [...(region?.encounterTableIds ?? [])],
+        counts: emptyPopulationBreakdown(),
+        activeEntityCount: 0,
+        ambientPopulationCap: 0,
+        spawnBudgetRemaining: 0,
+        populationPressure: 0
+      };
+
+    if (chunkState.ambientPopulationCap === 0) {
+      chunkState.ambientPopulationCap = chunkState.encounterTableIds.reduce(
+        (total, tableId) => total + (encounterTables.get(tableId)?.ambientCap ?? 0),
+        0
+      );
+    }
+    incrementPopulationBreakdown(chunkState.counts, entity);
+    finalizeChunkPopulation(chunkState);
+    chunks.set(chunkKey, chunkState);
+  }
+
+  const chunkList = Array.from(chunks.values()).sort((left, right) =>
+    left.chunkKey.localeCompare(right.chunkKey)
+  );
+  const regionList: NetworkRegionPopulationState[] = Array.from(regions.values())
+    .map((region) => {
+      const counts = emptyPopulationBreakdown();
+      const matchingChunks = chunkList.filter(
+        (chunk) => chunk.regionId === region.regionId
+      );
+      for (const chunk of matchingChunks) {
+        counts.players += chunk.counts.players;
+        counts.npcs += chunk.counts.npcs;
+        counts.wildCreatures += chunk.counts.wildCreatures;
+        counts.companions += chunk.counts.companions;
+        counts.resourceNodes += chunk.counts.resourceNodes;
+        counts.lootContainers += chunk.counts.lootContainers;
+        counts.scenery += chunk.counts.scenery;
+      }
+      const ambientPopulationCap = region.encounterTableIds.reduce(
+        (total, tableId) => total + (encounterTables.get(tableId)?.ambientCap ?? 0),
+        0
+      );
+      const regionState: NetworkRegionPopulationState = {
+        regionId: region.regionId,
+        regionName: region.displayName,
+        primaryBiomeId: region.primaryBiomeId,
+        chunkKeys: [...region.chunkKeys],
+        activeQuestGraphIds: [...region.activeQuestGraphIds],
+        dominantFactionTrackId: region.dominantFactionTrackId || null,
+        encounterTableIds: [...region.encounterTableIds],
+        activeChunkCount: matchingChunks.filter((chunk) => chunk.activeEntityCount > 0).length,
+        counts,
+        activeEntityCount: 0,
+        ambientPopulationCap,
+        spawnBudgetRemaining: ambientPopulationCap,
+        populationPressure: 0
+      };
+      finalizeRegionPopulation(regionState);
+      return regionState;
+    })
+    .sort((left, right) => left.regionId.localeCompare(right.regionId));
+
+  return {
+    tick,
+    chunks: chunkList,
+    regions: regionList
+  };
 }
 
 function chunkKeyFromPosition(position: Vec2Tuple): string {

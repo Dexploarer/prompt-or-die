@@ -544,15 +544,64 @@ export interface NetworkEntitySnapshot {
   metadata: NetworkEntityMetadataSnapshot;
 }
 
+export interface NetworkPopulationBreakdown {
+  players: number;
+  npcs: number;
+  wildCreatures: number;
+  companions: number;
+  resourceNodes: number;
+  lootContainers: number;
+  scenery: number;
+}
+
+export interface NetworkChunkPopulationState {
+  chunkKey: string;
+  regionId: string | null;
+  regionName: string | null;
+  biomeId: string | null;
+  questGraphIds: string[];
+  factionTrackId: string | null;
+  encounterTableIds: string[];
+  counts: NetworkPopulationBreakdown;
+  activeEntityCount: number;
+  ambientPopulationCap: number;
+  spawnBudgetRemaining: number;
+  populationPressure: number;
+}
+
+export interface NetworkRegionPopulationState {
+  regionId: string;
+  regionName: string;
+  primaryBiomeId: string;
+  chunkKeys: string[];
+  activeQuestGraphIds: string[];
+  dominantFactionTrackId: string | null;
+  encounterTableIds: string[];
+  activeChunkCount: number;
+  counts: NetworkPopulationBreakdown;
+  activeEntityCount: number;
+  ambientPopulationCap: number;
+  spawnBudgetRemaining: number;
+  populationPressure: number;
+}
+
+export interface NetworkWorldPopulationState {
+  tick: number;
+  chunks: NetworkChunkPopulationState[];
+  regions: NetworkRegionPopulationState[];
+}
+
 export interface NetworkWorldSnapshot {
   tick: number;
   entities: NetworkEntitySnapshot[];
+  population: NetworkWorldPopulationState;
 }
 
 export interface NetworkStateDelta {
   tick: number;
   updated: NetworkEntitySnapshot[];
   destroyed: number[];
+  population: NetworkWorldPopulationState;
 }
 
 export interface NetworkGameEvent {
@@ -1129,6 +1178,147 @@ function defaultInteractionHints(): NetworkEntityInteractionHints {
   };
 }
 
+function defaultPopulationBreakdown(): NetworkPopulationBreakdown {
+  return {
+    players: 0,
+    npcs: 0,
+    wildCreatures: 0,
+    companions: 0,
+    resourceNodes: 0,
+    lootContainers: 0,
+    scenery: 0
+  };
+}
+
+function parsePopulationBreakdown(value: unknown): NetworkPopulationBreakdown {
+  if (!isRecord(value)) {
+    return defaultPopulationBreakdown();
+  }
+
+  return {
+    players: asNumber(value.players) ?? 0,
+    npcs: asNumber(value.npcs) ?? 0,
+    wildCreatures:
+      asNumber(value.wild_creatures ?? value.wildCreatures) ?? 0,
+    companions: asNumber(value.companions) ?? 0,
+    resourceNodes:
+      asNumber(value.resource_nodes ?? value.resourceNodes) ?? 0,
+    lootContainers:
+      asNumber(value.loot_containers ?? value.lootContainers) ?? 0,
+    scenery: asNumber(value.scenery) ?? 0
+  };
+}
+
+function defaultWorldPopulationState(tick = 0): NetworkWorldPopulationState {
+  return {
+    tick,
+    chunks: [],
+    regions: []
+  };
+}
+
+function parseChunkPopulationState(value: unknown): NetworkChunkPopulationState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const chunkKey = optionalString(value.chunk_key ?? value.chunkKey);
+  if (chunkKey == null) {
+    return null;
+  }
+
+  return {
+    chunkKey,
+    regionId: optionalString(value.region_id ?? value.regionId) ?? null,
+    regionName: optionalString(value.region_name ?? value.regionName) ?? null,
+    biomeId: optionalString(value.biome_id ?? value.biomeId) ?? null,
+    questGraphIds: parseStringArray(value.quest_graph_ids ?? value.questGraphIds) ?? [],
+    factionTrackId:
+      optionalString(value.faction_track_id ?? value.factionTrackId) ?? null,
+    encounterTableIds:
+      parseStringArray(value.encounter_table_ids ?? value.encounterTableIds) ?? [],
+    counts: parsePopulationBreakdown(value.counts),
+    activeEntityCount:
+      asNumber(value.active_entity_count ?? value.activeEntityCount) ?? 0,
+    ambientPopulationCap:
+      asNumber(value.ambient_population_cap ?? value.ambientPopulationCap) ?? 0,
+    spawnBudgetRemaining:
+      asNumber(value.spawn_budget_remaining ?? value.spawnBudgetRemaining) ?? 0,
+    populationPressure:
+      asNumber(value.population_pressure ?? value.populationPressure) ?? 0
+  };
+}
+
+function parseRegionPopulationState(value: unknown): NetworkRegionPopulationState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const regionId = optionalString(value.region_id ?? value.regionId);
+  const regionName = optionalString(value.region_name ?? value.regionName);
+  const primaryBiomeId = optionalString(
+    value.primary_biome_id ?? value.primaryBiomeId
+  );
+  if (regionId == null || regionName == null || primaryBiomeId == null) {
+    return null;
+  }
+
+  return {
+    regionId,
+    regionName,
+    primaryBiomeId,
+    chunkKeys: parseStringArray(value.chunk_keys ?? value.chunkKeys) ?? [],
+    activeQuestGraphIds:
+      parseStringArray(value.active_quest_graph_ids ?? value.activeQuestGraphIds) ?? [],
+    dominantFactionTrackId:
+      optionalString(
+        value.dominant_faction_track_id ?? value.dominantFactionTrackId
+      ) ?? null,
+    encounterTableIds:
+      parseStringArray(value.encounter_table_ids ?? value.encounterTableIds) ?? [],
+    activeChunkCount:
+      asNumber(value.active_chunk_count ?? value.activeChunkCount) ?? 0,
+    counts: parsePopulationBreakdown(value.counts),
+    activeEntityCount:
+      asNumber(value.active_entity_count ?? value.activeEntityCount) ?? 0,
+    ambientPopulationCap:
+      asNumber(value.ambient_population_cap ?? value.ambientPopulationCap) ?? 0,
+    spawnBudgetRemaining:
+      asNumber(value.spawn_budget_remaining ?? value.spawnBudgetRemaining) ?? 0,
+    populationPressure:
+      asNumber(value.population_pressure ?? value.populationPressure) ?? 0
+  };
+}
+
+function parseWorldPopulationState(
+  value: unknown,
+  tickFallback: number
+): NetworkWorldPopulationState {
+  if (!isRecord(value)) {
+    return defaultWorldPopulationState(tickFallback);
+  }
+
+  const tick = asNumber(value.tick) ?? tickFallback;
+  const chunks = Array.isArray(value.chunks)
+    ? value.chunks
+        .map((chunk) => parseChunkPopulationState(chunk))
+        .filter((chunk): chunk is NetworkChunkPopulationState => chunk != null)
+        .sort((left, right) => left.chunkKey.localeCompare(right.chunkKey))
+    : [];
+  const regions = Array.isArray(value.regions)
+    ? value.regions
+        .map((region) => parseRegionPopulationState(region))
+        .filter((region): region is NetworkRegionPopulationState => region != null)
+        .sort((left, right) => left.regionId.localeCompare(right.regionId))
+    : [];
+
+  return {
+    tick,
+    chunks,
+    regions
+  };
+}
+
 function defaultNetworkEntityMetadata(): NetworkEntityMetadataSnapshot {
   return {
     kind: "Unknown",
@@ -1226,7 +1416,11 @@ function parseNetworkWorldSnapshot(value: unknown): NetworkWorldSnapshot | null 
 
   return {
     tick: value.tick,
-    entities
+    entities,
+    population: parseWorldPopulationState(
+      value.population ?? value.population_state,
+      value.tick
+    )
   };
 }
 
@@ -1251,7 +1445,11 @@ function parseNetworkStateDelta(value: unknown): NetworkStateDelta | null {
   return {
     tick: value.tick,
     updated,
-    destroyed
+    destroyed,
+    population: parseWorldPopulationState(
+      value.population ?? value.population_state,
+      value.tick
+    )
   };
 }
 
@@ -1873,7 +2071,8 @@ export function applyNetworkStateDelta(
   if (isFullSnapshot) {
     return {
       tick: delta.tick,
-      entities: delta.updated.slice().sort((left, right) => left.id - right.id)
+      entities: delta.updated.slice().sort((left, right) => left.id - right.id),
+      population: delta.population
     };
   }
 
@@ -1894,7 +2093,8 @@ export function applyNetworkStateDelta(
 
   return {
     tick: delta.tick,
-    entities: Array.from(entitiesById.values()).sort((left, right) => left.id - right.id)
+    entities: Array.from(entitiesById.values()).sort((left, right) => left.id - right.id),
+    population: delta.population
   };
 }
 

@@ -679,6 +679,7 @@ impl GameServer {
                 tick: self.tick,
                 updated: current_snapshot.entities.clone(),
                 destroyed: vec![],
+                population: current_snapshot.population.clone(),
             }
         } else {
             StateDelta::diff(
@@ -810,6 +811,7 @@ impl GameServer {
                 tick: self.tick,
                 updated: snapshot.entities,
                 destroyed: vec![],
+                population: snapshot.population,
             },
         }
     }
@@ -1073,6 +1075,7 @@ impl std::error::Error for ServerError {}
                 let snapshot = WorldSnapshot {
                     tick,
                     entities: delta.updated,
+                    population: delta.population,
                 };
                 assert_eq!(snapshot.digest(), authoritative_digest);
             }

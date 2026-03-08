@@ -830,5 +830,21 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-editor --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 85
-**Current focus**: Iteration 86 shard-side streamed population rules and browser/editor consumption of authoritative region population state, followed by denser flagship world authoring beyond the local sandbox
+### Iteration 86
+- [x] Added deterministic shard-side streamed population reconciliation in `pod-core`, including active-chunk tracking from authoritative agents, neighbor-chunk activation, inactive streamed-entity eviction, encounter-table-driven spawn filling, and TOON-exportable world/chunk/region population state.
+- [x] Extended `pod-net` snapshots and delta application with authoritative `WorldPopulationState`, including digest coverage and direct-connect/client snapshot propagation so browser consumers receive region/chunk pressure, spawn budget, and density metadata from the real shard path.
+- [x] Updated `apps/pod-web` and `pod-editor` to consume authoritative population state, surfacing region/chunk population summaries in the browser HUD and adding TOON import plus dashboard rendering for editor-side shard population inspection.
+- [x] Replaced the old server default map with a streamed `Verdant Hollow` shard layout in `pod-server`, including authored chunks/regions/encounter tables and deterministic runtime seeding so the flagship MMO world no longer depends on local-only browser sandbox density.
+- [x] Added deterministic coverage for streamed population spawning/re-homing in `pod-core`, authoritative population parsing in browser tests, editor TOON population import, and server-map shard seeding.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/local-world.test.ts ./src/affordances.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 86
+**Current focus**: Iteration 87 authoritative streamed respawn tuning and richer shard-backed flagship biome authoring, followed by browser/editor heatmaps and creator controls for live regional population balancing

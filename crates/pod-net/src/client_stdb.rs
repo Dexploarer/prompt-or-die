@@ -577,6 +577,10 @@ impl SpacetimeDBClient {
                                 tick,
                                 updated: vec![snap],
                                 destroyed: vec![],
+                                population: pod_core::WorldPopulationState {
+                                    tick,
+                                    ..Default::default()
+                                },
                             },
                         });
                     }
@@ -607,6 +611,10 @@ impl SpacetimeDBClient {
                             tick,
                             updated: vec![],
                             destroyed: vec![entity_id],
+                            population: pod_core::WorldPopulationState {
+                                tick,
+                                ..Default::default()
+                            },
                         },
                     });
                 }
@@ -971,6 +979,10 @@ impl SpacetimeDBClient {
         WorldSnapshot {
             tick: self.current_tick_or_zero(),
             entities,
+            population: pod_core::WorldPopulationState {
+                tick: self.current_tick_or_zero(),
+                ..Default::default()
+            },
         }
     }
 
@@ -1533,6 +1545,10 @@ mod tests {
                 label: Some("player".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
+            population: pod_core::WorldPopulationState {
+                tick: 10,
+                ..Default::default()
+            },
         });
         client.ingest_local_snapshot();
 
@@ -1559,6 +1575,10 @@ mod tests {
                 label: Some("npc".into()),
                 metadata: EntityMetadataSnapshot::default(),
             }],
+            population: pod_core::WorldPopulationState {
+                tick: 10,
+                ..Default::default()
+            },
         });
         client.ingest_local_snapshot();
         client.render_clock.advance(10, 1.0 / 60.0);
