@@ -46,6 +46,14 @@ export interface DirectConnectActionState {
   lastActionSummary: string | null;
 }
 
+export interface InitialHudState {
+  feedback: string;
+  connectionBadge: string;
+  worldLabel: string;
+  populationLabel: string;
+  frameSourceLabel: string;
+}
+
 interface DirectConnectHandlers {
   onFrame: (
     snapshot: NetworkWorldSnapshot,
@@ -83,6 +91,29 @@ export function runtimeConfigFromLocation(
     playerName: params.get("player")?.trim() || DEFAULT_PLAYER_NAME,
     debugTelemetry: parseBooleanParam(params.get("debug")),
     reconnectDelayMs: parsePositiveInt(params.get("reconnectMs")) ?? DEFAULT_RECONNECT_DELAY_MS
+  };
+}
+
+export function initialHudStateFromLocation(
+  location: Pick<Location, "search">
+): InitialHudState {
+  const runtimeConfig = runtimeConfigFromLocation(location);
+  if (runtimeConfig) {
+    return {
+      feedback: `Connecting to ${runtimeConfig.url}`,
+      connectionBadge: "connecting to shard",
+      worldLabel: "waiting for shard snapshot",
+      populationLabel: "Awaiting authoritative population state",
+      frameSourceLabel: "bootstrapping direct-connect shard"
+    };
+  }
+
+  return {
+    feedback: "Starting local browser shard",
+    connectionBadge: "local sandbox booting",
+    worldLabel: "booting Verdant Hollow",
+    populationLabel: "Seeding local region population",
+    frameSourceLabel: "bootstrapping local sandbox"
   };
 }
 

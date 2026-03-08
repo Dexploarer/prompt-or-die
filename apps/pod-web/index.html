@@ -295,17 +295,17 @@
         </div>
         <h1>Playable browser shard</h1>
         <p id="feedback-label">
-          Awaiting authoritative outcomes
+          Starting local browser shard
         </p>
         <div class="hud__badge-row">
-          <span class="hud__badge" id="connection-label">offline demo / bridge mode</span>
+          <span class="hud__badge" id="connection-label">local sandbox booting</span>
           <span class="hud__badge" id="quality-label">auto</span>
         </div>
         <div class="hud__stack">
           <div class="hud__card">
             <span class="hud__card-label">World</span>
-            <strong class="hud__card-value" id="world-label">demo scene</strong>
-            <span class="hud__card-meta" id="population-label">No authoritative population state yet</span>
+            <strong class="hud__card-value" id="world-label">booting Verdant Hollow</strong>
+            <span class="hud__card-meta" id="population-label">Seeding local region population</span>
           </div>
           <div class="hud__card">
             <span class="hud__card-label">Target</span>
@@ -333,7 +333,7 @@
           </div>
           <dl>
             <dt>Source</dt>
-            <dd id="frame-source">demo frame</dd>
+            <dd id="frame-source">bootstrapping local sandbox</dd>
             <dt>Stats</dt>
             <dd id="stats-label">warming up…</dd>
             <dt>Controls</dt>
@@ -377,6 +377,30 @@
         </dl>
       </section>
     </div>
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const directConnect = params.has("ws") || params.has("server");
+        if (!directConnect) {
+          return;
+        }
+
+        const setText = (id, value) => {
+          const node = document.getElementById(id);
+          if (node) {
+            node.textContent = value;
+          }
+        };
+
+        const server = params.get("server");
+        const websocketUrl = params.get("ws") || (server ? (/^wss?:\/\//i.test(server) ? server : `ws://${server}`) : "authoritative shard");
+        setText("feedback-label", `Connecting to ${websocketUrl}`);
+        setText("connection-label", "connecting to shard");
+        setText("world-label", "waiting for shard snapshot");
+        setText("population-label", "Awaiting authoritative population state");
+        setText("frame-source", "bootstrapping direct-connect shard");
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

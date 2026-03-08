@@ -35,6 +35,7 @@ import {
   resolvePointerTarget
 } from "./controls";
 import {
+  initialHudStateFromLocation,
   PodWebDirectConnectClient,
   type DirectConnectActionState,
   runtimeConfigFromLocation,
@@ -188,6 +189,13 @@ const rollupSummaryNode = rollupSummaryLabel;
 const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
+const bootHudState = initialHudStateFromLocation(window.location);
+
+feedbackNode.textContent = bootHudState.feedback;
+connectionNode.textContent = bootHudState.connectionBadge;
+worldNode.textContent = bootHudState.worldLabel;
+populationNode.textContent = bootHudState.populationLabel;
+frameSourceNode.textContent = bootHudState.frameSourceLabel;
 
 const renderer = await createPodRenderRuntime(renderCanvas);
 backendLabel.textContent = renderer.backend;
