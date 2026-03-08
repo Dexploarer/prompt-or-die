@@ -32,6 +32,10 @@ function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
     resource_skill: null,
     resource_tier: null,
     encounter_kind: null,
+    faction: null,
+    quest_anchor: null,
+    encounter_profile: null,
+    spawn_profile: null,
     atmosphere: null,
     atmosphere_volume: null,
     actor_presentation: null,
@@ -63,6 +67,10 @@ function typedEntityMetadata(
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    faction: null,
+    questAnchor: null,
+    encounterProfile: null,
+    spawnProfile: null,
     atmosphere: null,
     atmosphereVolume: null,
     actorPresentation: null,
@@ -309,6 +317,12 @@ describe("TOON contract parsing", () => {
                 rotation: 0.4,
                 label: "Hero",
                 metadata: entityMetadata("Player", {
+                  faction: {
+                    faction_id: "verdant-wardens",
+                    role_id: "initiate",
+                    disposition: "Friendly",
+                    influence_radius: 18
+                  },
                   interaction: {
                     can_inspect: true,
                     can_interact: true,
@@ -333,6 +347,7 @@ describe("TOON contract parsing", () => {
     }
     expect(welcome.snapshot.entities[0]?.position).toEqual([12, 18]);
     expect(welcome.snapshot.entities[0]?.metadata.kind).toBe("Player");
+    expect(welcome.snapshot.entities[0]?.metadata.faction?.factionId).toBe("verdant-wardens");
 
     const delta = parseDirectConnectServerMessage(
       JSON.stringify({
@@ -352,6 +367,11 @@ describe("TOON contract parsing", () => {
                 label: "Hero",
                 metadata: entityMetadata("Player", {
                   team_id: 2,
+                  quest_anchor: {
+                    quest_ids: ["verdant-intro"],
+                    primary_prompt: "Speak with the wardens",
+                    stage_tags: ["intro"]
+                  },
                   interaction: {
                     can_inspect: true,
                     can_interact: true,
@@ -378,6 +398,9 @@ describe("TOON contract parsing", () => {
     expect(delta.delta.updated[0]?.position).toEqual([14, 19]);
     expect(delta.acknowledgedActionTick).toBe(12);
     expect(delta.delta.updated[0]?.metadata.teamId).toBe(2);
+    expect(delta.delta.updated[0]?.metadata.questAnchor?.questIds).toEqual([
+      "verdant-intro"
+    ]);
   });
 
   test("parses authoritative event batches into gameplay summaries", () => {

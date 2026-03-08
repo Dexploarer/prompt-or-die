@@ -15,6 +15,10 @@ function metadata(
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    faction: null,
+    questAnchor: null,
+    encounterProfile: null,
+    spawnProfile: null,
     atmosphere: null,
     atmosphereVolume: null,
     actorPresentation: null,
@@ -156,5 +160,81 @@ describe("target affordances", () => {
         })
       })
     ).toBe("Static scenery");
+  });
+
+  test("surfaces faction and quest metadata for creators", () => {
+    expect(
+      formatTargetSummary(
+        {
+          id: 31,
+          position: [6, 4],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Archivist Mara",
+          metadata: metadata({
+            kind: "Npc",
+            faction: {
+              factionId: "verdant-wardens",
+              roleId: "archivist",
+              disposition: "Friendly",
+              influenceRadius: 14
+            },
+            questAnchor: {
+              questIds: ["verdant-intro", "spire-records"],
+              primaryPrompt: "Ask Mara about the spire",
+              stageTags: ["intro", "lore"]
+            },
+            interaction: {
+              canInspect: true,
+              canInteract: true,
+              canAttack: false,
+              canGather: false,
+              canLoot: false,
+              canCapture: false,
+              canCommandCompanion: false,
+              canChat: true
+            }
+          })
+        },
+        {
+          id: 1,
+          position: [2, 2],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Scout",
+          metadata: metadata({
+            kind: "Player"
+          })
+        }
+      )
+    ).toBe("Archivist Mara · E(31) · npc · verdant-wardens archivist · 2 quests · 4u away");
+
+    expect(
+      describeTargetAffordances({
+        id: 31,
+        position: [6, 4],
+        velocity: [0, 0],
+        rotation: 0,
+        label: "Archivist Mara",
+        metadata: metadata({
+          kind: "Npc",
+          questAnchor: {
+            questIds: ["verdant-intro"],
+            primaryPrompt: "Ask Mara about the spire",
+            stageTags: ["intro"]
+          },
+          interaction: {
+            canInspect: true,
+            canInteract: true,
+            canAttack: false,
+            canGather: false,
+            canLoot: false,
+            canCapture: false,
+            canCommandCompanion: false,
+            canChat: true
+          }
+        })
+      })
+    ).toBe("Q quests · E interact · Enter chat");
   });
 });

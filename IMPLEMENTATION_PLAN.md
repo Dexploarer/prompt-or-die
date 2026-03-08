@@ -794,5 +794,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 82
-**Current focus**: Iteration 83 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, plus higher-level creator primitives for authored factions, quest hooks, encounter tables, and biome-linked spawn distributions
+### Iteration 83
+- [x] Added creator-facing world primitives in `pod-core` for `FactionAffiliation`, `QuestAnchor`, `EncounterProfile`, and `SpawnProfile`, and registered them in the core type registry plus fluent world builder so authored MMO content can express faction identity, quest hooks, encounter tables, and biome spawn rules as native engine data.
+- [x] Extended authoritative `pod-net` snapshot metadata and hashing to carry those creator-world primitives, including faction context, quest anchors, encounter profile tuning, and spawn profile identity for both moving actors and static landmarks.
+- [x] Updated `apps/pod-web` metadata parsing, local test world content, and creator affordance summaries so factions, quest hooks, encounter tables, and spawn profiles are immediately visible and testable in the browser sandbox instead of remaining hidden transport-only data.
+- [x] Added deterministic coverage for snapshot capture of the new primitives plus browser-side faction/quest display and local-world authored metadata seeding.
+- [x] Validated touched targets:
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-net --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/local-world.test.ts ./src/affordances.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 83
+**Current focus**: Iteration 84 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, and higher-level creator workflows for quest-state graphs, faction reputation progression, and encounter-table driven population across streamed world regions

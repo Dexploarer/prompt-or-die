@@ -802,6 +802,7 @@ function createPlayerEntity(playerName: string): LocalEntity {
     metadata: metadata("Player", {
       teamId: 1,
       combatStyle: "Melee",
+      faction: factionAffiliation("verdant-wardens", "initiate", "Friendly", 18),
       actorPresentation: {
         profileId: "hero-ranger",
         meshAssetId: "adventurer-hero",
@@ -855,6 +856,25 @@ function createNpcEntity(id: number, label: string, position: Vec2Tuple): LocalE
     metadata: metadata("Npc", {
       teamId: 2,
       combatStyle: "Magic",
+      faction: factionAffiliation("verdant-wardens", slug(label), "Friendly", 14),
+      questAnchor:
+        label === "Archivist Mara"
+          ? questAnchor(
+              ["verdant-intro", "spire-records"],
+              "Ask Mara about the glass spire",
+              ["intro", "lore"]
+            )
+          : label === "Forgekeeper Ivo"
+            ? questAnchor(
+                ["tempered-trail"],
+                "Ask Ivo to prepare expedition gear",
+                ["crafting", "gear"]
+              )
+            : questAnchor(
+                ["lynx-patrol", "hollow-watch"],
+                "Report the field state to Selene",
+                ["combat", "patrol"]
+              ),
       actorPresentation: {
         profileId: "hub-npc",
         meshAssetId: "adventurer-avatar",
@@ -907,6 +927,9 @@ function createWildCreatureEntity(
       speciesId: slug(speciesName),
       speciesName,
       encounterKind: "WildCreature",
+      faction: factionAffiliation("verdant-wilds", "predator", "Hostile", 22),
+      encounterProfile: encounterProfile(`${slug(speciesName)}-encounters`, 2, 1, 1_200),
+      spawnProfile: spawnProfile(`${slug(speciesName)}-grove`, "verdant-hollow", "wildlife", 900, 16),
       actorPresentation: {
         profileId: slug(speciesName),
         meshAssetId: "rift-beast",
@@ -965,6 +988,13 @@ function createResourceEntity(
     metadata: metadata("ResourceNode", {
       resourceSkill: skill,
       resourceTier: 1,
+      spawnProfile: spawnProfile(
+        `${slug(label)}-resource`,
+        "verdant-hollow",
+        skill === "Woodcutting" ? "forest-resources" : "mineral-resources",
+        720,
+        12
+      ),
       actorPresentation: {
         profileId: skill === "Woodcutting" ? "tree-resource" : "ore-resource",
         meshAssetId: skill === "Woodcutting" ? "canopy-tree" : "weathered-boulder",
@@ -1012,6 +1042,14 @@ function createLootEntity(
     health: null,
     maxHealth: null,
     metadata: metadata("LootContainer", {
+      questAnchor:
+        label === "Expedition Chest"
+          ? questAnchor(
+              ["ember-charm-recovery"],
+              "Recover the ember charm from the expedition chest",
+              ["loot", "artifact"]
+            )
+          : null,
       actorPresentation: {
         profileId: "loot-cache",
         meshAssetId: "supply-crate",
@@ -1063,6 +1101,7 @@ function createCompanionEntity(
       combatStyle: "Summoning",
       speciesId,
       speciesName,
+      faction: factionAffiliation("verdant-wardens", "companion", "Friendly", 10),
       actorPresentation: {
         profileId: speciesId,
         meshAssetId: "spirit-companion",
@@ -1117,6 +1156,18 @@ function createSceneryEntity(
     health: null,
     maxHealth: null,
     metadata: metadata("Scenery", {
+      faction:
+        label === "glass spire"
+          ? factionAffiliation("ancient-spirekeepers", "relic", "Neutral", 30)
+          : null,
+      questAnchor:
+        label === "glass spire"
+          ? questAnchor(
+              ["spire-attunement"],
+              "Inspect the glass spire to attune with Verdant Hollow",
+              ["exploration", "attunement"]
+            )
+          : null,
       actorPresentation: {
         profileId: slug(label),
         meshAssetId: null,
@@ -1169,6 +1220,10 @@ function metadata(
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    faction: null,
+    questAnchor: null,
+    encounterProfile: null,
+    spawnProfile: null,
     atmosphere: null,
     atmosphereVolume: null,
     actorPresentation: null,
@@ -1197,6 +1252,62 @@ function verdantAtmosphereProfile(): NetworkAtmosphereProfile {
     rimIntensity: 11,
     groundColor: [0.08, 0.16, 0.12, 1],
     starfieldIntensity: 0.72
+  };
+}
+
+function factionAffiliation(
+  factionId: string,
+  roleId: string,
+  disposition: "Friendly" | "Neutral" | "Hostile",
+  influenceRadius: number
+) {
+  return {
+    factionId,
+    roleId,
+    disposition,
+    influenceRadius
+  };
+}
+
+function questAnchor(
+  questIds: string[],
+  primaryPrompt: string,
+  stageTags: string[]
+) {
+  return {
+    questIds,
+    primaryPrompt,
+    stageTags
+  };
+}
+
+function encounterProfile(
+  tableId: string,
+  difficultyTier: number,
+  recommendedPartySize: number,
+  respawnTicks: number
+) {
+  return {
+    tableId,
+    difficultyTier,
+    recommendedPartySize,
+    respawnTicks
+  };
+}
+
+function spawnProfile(
+  profileId: string,
+  biomeId: string,
+  spawnGroup: string,
+  respawnTicks: number,
+  leashRadius: number
+) {
+  return {
+    profileId,
+    biomeId,
+    spawnGroup,
+    respawnTicks,
+    leashRadius
   };
 }
 
