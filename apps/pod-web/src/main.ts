@@ -16,6 +16,7 @@ import {
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
   withInteractionMarkers,
+  withWorldEventMarkers,
   type ThreeJsWebGpuFrame,
   type TickRollupSummary,
   type ToolCallEventSummary,
@@ -465,20 +466,20 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
   const leadY =
     controlled && speed > 0.05 ? (controlled.velocity[1] / speed) * leadDistance : 0;
 
-  return withInteractionMarkers(
+  const interactionFrame = withInteractionMarkers(
     {
-    ...baseFrame,
-    camera: {
-      ...baseFrame.camera,
-      rotation: cameraRig.yaw,
-      pitch: cameraRig.pitch,
-      zoom: cameraRig.zoom,
-      focusHeight: baseFrame.camera.focusHeight ?? 2.2,
-      followDistance: baseFrame.camera.followDistance ?? 13.5,
-      shoulderOffset: baseFrame.camera.shoulderOffset ?? 0.9,
-      leadX,
-      leadY
-    }
+      ...baseFrame,
+      camera: {
+        ...baseFrame.camera,
+        rotation: cameraRig.yaw,
+        pitch: cameraRig.pitch,
+        zoom: cameraRig.zoom,
+        focusHeight: baseFrame.camera.focusHeight ?? 2.2,
+        followDistance: baseFrame.camera.followDistance ?? 13.5,
+        shoulderOffset: baseFrame.camera.shoulderOffset ?? 0.9,
+        leadX,
+        leadY
+      }
     },
     {
       moveTarget: clickMoveTarget,
@@ -487,6 +488,12 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
       controlledSnapshot: controlled
     }
   );
+
+  return withWorldEventMarkers(interactionFrame, {
+    events: recentWorldEvents,
+    worldSnapshot: latestSnapshot,
+    currentTick: latestSnapshot?.tick ?? null
+  });
 }
 
 function selectedTarget(): NetworkEntitySnapshot | null {

@@ -20,7 +20,8 @@ import {
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
-  withInteractionMarkers
+  withInteractionMarkers,
+  withWorldEventMarkers
 } from "./contracts";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
@@ -928,6 +929,117 @@ describe("TOON contract parsing", () => {
           (instance) =>
             instance.animationSetId === "target-ring" && instance.sourceEntity === 12
         )
+      )
+    ).toBe(true);
+  });
+
+  test("adds recent world-event markers without mutating the base frame", () => {
+    const baseFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: 0,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      environment: {
+        biomeId: "verdant-hollow",
+        skyColor: [0.64, 0.8, 0.98, 1],
+        fogColor: [0.72, 0.84, 0.78, 1],
+        fogNear: 30,
+        fogFar: 196,
+        ambientColor: [0.82, 0.92, 0.88],
+        ambientIntensity: 1.4,
+        sunColor: [1, 0.96, 0.84],
+        sunIntensity: 2.95,
+        sunDirection: [30, 48, 18],
+        fillColor: [0.48, 0.76, 0.94],
+        fillIntensity: 0.88,
+        fillDirection: [-18, 14, -10],
+        rimColor: [0.4, 0.88, 0.78],
+        rimIntensity: 8.5,
+        groundColor: [0.19, 0.33, 0.21, 1],
+        starfieldIntensity: 0.08
+      },
+      overlayCommands: [],
+      meshBatches: [],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    } satisfies Parameters<typeof withWorldEventMarkers>[0];
+
+    const decorated = withWorldEventMarkers(baseFrame, {
+      currentTick: 125,
+      worldSnapshot: {
+        tick: 125,
+        entities: [
+          {
+            id: 12,
+            position: [10, -6],
+            velocity: [0, 0],
+            rotation: 0,
+            health: 20,
+            maxHealth: 30,
+            movementSpeed: 4,
+            label: "Rift Beast",
+            metadata: typedEntityMetadata("WildCreature", {})
+          }
+        ],
+        population: {
+          tick: 125,
+          chunks: [],
+          regions: []
+        }
+      },
+      events: [
+        {
+          tick: 123,
+          origin: [8, -4],
+          kind: "DamageApplied",
+          summary: "Rift Beast takes 4 damage",
+          entityIds: [12]
+        },
+        {
+          tick: 124,
+          origin: null,
+          kind: "LootOpened",
+          summary: "Supply crate opened",
+          entityIds: [12]
+        },
+        {
+          tick: 108,
+          origin: [0, 0],
+          kind: "OldEvent",
+          summary: "This one should age out",
+          entityIds: [12]
+        }
+      ]
+    });
+
+    expect(baseFrame.spriteBatches).toHaveLength(0);
+    expect(decorated.spriteBatches).toHaveLength(2);
+    expect(
+      decorated.spriteBatches.some((batch) =>
+        batch.instances.some((instance) => instance.animationSetId === "critical-ring")
+      )
+    ).toBe(true);
+    expect(
+      decorated.spriteBatches.some((batch) =>
+        batch.instances.some((instance) => instance.animationSetId === "destination-ring")
       )
     ).toBe(true);
   });

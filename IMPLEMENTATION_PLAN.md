@@ -896,5 +896,26 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 90
-**Current focus**: Iteration 91 character animation, combat feedback, and replacing the remaining debug-sandbox feel with authored traversal and encounter presentation
+### Iteration 91
+- [x] Added deterministic ambient chunk dressing for `pod-web`, driven from streamed visible/preloaded chunk keys instead of hand-placed demo clutter, so the flagship shard now fills warm regions with terrain-aware trees, boulders, basalt columns, and spires.
+- [x] Reused the existing chunk planner and asset residency pipeline to prewarm ambient chunk meshes before they come on screen, keeping density improvements aligned with the streamed-world runtime instead of bypassing it.
+- [x] Surfaced ambient instance counts in the runtime HUD/stats path and validated live in Playwright that the shard now renders with denser chunk presentation on WebGPU while keeping asset residency stable and pending counts at zero after warm-up.
+- [x] Added deterministic coverage for ambient planner determinism, lagoon/hub exclusion, and prewarm request generation.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/renderer.test.ts ./src/contracts.test.ts ./src/render-runtime.test.ts ./src/controls.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+### Iteration 92
+- [x] Added browser-side world-event marker decoration in `pod-web`, so recent authoritative combat, gather, loot, capture, and summon events now render as short-lived world-space markers instead of only appearing in HUD text and event feed logs.
+- [x] Kept the marker path inside the shared frame-decoration layer by composing it after interaction markers and before renderer submission, using current snapshot tick age and authoritative event origins/entity positions instead of browser-only heuristics.
+- [x] Added deterministic coverage for recent-event filtering, origin/entity fallback positioning, and marker-style decoration without mutating the base Three.js frame contract.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/renderer.test.ts ./src/frame-plan.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 92
+**Current focus**: Iteration 93 richer authored traversal/combat presentation, including stronger animation-set differentiation, encounter readability, and worker-route gameplay-input parity proof
