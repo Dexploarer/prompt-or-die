@@ -1009,5 +1009,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 101
-**Current focus**: Iteration 102 further HUD reduction, richer traversal/combat feedback, and deeper selected-entity debug telemetry consumption in browser/runtime surfaces
+### Iteration 102
+- [x] Added browser-side retained live-debug state so tool-call events and rollups stay keyed by entity instead of only exposing the latest global debug document.
+- [x] Wired the `pod-web` telemetry HUD to the focused entity (`selected target` or controlled entity), so raw selected-entity SpacetimeDB debug streams now surface meaningful focus-aware tool/rollup summaries in runtime.
+- [x] Added deterministic `pod-web` coverage for retained per-entity live-debug summaries and replay/incident stream counters.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/live-debug.test.ts ./src/contracts.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 102
+**Current focus**: Iteration 103 further HUD reduction, richer traversal/combat feedback, and deeper shard/runtime consumption of selected-entity debug telemetry

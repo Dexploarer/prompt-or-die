@@ -12,14 +12,10 @@ import {
   parseShardIncidentSummary,
   parseThreeJsWebGpuFrame,
   parseTickTelemetryEnvelope,
-  summarizeAgentTickRollup,
-  summarizeAgentToolCallEvent,
   summarizeReplayFile,
   withInteractionMarkers,
   withWorldEventMarkers,
   type ThreeJsWebGpuFrame,
-  type TickRollupSummary,
-  type ToolCallEventSummary,
   type ReplaySummary,
   type ShardIncidentSummary
 } from "./contracts";
@@ -58,6 +54,13 @@ import {
   formatPopulationHeatmapLegend,
   renderPopulationHeatmap
 } from "./population-heatmap";
+import {
+  createLiveDebugState,
+  recordLiveDebugDocument,
+  resetLiveDebugState,
+  selectedTickRollupSummary,
+  selectedToolEventSummary
+} from "./live-debug";
 
 declare global {
   interface Window {
@@ -224,10 +227,7 @@ let latestFrame: string | ReturnType<typeof buildAuthoritativeWorldFrame> | null
 let lastTelemetryRevision = -1;
 let latestReplaySummary: ReplaySummary | null = null;
 let latestIncidentSummary: ShardIncidentSummary | null = null;
-let latestToolEventSummary: ToolCallEventSummary | null = null;
-let latestRollupSummary: TickRollupSummary | null = null;
-let liveReplayDocuments = 0;
-let liveIncidentDocuments = 0;
+const liveDebugState = createLiveDebugState();
 let latestSnapshot: NetworkWorldSnapshot | null = null;
 let latestActionStatus: DirectConnectActionState = {
   pendingCount: 0,
@@ -986,10 +986,7 @@ window.podRender = {
     recentWorldEvents = [];
     latestReplaySummary = null;
     latestIncidentSummary = null;
-    latestToolEventSummary = null;
-    latestRollupSummary = null;
-    liveReplayDocuments = 0;
-    liveIncidentDocuments = 0;
+    resetLiveDebugState(liveDebugState);
     if (localSandbox) {
       localSandbox.reset();
       cameraRig.initialized = false;
@@ -1090,24 +1087,21 @@ window.advanceTime = async (ms: number) => {
 
 function applyLiveDebugDocument(document: string): void {
   const parsed = parseLiveDebugDocument(document);
+  recordLiveDebugDocument(liveDebugState, parsed);
 
   switch (parsed.kind) {
     case "tickTelemetry":
       applyTickTelemetry(telemetryState, parsed.payload);
       break;
     case "toolCallEvent":
-      latestToolEventSummary = summarizeAgentToolCallEvent(parsed.payload);
       break;
     case "tickRollup":
-      latestRollupSummary = summarizeAgentTickRollup(parsed.payload);
       break;
     case "replay":
       latestReplaySummary = summarizeReplayFile(parsed.payload);
-      liveReplayDocuments += 1;
       break;
     case "incident":
       latestIncidentSummary = parsed.payload;
-      liveIncidentDocuments += 1;
       break;
   }
 }
@@ -1199,6 +1193,9 @@ function renderTelemetryHud(): void {
   const stats = telemetryStats(telemetryState);
   const target = selectedTarget();
   const controlled = controlledEntity();
+  const debugFocusEntityId = target?.id ?? controlled?.id ?? null;
+  const focusedToolEvent = selectedToolEventSummary(liveDebugState, debugFocusEntityId);
+  const focusedRollup = selectedTickRollupSummary(liveDebugState, debugFocusEntityId);
   const populationHeatmap = currentPopulationHeatmap();
   connectionNode.textContent = liveConnectionStatus
     ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
@@ -1245,20 +1242,24 @@ function renderTelemetryHud(): void {
       )}u`
     : "No replay summary loaded";
   incidentSummaryNode.textContent = latestIncidentSummary
-    ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveIncidentDocuments}`
+    ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveDebugState.liveIncidentDocuments}`
     : "No shard incident summary loaded";
-  toolEventSummaryNode.textContent = latestToolEventSummary
-    ? `E(${latestToolEventSummary.agentEntityId}) · ${latestToolEventSummary.toolName} · ${latestToolEventSummary.status} · ${latestToolEventSummary.latencyMs}ms`
+  toolEventSummaryNode.textContent = focusedToolEvent
+    ? `E(${focusedToolEvent.agentEntityId}) · ${focusedToolEvent.toolName} · ${focusedToolEvent.status} · ${focusedToolEvent.latencyMs}ms${
+        debugFocusEntityId != null ? " · focus" : ""
+      }`
     : "No tool-call event loaded";
-  rollupSummaryNode.textContent = latestRollupSummary
-    ? `E(${latestRollupSummary.agentEntityId}) · ticks ${latestRollupSummary.tickStart}-${latestRollupSummary.tickEnd} · ${latestRollupSummary.totalDistance.toFixed(
+  rollupSummaryNode.textContent = focusedRollup
+    ? `E(${focusedRollup.agentEntityId}) · ticks ${focusedRollup.tickStart}-${focusedRollup.tickEnd} · ${focusedRollup.totalDistance.toFixed(
         2
-      )}u · ${latestRollupSummary.toolErrorCount} tool errors`
+      )}u · ${focusedRollup.toolErrorCount} tool errors${
+        debugFocusEntityId != null ? " · focus" : ""
+      }`
     : "No telemetry rollup loaded";
   if (latestReplaySummary) {
     replaySummaryNode.textContent = `${latestReplaySummary.name} · ${latestReplaySummary.traceCount} traces · ${latestReplaySummary.trainingSampleCount} samples · ${latestReplaySummary.totalPathDistance.toFixed(
       2
-    )}u · stream ${liveReplayDocuments}`;
+    )}u · stream ${liveDebugState.liveReplayDocuments}`;
   }
 }
 
