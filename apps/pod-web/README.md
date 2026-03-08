@@ -12,6 +12,7 @@ It consumes the `pod-render` browser frame contract and provides:
 - ACES tone mapping, tuned shadows, cached materials, and a richer atmospheric scene baseline
 - a 2D overlay scene for the legacy `RenderFrame` contract
 - a demo bridge via `window.podRender.*` so the app is useful before the Rust wasm entrypoint is wired in
+- direct browser websocket connection to the authoritative `pod-server` runtime using `Welcome` / `StateDelta` / `DebugDocument` JSON messages
 
 ## Run
 
@@ -20,6 +21,16 @@ cd apps/pod-web
 bun install
 bun run dev
 ```
+
+### Connect to a live shard
+
+Start the authoritative server in network mode, then open:
+
+```text
+http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
+```
+
+`server` may be `host:port`, `ws://host:port`, or `wss://host:port`.
 
 ## Validate
 
@@ -38,3 +49,5 @@ bun run build
   - accepts the batched `ThreeJsWebGpuFrame` JSON from `pod-render`
 - `window.podRender.resetDemo()`
   - returns the app to its built-in demo scene
+- `?server=127.0.0.1:7778&debug=1`
+  - connects the browser directly to the authoritative websocket runtime and enables live TOON debug documents

@@ -1,5 +1,7 @@
 import {
+  buildAuthoritativeWorldFrame,
   parseLiveDebugDocument,
+  type DirectConnectServerMessage,
   parseRenderFrame,
   parseReplayFile,
   parseShardIncidentSummary,
@@ -13,6 +15,11 @@ import {
   type ReplaySummary,
   type ShardIncidentSummary
 } from "./contracts";
+import {
+  PodWebDirectConnectClient,
+  runtimeConfigFromLocation,
+  type DirectConnectStatus
+} from "./direct-connect";
 import { PodThreeWorldRenderer } from "./renderer";
 import { createDemoFrame } from "./sample-frame";
 import {
@@ -50,6 +57,8 @@ declare global {
 const canvas = document.querySelector<HTMLCanvasElement>("#pod-web-canvas");
 const backendLabel = document.querySelector<HTMLElement>("#backend-label");
 const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
+const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
+const worldLabel = document.querySelector<HTMLElement>("#world-label");
 const qualityLabel = document.querySelector<HTMLElement>("#quality-label");
 const statsLabel = document.querySelector<HTMLElement>("#stats-label");
 const telemetryToggle = document.querySelector<HTMLButtonElement>("#telemetry-toggle");
@@ -78,6 +87,8 @@ if (
   !canvas ||
   !backendLabel ||
   !frameSourceLabel ||
+  !connectionLabel ||
+  !worldLabel ||
   !qualityLabel ||
   !statsLabel ||
   !telemetryToggle ||
@@ -99,6 +110,8 @@ if (
 }
 
 const telemetryToggleButton = telemetryToggle;
+const connectionNode = connectionLabel;
+const worldNode = worldLabel;
 const telemetrySelectionNode = telemetrySelectionLabel;
 const telemetryTrailNode = telemetryTrailLabel;
 const telemetryActionsNode = telemetryActionsLabel;
@@ -118,9 +131,10 @@ backendLabel.textContent = renderer.backend;
 qualityLabel.textContent = renderer.quality.preset;
 const runtimeStatsLabel = statsLabel;
 const telemetryState = createTelemetryOverlayState(300);
+const runtimeConfig = runtimeConfigFromLocation(window.location);
 
 let liveFrameSource: "demo" | "legacy" | "threejs" = "demo";
-let latestFrameJson: string | null = null;
+let latestFrame: string | ReturnType<typeof buildAuthoritativeWorldFrame> | null = null;
 let lastTelemetryRevision = -1;
 let latestReplaySummary: ReplaySummary | null = null;
 let latestIncidentSummary: ShardIncidentSummary | null = null;
@@ -128,9 +142,46 @@ let latestToolEventSummary: ToolCallEventSummary | null = null;
 let latestRollupSummary: TickRollupSummary | null = null;
 let liveReplayDocuments = 0;
 let liveIncidentDocuments = 0;
+let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
+  ? {
+      phase: "idle",
+      detail: `Waiting to connect to ${runtimeConfig.url}`,
+      url: runtimeConfig.url,
+      tick: null,
+      entityCount: 0,
+      controlledEntity: null,
+      authoritativeDigest: null
+    }
+  : null;
+
+if (runtimeConfig?.debugTelemetry) {
+  setTelemetryEnabled(telemetryState, true);
+}
+
+const liveClient = runtimeConfig
+  ? new PodWebDirectConnectClient(runtimeConfig, {
+      onFrame(snapshot, frameOptions, status) {
+        latestFrame = buildAuthoritativeWorldFrame(snapshot, {
+          ...frameOptions,
+          viewportWidth: canvas.clientWidth || window.innerWidth,
+          viewportHeight: canvas.clientHeight || window.innerHeight
+        });
+        liveFrameSource = "threejs";
+        frameSourceLabel.textContent = "authoritative websocket";
+        liveConnectionStatus = status;
+      },
+      onDebugDocument(document) {
+        applyLiveDebugDocument(document);
+      },
+      onStatus(status) {
+        liveConnectionStatus = status;
+      }
+    })
+  : null;
 
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
+  liveClient?.setDebugTelemetry(telemetryState.enabled);
 });
 telemetryPrevButton.addEventListener("click", () => {
   cycleTelemetrySelection(telemetryState, -1);
@@ -141,12 +192,12 @@ telemetryNextButton.addEventListener("click", () => {
 
 window.podRender = {
   render(frame: string) {
-    latestFrameJson = frame;
+    latestFrame = frame;
     liveFrameSource = "legacy";
     frameSourceLabel.textContent = "legacy pod-render frame";
   },
   renderThreeJsWebGpuFrame(frame: string) {
-    latestFrameJson = frame;
+    latestFrame = frame;
     liveFrameSource = "threejs";
     frameSourceLabel.textContent = "Three.js WebGPU frame";
   },
@@ -173,7 +224,7 @@ window.podRender = {
     renderer.clearTelemetryTrail();
   },
   resetDemo() {
-    latestFrameJson = null;
+    latestFrame = null;
     liveFrameSource = "demo";
     frameSourceLabel.textContent = "demo frame";
   },
@@ -231,11 +282,15 @@ async function tick(timestamp: number): Promise<void> {
     lastTelemetryRevision = telemetryState.revision;
   }
 
-  if (latestFrameJson) {
+  if (latestFrame) {
     if (liveFrameSource === "threejs") {
-      await renderer.applyFrame(parseThreeJsWebGpuFrame(latestFrameJson));
+      await renderer.applyFrame(
+        typeof latestFrame === "string" ? parseThreeJsWebGpuFrame(latestFrame) : latestFrame
+      );
+    } else if (typeof latestFrame === "string") {
+      await renderer.applyLegacyFrame(parseRenderFrame(latestFrame));
     } else {
-      await renderer.applyLegacyFrame(parseRenderFrame(latestFrameJson));
+      await renderer.applyFrame(latestFrame);
     }
   } else {
     await renderer.applyFrame(createDemoFrame(timestamp / 1000));
@@ -254,6 +309,18 @@ async function tick(timestamp: number): Promise<void> {
 
 function renderTelemetryHud(): void {
   const stats = telemetryStats(telemetryState);
+  connectionNode.textContent = liveConnectionStatus
+    ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
+    : "offline demo / bridge mode";
+  worldNode.textContent = liveConnectionStatus
+    ? liveConnectionStatus.tick == null
+      ? `awaiting snapshot · ${liveConnectionStatus.url}`
+      : `tick ${liveConnectionStatus.tick} · ${liveConnectionStatus.entityCount} entities · ${
+          liveConnectionStatus.controlledEntity == null
+            ? "spectator"
+            : `controlled E(${liveConnectionStatus.controlledEntity})`
+        }`
+    : "demo scene";
   telemetryToggleButton.textContent = stats.enabled ? "Disable Telemetry" : "Enable Telemetry";
   telemetryPanelNode.dataset.telemetryEnabled = String(stats.enabled);
   telemetrySelectionNode.textContent = stats.selectedLabel;
@@ -295,4 +362,5 @@ function renderTelemetryHud(): void {
   }
 }
 
+liveClient?.connect();
 void tick(performance.now());
