@@ -37,6 +37,8 @@ export interface PodThreePlanningOptions extends PodThreeCameraRigOptions {
   preloadChunkRadius?: number;
 }
 
+export const DEFAULT_WORLD_CHUNK_SIZE = 24;
+
 export interface PlannedCameraPose {
   position: [number, number, number];
   target: [number, number, number];
@@ -81,6 +83,7 @@ export interface PlannedFrame {
   camera: PlannedCameraPose;
   meshBatches: PlannedMeshBatch[];
   spriteBatches: PlannedSpriteBatch[];
+  worldChunkSize: number;
   visibleWorldChunks: string[];
   preloadedWorldChunks: string[];
   prewarmMeshRequests: PlannedMeshPrewarmRequest[];
@@ -167,7 +170,7 @@ export function buildFramePlan(
   const highDetailDistance = options.highDetailDistance ?? 36;
   const mediumDetailDistance = options.mediumDetailDistance ?? 108;
   const shadowDistance = options.shadowDistance ?? 72;
-  const worldChunkSize = options.worldChunkSize ?? 24;
+  const worldChunkSize = options.worldChunkSize ?? DEFAULT_WORLD_CHUNK_SIZE;
   const preloadChunkRadius = options.preloadChunkRadius ?? 1;
   const visibleWorldChunks = new Set<string>();
   const meshPrewarmDistance =
@@ -211,6 +214,7 @@ export function buildFramePlan(
     camera,
     meshBatches,
     spriteBatches,
+    worldChunkSize,
     visibleWorldChunks: Array.from(visibleWorldChunks).sort((left, right) =>
       left.localeCompare(right)
     ),

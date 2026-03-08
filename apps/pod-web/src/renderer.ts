@@ -10,6 +10,7 @@ import {
   type PodThreeAssetRegistry
 } from "./assets";
 import {
+  DEFAULT_WORLD_CHUNK_SIZE,
   buildCameraPose,
   buildFramePlan,
   composeAnimatedInstanceMatrix,
@@ -387,6 +388,7 @@ export interface PodThreeRendererStats {
   residentSpriteAssets: number;
   pendingGeometryAssets: number;
   pendingSpriteAssets: number;
+  ambientInstances: number;
   visibleWorldChunks: number;
   preloadedWorldChunks: number;
 }
@@ -410,6 +412,12 @@ export interface PodThreeWorldRendererOptions {
 }
 
 type PaintSurface = OffscreenCanvas | HTMLCanvasElement;
+
+interface AmbientChunkDressingPlan {
+  meshBatches: PlannedMeshBatch[];
+  prewarmRequests: Array<{ batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }>;
+  totalInstances: number;
+}
 
 export class PodThreeWorldRenderer {
   static async create(
@@ -438,6 +446,7 @@ export class PodThreeWorldRenderer {
   readonly quality: PodThreeQualityProfile;
 
   private readonly meshEntries = new Map<string, InstancedEntry>();
+  private readonly ambientMeshEntries = new Map<string, InstancedEntry>();
   private readonly spriteEntries = new Map<string, InstancedEntry>();
   private readonly meshMaterialCache = new Map<string, THREE.Material>();
   private readonly spriteMaterialCache = new Map<string, THREE.Material>();
@@ -469,6 +478,7 @@ export class PodThreeWorldRenderer {
   private smoothedFrameMs = 16.7;
   private adjustmentCooldown = 0;
   private surfaceMetrics: RenderSurfaceMetrics | null;
+  private ambientInstances = 0;
   private visibleWorldChunks = 0;
   private preloadedWorldChunks = 0;
   private environmentPreset: "daylight" | "twilight" | "night" = "daylight";
@@ -537,9 +547,20 @@ export class PodThreeWorldRenderer {
     });
     this.visibleWorldChunks = planned.visibleWorldChunks.length;
     this.preloadedWorldChunks = planned.preloadedWorldChunks.length;
+    const ambientPlan = buildAmbientChunkDressingPlan({
+      visibleChunkKeys: planned.visibleWorldChunks,
+      preloadedChunkKeys: planned.preloadedWorldChunks,
+      cameraPosition: planned.camera.position,
+      qualityPreset: this.quality.preset,
+      worldChunkSize: planned.worldChunkSize,
+      highDetailDistance: this.quality.highDetailDistance,
+      mediumDetailDistance: this.quality.mediumDetailDistance
+    });
+    this.ambientInstances = ambientPlan.totalInstances;
     this.applyCamera(planned.camera, frame.camera);
-    await this.prewarmPlannedAssets(planned);
+    await this.prewarmPlannedAssets(planned, ambientPlan);
     await this.syncMeshBatches(planned.meshBatches);
+    await this.syncAmbientMeshBatches(ambientPlan.meshBatches);
     await this.syncSpriteBatches(planned.spriteBatches);
     await this.syncOverlay(frame.overlayCommands);
     await this.renderFrame();
@@ -576,6 +597,9 @@ export class PodThreeWorldRenderer {
     this.resizeObserver?.disconnect();
 
     for (const entry of this.meshEntries.values()) {
+      disposeInstancedEntry(entry);
+    }
+    for (const entry of this.ambientMeshEntries.values()) {
       disposeInstancedEntry(entry);
     }
     for (const entry of this.spriteEntries.values()) {
@@ -1086,6 +1110,51 @@ export class PodThreeWorldRenderer {
     cleanupUnusedEntries(this.scene, this.spriteEntries, activeKeys);
   }
 
+  private async syncAmbientMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
+    const activeKeys = new Set<string>();
+
+    for (const planned of batches) {
+      if (planned.visibleCount === 0) {
+        continue;
+      }
+
+      activeKeys.add(planned.key);
+      const geometry = await this.assetRegistry.resolveGeometry(planned.batch, planned.lodLevel);
+      const existing = this.ambientMeshEntries.get(planned.key);
+      const material =
+        existing?.material ??
+        createMeshMaterial(planned.batch, planned.lodLevel, this.quality);
+      const entry = ensureInstancedEntry(
+        this.scene,
+        existing,
+        geometry,
+        material,
+        planned.instances.length,
+        planned.key
+      );
+
+      entry.mesh.castShadow = planned.batch.castShadows;
+      entry.mesh.receiveShadow = planned.batch.receiveShadows;
+      entry.mesh.count = planned.instances.length;
+      entry.mesh.renderOrder = planned.batch.renderOrder;
+      entry.mesh.visible = true;
+      entry.mesh.name = planned.key;
+      entry.mesh.frustumCulled = false;
+
+      for (let index = 0; index < planned.instances.length; index += 1) {
+        const instance = planned.instances[index];
+        if (!instance) {
+          continue;
+        }
+        entry.mesh.setMatrixAt(index, composeAnimatedInstanceMatrix(instance, 0, 0));
+      }
+      entry.mesh.instanceMatrix.needsUpdate = true;
+      this.ambientMeshEntries.set(planned.key, entry);
+    }
+
+    cleanupUnusedEntries(this.scene, this.ambientMeshEntries, activeKeys);
+  }
+
   private async syncOverlay(commands: RenderCommand[]): Promise<void> {
     this.clearOverlay();
 
@@ -1275,20 +1344,25 @@ export class PodThreeWorldRenderer {
       residentSpriteAssets: residency.residentSpriteAssets,
       pendingGeometryAssets: residency.pendingGeometryAssets,
       pendingSpriteAssets: residency.pendingSpriteAssets,
+      ambientInstances: this.ambientInstances,
       visibleWorldChunks: this.visibleWorldChunks,
       preloadedWorldChunks: this.preloadedWorldChunks
     };
   }
 
   private async prewarmPlannedAssets(
-    planned: ReturnType<typeof buildFramePlan>
+    planned: ReturnType<typeof buildFramePlan>,
+    ambientPlan: AmbientChunkDressingPlan
   ): Promise<void> {
     await Promise.all([
       this.assetRegistry.prefetchMeshes?.(
-        planned.prewarmMeshRequests.map((request) => ({
-          batch: request.batch,
-          lodLevel: request.lodLevel
-        }))
+        dedupeMeshPrefetchRequests([
+          ...planned.prewarmMeshRequests.map((request) => ({
+            batch: request.batch,
+            lodLevel: request.lodLevel
+          })),
+          ...ambientPlan.prewarmRequests
+        ])
       ),
       this.assetRegistry.prefetchSprites?.(
         planned.prewarmSpriteRequests.map((request) => ({
@@ -1397,6 +1471,363 @@ export class PodThreeWorldRenderer {
       this.resize();
     }
   }
+}
+
+interface AmbientChunkDressingInput {
+  visibleChunkKeys: string[];
+  preloadedChunkKeys: string[];
+  cameraPosition: [number, number, number];
+  qualityPreset: PodThreeQualityPreset;
+  worldChunkSize?: number;
+  highDetailDistance: number;
+  mediumDetailDistance: number;
+}
+
+interface AmbientChunkArchetype {
+  id: string;
+  mesh: string;
+  material: string;
+  tint: [number, number, number, number];
+  emissive: [number, number, number];
+  roughness: number;
+  metallic: number;
+  castShadows: boolean;
+  receiveShadows: boolean;
+  renderOrder: number;
+  baseScale: [number, number, number];
+  halfHeight: number;
+  densities: Record<PodThreeQualityPreset, number>;
+  lakeMaskMax: number;
+  minSlope: number;
+  maxSlope: number;
+  minHeight: number;
+  maxHeight: number;
+  minRadiusFromOrigin: number;
+  regionBias?: (chunkX: number, chunkZ: number) => boolean;
+}
+
+const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
+  {
+    id: "canopy-tree",
+    mesh: "canopy-tree",
+    material: "foliage-canopy",
+    tint: [0.82, 0.92, 0.8, 1],
+    emissive: [0.03, 0.06, 0.03],
+    roughness: 0.96,
+    metallic: 0,
+    castShadows: true,
+    receiveShadows: true,
+    renderOrder: 4,
+    baseScale: [1.9, 2.5, 1.9],
+    halfHeight: 1.7,
+    densities: {
+      ultra: 4,
+      high: 3,
+      balanced: 2,
+      performance: 1
+    },
+    lakeMaskMax: 0.14,
+    minSlope: 0,
+    maxSlope: 0.58,
+    minHeight: -20,
+    maxHeight: 19,
+    minRadiusFromOrigin: 18
+  },
+  {
+    id: "weathered-boulder",
+    mesh: "weathered-boulder",
+    material: "weathered-stone",
+    tint: [0.88, 0.9, 0.94, 1],
+    emissive: [0.01, 0.015, 0.02],
+    roughness: 1,
+    metallic: 0.02,
+    castShadows: true,
+    receiveShadows: true,
+    renderOrder: 5,
+    baseScale: [1.2, 1, 1.15],
+    halfHeight: 1,
+    densities: {
+      ultra: 3,
+      high: 2,
+      balanced: 2,
+      performance: 1
+    },
+    lakeMaskMax: 0.2,
+    minSlope: 0.04,
+    maxSlope: 1.12,
+    minHeight: -20,
+    maxHeight: 28,
+    minRadiusFromOrigin: 12
+  },
+  {
+    id: "basalt-column",
+    mesh: "basalt-column",
+    material: "basalt",
+    tint: [0.72, 0.76, 0.84, 1],
+    emissive: [0.015, 0.02, 0.03],
+    roughness: 0.9,
+    metallic: 0.04,
+    castShadows: true,
+    receiveShadows: true,
+    renderOrder: 5,
+    baseScale: [0.82, 1.25, 0.82],
+    halfHeight: 2.6,
+    densities: {
+      ultra: 2,
+      high: 2,
+      balanced: 1,
+      performance: 1
+    },
+    lakeMaskMax: 0.1,
+    minSlope: 0.12,
+    maxSlope: 1.55,
+    minHeight: -18,
+    maxHeight: 38,
+    minRadiusFromOrigin: 22,
+    regionBias: (chunkX, chunkZ) => chunkX >= 0 || chunkZ <= -1
+  },
+  {
+    id: "glass-spire",
+    mesh: "glass-spire",
+    material: "aether-glass",
+    tint: [0.72, 0.9, 1, 1],
+    emissive: [0.12, 0.18, 0.24],
+    roughness: 0.24,
+    metallic: 0.22,
+    castShadows: false,
+    receiveShadows: true,
+    renderOrder: 6,
+    baseScale: [1.05, 1.55, 1.05],
+    halfHeight: 2.4,
+    densities: {
+      ultra: 1,
+      high: 1,
+      balanced: 1,
+      performance: 0
+    },
+    lakeMaskMax: 0.06,
+    minSlope: 0,
+    maxSlope: 0.72,
+    minHeight: -18,
+    maxHeight: 42,
+    minRadiusFromOrigin: 34,
+    regionBias: (_chunkX, chunkZ) => chunkZ >= 1
+  }
+];
+
+export function buildAmbientChunkDressingPlan(
+  input: AmbientChunkDressingInput
+): AmbientChunkDressingPlan {
+  const worldChunkSize = input.worldChunkSize ?? DEFAULT_WORLD_CHUNK_SIZE;
+  const camera = new THREE.Vector3(...input.cameraPosition);
+  const visibleGroups = new Map<string, { batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2; instances: PlannedMeshBatch["instances"] }>();
+  const prewarmRequests = new Map<string, { batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }>();
+
+  for (const chunkKey of input.visibleChunkKeys) {
+    const instances = sampleAmbientChunkInstances(
+      chunkKey,
+      worldChunkSize,
+      input.qualityPreset
+    );
+
+    for (const entry of instances) {
+      const distance = Math.hypot(
+        entry.instance.position[0] - camera.x,
+        entry.instance.position[2] - camera.z
+      );
+      const lodLevel =
+        distance <= input.highDetailDistance
+          ? 0
+          : distance <= input.mediumDetailDistance
+            ? 1
+            : 2;
+      const key = `ambient:${entry.archetype.id}:lod:${lodLevel}`;
+      const group = visibleGroups.get(key) ?? {
+        batch: createAmbientBatch(entry.archetype),
+        lodLevel,
+        instances: []
+      };
+      group.instances.push(entry.instance);
+      visibleGroups.set(key, group);
+    }
+  }
+
+  for (const chunkKey of input.preloadedChunkKeys) {
+    const instances = sampleAmbientChunkInstances(
+      chunkKey,
+      worldChunkSize,
+      input.qualityPreset
+    );
+    for (const entry of instances) {
+      const distance = Math.hypot(
+        entry.instance.position[0] - camera.x,
+        entry.instance.position[2] - camera.z
+      );
+      const lodLevel =
+        distance <= input.highDetailDistance
+          ? 0
+          : distance <= input.mediumDetailDistance
+            ? 1
+            : 2;
+      const key = `${entry.archetype.mesh}:lod:${lodLevel}`;
+      if (!prewarmRequests.has(key)) {
+        prewarmRequests.set(key, {
+          batch: createAmbientBatch(entry.archetype),
+          lodLevel
+        });
+      }
+    }
+  }
+
+  const meshBatches = Array.from(visibleGroups.entries())
+    .map(([key, group]) => ({
+      key,
+      batch: group.batch,
+      lodLevel: group.lodLevel,
+      visibleCount: group.instances.length,
+      instances: group.instances,
+      matrices: group.instances.map((instance) => composeAnimatedInstanceMatrix(instance, 0, 0))
+    }))
+    .sort((left, right) => {
+      if (left.batch.renderOrder !== right.batch.renderOrder) {
+        return left.batch.renderOrder - right.batch.renderOrder;
+      }
+      return left.key.localeCompare(right.key);
+    });
+
+  return {
+    meshBatches,
+    prewarmRequests: Array.from(prewarmRequests.values()),
+    totalInstances: meshBatches.reduce((total, batch) => total + batch.visibleCount, 0)
+  };
+}
+
+function createAmbientBatch(archetype: AmbientChunkArchetype): PlannedMeshBatch["batch"] {
+  return {
+    mesh: archetype.mesh,
+    material: archetype.material,
+    layer: 0,
+    phase: "opaque",
+    sortDepth: 0,
+    renderOrder: archetype.renderOrder,
+    transparent: false,
+    doubleSided: false,
+    castShadows: archetype.castShadows,
+    receiveShadows: archetype.receiveShadows,
+    tint: archetype.tint,
+    roughness: archetype.roughness,
+    metallic: archetype.metallic,
+    emissive: archetype.emissive,
+    depthWrite: true,
+    depthTest: true,
+    instances: []
+  };
+}
+
+function sampleAmbientChunkInstances(
+  chunkKey: string,
+  worldChunkSize: number,
+  qualityPreset: PodThreeQualityPreset
+): Array<{ archetype: AmbientChunkArchetype; instance: PlannedMeshBatch["instances"][number] }> {
+  const [chunkX, chunkZ] = parseAmbientChunkKey(chunkKey);
+  const originX = chunkX * worldChunkSize;
+  const originZ = chunkZ * worldChunkSize;
+  const instances = new Array<{
+    archetype: AmbientChunkArchetype;
+    instance: PlannedMeshBatch["instances"][number];
+  }>();
+
+  for (const archetype of AMBIENT_CHUNK_ARCHETYPES) {
+    const density = archetype.densities[qualityPreset];
+    if (density <= 0) {
+      continue;
+    }
+    if (archetype.regionBias && !archetype.regionBias(chunkX, chunkZ)) {
+      continue;
+    }
+
+    for (let slotIndex = 0; slotIndex < density; slotIndex += 1) {
+      const x =
+        originX +
+        2.4 +
+        ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:x`) *
+          Math.max(worldChunkSize - 4.8, 1);
+      const z =
+        originZ +
+        2.4 +
+        ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:z`) *
+          Math.max(worldChunkSize - 4.8, 1);
+      const radialDistance = Math.hypot(x, z);
+      const lakeMask = sampleLakeMask(x, z);
+      const slope = sampleTerrainSlope(x, z);
+      const height = sampleTerrainHeight(x, z);
+
+      if (radialDistance < archetype.minRadiusFromOrigin) {
+        continue;
+      }
+      if (lakeMask > archetype.lakeMaskMax) {
+        continue;
+      }
+      if (slope < archetype.minSlope || slope > archetype.maxSlope) {
+        continue;
+      }
+      if (height < archetype.minHeight || height > archetype.maxHeight) {
+        continue;
+      }
+
+      const scaleVariance = 0.82 + ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:s`) * 0.58;
+      const yaw = ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:r`) * Math.PI * 2;
+      const rotation = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        yaw
+      );
+      const scale: [number, number, number] = [
+        archetype.baseScale[0] * scaleVariance,
+        archetype.baseScale[1] * scaleVariance,
+        archetype.baseScale[2] * scaleVariance
+      ];
+
+      instances.push({
+        archetype,
+        instance: {
+          position: [x, height + archetype.halfHeight * scale[1], z],
+          rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
+          scale,
+          animationSetId: "static-prop"
+        }
+      });
+    }
+  }
+
+  return instances;
+}
+
+function parseAmbientChunkKey(chunkKey: string): [number, number] {
+  const [rawX = "0", rawZ = "0"] = chunkKey.split(":");
+  return [Number.parseInt(rawX, 10) || 0, Number.parseInt(rawZ, 10) || 0];
+}
+
+function ambientNoise(chunkX: number, chunkZ: number, slotIndex: number, salt: string): number {
+  const saltValue = salt.split("").reduce((total, char) => total + char.charCodeAt(0), 0);
+  const seed =
+    chunkX * 127.1 + chunkZ * 311.7 + slotIndex * 74.7 + saltValue * 0.61803398875;
+  const value = Math.sin(seed) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
+function dedupeMeshPrefetchRequests(
+  requests: Array<{ batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }>
+): Array<{ batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }> {
+  const unique = new Map<string, { batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }>();
+
+  for (const request of requests) {
+    const key = `${request.batch.mesh}|${request.batch.material}|${request.lodLevel}`;
+    if (!unique.has(key)) {
+      unique.set(key, request);
+    }
+  }
+
+  return Array.from(unique.values());
 }
 
 async function createRenderer(
