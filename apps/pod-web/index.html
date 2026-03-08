@@ -125,6 +125,23 @@
         color: var(--panel-accent);
       }
 
+      .hud__chat {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .hud__chat input {
+        width: 100%;
+        border: 1px solid rgba(138, 245, 207, 0.18);
+        border-radius: 999px;
+        background: rgba(5, 9, 15, 0.72);
+        color: var(--copy);
+        padding: 9px 12px;
+        font: inherit;
+      }
+
       #telemetry-panel[data-telemetry-enabled="false"] .telemetry-debug-only {
         opacity: 0.56;
       }
@@ -147,15 +164,23 @@
           <dd id="connection-label">offline demo / bridge mode</dd>
           <dt>World</dt>
           <dd id="world-label">demo scene</dd>
+          <dt>Target</dt>
+          <dd id="target-label">No target selected</dd>
           <dt>Quality</dt>
           <dd id="quality-label">auto</dd>
           <dt>Source</dt>
           <dd id="frame-source">demo frame</dd>
           <dt>Stats</dt>
           <dd id="stats-label">warming up…</dd>
+          <dt>Controls</dt>
+          <dd><code>WASD</code> move · <code>Tab</code> target · <code>Space</code> attack · <code>E</code> interact · <code>Enter</code> chat</dd>
           <dt>Bridge</dt>
           <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
         </dl>
+        <form class="hud__chat" id="chat-form">
+          <input id="chat-input" type="text" maxlength="120" placeholder="Say something to the shard…" />
+          <button type="submit">Send</button>
+        </form>
       </section>
       <section class="hud hud--telemetry" id="telemetry-panel" data-telemetry-enabled="false">
         <h1>Debug Telemetry</h1>

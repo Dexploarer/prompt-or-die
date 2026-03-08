@@ -32,6 +32,20 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 
 `server` may be `host:port`, `ws://host:port`, or `wss://host:port`.
 
+### Browser controls
+
+- `WASD` or arrow keys: move
+- `Tab`: cycle nearby targets
+- `Space`: attack current target
+- `E`: interact with current target
+- `G`: gather from current target
+- `R`: loot current target
+- `C`: capture current target
+- `1`: summon companion slot `0`
+- `F`: issue a follow command to companion slot `0`
+- `P`: toggle auto-retaliate
+- `Enter`: focus chat input and send a shard message
+
 ## Validate
 
 ```bash

@@ -1,11 +1,13 @@
 import {
   applyNetworkStateDelta,
   buildAuthoritativeWorldFrame,
+  encodeDirectConnectActionBatch,
   encodeDirectConnectConnectMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
   parseDirectConnectServerMessage,
   type AuthoritativeWorldFrameOptions,
+  type BrowserAction,
   type DirectConnectServerMessage,
   type NetworkWorldSnapshot
 } from "./contracts";
@@ -156,6 +158,24 @@ export class PodWebDirectConnectClient {
 
   currentStatus(): DirectConnectStatus {
     return { ...this.status };
+  }
+
+  snapshotState(): NetworkWorldSnapshot | null {
+    return this.snapshot;
+  }
+
+  controlledEntityId(): number | null {
+    return this.controlledEntity;
+  }
+
+  submitActions(actions: BrowserAction[]): boolean {
+    if (actions.length === 0 || this.socket?.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    const nextTick = (this.snapshot?.tick ?? this.status.tick ?? 0) + 1;
+    this.socket.send(encodeDirectConnectActionBatch(nextTick, actions));
+    return true;
   }
 
   private handleServerMessage(message: DirectConnectServerMessage): void {

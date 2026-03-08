@@ -4,6 +4,7 @@ import { encode } from "@toon-format/toon";
 import {
   applyNetworkStateDelta,
   buildAuthoritativeWorldFrame,
+  encodeDirectConnectActionBatch,
   encodeDirectConnectConnectMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
@@ -371,6 +372,25 @@ describe("TOON contract parsing", () => {
       RequestFullSnapshot: {
         last_known_tick: 42,
         last_known_digest: 99
+      }
+    });
+
+    expect(
+      JSON.parse(
+        encodeDirectConnectActionBatch(77, [
+          { kind: "move", direction: [1, 0] },
+          { kind: "attackTarget", target: 9 },
+          { kind: "speak", message: "hello", volume: "Normal" }
+        ])
+      )
+    ).toEqual({
+      ActionBatch: {
+        tick: 77,
+        actions: [
+          { Move: { direction: [1, 0] } },
+          { AttackTarget: { target: 9 } },
+          { Speak: { message: "hello", volume: "Normal" } }
+        ]
       }
     });
   });

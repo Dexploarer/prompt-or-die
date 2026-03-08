@@ -416,6 +416,36 @@ export interface AuthoritativeWorldFrameOptions {
   backgroundColor?: RgbaTuple;
 }
 
+export type BrowserSpeakVolume = "Whisper" | "Normal" | "Shout";
+export type BrowserCompanionCommand = "Attack" | "Follow" | "Guard" | "Recall";
+
+export type BrowserAction =
+  | { kind: "move"; direction: Vec2Tuple }
+  | { kind: "stop" }
+  | { kind: "rotate"; angle: number }
+  | { kind: "lookAt"; target: Vec2Tuple }
+  | { kind: "attack" }
+  | { kind: "attackTarget"; target: number }
+  | { kind: "interact" }
+  | { kind: "interactWith"; target: number }
+  | { kind: "gatherResource"; target: number; skill: string }
+  | { kind: "loot"; target: number }
+  | { kind: "captureCreature"; target: number; toolSlot?: number | null }
+  | { kind: "summonCompanion"; slot: number }
+  | {
+      kind: "commandCompanion";
+      slot: number;
+      command: BrowserCompanionCommand;
+      target?: number | null;
+    }
+  | {
+      kind: "speak";
+      message: string;
+      volume: BrowserSpeakVolume;
+    }
+  | { kind: "setAutoRetaliate"; enabled: boolean }
+  | { kind: "idle" };
+
 interface ToonDocumentEnvelope<T = unknown> {
   document_type: string;
   payload: T;
@@ -991,6 +1021,18 @@ export function encodeDirectConnectFullSnapshotRequest(
   });
 }
 
+export function encodeDirectConnectActionBatch(
+  tick: number,
+  actions: BrowserAction[]
+): string {
+  return JSON.stringify({
+    ActionBatch: {
+      tick,
+      actions: actions.map((action) => encodeBrowserAction(action))
+    }
+  });
+}
+
 export function applyNetworkStateDelta(
   currentSnapshot: NetworkWorldSnapshot | null,
   delta: NetworkStateDelta,
@@ -1076,6 +1118,68 @@ function defaultFrameHints(): ThreeJsWebGpuHints {
     transparentDepthWrite: false,
     maxPixelRatio: 2
   };
+}
+
+function encodeBrowserAction(action: BrowserAction): unknown {
+  switch (action.kind) {
+    case "move":
+      return { Move: { direction: action.direction } };
+    case "stop":
+      return { Stop: null };
+    case "rotate":
+      return { Rotate: { angle: action.angle } };
+    case "lookAt":
+      return { LookAt: { target: action.target } };
+    case "attack":
+      return { Attack: null };
+    case "attackTarget":
+      return { AttackTarget: { target: action.target } };
+    case "interact":
+      return { Interact: null };
+    case "interactWith":
+      return { InteractWith: { target: action.target } };
+    case "gatherResource":
+      return {
+        GatherResource: {
+          target: action.target,
+          skill: action.skill
+        }
+      };
+    case "loot":
+      return { Loot: { target: action.target } };
+    case "captureCreature":
+      return {
+        CaptureCreature: {
+          target: action.target,
+          tool_slot: action.toolSlot ?? null
+        }
+      };
+    case "summonCompanion":
+      return { SummonCompanion: { slot: action.slot } };
+    case "commandCompanion":
+      return {
+        CommandCompanion: {
+          slot: action.slot,
+          command: action.command,
+          target: action.target ?? null
+        }
+      };
+    case "speak":
+      return {
+        Speak: {
+          message: action.message,
+          volume: action.volume
+        }
+      };
+    case "setAutoRetaliate":
+      return {
+        SetAutoRetaliate: {
+          enabled: action.enabled
+        }
+      };
+    case "idle":
+      return { Idle: null };
+  }
 }
 
 function healthBand(entity: NetworkEntitySnapshot): "healthy" | "wounded" | "critical" | "neutral" {
