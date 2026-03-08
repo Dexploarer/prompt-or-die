@@ -22,3 +22,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added per-client interest-filtered authoritative snapshots in `pod-net`, so shard clients now diff against their own visible world instead of one global full-world baseline.
 - Welcome and full-resync snapshot paths now use the same filtered authoritative interest window, keeping reconnect/recovery correctness aligned with the new network scaling path.
 - Added deterministic network coverage for chunk-window snapshot filtering and server-side per-client broadcast partitioning, and revalidated native, wasm, and SpacetimeDB-enabled `pod-net` targets.
+- Extended `pod-net` authoritative event delivery with the same per-client interest window, so combat/chat/world events now partition by shard locality instead of broadcasting every event to every connected player.

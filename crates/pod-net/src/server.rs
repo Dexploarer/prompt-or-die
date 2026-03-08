@@ -717,8 +717,9 @@ impl GameServer {
         let mut any_state_update = !has_authoritative_baseline;
 
         for target in &client_targets {
-            let filtered_snapshot =
-                self.snapshot_for_client(&authoritative_snapshot, target.agent_id);
+            let interest =
+                self.snapshot_interest_for_agent(&authoritative_snapshot, target.agent_id);
+            let filtered_snapshot = authoritative_snapshot.for_interest(&interest);
             let authoritative_digest = filtered_snapshot.digest();
             let is_full_snapshot = should_snapshot || target.last_sent_snapshot.is_none();
             let delta = if is_full_snapshot {
@@ -766,15 +767,18 @@ impl GameServer {
             }
 
             if has_event_update {
-                let _ = self
-                    .send_to_client(
-                        target.client_id,
-                        ServerMessage::EventBatch {
-                            tick: self.tick,
-                            events: self.pending_events.clone(),
-                        },
-                    )
-                    .await;
+                let events = self.filter_events_for_interest(&self.pending_events, &interest);
+                if !events.is_empty() {
+                    let _ = self
+                        .send_to_client(
+                            target.client_id,
+                            ServerMessage::EventBatch {
+                                tick: self.tick,
+                                events,
+                            },
+                        )
+                        .await;
+                }
             }
 
             if target.debug_telemetry_enabled {
@@ -933,15 +937,63 @@ impl GameServer {
         )
     }
 
+    fn snapshot_interest_for_agent(
+        &self,
+        authoritative_snapshot: &WorldSnapshot,
+        agent_id: Option<pod_core::AgentId>,
+    ) -> SnapshotInterest {
+        let controlled_entity =
+            agent_id.and_then(|agent_id| self.controlled_entity_for_agent(agent_id));
+        self.snapshot_interest_for_controlled_entity(authoritative_snapshot, controlled_entity)
+    }
+
+    fn filter_events_for_interest(
+        &self,
+        events: &[GameEvent],
+        interest: &SnapshotInterest,
+    ) -> Vec<GameEvent> {
+        let chunk_keys = interest
+            .chunk_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let center = interest.center;
+        let radius = interest.radius.unwrap_or_default().max(0.0);
+        let unbounded = interest.controlled_entity.is_none()
+            && interest.center.is_none()
+            && interest.radius.is_none()
+            && interest.chunk_keys.is_empty();
+
+        if unbounded {
+            return events.to_vec();
+        }
+
+        events
+            .iter()
+            .filter(|event| {
+                if center
+                    .map(|center| center.distance(event.origin) <= radius)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+
+                let event_chunk_key = self
+                    .world
+                    .resolve_streaming_metadata(event.origin)
+                    .chunk_key;
+                chunk_keys.contains(event_chunk_key.as_str())
+            })
+            .cloned()
+            .collect()
+    }
+
     fn snapshot_for_client(
         &self,
         authoritative_snapshot: &WorldSnapshot,
         agent_id: Option<pod_core::AgentId>,
     ) -> WorldSnapshot {
-        let controlled_entity =
-            agent_id.and_then(|agent_id| self.controlled_entity_for_agent(agent_id));
-        let interest =
-            self.snapshot_interest_for_controlled_entity(authoritative_snapshot, controlled_entity);
+        let interest = self.snapshot_interest_for_agent(authoritative_snapshot, agent_id);
         authoritative_snapshot.for_interest(&interest)
     }
 
@@ -1433,6 +1485,109 @@ mod tests {
 
         assert!(saw_event_batch);
         assert!(server.pending_events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_filters_event_batches_per_client_interest() {
+        let config = ProtoServerConfig::default();
+        let mut world = World::new(42);
+        let (alpha_slot, alpha_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        let (spire_slot, spire_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(alpha_entity)
+            .expect("alpha transform")
+            .position = glam::Vec2::new(1.0, 1.0);
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(spire_entity)
+            .expect("spire transform")
+            .position = glam::Vec2::new(30.0, 1.0);
+
+        let mut server = GameServer::new(config, world);
+        let alpha_client = ClientId::new();
+        let spire_client = ClientId::new();
+        let (alpha_tx, mut alpha_rx) = mpsc::channel(8);
+        let (spire_tx, mut spire_rx) = mpsc::channel(8);
+        server
+            .client_tx
+            .write()
+            .await
+            .insert(alpha_client, alpha_tx);
+        server
+            .client_tx
+            .write()
+            .await
+            .insert(spire_client, spire_tx);
+        server.clients.write().await.insert(
+            alpha_client,
+            ClientSession {
+                player_name: Some("alpha".into()),
+                agent_id: Some(server.world.agents[alpha_slot].agent.id()),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
+            },
+        );
+        server.clients.write().await.insert(
+            spire_client,
+            ClientSession {
+                player_name: Some("spire".into()),
+                agent_id: Some(server.world.agents[spire_slot].agent.id()),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                last_sent_snapshot: None,
+            },
+        );
+        server.tick = 21;
+        server.pending_events = vec![
+            pod_core::GameEvent {
+                tick: 21,
+                origin: glam::Vec2::new(2.0, 1.0),
+                event: pod_core::Event::AgentSpoke {
+                    agent_id: pod_core::AgentId::new(),
+                    message: "alpha event".into(),
+                    volume: 200.0,
+                },
+            },
+            pod_core::GameEvent {
+                tick: 21,
+                origin: glam::Vec2::new(31.0, 1.0),
+                event: pod_core::Event::AgentSpoke {
+                    agent_id: pod_core::AgentId::new(),
+                    message: "spire event".into(),
+                    volume: 200.0,
+                },
+            },
+        ];
+
+        server.broadcast_updates().await.unwrap();
+
+        let alpha_events = loop {
+            match alpha_rx.try_recv() {
+                Ok(ServerMessage::EventBatch { events, .. }) => break events,
+                Ok(_) => continue,
+                Err(err) => panic!("missing alpha event batch: {err}"),
+            }
+        };
+        let spire_events = loop {
+            match spire_rx.try_recv() {
+                Ok(ServerMessage::EventBatch { events, .. }) => break events,
+                Ok(_) => continue,
+                Err(err) => panic!("missing spire event batch: {err}"),
+            }
+        };
+
+        assert_eq!(alpha_events.len(), 1);
+        assert_eq!(alpha_events[0].origin, glam::Vec2::new(2.0, 1.0));
+        assert_eq!(spire_events.len(), 1);
+        assert_eq!(spire_events[0].origin, glam::Vec2::new(31.0, 1.0));
     }
 
     #[tokio::test]
