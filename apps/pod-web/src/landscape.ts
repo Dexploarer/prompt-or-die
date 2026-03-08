@@ -113,11 +113,19 @@ export function sampleTerrainHeight(x: number, z: number): number {
   const macroMountains = (fractalNoise(x * 0.01, z * 0.01) - 0.5) * 20;
   const rollingHills = (fractalNoise(x * 0.028 + 11, z * 0.028 - 17) - 0.5) * 7;
   const centralPlateau = 6.8 * Math.exp(-(distance * distance) / (2 * 34 * 34));
-  const outerWall = smoothstep(52, 136, distance) * 22;
+  const hubTerraceBlend = 1 - smoothstep(0, 22, distance);
+  const hubTerraceHeight = mixScalar(macroMountains + rollingHills + centralPlateau - 5, 3.8, hubTerraceBlend);
+  const outerWall = smoothstep(52, 136, distance) * 24;
   const cliffBands =
     Math.pow(Math.abs(valueNoise(x * 0.018 - 9, z * 0.018 + 23) - 0.5) * 2, 1.7) *
     smoothstep(64, 112, distance) *
     11;
+  const northRidge =
+    18 *
+    Math.exp(-((x - 18) * (x - 18)) / (2 * 52 * 52) - ((z + 82) * (z + 82)) / (2 * 18 * 18));
+  const westernBluffs =
+    14 *
+    Math.exp(-((x + 74) * (x + 74)) / (2 * 16 * 16) - ((z - 8) * (z - 8)) / (2 * 56 * 56));
   const riverValley =
     -3.4 *
     Math.exp(-((x + 10) * (x + 10)) / (2 * 58 * 58) - ((z - 4) * (z - 4)) / (2 * 14 * 14));
@@ -132,10 +140,13 @@ export function sampleTerrainHeight(x: number, z: number): number {
     centralPlateau +
     outerWall +
     cliffBands +
+    northRidge +
+    westernBluffs +
     riverValley +
     lakeBasin +
     shorelineShelf -
-    5
+    5 +
+    (hubTerraceHeight - (macroMountains + rollingHills + centralPlateau - 5))
   );
 }
 

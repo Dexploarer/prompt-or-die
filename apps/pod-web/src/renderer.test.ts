@@ -37,6 +37,8 @@ describe("pod-web renderer landscape helpers", () => {
     expect(sampleTerrainHeight(0, 0)).toBeCloseTo(sampleTerrainHeight(0, 0), 6);
     expect(sampleTerrainHeight(0, 0)).not.toBeCloseTo(sampleTerrainHeight(42, -18), 3);
     expect(sampleTerrainHeight(-36, 24)).not.toBeCloseTo(sampleTerrainHeight(68, 64), 3);
+    expect(sampleTerrainHeight(18, -82)).toBeGreaterThan(sampleTerrainHeight(0, 0));
+    expect(sampleTerrainHeight(-74, 4)).toBeGreaterThan(sampleTerrainHeight(12, 12));
   });
 
   test("carves a lagoon basin below the waterline", () => {

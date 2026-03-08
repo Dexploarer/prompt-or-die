@@ -885,5 +885,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 89
-**Current focus**: Iteration 90 real terrain meshes, shoreline/water polish, and reducing the flagship HUD/debug chrome so the browser client feels like a game first and a diagnostics surface second
+### Iteration 90
+- [x] Strengthened the flagship `pod-web` biome composition with more pronounced ridge/backdrop shaping, improved terrain albedo painting, a dedicated shoreline band, and richer water surfacing so the world reads as a place instead of a debug field.
+- [x] Reduced first-view debug weight in the main HUD by tightening the chrome and keeping diagnostics secondary to the playable shard state.
+- [x] Fixed the browser timelapse boot state so the world starts in daylight reliably, making the flagship client prove terrain, water, and atmosphere immediately instead of sometimes loading into a dim night frame.
+- [x] Re-ran the touched Bun suite, typecheck, build, and live Playwright checks to confirm daylight boot, warm asset residency, and clean browser console behavior apart from the known upstream Three.js TSL warning.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/controls.test.ts ./src/local-world.test.ts ./src/contracts.test.ts ./src/renderer.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 90
+**Current focus**: Iteration 91 character animation, combat feedback, and replacing the remaining debug-sandbox feel with authored traversal and encounter presentation

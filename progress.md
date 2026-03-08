@@ -11,3 +11,5 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Implemented a real browser-side third-person camera controller: right-drag orbit, wheel zoom, independent camera yaw, terrain-aware spring-arm collision, and velocity lead so movement no longer feels welded to the player facing.
 - Smoothed local sandbox locomotion with acceleration, deceleration, and turn easing instead of instantaneous velocity snaps.
 - Verified in Playwright that click-to-move still advances the player, assets fully warm, and keyboard movement follows the rotated camera after orbit input.
+- Added a stronger flagship biome read: elevated ridge/backdrop shaping, brighter shoreline separation, richer water texture, and a less dominant main HUD.
+- Fixed the timelapse boot state so the world now starts in readable daylight instead of sometimes loading into near-night on first paint.

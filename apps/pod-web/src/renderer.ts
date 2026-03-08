@@ -70,6 +70,7 @@ interface InstancedEntry {
 
 const INLINE_TSL_FN_WARNING =
   "THREE.TSL: Return statement used in an inline 'Fn()'. Define a layout struct to allow return values.";
+const DAYLIGHT_START_OFFSET_SECONDS = 86.25;
 let installedThreeConsoleFilter = false;
 let didReportInlineFnWarning = false;
 
@@ -129,6 +130,8 @@ function paintTerrainTexture(
   );
   const moss = mixVec3(grass, [0.36, 0.49, 0.24], 0.52);
   const cliff = mixVec3(grass, [0.38, 0.35, 0.31], 0.78);
+  const basalt: [number, number, number] = [0.22, 0.24, 0.28];
+  const highland: [number, number, number] = [0.54, 0.52, 0.46];
   const sand: [number, number, number] = [0.72, 0.66, 0.48];
   const imageData = context.createImageData(width, height);
   const worldHalfSize = LANDSCAPE_WORLD_SIZE * 0.5;
@@ -143,15 +146,26 @@ function paintTerrainTexture(
       const shore = lake * (1 - smoothstep(2.4, 8.4, Math.abs(terrainHeight - WATER_LEVEL)));
       const cliffMask = clamp((slope - 0.55) / 1.9 + Math.max(terrainHeight - 10, 0) / 18, 0, 1);
       const meadowNoise = fractalNoise(worldX * 0.12 + 8, worldZ * 0.12 - 12);
+      const ridgeNoise = fractalNoise(worldX * 0.032 - 14, worldZ * 0.032 + 21);
       const distanceFalloff = 1 - clamp(Math.hypot(worldX, worldZ) / worldHalfSize, 0, 1);
+      const highlandMask = clamp((terrainHeight - 16) / 16, 0, 1);
+      const rockMask = clamp(cliffMask * 0.7 + highlandMask * 0.8 + ridgeNoise * 0.24, 0, 1);
+      const foamMask = clamp(shore * 1.35, 0, 1);
 
       let tint = mixVec3(grass, moss, meadowNoise * 0.75 + distanceFalloff * 0.15);
-      tint = mixVec3(tint, sand, shore * 0.82);
-      tint = mixVec3(tint, cliff, cliffMask);
+      tint = mixVec3(tint, sand, shore * 0.7);
+      tint = mixVec3(tint, cliff, cliffMask * 0.72);
+      tint = mixVec3(tint, highland, highlandMask * 0.52);
+      tint = mixVec3(tint, basalt, rockMask * 0.58);
+      tint = mixVec3(tint, [0.92, 0.9, 0.82], foamMask * 0.14);
 
       const brightness = clamp(
-        0.74 + terrainHeight * 0.012 - cliffMask * 0.08 + meadowNoise * 0.12,
-        0.36,
+        0.72 +
+          terrainHeight * 0.011 -
+          cliffMask * 0.06 +
+          meadowNoise * 0.12 +
+          foamMask * 0.08,
+        0.34,
         1.18
       );
       const index = (y * width + x) * 4;
@@ -170,21 +184,36 @@ function paintWaterTexture(surface: PaintSurface): void {
   const width = "width" in surface ? surface.width : 512;
   const height = "height" in surface ? surface.height : 512;
   const gradient = context.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "rgb(162, 223, 239)");
-  gradient.addColorStop(0.45, "rgb(77, 162, 204)");
-  gradient.addColorStop(1, "rgb(18, 77, 119)");
+  gradient.addColorStop(0, "rgb(178, 235, 244)");
+  gradient.addColorStop(0.3, "rgb(92, 182, 214)");
+  gradient.addColorStop(0.68, "rgb(29, 104, 152)");
+  gradient.addColorStop(1, "rgb(10, 42, 78)");
   context.fillStyle = gradient;
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(255, 255, 255, 0.16)";
-  context.lineWidth = 3;
-  for (let stripe = 0; stripe < 18; stripe += 1) {
-    const offsetY = (stripe / 18) * height;
+  const radial = context.createRadialGradient(
+    width * 0.52,
+    height * 0.42,
+    width * 0.08,
+    width * 0.5,
+    height * 0.5,
+    width * 0.56
+  );
+  radial.addColorStop(0, "rgba(255,255,255,0.16)");
+  radial.addColorStop(0.45, "rgba(170,232,255,0.08)");
+  radial.addColorStop(1, "rgba(0,0,0,0)");
+  context.fillStyle = radial;
+  context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.14)";
+  context.lineWidth = 2.5;
+  for (let stripe = 0; stripe < 22; stripe += 1) {
+    const offsetY = (stripe / 22) * height;
     context.beginPath();
     for (let x = 0; x <= width; x += 16) {
       const waveY =
         offsetY +
-        Math.sin((x / width) * Math.PI * 4 + stripe * 0.9) * (6 + (stripe % 3) * 2);
+        Math.sin((x / width) * Math.PI * 4 + stripe * 0.9) * (5 + (stripe % 3) * 1.6);
       if (x === 0) {
         context.moveTo(x, waveY);
       } else {
@@ -193,17 +222,40 @@ function paintWaterTexture(surface: PaintSurface): void {
     }
     context.stroke();
   }
+
+  context.strokeStyle = "rgba(210, 246, 255, 0.24)";
+  context.lineWidth = 1.5;
+  for (let ring = 0; ring < 5; ring += 1) {
+    const radius = width * (0.16 + ring * 0.11);
+    context.beginPath();
+    context.ellipse(width * 0.52, height * 0.5, radius, radius * 0.62, 0, 0, Math.PI * 2);
+    context.stroke();
+  }
 }
 
-function createLakeGeometry(pointCount = 56): THREE.ShapeGeometry {
-  const shape = new THREE.Shape();
+function buildLakeOutline(
+  pointCount = 56,
+  radialScale = 1
+): Array<[number, number]> {
+  const points = new Array<[number, number]>();
 
-  for (let index = 0; index <= pointCount; index += 1) {
+  for (let index = 0; index < pointCount; index += 1) {
     const angle = (index / pointCount) * Math.PI * 2;
     const noise = 0.86 + fractalNoise(Math.cos(angle) * 12, Math.sin(angle) * 12) * 0.24;
-    const x = WATER_CENTER[0] + Math.cos(angle) * WATER_RADII[0] * noise;
-    const z = WATER_CENTER[1] + Math.sin(angle) * WATER_RADII[1] * noise;
+    points.push([
+      WATER_CENTER[0] + Math.cos(angle) * WATER_RADII[0] * noise * radialScale,
+      WATER_CENTER[1] + Math.sin(angle) * WATER_RADII[1] * noise * radialScale
+    ]);
+  }
 
+  return points;
+}
+
+function createClosedShape(points: Array<[number, number]>): THREE.Shape {
+  const shape = new THREE.Shape();
+
+  for (let index = 0; index <= points.length; index += 1) {
+    const [x, z] = points[index % points.length] ?? points[0] ?? [0, 0];
     if (index === 0) {
       shape.moveTo(x, z);
     } else {
@@ -211,8 +263,73 @@ function createLakeGeometry(pointCount = 56): THREE.ShapeGeometry {
     }
   }
 
+  return shape;
+}
+
+function createLakeGeometry(pointCount = 56): THREE.ShapeGeometry {
+  const shape = createClosedShape(buildLakeOutline(pointCount));
+
   const geometry = new THREE.ShapeGeometry(shape, 18);
   geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+function createShorelineGeometry(pointCount = 56): THREE.ShapeGeometry {
+  const outerShape = createClosedShape(buildLakeOutline(pointCount, 1.08));
+  const innerPath = new THREE.Path();
+  const innerPoints = buildLakeOutline(pointCount, 0.98);
+
+  for (let index = innerPoints.length; index >= 0; index -= 1) {
+    const [x, z] = innerPoints[index % innerPoints.length] ?? innerPoints[0] ?? [0, 0];
+    if (index === innerPoints.length) {
+      innerPath.moveTo(x, z);
+    } else {
+      innerPath.lineTo(x, z);
+    }
+  }
+
+  outerShape.holes.push(innerPath);
+  const geometry = new THREE.ShapeGeometry(outerShape, 18);
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+function createMountainBackdropGeometry(
+  radius = LANDSCAPE_WORLD_SIZE * 0.68,
+  width = 42,
+  segments = 88
+): THREE.BufferGeometry {
+  const positions = new Float32Array((segments + 1) * 2 * 3);
+  const indices = new Array<number>();
+
+  for (let index = 0; index <= segments; index += 1) {
+    const angle = (index / segments) * Math.PI * 2;
+    const ridgeNoise = fractalNoise(Math.cos(angle) * 7 + 4, Math.sin(angle) * 7 - 9);
+    const peakHeight = 28 + ridgeNoise * 42;
+    const innerRadius = radius;
+    const outerRadius = radius + width + ridgeNoise * 18;
+    const sin = Math.sin(angle);
+    const cos = Math.cos(angle);
+    const offset = index * 6;
+
+    positions[offset] = cos * innerRadius;
+    positions[offset + 1] = -6;
+    positions[offset + 2] = sin * innerRadius;
+
+    positions[offset + 3] = cos * outerRadius;
+    positions[offset + 4] = peakHeight;
+    positions[offset + 5] = sin * outerRadius;
+
+    if (index < segments) {
+      const base = index * 2;
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -335,8 +452,12 @@ export class PodThreeWorldRenderer {
   private terrainTexture: THREE.Texture | null = null;
   private terrainTextureSurface: PaintSurface | null = null;
   private waterMesh: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> | null = null;
+  private shorelineMesh: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> | null = null;
   private waterTexture: THREE.Texture | null = null;
   private waterTextureSurface: PaintSurface | null = null;
+  private mountainBackdrop:
+    | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
+    | null = null;
   private skyDome: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial> | null = null;
   private skyTexture: THREE.Texture | null = null;
   private skyTextureSurface: PaintSurface | null = null;
@@ -540,8 +661,8 @@ export class PodThreeWorldRenderer {
     const groundMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: terrainTexture,
-      roughness: 0.96,
-      metalness: 0.02
+      roughness: 0.9,
+      metalness: 0.03
     });
     this.groundMaterial = groundMaterial;
     const ground = new THREE.Mesh(createTerrainGeometry(), groundMaterial);
@@ -563,11 +684,11 @@ export class PodThreeWorldRenderer {
       color: new THREE.Color(0.24, 0.62, 0.76),
       map: waterTexture,
       transparent: true,
-      opacity: 0.84,
-      roughness: 0.14,
-      metalness: 0.04,
+      opacity: 0.9,
+      roughness: 0.08,
+      metalness: 0.12,
       emissive: new THREE.Color(0.04, 0.12, 0.18),
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.56,
       side: THREE.DoubleSide,
       depthWrite: false
     });
@@ -577,6 +698,39 @@ export class PodThreeWorldRenderer {
     water.renderOrder = 2;
     this.scene.add(water);
     this.waterMesh = water;
+
+    const shorelineMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0.82, 0.79, 0.66),
+      transparent: true,
+      opacity: 0.54,
+      roughness: 0.92,
+      metalness: 0,
+      emissive: new THREE.Color(0.12, 0.14, 0.12),
+      emissiveIntensity: 0.12,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const shoreline = new THREE.Mesh(createShorelineGeometry(), shorelineMaterial);
+    shoreline.position.y = WATER_LEVEL + 0.08;
+    shoreline.receiveShadow = true;
+    shoreline.renderOrder = 3;
+    this.scene.add(shoreline);
+    this.shorelineMesh = shoreline;
+
+    const mountainBackdrop = new THREE.Mesh(
+      createMountainBackdropGeometry(),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0.17, 0.24, 0.32),
+        roughness: 1,
+        metalness: 0,
+        fog: true
+      })
+    );
+    mountainBackdrop.position.y = -4;
+    mountainBackdrop.receiveShadow = false;
+    mountainBackdrop.castShadow = false;
+    this.scene.add(mountainBackdrop);
+    this.mountainBackdrop = mountainBackdrop;
 
     if (this.quality.showGrid) {
       const grid = new THREE.GridHelper(180, 60, 0x5fa7ff, 0x173049);
@@ -694,6 +848,31 @@ export class PodThreeWorldRenderer {
         0.12 + environment.skyColor[2] * 0.08
       );
       this.waterMesh.material.emissiveIntensity = 0.4 + environment.sunIntensity * 0.03;
+    }
+    if (this.shorelineMesh) {
+      this.shorelineMesh.material.color.setRGB(
+        0.68 + environment.sunColor[0] * 0.1,
+        0.62 + environment.sunColor[1] * 0.1,
+        0.54 + environment.sunColor[2] * 0.04
+      );
+      this.shorelineMesh.material.opacity = 0.3 + environment.sunIntensity * 0.05;
+      this.shorelineMesh.material.emissive.setRGB(
+        0.08 + environment.skyColor[0] * 0.04,
+        0.08 + environment.skyColor[1] * 0.04,
+        0.07 + environment.skyColor[2] * 0.03
+      );
+    }
+    if (this.mountainBackdrop) {
+      this.mountainBackdrop.material.color.setRGB(
+        environment.fogColor[0] * 0.5,
+        environment.fogColor[1] * 0.48,
+        environment.fogColor[2] * 0.58
+      );
+      this.mountainBackdrop.material.emissive.setRGB(
+        environment.fillColor[0] * 0.05,
+        environment.fillColor[1] * 0.05,
+        environment.fillColor[2] * 0.06
+      );
     }
     if (this.sunOrb) {
       const sunDirection = new THREE.Vector3(...environment.sunDirection)
@@ -955,7 +1134,10 @@ export class PodThreeWorldRenderer {
   private async renderFrame(): Promise<void> {
     const frameStart = performance.now();
     if (this.baseEnvironment) {
-      const timeLapse = sampleTimeLapseEnvironment(this.baseEnvironment, frameStart / 1000);
+      const timeLapse = sampleTimeLapseEnvironment(
+        this.baseEnvironment,
+        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+      );
       this.timeOfDayHours = timeLapse.timeOfDayHours;
       this.applyDynamicEnvironment(timeLapse.environment);
     }

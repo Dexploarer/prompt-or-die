@@ -10,8 +10,12 @@ import {
 const DEFAULT_CAMERA: CameraState = {
   x: 0,
   y: 0,
-  zoom: 1,
+  zoom: 1.25,
   rotation: 0,
+  pitch: 0.22,
+  focusHeight: 1.8,
+  followDistance: 9,
+  shoulderOffset: 0,
   viewportWidth: 1280,
   viewportHeight: 720
 };
@@ -89,7 +93,7 @@ describe("pod-web controls", () => {
 
   test("projects a center-screen click onto the ground near the camera focus", () => {
     const point = pickWorldGroundPoint(
-      [DEFAULT_CAMERA.viewportWidth / 2, DEFAULT_CAMERA.viewportHeight / 2],
+      [DEFAULT_CAMERA.viewportWidth / 2, DEFAULT_CAMERA.viewportHeight * 0.78],
       { width: DEFAULT_CAMERA.viewportWidth, height: DEFAULT_CAMERA.viewportHeight },
       DEFAULT_CAMERA
     );
