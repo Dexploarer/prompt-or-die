@@ -357,26 +357,81 @@ export function sampleAnimatedInstanceTransform(
   let scaleY = instance.scale[1];
   let scaleZ = instance.scale[2];
   let pitchOffset = 0;
+  let yawOffset = 0;
   let rollOffset = 0;
 
-  if (animationSetId.includes("ring")) {
+  if (animationSetId.includes("critical-ring")) {
+    const ringPulse = Math.abs(Math.sin(elapsedSeconds * 5.1 + phase));
+    const ringScale = 1.06 + ringPulse * 0.16;
+    scaleX *= ringScale;
+    scaleY *= ringScale;
+    yOffset += ringPulse * 0.04;
+  } else if (animationSetId.includes("target-ring")) {
+    const ringPulse = Math.sin(elapsedSeconds * 3.4 + phase);
+    const ringScale = 1.02 + Math.max(ringPulse, -0.1) * 0.09;
+    scaleX *= ringScale;
+    scaleY *= ringScale;
+    yOffset += Math.max(ringPulse, 0) * 0.025;
+  } else if (animationSetId.includes("destination-ring")) {
+    const ringPulse = Math.sin(elapsedSeconds * 2.8 + phase);
+    const ringScale = 0.98 + (ringPulse + 1) * 0.05;
+    scaleX *= ringScale;
+    scaleY *= ringScale;
+  } else if (animationSetId.includes("path-node")) {
+    const nodePulse = Math.sin(elapsedSeconds * 2.6 + phase);
+    const nodeScale = 0.98 + (nodePulse + 1) * 0.04;
+    scaleX *= nodeScale;
+    scaleY *= nodeScale;
+    yOffset += Math.max(nodePulse, 0) * 0.018;
+  } else if (animationSetId.includes("ring")) {
     const ringPulse = Math.sin(elapsedSeconds * 2.2 + phase);
     const ringScale = 1 + ringPulse * 0.045;
     scaleX *= ringScale;
     scaleY *= ringScale;
   } else if (animationSetId.includes("companion") || animationSetId.includes("hover")) {
-    yOffset += 0.18 + hoverWave * 0.14;
+    const driftWave = Math.sin(elapsedSeconds * 1.15 + phase * 0.6);
+    yOffset += 0.18 + hoverWave * 0.14 + driftWave * 0.03;
     scaleX *= 1 + hoverWave * 0.025;
     scaleY *= 1 - hoverWave * 0.05;
     scaleZ *= 1 + hoverWave * 0.025;
+    yawOffset += driftWave * 0.03;
     rollOffset += hoverWave * 0.045;
   } else if (animationSetId.includes("beast")) {
+    const stalk = Math.sin(elapsedSeconds * (1.4 + motion * 2.4) + phase * 0.8);
     const stomp = Math.abs(strideWave) * Math.max(0.2, motion);
-    yOffset += idleWave * 0.04 + stomp * 0.16;
-    scaleX *= 1 + stomp * 0.035;
-    scaleY *= 1 - stomp * 0.06;
-    scaleZ *= 1 + stomp * 0.035;
-    pitchOffset += strideWave * 0.04 * Math.max(motion, 0.25);
+    yOffset += idleWave * 0.03 + stomp * 0.16;
+    scaleX *= 1 + stomp * 0.04;
+    scaleY *= 0.94 - motion * 0.04;
+    scaleZ *= 1 + stomp * 0.05;
+    pitchOffset += strideWave * 0.05 * Math.max(motion, 0.25) - 0.03;
+    yawOffset += stalk * 0.028;
+    rollOffset += stalk * 0.03 * Math.max(motion, 0.3);
+  } else if (
+    animationSetId.includes("humanoid-idle") ||
+    animationSetId.includes("npc-idle") ||
+    animationSetId.includes("merchant-idle")
+  ) {
+    const breathWave = Math.sin(elapsedSeconds * 1.8 + phase);
+    yOffset += breathWave * 0.025;
+    scaleY *= 1 + breathWave * 0.015;
+    pitchOffset += breathWave * 0.01;
+    rollOffset += Math.cos(elapsedSeconds * 1.35 + phase) * 0.012;
+  } else if (
+    animationSetId.includes("humanoid") ||
+    animationSetId.includes("hero") ||
+    animationSetId.includes("explorer") ||
+    animationSetId.includes("runescape")
+  ) {
+    const gait = clamp(motion / 0.32, 0, 1);
+    const footfall = Math.abs(strideWave) * Math.max(0.16, gait);
+    const torsoWave = Math.sin(elapsedSeconds * (1.8 + motion * 3.4) + phase);
+    yOffset += idleWave * 0.02 + footfall * 0.14;
+    scaleX *= 1 + footfall * 0.014;
+    scaleY *= 1 - footfall * 0.035;
+    scaleZ *= 1 + footfall * 0.014;
+    pitchOffset += strideWave * 0.024 * Math.max(gait, 0.25) - gait * 0.018;
+    yawOffset += torsoWave * 0.014 * Math.max(gait, 0.35);
+    rollOffset += Math.sin(elapsedSeconds * 1.9 + phase) * 0.02 * Math.max(gait, 0.2);
   } else if (!animationSetId.includes("static")) {
     const gait = Math.abs(strideWave) * Math.max(0.18, motion);
     yOffset += idleWave * 0.03 + gait * 0.12;
@@ -384,6 +439,7 @@ export function sampleAnimatedInstanceTransform(
     scaleY *= 1 - gait * 0.04;
     scaleZ *= 1 + gait * 0.018;
     pitchOffset += strideWave * 0.028 * Math.max(motion, 0.2);
+    yawOffset += Math.sin(elapsedSeconds * 1.6 + phase) * 0.014 * Math.max(motion, 0.25);
     rollOffset += Math.sin(elapsedSeconds * 1.8 + phase) * 0.012;
   }
 
@@ -408,7 +464,7 @@ export function sampleAnimatedInstanceTransform(
 
   const baseRotation = new Quaternion(...instance.rotation);
   const animationRotation = new Quaternion().setFromEuler(
-    new Euler(pitchOffset, 0, rollOffset)
+    new Euler(pitchOffset, yawOffset, rollOffset)
   );
   const finalRotation = baseRotation.multiply(animationRotation);
 

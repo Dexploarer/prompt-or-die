@@ -917,5 +917,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 92
-**Current focus**: Iteration 93 richer authored traversal/combat presentation, including stronger animation-set differentiation, encounter readability, and worker-route gameplay-input parity proof
+### Iteration 93
+- [x] Differentiated `pod-web` animation-set sampling so critical rings, target markers, destination breadcrumbs, companions, beasts, idle humanoids, and moving humanoids no longer share the same subtle debug wobble profile.
+- [x] Added stronger stance/readability cues directly in `sampleAnimatedInstanceTransform(...)`, including critical-ring urgency, companion hover drift, beast crouch/stalk motion, and calmer idle humanoid breathing versus travel gait.
+- [x] Added deterministic Bun coverage for ring differentiation and beast-versus-humanoid stance/motion separation so this presentation pass stays locked instead of regressing into one generic animation profile.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/contracts.test.ts ./src/renderer.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 93
+**Current focus**: Iteration 94 worker-route gameplay-input parity proof, then richer authored traversal/combat presentation on top of the differentiated actor motion pass
