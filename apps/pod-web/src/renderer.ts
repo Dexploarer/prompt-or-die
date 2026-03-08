@@ -62,6 +62,10 @@ export interface PodThreeRendererStats {
   triangles: number;
   textures: number;
   frameMs: number;
+  residentGeometryAssets: number;
+  residentSpriteAssets: number;
+  pendingGeometryAssets: number;
+  pendingSpriteAssets: number;
 }
 
 export interface PodThreeWorldRendererOptions {
@@ -167,6 +171,7 @@ export class PodThreeWorldRenderer {
       ...planningOptionsFromQuality(this.quality)
     });
     this.applyCamera(planned.camera, frame.camera);
+    await this.prewarmPlannedAssets(planned);
     await this.syncMeshBatches(planned.meshBatches);
     await this.syncSpriteBatches(planned.spriteBatches);
     await this.syncOverlay(frame.overlayCommands);
@@ -503,6 +508,13 @@ export class PodThreeWorldRenderer {
   }
 
   getStats(): PodThreeRendererStats {
+    const residency = this.assetRegistry.getResidencyStats?.() ?? {
+      residentGeometryAssets: 0,
+      residentSpriteAssets: 0,
+      pendingGeometryAssets: 0,
+      pendingSpriteAssets: 0
+    };
+
     return {
       backend: this.backend,
       qualityPreset: this.quality.preset,
@@ -510,8 +522,35 @@ export class PodThreeWorldRenderer {
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       textures: this.renderer.info.memory.textures,
-      frameMs: Number(this.smoothedFrameMs.toFixed(2))
+      frameMs: Number(this.smoothedFrameMs.toFixed(2)),
+      residentGeometryAssets: residency.residentGeometryAssets,
+      residentSpriteAssets: residency.residentSpriteAssets,
+      pendingGeometryAssets: residency.pendingGeometryAssets,
+      pendingSpriteAssets: residency.pendingSpriteAssets
     };
+  }
+
+  private async prewarmPlannedAssets(
+    planned: ReturnType<typeof buildFramePlan>
+  ): Promise<void> {
+    await Promise.all([
+      this.assetRegistry.prefetchMeshes?.(
+        planned.meshBatches
+          .filter((batch) => batch.visibleCount > 0)
+          .map((batch) => ({ batch: batch.batch, lodLevel: batch.lodLevel }))
+      ),
+      this.assetRegistry.prefetchSprites?.(
+        planned.spriteBatches
+          .filter((batch) => batch.visibleCount > 0)
+          .map((batch) => ({
+            batch: {
+              texture: batch.batch.texture,
+              frame: batch.batch.frame
+            },
+            anisotropy: this.quality.anisotropy
+          }))
+      )
+    ]);
   }
 
   private getOrCreateMeshMaterial(planned: PlannedMeshBatch): THREE.Material {

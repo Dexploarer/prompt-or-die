@@ -646,7 +646,9 @@ async function tick(timestamp: number): Promise<void> {
   const stats = renderer.getStats();
   runtimeStatsLabel.textContent = `${stats.drawCalls} calls · ${stats.triangles} tris · ${stats.pixelRatio.toFixed(
     2
-  )}x DPR · ${stats.frameMs.toFixed(1)}ms`;
+  )}x DPR · ${stats.frameMs.toFixed(1)}ms · assets ${
+    stats.residentGeometryAssets + stats.residentSpriteAssets
+  } resident / ${stats.pendingGeometryAssets + stats.pendingSpriteAssets} pending`;
   renderTelemetryHud();
 
   requestAnimationFrame((nextTimestamp) => {

@@ -723,5 +723,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 76
-**Current focus**: Iteration 77 browser-first flagship world delivery, continuing with chunk-streamed asset residency, worker/offscreen render execution, and replacing emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 77
+- [x] Added parallel asset prewarming to `PodThreeWorldRenderer` so unique mesh and sprite assets resolve concurrently before the instanced sync path instead of serializing one loader await at a time through the render loop.
+- [x] Added manifest-registry residency metrics (`resident` / `pending` geometry and sprite assets) and surfaced them in the browser HUD stats row for creator-facing runtime inspection.
+- [x] Added deterministic Bun coverage for deduplicated mesh prefetch and residency accounting in the manifest-backed asset registry.
+- [x] Updated `apps/pod-web` Vite config to pre-optimize the dynamic Three.js loader paths and assign stable chunk names for the heavy runtime/vendor modules, reducing main-entry bundle pressure and eliminating the dev-session dependency waterfall after first loader use.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4173`
+  - `git diff --check`
+
+**Last updated**: Iteration 77
+**Current focus**: Iteration 78 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache, worker/offscreen render execution, and replacing emulated SpacetimeDB client paths with generated typed bindings
