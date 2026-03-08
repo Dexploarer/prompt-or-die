@@ -1045,5 +1045,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-server --bin pod-server`
   - `git diff --check`
 
-**Last updated**: Iteration 104
-**Current focus**: Iteration 105 richer traversal/combat feedback, further gameplay-first HUD reduction, and deeper server/runtime debug focus parity across direct-connect and SpacetimeDB paths
+### Iteration 105
+- [x] Added focused-entity debug summary synthesis on the `pod-net` SpacetimeDB adapter path, so entity-scoped tool-call and rollup streams now emit the same `focused_entity_debug_summary` TOON documents as direct-connect runtime flows.
+- [x] Preserved the existing raw TOON debug documents while publishing synthesized focused summaries through the same retained `DebugDocument` surface used by browser and editor consumers.
+- [x] Added deterministic `pod-net` coverage proving SpacetimeDB tool-call and rollup events synthesize focused summaries with retained latest-tool metadata and rollup metrics.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-net --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 105
+**Current focus**: Iteration 106 richer traversal/combat feedback, further gameplay-first HUD reduction, and deeper focused-debug presentation parity across browser, editor, and shard runtime consumers

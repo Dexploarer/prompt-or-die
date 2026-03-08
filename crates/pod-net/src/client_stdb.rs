@@ -39,7 +39,7 @@
 //! }
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use glam::Vec2;
@@ -48,6 +48,10 @@ use uuid::Uuid;
 use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
 use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
+use pod_core::{
+    decode_toon_document, AgentTickRollup, AgentToolCallEvent, FocusedEntityDebugSummary,
+    ToolCallStatus,
+};
 
 use pod_stdb::client::{
     CachedEntity, StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent,
@@ -407,6 +411,7 @@ pub struct SpacetimeDBClient {
     local_snapshot: Option<WorldSnapshot>,
     last_debug_telemetry_json: Option<String>,
     pending_debug_documents: Vec<String>,
+    focused_debug_summaries: HashMap<u64, FocusedEntityDebugSummary>,
     render_buffer: SnapshotInterpolationBuffer,
     render_clock: RenderClock,
     welcome_sent: bool,
@@ -425,6 +430,7 @@ impl SpacetimeDBClient {
             local_snapshot: None,
             last_debug_telemetry_json: None,
             pending_debug_documents: Vec::new(),
+            focused_debug_summaries: HashMap::new(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
             welcome_sent: false,
@@ -718,10 +724,33 @@ impl SpacetimeDBClient {
                         document: frame_json,
                     });
                 }
-                StdbEvent::AgentToolCallEventReceived { document, .. }
-                | StdbEvent::AgentTickRollupReceived { document, .. } => {
+                StdbEvent::AgentToolCallEventReceived { document, .. } => {
                     self.pending_debug_documents.push(document.clone());
-                    messages.push(ServerMessage::DebugDocument { document });
+                    messages.push(ServerMessage::DebugDocument {
+                        document: document.clone(),
+                    });
+                    if let Some(summary_document) =
+                        self.update_focused_summary_from_tool_call_document(&document)
+                    {
+                        self.pending_debug_documents.push(summary_document.clone());
+                        messages.push(ServerMessage::DebugDocument {
+                            document: summary_document,
+                        });
+                    }
+                }
+                StdbEvent::AgentTickRollupReceived { document, .. } => {
+                    self.pending_debug_documents.push(document.clone());
+                    messages.push(ServerMessage::DebugDocument {
+                        document: document.clone(),
+                    });
+                    if let Some(summary_document) =
+                        self.update_focused_summary_from_rollup_document(&document)
+                    {
+                        self.pending_debug_documents.push(summary_document.clone());
+                        messages.push(ServerMessage::DebugDocument {
+                            document: summary_document,
+                        });
+                    }
                 }
 
                 // ── Tick advancement ──
@@ -759,6 +788,7 @@ impl SpacetimeDBClient {
         self.last_emitted_tick = 0;
         self.last_debug_telemetry_json = None;
         self.pending_debug_documents.clear();
+        self.focused_debug_summaries.clear();
         self.subscriptions.reset_connection();
         self.clear_presentation_state();
     }
@@ -945,6 +975,93 @@ impl SpacetimeDBClient {
     /// same browser/editor consumer path as tick telemetry.
     pub fn push_debug_document(&mut self, document: String) {
         self.pending_debug_documents.push(document);
+    }
+
+    fn focused_debug_summary_entry(&mut self, entity_id: u64) -> &mut FocusedEntityDebugSummary {
+        let shard_id = self.inner.config().db_name.clone();
+        self.focused_debug_summaries
+            .entry(entity_id)
+            .or_insert_with(|| FocusedEntityDebugSummary {
+                shard_id,
+                entity_id,
+                ..Default::default()
+            })
+    }
+
+    fn refresh_focused_summary_notes(summary: &mut FocusedEntityDebugSummary) {
+        summary.notes.clear();
+        if summary.tool_error_count > 0 {
+            summary
+                .notes
+                .push(format!("{} tool-call errors retained", summary.tool_error_count));
+        }
+        if summary.rejected_action_count > 0 {
+            summary.notes.push(format!(
+                "{} rejected actions retained",
+                summary.rejected_action_count
+            ));
+        }
+    }
+
+    fn update_focused_summary_from_tool_call_document(&mut self, document: &str) -> Option<String> {
+        let event: AgentToolCallEvent =
+            match decode_toon_document(document, "agent_tool_call_event") {
+                Ok(event) => event,
+                Err(error) => {
+                    log::warn!(
+                        "[pod-net stdb] Failed to decode agent_tool_call_event for focused summary synthesis: {error}"
+                    );
+                    return None;
+                }
+            };
+
+        let summary = self.focused_debug_summary_entry(event.agent_entity_id);
+        let prior_tool_count = summary.tool_call_count;
+        summary.latest_tick = summary.latest_tick.max(event.tick);
+        summary.tool_call_count += 1;
+        summary.average_tool_latency_ms = if prior_tool_count == 0 {
+            event.trace.latency_ms as f32
+        } else {
+            ((summary.average_tool_latency_ms * prior_tool_count as f32)
+                + event.trace.latency_ms as f32)
+                / summary.tool_call_count as f32
+        };
+        summary.latest_tool_name = Some(event.trace.tool_name.clone());
+        summary.latest_tool_status = Some(format!("{:?}", event.trace.status));
+        summary.latest_tool_error = event.trace.error_message.clone();
+        if !matches!(
+            event.trace.status,
+            ToolCallStatus::Requested | ToolCallStatus::Succeeded
+        ) {
+            summary.tool_error_count += 1;
+        }
+        Self::refresh_focused_summary_notes(summary);
+        Some(summary.to_toon_document())
+    }
+
+    fn update_focused_summary_from_rollup_document(&mut self, document: &str) -> Option<String> {
+        let rollup: AgentTickRollup = match decode_toon_document(document, "agent_tick_rollup") {
+            Ok(rollup) => rollup,
+            Err(error) => {
+                log::warn!(
+                    "[pod-net stdb] Failed to decode agent_tick_rollup for focused summary synthesis: {error}"
+                );
+                return None;
+            }
+        };
+
+        let summary = self.focused_debug_summary_entry(rollup.agent_entity_id);
+        summary.latest_tick = summary.latest_tick.max(rollup.tick_end);
+        summary.tool_call_count = rollup.tool_call_count as usize;
+        summary.tool_error_count = rollup.tool_error_count as usize;
+        summary.rejected_action_count = rollup.rejected_action_count as usize;
+        summary.total_distance = rollup.total_distance;
+        summary.average_tool_latency_ms = rollup.average_tool_latency_ms;
+        summary.visible_entity_count = rollup.visible_entity_count as usize;
+        summary.audible_event_count = rollup.audible_event_count as usize;
+        summary.message_count = rollup.message_count as usize;
+        Self::refresh_focused_summary_notes(summary);
+        Some(summary.to_toon_document())
     }
 
     /// Inspect the local rollback/replay path from a chosen retained tick.
@@ -1305,9 +1422,9 @@ fn convert_world_event(
 mod tests {
     use super::*;
     use pod_core::{
-        action::SpeakVolume as CoreSpeakVolume, AgentTickRollup, AgentToolCallEvent,
-        AgentToolCallTrace, ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame,
-        VersionedTickTelemetry,
+        action::SpeakVolume as CoreSpeakVolume, decode_toon_document, AgentTickRollup,
+        AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary, ReplayFile,
+        ReplayHeader, ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry,
     };
 
     #[test]
@@ -1842,6 +1959,9 @@ mod tests {
             .any(|document| document.contains("agent_tick_rollup")));
         assert!(documents
             .iter()
+            .any(|document| document.contains("focused_entity_debug_summary")));
+        assert!(documents
+            .iter()
             .any(|document| document.contains("replay_file")));
         assert!(documents
             .iter()
@@ -1850,6 +1970,76 @@ mod tests {
             .last_debug_document()
             .expect("latest telemetry document retained")
             .contains("versioned_tick_telemetry"));
+    }
+
+    #[test]
+    fn test_stdb_tool_and_rollup_documents_synthesize_focused_summary() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig::default());
+        client.inner_mut().receive_agent_tool_call_event(
+            18,
+            44,
+            "llm.complete".into(),
+            "qwen".into(),
+            "TimedOut".into(),
+            AgentToolCallEvent::new(
+                44,
+                AgentToolCallTrace::failure(
+                    18,
+                    "llm.complete",
+                    "qwen",
+                    pod_core::ToolCallStatus::TimedOut,
+                    96,
+                    "timeout",
+                ),
+            )
+            .to_toon_document(),
+        );
+        client.inner_mut().receive_agent_tick_rollup(
+            1,
+            60,
+            44,
+            AgentTickRollup {
+                tick_start: 1,
+                tick_end: 60,
+                agent_entity_id: 44,
+                total_distance: 24.5,
+                submitted_action_count: 6,
+                executed_action_count: 5,
+                rejected_action_count: 1,
+                tool_call_count: 2,
+                tool_error_count: 1,
+                visible_entity_count: 9,
+                audible_event_count: 3,
+                message_count: 4,
+                average_tool_latency_ms: 72.0,
+            }
+            .to_toon_document(),
+        );
+
+        let _ = client.poll_updates();
+        let documents = client.drain_debug_documents();
+        let focused_summary = documents
+            .iter()
+            .rev()
+            .filter_map(|document| {
+                decode_toon_document::<FocusedEntityDebugSummary>(
+                    document,
+                    "focused_entity_debug_summary",
+                )
+                .ok()
+            })
+            .find(|summary| summary.entity_id == 44)
+            .expect("focused summary should be synthesized");
+
+        assert_eq!(focused_summary.latest_tick, 60);
+        assert_eq!(focused_summary.tool_call_count, 2);
+        assert_eq!(focused_summary.tool_error_count, 1);
+        assert_eq!(focused_summary.rejected_action_count, 1);
+        assert_eq!(focused_summary.visible_entity_count, 9);
+        assert_eq!(focused_summary.latest_tool_name.as_deref(), Some("llm.complete"));
+        assert_eq!(focused_summary.latest_tool_status.as_deref(), Some("TimedOut"));
+        assert_eq!(focused_summary.latest_tool_error.as_deref(), Some("timeout"));
+        assert!((focused_summary.total_distance - 24.5).abs() < f32::EPSILON);
     }
 
     #[test]
