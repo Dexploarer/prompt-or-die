@@ -79,7 +79,7 @@ pub use observation::*;
 pub use observation_filter::{
     FilteredObservation, ObservationFilter, ObservationHistory, SalienceScore,
 };
-pub use ops::{IncidentSeverity, ShardIncidentSummary};
+pub use ops::{FocusedEntityDebugSummary, IncidentSeverity, ShardIncidentSummary};
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
 pub use replay::{
     ActionOutcomeSummary, DecisionTrace, EncounterTransition, ReplayFile, ReplayHeader,

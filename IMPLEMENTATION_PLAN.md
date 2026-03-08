@@ -1019,5 +1019,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 102
-**Current focus**: Iteration 103 further HUD reduction, richer traversal/combat feedback, and deeper shard/runtime consumption of selected-entity debug telemetry
+### Iteration 103
+- [x] Reduced the `pod-web` main HUD to a shorter gameplay-facing runtime line and upgraded authoritative event copy so combat/world outcomes read more clearly than raw event kinds.
+- [x] Added shared `FocusedEntityDebugSummary` TOON-exportable primitives in `pod-core` and shard-side focused summary/document generation in `pod-server` from retained telemetry archives.
+- [x] Added deterministic coverage for compact HUD/event formatting plus focused-entity TOON summary generation.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/hud.test.ts ./src/live-debug.test.ts ./src/contracts.test.ts ./src/controls.test.ts ./src/render-runtime.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cargo test -p pod-core --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `git diff --check`
+
+**Last updated**: Iteration 103
+**Current focus**: Iteration 104 richer traversal/combat feedback, deeper shard/runtime consumers for focused debug summaries, and further gameplay-first HUD reduction
