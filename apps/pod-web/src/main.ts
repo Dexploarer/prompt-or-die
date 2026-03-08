@@ -28,6 +28,8 @@ import {
 } from "./affordances";
 import {
   cameraRelativeMovementDirection,
+  focusGameplaySurface,
+  isGameplayKeyCode,
   pickWorldGroundPoint,
   resolvePointerTarget
 } from "./controls";
@@ -158,6 +160,7 @@ if (
 
 const telemetryToggleButton = telemetryToggle;
 const renderCanvas = canvas;
+focusGameplaySurface(renderCanvas);
 const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
@@ -682,7 +685,7 @@ function submitTargetedAction(
   submitActions([actionBuilder(target)]);
 }
 
-window.addEventListener("keydown", (event) => {
+function handleGameplayKeyDown(event: KeyboardEvent): void {
   if (isEditableTarget(event.target)) {
     return;
   }
@@ -740,10 +743,40 @@ window.addEventListener("keydown", (event) => {
   if (event.code.startsWith("Key") || event.code.startsWith("Arrow")) {
     pressedKeys.add(event.code);
   }
+}
+
+function handleGameplayKeyUp(event: KeyboardEvent): void {
+  pressedKeys.delete(event.code);
+}
+
+window.addEventListener("keydown", (event) => {
+  if (event.target === renderCanvas) {
+    return;
+  }
+  handleGameplayKeyDown(event);
 });
 
 window.addEventListener("keyup", (event) => {
-  pressedKeys.delete(event.code);
+  if (event.target === renderCanvas) {
+    return;
+  }
+  handleGameplayKeyUp(event);
+});
+
+renderCanvas.addEventListener("keydown", (event) => {
+  if (!isGameplayKeyCode(event.code)) {
+    return;
+  }
+  handleGameplayKeyDown(event);
+  event.stopPropagation();
+});
+
+renderCanvas.addEventListener("keyup", (event) => {
+  if (!isGameplayKeyCode(event.code)) {
+    return;
+  }
+  handleGameplayKeyUp(event);
+  event.stopPropagation();
 });
 
 chatFormNode.addEventListener("submit", (event) => {
@@ -765,6 +798,7 @@ chatFormNode.addEventListener("submit", (event) => {
 });
 
 renderCanvas.addEventListener("pointerdown", (event) => {
+  focusGameplaySurface(renderCanvas);
   if (event.button === 2) {
     orbitPointerId = event.pointerId;
     orbitPointer = [event.clientX, event.clientY];
@@ -843,6 +877,7 @@ renderCanvas.addEventListener("pointercancel", (event) => {
 });
 
 renderCanvas.addEventListener("wheel", (event) => {
+  focusGameplaySurface(renderCanvas);
   cameraRig.desiredZoom = Math.max(
     0.72,
     Math.min(1.65, cameraRig.desiredZoom - event.deltaY * 0.0009)

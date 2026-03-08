@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import type { CameraState, NetworkEntitySnapshot } from "./contracts";
 import {
   cameraRelativeMovementDirection,
+  focusGameplaySurface,
+  isGameplayKeyCode,
   pickWorldGroundPoint,
   resolvePointerTarget
 } from "./controls";
@@ -89,6 +91,33 @@ describe("pod-web controls", () => {
     const rotatedForward = cameraRelativeMovementDirection(["KeyW"], Math.PI / 2);
     expect(rotatedForward?.[0]).toBeCloseTo(-1, 6);
     expect(rotatedForward?.[1]).toBeCloseTo(0, 6);
+  });
+
+  test("identifies gameplay hotkeys and movement keys", () => {
+    expect(isGameplayKeyCode("KeyW")).toBe(true);
+    expect(isGameplayKeyCode("KeyE")).toBe(true);
+    expect(isGameplayKeyCode("Tab")).toBe(true);
+    expect(isGameplayKeyCode("Escape")).toBe(false);
+    expect(isGameplayKeyCode("ShiftLeft")).toBe(false);
+  });
+
+  test("focuses and labels the gameplay surface", () => {
+    let focused = false;
+    const surface = {
+      tabIndex: -1,
+      focus() {
+        focused = true;
+      },
+      setAttribute(name: string, value: string) {
+        if (name === "aria-label") {
+          expect(value).toBe("Game world");
+        }
+      }
+    };
+
+    expect(focusGameplaySurface(surface)).toBe(true);
+    expect(surface.tabIndex).toBe(0);
+    expect(focused).toBe(true);
   });
 
   test("projects a center-screen click onto the ground near the camera focus", () => {
