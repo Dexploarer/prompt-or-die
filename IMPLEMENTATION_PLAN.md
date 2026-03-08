@@ -758,5 +758,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `bun run dev --host 127.0.0.1 --port 4174?renderThread=worker`
   - `git diff --check`
 
-**Last updated**: Iteration 79
-**Current focus**: Iteration 80 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache and replacing emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 80
+- [x] Replaced the minimal local browser sandbox with a richer `Verdant Hollow` authored test biome that includes a safe player spawn, multiple hub NPCs, multiple wild creatures, mining and woodcutting routes, loot caches, and denser landmark scenery for MMO-style browser validation.
+- [x] Expanded `apps/pod-web` render-profile mapping so scenery labels such as `glass spire`, `canopy tree`, and `basalt pillar` resolve to shipped manifest-backed assets instead of falling back to generic props.
+- [x] Added deterministic Bun coverage for the richer local sandbox layout and the new scenery-to-asset mappings in authoritative frame generation.
+- [x] Reduced initial local-shard HUD confusion by refreshing the HUD state immediately after sandbox reset/connect instead of waiting for the next render tick.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/local-world.test.ts ./src/contracts.test.ts ./src/affordances.test.ts ./src/assets.test.ts ./src/render-runtime.test.ts ./src/direct-connect.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `http://127.0.0.1:4174/` and `http://127.0.0.1:4174/?renderThread=worker`
+  - Figma capture of the upgraded world test scene
+
+**Last updated**: Iteration 80
+**Current focus**: Iteration 81 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache, cleanup of remaining WebGPU texture warnings, and replacement of emulated SpacetimeDB client paths with generated typed bindings

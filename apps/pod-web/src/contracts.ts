@@ -1698,6 +1698,48 @@ function entityRenderProfile(
     };
   }
 
+  if (label.includes("spire") || label.includes("obelisk") || label.includes("crystal")) {
+    return {
+      mesh: "glass-spire",
+      material: "glass-shrine",
+      tint: [0.54, 0.76, 0.94, 1],
+      emissive: [0.08, 0.14, 0.2],
+      scale: [2.2, 4.8, 2.2],
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.22,
+      metallic: 0.08
+    };
+  }
+
+  if (label.includes("tree") || label.includes("pine") || label.includes("birch")) {
+    return {
+      mesh: "canopy-tree",
+      material: "forest-canopy",
+      tint: [0.34, 0.66, 0.4, 1],
+      emissive: [0.02, 0.05, 0.02],
+      scale: [2.6, 5.0, 2.6],
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.9,
+      metallic: 0.04
+    };
+  }
+
+  if (label.includes("pillar") || label.includes("column")) {
+    return {
+      mesh: "basalt-column",
+      material: "rift-pillar",
+      tint: [0.34, 0.38, 0.46, 1],
+      emissive: [0.02, 0.03, 0.05],
+      scale: [1.8, 4.4, 1.8],
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.9,
+      metallic: 0.08
+    };
+  }
+
   if (label.includes("obstacle") || label.includes("rock") || label.includes("boulder")) {
     return {
       mesh: "weathered-boulder",

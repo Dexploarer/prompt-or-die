@@ -480,10 +480,10 @@ describe("TOON contract parsing", () => {
               }
             }
           },
-          {
-            id: 3,
-            position: [18, 20],
-            velocity: [0, 0],
+        {
+          id: 3,
+          position: [18, 20],
+          velocity: [0, 0],
             rotation: 0,
             label: "Monster-Wolf",
             metadata: {
@@ -504,17 +504,71 @@ describe("TOON contract parsing", () => {
                 canCapture: true,
                 canCommandCompanion: false,
                 canChat: false
-              }
             }
           }
-        ],
-        destroyed: [2]
+        },
+        {
+          id: 4,
+          position: [8, 26],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Glass Spire",
+          metadata: {
+            kind: "Scenery",
+            teamId: null,
+            combatStyle: null,
+            speciesId: null,
+            speciesName: null,
+            resourceSkill: null,
+            resourceTier: null,
+            encounterKind: null,
+            interaction: {
+              canInspect: true,
+              canInteract: false,
+              canAttack: false,
+              canGather: false,
+              canLoot: false,
+              canCapture: false,
+              canCommandCompanion: false,
+              canChat: false
+            }
+          }
+        },
+        {
+          id: 5,
+          position: [6, 4],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Canopy Tree",
+          metadata: {
+            kind: "Scenery",
+            teamId: null,
+            combatStyle: null,
+            speciesId: null,
+            speciesName: null,
+            resourceSkill: null,
+            resourceTier: null,
+            encounterKind: null,
+            interaction: {
+              canInspect: true,
+              canInteract: false,
+              canAttack: false,
+              canGather: false,
+              canLoot: false,
+              canCapture: false,
+              canCommandCompanion: false,
+              canChat: false
+            }
+          }
+        }
+      ],
+      destroyed: [2]
       },
       false
     );
 
     expect(next.tick).toBe(11);
-    expect(next.entities.map((entity) => entity.id)).toEqual([1, 3]);
+    expect(next.entities.map((entity) => entity.id)).toEqual([1, 3, 4, 5]);
 
     const frame = buildAuthoritativeWorldFrame(next, {
       controlledEntity: 1,
@@ -525,6 +579,8 @@ describe("TOON contract parsing", () => {
     expect(frame.camera.viewportWidth).toBe(1440);
     expect(frame.meshBatches.some((batch) => batch.mesh.includes("adventurer"))).toBe(true);
     expect(frame.meshBatches.some((batch) => batch.mesh.includes("rift-beast"))).toBe(true);
+    expect(frame.meshBatches.some((batch) => batch.mesh === "glass-spire")).toBe(true);
+    expect(frame.meshBatches.some((batch) => batch.mesh === "canopy-tree")).toBe(true);
     expect(frame.spriteBatches.some((batch) => batch.texture === "selection-ring")).toBe(true);
   });
 
