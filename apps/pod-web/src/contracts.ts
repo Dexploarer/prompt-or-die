@@ -113,9 +113,30 @@ export interface ThreeJsWebGpuHints {
   maxPixelRatio: number;
 }
 
+export interface ThreeJsEnvironment {
+  biomeId: string;
+  skyColor: RgbaTuple;
+  fogColor: RgbaTuple;
+  fogNear: number;
+  fogFar: number;
+  ambientColor: Vec3Tuple;
+  ambientIntensity: number;
+  sunColor: Vec3Tuple;
+  sunIntensity: number;
+  sunDirection: Vec3Tuple;
+  fillColor: Vec3Tuple;
+  fillIntensity: number;
+  fillDirection: Vec3Tuple;
+  rimColor: Vec3Tuple;
+  rimIntensity: number;
+  groundColor: RgbaTuple;
+  starfieldIntensity: number;
+}
+
 export interface ThreeJsWebGpuFrame {
   camera: CameraState;
   backgroundColor: RgbaTuple;
+  environment: ThreeJsEnvironment;
   overlayCommands: RenderCommand[];
   meshBatches: ThreeJsMeshBatch[];
   spriteBatches: ThreeJsSpriteBatch[];
@@ -410,6 +431,51 @@ export interface NetworkEntityInteractionHints {
   canChat: boolean;
 }
 
+export interface NetworkAtmosphereProfile {
+  biomeId: string;
+  skyColor: RgbaTuple;
+  fogColor: RgbaTuple;
+  fogNear: number;
+  fogFar: number;
+  ambientColor: Vec3Tuple;
+  ambientIntensity: number;
+  sunColor: Vec3Tuple;
+  sunIntensity: number;
+  sunDirection: Vec3Tuple;
+  fillColor: Vec3Tuple;
+  fillIntensity: number;
+  fillDirection: Vec3Tuple;
+  rimColor: Vec3Tuple;
+  rimIntensity: number;
+  groundColor: RgbaTuple;
+  starfieldIntensity: number;
+}
+
+export interface NetworkAtmosphereVolume {
+  radius: number;
+  priority: number;
+}
+
+export interface NetworkActorPresentation {
+  profileId: string;
+  meshAssetId: string | null;
+  materialPaletteId: string;
+  animationSetId: string;
+  scaleMultiplier: number;
+  footprintRadius: number;
+  selectionRingScale: number;
+  auraColor: RgbaTuple;
+}
+
+export interface NetworkCombatPresentation {
+  profileId: string;
+  hitFlashColor: RgbaTuple;
+  criticalRingColor: RgbaTuple;
+  selectionRingColor: RgbaTuple;
+  emissiveBoost: Vec3Tuple;
+  impactScale: number;
+}
+
 export interface NetworkEntityMetadataSnapshot {
   kind: NetworkEntityKind;
   teamId: number | null;
@@ -419,6 +485,10 @@ export interface NetworkEntityMetadataSnapshot {
   resourceSkill: NetworkSkillKind | null;
   resourceTier: number | null;
   encounterKind: NetworkEncounterKind | null;
+  atmosphere: NetworkAtmosphereProfile | null;
+  atmosphereVolume: NetworkAtmosphereVolume | null;
+  actorPresentation: NetworkActorPresentation | null;
+  combatPresentation: NetworkCombatPresentation | null;
   interaction: NetworkEntityInteractionHints;
 }
 
@@ -579,6 +649,44 @@ function vec2Tuple(value: unknown): Vec2Tuple | null {
   return null;
 }
 
+function vec3Tuple(value: unknown): Vec3Tuple | null {
+  if (
+    Array.isArray(value) &&
+    value.length >= 3 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number" &&
+    typeof value[2] === "number"
+  ) {
+    return [value[0], value[1], value[2]];
+  }
+
+  if (isRecord(value)) {
+    const x = asNumber(value.x);
+    const y = asNumber(value.y);
+    const z = asNumber(value.z);
+    if (x != null && y != null && z != null) {
+      return [x, y, z];
+    }
+  }
+
+  return null;
+}
+
+function rgbaTuple(value: unknown): RgbaTuple | null {
+  if (
+    Array.isArray(value) &&
+    value.length >= 4 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number" &&
+    typeof value[2] === "number" &&
+    typeof value[3] === "number"
+  ) {
+    return [value[0], value[1], value[2], value[3]];
+  }
+
+  return null;
+}
+
 function decodeStructuredString(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -652,7 +760,176 @@ function parseNetworkEntityMetadata(value: unknown): NetworkEntityMetadataSnapsh
     resourceSkill: isSkillKind(resourceSkill) ? resourceSkill : null,
     resourceTier: optionalNumber(value.resource_tier ?? value.resourceTier) ?? null,
     encounterKind: isEncounterKind(encounterKind) ? encounterKind : null,
+    atmosphere: parseAtmosphereProfile(value.atmosphere),
+    atmosphereVolume: parseAtmosphereVolume(value.atmosphere_volume ?? value.atmosphereVolume),
+    actorPresentation: parseActorPresentation(
+      value.actor_presentation ?? value.actorPresentation
+    ),
+    combatPresentation: parseCombatPresentation(
+      value.combat_presentation ?? value.combatPresentation
+    ),
     interaction: parseInteractionHints(value.interaction)
+  };
+}
+
+function parseAtmosphereProfile(value: unknown): NetworkAtmosphereProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const biomeId = optionalString(value.biome_id ?? value.biomeId);
+  const skyColor = rgbaTuple(value.sky_color ?? value.skyColor);
+  const fogColor = rgbaTuple(value.fog_color ?? value.fogColor);
+  const fogNear = asNumber(value.fog_near ?? value.fogNear);
+  const fogFar = asNumber(value.fog_far ?? value.fogFar);
+  const ambientColor = vec3Tuple(value.ambient_color ?? value.ambientColor);
+  const ambientIntensity = asNumber(value.ambient_intensity ?? value.ambientIntensity);
+  const sunColor = vec3Tuple(value.sun_color ?? value.sunColor);
+  const sunIntensity = asNumber(value.sun_intensity ?? value.sunIntensity);
+  const sunDirection = vec3Tuple(value.sun_direction ?? value.sunDirection);
+  const fillColor = vec3Tuple(value.fill_color ?? value.fillColor);
+  const fillIntensity = asNumber(value.fill_intensity ?? value.fillIntensity);
+  const fillDirection = vec3Tuple(value.fill_direction ?? value.fillDirection);
+  const rimColor = vec3Tuple(value.rim_color ?? value.rimColor);
+  const rimIntensity = asNumber(value.rim_intensity ?? value.rimIntensity);
+  const groundColor = rgbaTuple(value.ground_color ?? value.groundColor);
+  const starfieldIntensity = asNumber(value.starfield_intensity ?? value.starfieldIntensity);
+
+  if (
+    biomeId == null ||
+    skyColor == null ||
+    fogColor == null ||
+    fogNear == null ||
+    fogFar == null ||
+    ambientColor == null ||
+    ambientIntensity == null ||
+    sunColor == null ||
+    sunIntensity == null ||
+    sunDirection == null ||
+    fillColor == null ||
+    fillIntensity == null ||
+    fillDirection == null ||
+    rimColor == null ||
+    rimIntensity == null ||
+    groundColor == null ||
+    starfieldIntensity == null
+  ) {
+    return null;
+  }
+
+  return {
+    biomeId,
+    skyColor,
+    fogColor,
+    fogNear,
+    fogFar,
+    ambientColor,
+    ambientIntensity,
+    sunColor,
+    sunIntensity,
+    sunDirection,
+    fillColor,
+    fillIntensity,
+    fillDirection,
+    rimColor,
+    rimIntensity,
+    groundColor,
+    starfieldIntensity
+  };
+}
+
+function parseAtmosphereVolume(value: unknown): NetworkAtmosphereVolume | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const radius = asNumber(value.radius);
+  const priority = asNumber(value.priority);
+  if (radius == null || priority == null) {
+    return null;
+  }
+
+  return {
+    radius,
+    priority
+  };
+}
+
+function parseActorPresentation(value: unknown): NetworkActorPresentation | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const profileId = optionalString(value.profile_id ?? value.profileId);
+  const materialPaletteId = optionalString(
+    value.material_palette_id ?? value.materialPaletteId
+  );
+  const animationSetId = optionalString(value.animation_set_id ?? value.animationSetId);
+  const scaleMultiplier = asNumber(value.scale_multiplier ?? value.scaleMultiplier);
+  const footprintRadius = asNumber(value.footprint_radius ?? value.footprintRadius);
+  const selectionRingScale = asNumber(
+    value.selection_ring_scale ?? value.selectionRingScale
+  );
+  const auraColor = rgbaTuple(value.aura_color ?? value.auraColor);
+
+  if (
+    profileId == null ||
+    materialPaletteId == null ||
+    animationSetId == null ||
+    scaleMultiplier == null ||
+    footprintRadius == null ||
+    selectionRingScale == null ||
+    auraColor == null
+  ) {
+    return null;
+  }
+
+  return {
+    profileId,
+    meshAssetId: optionalString(value.mesh_asset_id ?? value.meshAssetId) ?? null,
+    materialPaletteId,
+    animationSetId,
+    scaleMultiplier,
+    footprintRadius,
+    selectionRingScale,
+    auraColor
+  };
+}
+
+function parseCombatPresentation(value: unknown): NetworkCombatPresentation | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const profileId = optionalString(value.profile_id ?? value.profileId);
+  const hitFlashColor = rgbaTuple(value.hit_flash_color ?? value.hitFlashColor);
+  const criticalRingColor = rgbaTuple(
+    value.critical_ring_color ?? value.criticalRingColor
+  );
+  const selectionRingColor = rgbaTuple(
+    value.selection_ring_color ?? value.selectionRingColor
+  );
+  const emissiveBoost = vec3Tuple(value.emissive_boost ?? value.emissiveBoost);
+  const impactScale = asNumber(value.impact_scale ?? value.impactScale);
+
+  if (
+    profileId == null ||
+    hitFlashColor == null ||
+    criticalRingColor == null ||
+    selectionRingColor == null ||
+    emissiveBoost == null ||
+    impactScale == null
+  ) {
+    return null;
+  }
+
+  return {
+    profileId,
+    hitFlashColor,
+    criticalRingColor,
+    selectionRingColor,
+    emissiveBoost,
+    impactScale
   };
 }
 
@@ -698,6 +975,10 @@ function defaultNetworkEntityMetadata(): NetworkEntityMetadataSnapshot {
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    atmosphere: null,
+    atmosphereVolume: null,
+    actorPresentation: null,
+    combatPresentation: null,
     interaction: defaultInteractionHints()
   };
 }
@@ -1452,6 +1733,11 @@ interface EntityRenderProfile {
   renderOrder: number;
   roughness: number;
   metallic: number;
+  selectionRingScale: number;
+  selectionRingColor: RgbaTuple;
+  criticalRingColor: RgbaTuple;
+  auraColor: RgbaTuple;
+  impactScale: number;
 }
 
 function yawQuaternion(yaw: number): Vec4Tuple {
@@ -1490,6 +1776,28 @@ function defaultFrameHints(): ThreeJsWebGpuHints {
     opaqueDepthWrite: true,
     transparentDepthWrite: false,
     maxPixelRatio: 2
+  };
+}
+
+function defaultEnvironment(): ThreeJsEnvironment {
+  return {
+    biomeId: "neutral-shard",
+    skyColor: [0.04, 0.06, 0.1, 1],
+    fogColor: [0.035, 0.06, 0.1, 1],
+    fogNear: 28,
+    fogFar: 180,
+    ambientColor: [0.66, 0.82, 1],
+    ambientIntensity: 1.2,
+    sunColor: [1, 0.94, 0.82],
+    sunIntensity: 2.6,
+    sunDirection: [24, 42, 18],
+    fillColor: [0.42, 0.74, 1],
+    fillIntensity: 0.7,
+    fillDirection: [-18, 14, -10],
+    rimColor: [0.29, 0.76, 1],
+    rimIntensity: 12,
+    groundColor: [0.055, 0.09, 0.14, 1],
+    starfieldIntensity: 0.9
   };
 }
 
@@ -1596,6 +1904,104 @@ function teamTint(teamId: number | null, controlled: boolean): RgbaTuple {
   return palette[teamId % palette.length] ?? palette[0];
 }
 
+function addVec3(left: Vec3Tuple, right: Vec3Tuple): Vec3Tuple {
+  return [left[0] + right[0], left[1] + right[1], left[2] + right[2]];
+}
+
+function finalizeEntityRenderProfile(
+  baseProfile: Omit<
+    EntityRenderProfile,
+    | "selectionRingScale"
+    | "selectionRingColor"
+    | "criticalRingColor"
+    | "auraColor"
+    | "impactScale"
+  >,
+  entity: NetworkEntitySnapshot,
+  isControlled: boolean
+): EntityRenderProfile {
+  const actor = entity.metadata.actorPresentation;
+  const combat = entity.metadata.combatPresentation;
+  const defaultSelectionRingColor: RgbaTuple = isControlled
+    ? [0.62, 0.98, 0.84, 0.34]
+    : [0.56, 0.82, 1, 0.16];
+
+  return {
+    ...baseProfile,
+    mesh: actor?.meshAssetId ?? baseProfile.mesh,
+    material:
+      actor && actor.materialPaletteId !== "default"
+        ? `${baseProfile.material}:${actor.materialPaletteId}`
+        : baseProfile.material,
+    emissive: addVec3(baseProfile.emissive, combat?.emissiveBoost ?? [0, 0, 0]),
+    scale:
+      actor != null
+        ? [
+            baseProfile.scale[0] * actor.scaleMultiplier,
+            baseProfile.scale[1] * actor.scaleMultiplier,
+            baseProfile.scale[2] * actor.scaleMultiplier
+          ]
+        : baseProfile.scale,
+    selectionRingScale: actor?.selectionRingScale ?? 2.4,
+    selectionRingColor: combat?.selectionRingColor ?? defaultSelectionRingColor,
+    criticalRingColor: combat?.criticalRingColor ?? [0.92, 0.34, 0.3, 0.22],
+    auraColor: actor?.auraColor ?? [0, 0, 0, 0],
+    impactScale: combat?.impactScale ?? 1
+  };
+}
+
+function resolveFrameEnvironment(
+  snapshot: NetworkWorldSnapshot,
+  focusEntity: NetworkEntitySnapshot | null
+): ThreeJsEnvironment {
+  const defaultValue = defaultEnvironment();
+  if (!focusEntity) {
+    return defaultValue;
+  }
+
+  const focusPosition = focusEntity.position;
+  let selected:
+    | {
+        atmosphere: NetworkAtmosphereProfile;
+        volume: NetworkAtmosphereVolume | null;
+        distance: number;
+      }
+    | null = null;
+
+  for (const entity of snapshot.entities) {
+    const atmosphere = entity.metadata.atmosphere;
+    if (!atmosphere) {
+      continue;
+    }
+
+    const volume = entity.metadata.atmosphereVolume;
+    const distance = Math.hypot(
+      entity.position[0] - focusPosition[0],
+      entity.position[1] - focusPosition[1]
+    );
+    if (volume && distance > volume.radius) {
+      continue;
+    }
+
+    if (!selected) {
+      selected = { atmosphere, volume, distance };
+      continue;
+    }
+
+    const selectedPriority = selected.volume?.priority ?? 0;
+    const nextPriority = volume?.priority ?? 0;
+    if (nextPriority > selectedPriority) {
+      selected = { atmosphere, volume, distance };
+      continue;
+    }
+    if (nextPriority === selectedPriority && distance < selected.distance) {
+      selected = { atmosphere, volume, distance };
+    }
+  }
+
+  return selected?.atmosphere ?? defaultValue;
+}
+
 function entityRenderProfile(
   entity: NetworkEntitySnapshot,
   controlledEntity: number | null
@@ -1607,7 +2013,7 @@ function entityRenderProfile(
 
   if (kind === "ResourceNode") {
     const isWood = entity.metadata.resourceSkill === "Woodcutting";
-    return {
+    return finalizeEntityRenderProfile({
       mesh: isWood ? "canopy-tree" : "weathered-boulder",
       material: isWood ? "forest-resource" : "ore-vein",
       tint: isWood ? [0.28, 0.62, 0.34, 1] : [0.74, 0.54, 0.28, 1],
@@ -1617,11 +2023,11 @@ function entityRenderProfile(
       renderOrder: 1,
       roughness: isWood ? 0.9 : 0.86,
       metallic: isWood ? 0.04 : 0.1
-    };
+    }, entity, isControlled);
   }
 
   if (kind === "LootContainer") {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "supply-crate",
       material: "bronze-cache",
       tint: [0.78, 0.58, 0.34, 1],
@@ -1631,11 +2037,11 @@ function entityRenderProfile(
       renderOrder: 2,
       roughness: 0.8,
       metallic: 0.12
-    };
+    }, entity, isControlled);
   }
 
   if (kind === "WildCreature") {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "rift-beast",
       material: `rift-hide:${band}:${entity.metadata.speciesId ?? "wild"}`,
       tint:
@@ -1650,11 +2056,11 @@ function entityRenderProfile(
       renderOrder: 3,
       roughness: 0.82,
       metallic: 0.08
-    };
+    }, entity, isControlled);
   }
 
   if (kind === "Companion") {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "spirit-companion",
       material: `summon-shell:${band}:${entity.metadata.speciesId ?? "companion"}`,
       tint: [0.42, 0.88, 0.74, 1],
@@ -1664,11 +2070,11 @@ function entityRenderProfile(
       renderOrder: 4,
       roughness: 0.42,
       metallic: 0.12
-    };
+    }, entity, isControlled);
   }
 
   if (kind === "Npc") {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "adventurer-avatar",
       material: `npc-cloth:${band}:${entity.metadata.combatStyle ?? "Melee"}`,
       tint:
@@ -1681,11 +2087,11 @@ function entityRenderProfile(
       renderOrder: 5,
       roughness: 0.66,
       metallic: 0.08
-    };
+    }, entity, isControlled);
   }
 
   if (label.includes("wall")) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "basalt-column",
       material: "obsidian-wall",
       tint: [0.24, 0.3, 0.38, 1],
@@ -1695,11 +2101,11 @@ function entityRenderProfile(
       renderOrder: 0,
       roughness: 0.94,
       metallic: 0.06
-    };
+    }, entity, isControlled);
   }
 
   if (label.includes("spire") || label.includes("obelisk") || label.includes("crystal")) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "glass-spire",
       material: "glass-shrine",
       tint: [0.54, 0.76, 0.94, 1],
@@ -1709,11 +2115,11 @@ function entityRenderProfile(
       renderOrder: 1,
       roughness: 0.22,
       metallic: 0.08
-    };
+    }, entity, isControlled);
   }
 
   if (label.includes("tree") || label.includes("pine") || label.includes("birch")) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "canopy-tree",
       material: "forest-canopy",
       tint: [0.34, 0.66, 0.4, 1],
@@ -1723,11 +2129,11 @@ function entityRenderProfile(
       renderOrder: 1,
       roughness: 0.9,
       metallic: 0.04
-    };
+    }, entity, isControlled);
   }
 
   if (label.includes("pillar") || label.includes("column")) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "basalt-column",
       material: "rift-pillar",
       tint: [0.34, 0.38, 0.46, 1],
@@ -1737,11 +2143,11 @@ function entityRenderProfile(
       renderOrder: 1,
       roughness: 0.9,
       metallic: 0.08
-    };
+    }, entity, isControlled);
   }
 
   if (label.includes("obstacle") || label.includes("rock") || label.includes("boulder")) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "weathered-boulder",
       material: "arena-stone",
       tint: [0.5, 0.42, 0.32, 1],
@@ -1751,7 +2157,7 @@ function entityRenderProfile(
       renderOrder: 1,
       roughness: 0.96,
       metallic: 0.04
-    };
+    }, entity, isControlled);
   }
 
   if (
@@ -1761,7 +2167,7 @@ function entityRenderProfile(
       label.includes("beast") ||
       label.includes("npc"))
   ) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: label.includes("npc") ? "adventurer-avatar" : "rift-beast",
       material: label.includes("npc") ? `npc-cloth:${band}:legacy` : `rift-hide:${band}:legacy`,
       tint:
@@ -1776,7 +2182,7 @@ function entityRenderProfile(
       renderOrder: label.includes("npc") ? 5 : 3,
       roughness: 0.82,
       metallic: 0.08
-    };
+    }, entity, isControlled);
   }
 
   if (
@@ -1786,7 +2192,7 @@ function entityRenderProfile(
       label.includes("summon") ||
       label.includes("spirit"))
   ) {
-    return {
+    return finalizeEntityRenderProfile({
       mesh: "spirit-companion",
       material: `summon-shell:${band}:legacy`,
       tint: [0.42, 0.88, 0.74, 1],
@@ -1796,9 +2202,9 @@ function entityRenderProfile(
       renderOrder: 4,
       roughness: 0.42,
       metallic: 0.12
-    };
+    }, entity, isControlled);
   }
-  return {
+  return finalizeEntityRenderProfile({
     mesh: isControlled ? "adventurer-hero" : "adventurer-avatar",
     material: `traveler-cloth:${band}:${isControlled ? "hero" : kind.toLowerCase()}`,
     tint:
@@ -1813,7 +2219,7 @@ function entityRenderProfile(
     renderOrder: 6,
     roughness: 0.64,
     metallic: 0.08
-  };
+  }, entity, isControlled);
 }
 
 function meshBatchKey(profile: EntityRenderProfile): string {
@@ -1833,6 +2239,7 @@ export function buildAuthoritativeWorldFrame(
   const controlledEntity = options.controlledEntity ?? null;
   const controlled = snapshot.entities.find((entity) => entity.id === controlledEntity) ?? null;
   const focus = controlled ?? snapshot.entities[0] ?? null;
+  const environment = resolveFrameEnvironment(snapshot, focus);
   const focusPosition = focus
     ? [focus.position[0] * WORLD_TO_RENDER_SCALE, focus.position[1] * WORLD_TO_RENDER_SCALE]
     : [0, 0];
@@ -1888,6 +2295,33 @@ export function buildAuthoritativeWorldFrame(
     }
 
     const band = healthBand(entity);
+    if (profile.auraColor[3] > 0.001) {
+      spriteBatches.push({
+        texture: "mist-ring",
+        frame: 0,
+        layer: profile.layer + 1,
+        billboard: false,
+        phase: "transparent",
+        sortDepth: position[2],
+        renderOrder: profile.renderOrder + 10,
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        instances: [
+          {
+            position: [position[0], 0.12, position[2]],
+            rotation: GROUND_RING_ROTATION,
+            scale: [
+              profile.selectionRingScale * 1.4,
+              profile.selectionRingScale * 1.4,
+              1
+            ],
+            color: profile.auraColor,
+            sourceEntity: entity.id
+          }
+        ]
+      });
+    }
     if (controlledEntity != null && entity.id === controlledEntity) {
       spriteBatches.push({
         texture: "selection-ring",
@@ -1904,8 +2338,8 @@ export function buildAuthoritativeWorldFrame(
           {
             position: [position[0], 0.08, position[2]],
             rotation: GROUND_RING_ROTATION,
-            scale: [2.6, 2.6, 1],
-            color: [0.62, 0.98, 0.84, 0.34],
+            scale: [profile.selectionRingScale, profile.selectionRingScale, 1],
+            color: profile.selectionRingColor,
             sourceEntity: entity.id
           }
         ]
@@ -1926,8 +2360,12 @@ export function buildAuthoritativeWorldFrame(
           {
             position: [position[0], 0.06, position[2]],
             rotation: GROUND_RING_ROTATION,
-            scale: [2.1, 2.1, 1],
-            color: [0.92, 0.34, 0.3, 0.22],
+            scale: [
+              profile.selectionRingScale * profile.impactScale,
+              profile.selectionRingScale * profile.impactScale,
+              1
+            ],
+            color: profile.criticalRingColor,
             sourceEntity: entity.id
           }
         ]
@@ -1944,7 +2382,8 @@ export function buildAuthoritativeWorldFrame(
       viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
       viewportHeight: options.viewportHeight ?? defaultViewportHeight()
     },
-    backgroundColor: options.backgroundColor ?? [0.04, 0.06, 0.1, 1],
+    backgroundColor: options.backgroundColor ?? environment.skyColor,
+    environment,
     overlayCommands: [],
     meshBatches: Array.from(meshBatches.values()).sort((left, right) => {
       if (left.renderOrder !== right.renderOrder) {
@@ -1961,6 +2400,7 @@ export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFram
   return {
     camera: frame.camera,
     backgroundColor: frame.backgroundColor,
+    environment: defaultEnvironment(),
     overlayCommands: frame.commands.filter((command) => command.visible),
     meshBatches: [],
     spriteBatches: [],

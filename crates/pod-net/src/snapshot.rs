@@ -6,9 +6,11 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Deref;
 
 use pod_core::{
-    Action, CombatLoadout, CombatStyle, CreatureIdentity, EncounterKind, EncounterState, Health,
+    Action, ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout,
+    CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterState, Health,
     Label, LootContainer, Movement, ResourceNode, SkillKind, Team, Transform, Velocity,
 };
 
@@ -80,7 +82,7 @@ pub struct EntityInteractionHints {
 }
 
 /// Rich per-entity metadata for browser/editor presentation and creator tooling.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EntityMetadataSnapshot {
     pub kind: EntityKind,
     pub team_id: Option<u8>,
@@ -90,6 +92,10 @@ pub struct EntityMetadataSnapshot {
     pub resource_skill: Option<SkillKind>,
     pub resource_tier: Option<u8>,
     pub encounter_kind: Option<EncounterKind>,
+    pub atmosphere: Option<AtmosphereProfile>,
+    pub atmosphere_volume: Option<AtmosphereVolume>,
+    pub actor_presentation: Option<ActorPresentation>,
+    pub combat_presentation: Option<CombatPresentation>,
     pub interaction: EntityInteractionHints,
 }
 
@@ -490,6 +496,10 @@ impl WorldSnapshot {
             let resource = world.ecs.get::<&ResourceNode>(entity).ok();
             let loot = world.ecs.get::<&LootContainer>(entity).ok();
             let encounter = world.ecs.get::<&EncounterState>(entity).ok();
+            let atmosphere = world.ecs.get::<&AtmosphereProfile>(entity).ok();
+            let atmosphere_volume = world.ecs.get::<&AtmosphereVolume>(entity).ok();
+            let actor_presentation = world.ecs.get::<&ActorPresentation>(entity).ok();
+            let combat_presentation = world.ecs.get::<&CombatPresentation>(entity).ok();
 
             let health = health_opt.as_ref().map(|h| h.current);
             let max_health = health_opt.as_ref().map(|h| h.max);
@@ -536,6 +546,10 @@ impl WorldSnapshot {
                     resource_skill: resource.as_ref().map(|resource| resource.skill),
                     resource_tier: resource.as_ref().map(|resource| resource.tier),
                     encounter_kind: encounter.as_ref().map(|encounter| encounter.kind),
+                    atmosphere: atmosphere.map(|value| value.deref().clone()),
+                    atmosphere_volume: atmosphere_volume.map(|value| *value.deref()),
+                    actor_presentation: actor_presentation.map(|value| value.deref().clone()),
+                    combat_presentation: combat_presentation.map(|value| value.deref().clone()),
                     interaction,
                 },
             });
@@ -1032,6 +1046,87 @@ fn hash_bool(hash: &mut u64, value: bool) {
     hash_u64(hash, value as u64);
 }
 
+fn hash_rgba(hash: &mut u64, value: [f32; 4]) {
+    for channel in value {
+        hash_f32(hash, channel);
+    }
+}
+
+fn hash_rgb(hash: &mut u64, value: [f32; 3]) {
+    for channel in value {
+        hash_f32(hash, channel);
+    }
+}
+
+fn hash_option_atmosphere(hash: &mut u64, atmosphere: Option<&AtmosphereProfile>) {
+    match atmosphere {
+        Some(atmosphere) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(atmosphere.biome_id.as_str()));
+            hash_rgba(hash, atmosphere.sky_color);
+            hash_rgba(hash, atmosphere.fog_color);
+            hash_f32(hash, atmosphere.fog_near);
+            hash_f32(hash, atmosphere.fog_far);
+            hash_rgb(hash, atmosphere.ambient_color);
+            hash_f32(hash, atmosphere.ambient_intensity);
+            hash_rgb(hash, atmosphere.sun_color);
+            hash_f32(hash, atmosphere.sun_intensity);
+            hash_rgb(hash, atmosphere.sun_direction);
+            hash_rgb(hash, atmosphere.fill_color);
+            hash_f32(hash, atmosphere.fill_intensity);
+            hash_rgb(hash, atmosphere.fill_direction);
+            hash_rgb(hash, atmosphere.rim_color);
+            hash_f32(hash, atmosphere.rim_intensity);
+            hash_rgba(hash, atmosphere.ground_color);
+            hash_f32(hash, atmosphere.starfield_intensity);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_atmosphere_volume(hash: &mut u64, volume: Option<&AtmosphereVolume>) {
+    match volume {
+        Some(volume) => {
+            hash_u64(hash, 1);
+            hash_f32(hash, volume.radius);
+            hash_u64(hash, volume.priority as u64);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_actor_presentation(hash: &mut u64, presentation: Option<&ActorPresentation>) {
+    match presentation {
+        Some(presentation) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(presentation.profile_id.as_str()));
+            hash_option_str(hash, presentation.mesh_asset_id.as_deref());
+            hash_option_str(hash, Some(presentation.material_palette_id.as_str()));
+            hash_option_str(hash, Some(presentation.animation_set_id.as_str()));
+            hash_f32(hash, presentation.scale_multiplier);
+            hash_f32(hash, presentation.footprint_radius);
+            hash_f32(hash, presentation.selection_ring_scale);
+            hash_rgba(hash, presentation.aura_color);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
+fn hash_option_combat_presentation(hash: &mut u64, presentation: Option<&CombatPresentation>) {
+    match presentation {
+        Some(presentation) => {
+            hash_u64(hash, 1);
+            hash_option_str(hash, Some(presentation.profile_id.as_str()));
+            hash_rgba(hash, presentation.hit_flash_color);
+            hash_rgba(hash, presentation.critical_ring_color);
+            hash_rgba(hash, presentation.selection_ring_color);
+            hash_rgb(hash, presentation.emissive_boost);
+            hash_f32(hash, presentation.impact_scale);
+        }
+        None => hash_u64(hash, 0),
+    }
+}
+
 fn hash_option_u8(hash: &mut u64, value: Option<u8>) {
     match value {
         Some(value) => {
@@ -1051,6 +1146,10 @@ fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_option_str(hash, metadata.resource_skill.map(skill_kind_name));
     hash_option_u8(hash, metadata.resource_tier);
     hash_option_str(hash, metadata.encounter_kind.map(encounter_kind_name));
+    hash_option_atmosphere(hash, metadata.atmosphere.as_ref());
+    hash_option_atmosphere_volume(hash, metadata.atmosphere_volume.as_ref());
+    hash_option_actor_presentation(hash, metadata.actor_presentation.as_ref());
+    hash_option_combat_presentation(hash, metadata.combat_presentation.as_ref());
     hash_bool(hash, metadata.interaction.can_inspect);
     hash_bool(hash, metadata.interaction.can_interact);
     hash_bool(hash, metadata.interaction.can_attack);
@@ -1181,7 +1280,10 @@ fn encounter_kind_name(kind: EncounterKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::{CombatLoadout, CreatureIdentity, IdleAgent, LootContainer, ResourceNode};
+    use pod_core::{
+        ActorPresentation, AtmosphereProfile, AtmosphereVolume, CombatLoadout, CombatPresentation,
+        CreatureIdentity, IdleAgent, LootContainer, ResourceNode,
+    };
 
     #[test]
     fn test_snapshot_default() {
@@ -1212,6 +1314,21 @@ mod tests {
             .with_label("Wild Embercub", Team::None)
             .with_health(24.0)
             .with_combat_loadout(CombatLoadout::default())
+            .with_actor_presentation(ActorPresentation {
+                profile_id: "wild-creature".into(),
+                mesh_asset_id: Some("rift-beast".into()),
+                material_palette_id: "ember".into(),
+                animation_set_id: "beast-stalker".into(),
+                scale_multiplier: 1.15,
+                footprint_radius: 1.45,
+                selection_ring_scale: 2.8,
+                aura_color: [0.92, 0.46, 0.22, 0.2],
+            })
+            .with_combat_presentation(CombatPresentation {
+                profile_id: "ember-crit".into(),
+                critical_ring_color: [0.95, 0.32, 0.18, 0.28],
+                ..CombatPresentation::default()
+            })
             .with_creature_identity(CreatureIdentity {
                 species_id: "embercub".into(),
                 species_name: "Wild Embercub".into(),
@@ -1219,10 +1336,24 @@ mod tests {
                 ..CreatureIdentity::default()
             })
             .build();
+        world
+            .spawn_at(4.0, 4.0)
+            .with_label("Verdant Atmosphere Anchor", Team::None)
+            .with_atmosphere_profile(AtmosphereProfile {
+                biome_id: "verdant-hollow".into(),
+                fog_color: [0.05, 0.11, 0.09, 1.0],
+                ground_color: [0.08, 0.15, 0.1, 1.0],
+                ..AtmosphereProfile::default()
+            })
+            .with_atmosphere_volume(AtmosphereVolume {
+                radius: 128.0,
+                priority: 3,
+            })
+            .build();
 
         let snapshot = WorldSnapshot::capture(&world);
 
-        assert_eq!(snapshot.entities.len(), 4);
+        assert_eq!(snapshot.entities.len(), 5);
 
         let player = snapshot
             .entities
@@ -1260,6 +1391,44 @@ mod tests {
             Some("Wild Embercub")
         );
         assert!(creature.metadata.interaction.can_capture);
+        assert_eq!(
+            creature
+                .metadata
+                .actor_presentation
+                .as_ref()
+                .and_then(|presentation| presentation.mesh_asset_id.as_deref()),
+            Some("rift-beast")
+        );
+        assert_eq!(
+            creature
+                .metadata
+                .combat_presentation
+                .as_ref()
+                .map(|presentation| presentation.profile_id.as_str()),
+            Some("ember-crit")
+        );
+
+        let atmosphere = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.label.as_deref() == Some("Verdant Atmosphere Anchor"))
+            .expect("atmosphere anchor present");
+        assert_eq!(
+            atmosphere
+                .metadata
+                .atmosphere
+                .as_ref()
+                .map(|atmosphere| atmosphere.biome_id.as_str()),
+            Some("verdant-hollow")
+        );
+        assert_eq!(
+            atmosphere
+                .metadata
+                .atmosphere_volume
+                .as_ref()
+                .map(|volume| volume.priority),
+            Some(3)
+        );
     }
 
     #[test]

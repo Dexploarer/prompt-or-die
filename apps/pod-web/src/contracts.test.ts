@@ -8,6 +8,7 @@ import {
   encodeDirectConnectConnectMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
+  type NetworkEntityMetadataSnapshot,
   type NetworkWorldSnapshot,
   parseAgentTickRollup,
   parseAgentToolCallEvent,
@@ -31,6 +32,10 @@ function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
     resource_skill: null,
     resource_tier: null,
     encounter_kind: null,
+    atmosphere: null,
+    atmosphere_volume: null,
+    actor_presentation: null,
+    combat_presentation: null,
     interaction: {
       can_inspect: true,
       can_interact: false,
@@ -40,6 +45,37 @@ function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
       can_capture: false,
       can_command_companion: false,
       can_chat: false
+    },
+    ...overrides
+  };
+}
+
+function typedEntityMetadata(
+  kind: NetworkEntityMetadataSnapshot["kind"],
+  overrides: Partial<NetworkEntityMetadataSnapshot> = {}
+): NetworkEntityMetadataSnapshot {
+  return {
+    kind,
+    teamId: null,
+    combatStyle: null,
+    speciesId: null,
+    speciesName: null,
+    resourceSkill: null,
+    resourceTier: null,
+    encounterKind: null,
+    atmosphere: null,
+    atmosphereVolume: null,
+    actorPresentation: null,
+    combatPresentation: null,
+    interaction: {
+      canInspect: true,
+      canInteract: false,
+      canAttack: false,
+      canGather: false,
+      canLoot: false,
+      canCapture: false,
+      canCommandCompanion: false,
+      canChat: false
     },
     ...overrides
   };
@@ -397,15 +433,9 @@ describe("TOON contract parsing", () => {
           velocity: [0, 0],
           rotation: 0,
           label: "Hero",
-          metadata: {
-            kind: "Player",
+          metadata: typedEntityMetadata("Player", {
             teamId: 1,
             combatStyle: "Melee",
-            speciesId: null,
-            speciesName: null,
-            resourceSkill: null,
-            resourceTier: null,
-            encounterKind: null,
             interaction: {
               canInspect: true,
               canInteract: true,
@@ -416,7 +446,7 @@ describe("TOON contract parsing", () => {
               canCommandCompanion: false,
               canChat: true
             }
-          }
+          })
         },
         {
           id: 2,
@@ -424,15 +454,7 @@ describe("TOON contract parsing", () => {
           velocity: [0, 0],
           rotation: 0,
           label: "Wall-East",
-          metadata: {
-            kind: "Scenery",
-            teamId: null,
-            combatStyle: null,
-            speciesId: null,
-            speciesName: null,
-            resourceSkill: null,
-            resourceTier: null,
-            encounterKind: null,
+          metadata: typedEntityMetadata("Scenery", {
             interaction: {
               canInspect: true,
               canInteract: false,
@@ -443,7 +465,7 @@ describe("TOON contract parsing", () => {
               canCommandCompanion: false,
               canChat: false
             }
-          }
+          })
         }
       ]
     };
@@ -459,15 +481,9 @@ describe("TOON contract parsing", () => {
             velocity: [4, 0],
             rotation: 0.3,
             label: "Hero",
-            metadata: {
-              kind: "Player",
+            metadata: typedEntityMetadata("Player", {
               teamId: 1,
               combatStyle: "Melee",
-              speciesId: null,
-              speciesName: null,
-              resourceSkill: null,
-              resourceTier: null,
-              encounterKind: null,
               interaction: {
                 canInspect: true,
                 canInteract: true,
@@ -478,7 +494,7 @@ describe("TOON contract parsing", () => {
                 canCommandCompanion: false,
                 canChat: true
               }
-            }
+            })
           },
         {
           id: 3,
@@ -486,14 +502,10 @@ describe("TOON contract parsing", () => {
           velocity: [0, 0],
             rotation: 0,
             label: "Monster-Wolf",
-            metadata: {
-              kind: "WildCreature",
-              teamId: null,
+            metadata: typedEntityMetadata("WildCreature", {
               combatStyle: "Melee",
               speciesId: "embercub",
               speciesName: "Wild Embercub",
-              resourceSkill: null,
-              resourceTier: null,
               encounterKind: "WildCreature",
               interaction: {
                 canInspect: true,
@@ -505,7 +517,7 @@ describe("TOON contract parsing", () => {
                 canCommandCompanion: false,
                 canChat: false
             }
-          }
+          })
         },
         {
           id: 4,
@@ -513,15 +525,7 @@ describe("TOON contract parsing", () => {
           velocity: [0, 0],
           rotation: 0,
           label: "Glass Spire",
-          metadata: {
-            kind: "Scenery",
-            teamId: null,
-            combatStyle: null,
-            speciesId: null,
-            speciesName: null,
-            resourceSkill: null,
-            resourceTier: null,
-            encounterKind: null,
+          metadata: typedEntityMetadata("Scenery", {
             interaction: {
               canInspect: true,
               canInteract: false,
@@ -532,7 +536,7 @@ describe("TOON contract parsing", () => {
               canCommandCompanion: false,
               canChat: false
             }
-          }
+          })
         },
         {
           id: 5,
@@ -540,15 +544,7 @@ describe("TOON contract parsing", () => {
           velocity: [0, 0],
           rotation: 0,
           label: "Canopy Tree",
-          metadata: {
-            kind: "Scenery",
-            teamId: null,
-            combatStyle: null,
-            speciesId: null,
-            speciesName: null,
-            resourceSkill: null,
-            resourceTier: null,
-            encounterKind: null,
+          metadata: typedEntityMetadata("Scenery", {
             interaction: {
               canInspect: true,
               canInteract: false,
@@ -559,7 +555,7 @@ describe("TOON contract parsing", () => {
               canCommandCompanion: false,
               canChat: false
             }
-          }
+          })
         }
       ],
       destroyed: [2]
@@ -582,6 +578,120 @@ describe("TOON contract parsing", () => {
     expect(frame.meshBatches.some((batch) => batch.mesh === "glass-spire")).toBe(true);
     expect(frame.meshBatches.some((batch) => batch.mesh === "canopy-tree")).toBe(true);
     expect(frame.spriteBatches.some((batch) => batch.texture === "selection-ring")).toBe(true);
+  });
+
+  test("builds presentation-driven environments and actor affordances", () => {
+    const snapshot: NetworkWorldSnapshot = {
+      tick: 18,
+      entities: [
+        {
+          id: 1,
+          position: [8, 10],
+          velocity: [0, 0],
+          rotation: 0.25,
+          label: "Hero",
+          metadata: typedEntityMetadata("Player", {
+            actorPresentation: {
+              profileId: "heroic-adventurer",
+              meshAssetId: "adventurer-hero",
+              materialPaletteId: "verdant",
+              animationSetId: "hero-runescape",
+              scaleMultiplier: 1.15,
+              footprintRadius: 1.1,
+              selectionRingScale: 3.2,
+              auraColor: [0.32, 0.86, 0.74, 0.28]
+            },
+            combatPresentation: {
+              profileId: "heroic-combat",
+              hitFlashColor: [1, 0.72, 0.34, 0.38],
+              criticalRingColor: [1, 0.28, 0.2, 0.42],
+              selectionRingColor: [0.62, 0.98, 0.84, 0.55],
+              emissiveBoost: [0.05, 0.04, 0.02],
+              impactScale: 1.45
+            }
+          })
+        },
+        {
+          id: 7,
+          position: [9, 9],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Glass Spire",
+          metadata: typedEntityMetadata("Scenery", {
+            atmosphere: {
+              biomeId: "verdant-hollow",
+              skyColor: [0.12, 0.16, 0.22, 1],
+              fogColor: [0.18, 0.25, 0.29, 1],
+              fogNear: 18,
+              fogFar: 130,
+              ambientColor: [0.58, 0.82, 0.94],
+              ambientIntensity: 1.35,
+              sunColor: [0.96, 0.88, 0.74],
+              sunIntensity: 2.9,
+              sunDirection: [18, 34, 12],
+              fillColor: [0.34, 0.8, 0.92],
+              fillIntensity: 0.92,
+              fillDirection: [-14, 16, -6],
+              rimColor: [0.42, 0.96, 1],
+              rimIntensity: 13,
+              groundColor: [0.1, 0.14, 0.18, 1],
+              starfieldIntensity: 0.42
+            },
+            atmosphereVolume: {
+              radius: 8,
+              priority: 3
+            }
+          })
+        },
+        {
+          id: 9,
+          position: [12, 10],
+          velocity: [0, 0],
+          rotation: 0.4,
+          health: 10,
+          maxHealth: 40,
+          label: "Rift Beast",
+          metadata: typedEntityMetadata("WildCreature", {
+            speciesId: "rift-beast",
+            speciesName: "Rift Beast",
+            combatPresentation: {
+              profileId: "beast-combat",
+              hitFlashColor: [1, 0.64, 0.44, 0.34],
+              criticalRingColor: [1, 0.18, 0.16, 0.5],
+              selectionRingColor: [0.82, 0.34, 0.3, 0.28],
+              emissiveBoost: [0.08, 0.02, 0.01],
+              impactScale: 1.75
+            }
+          })
+        }
+      ]
+    };
+
+    const frame = buildAuthoritativeWorldFrame(snapshot, {
+      controlledEntity: 1,
+      viewportWidth: 1600,
+      viewportHeight: 900
+    });
+
+    expect(frame.environment.biomeId).toBe("verdant-hollow");
+    expect(frame.environment.fogFar).toBe(130);
+    expect(frame.meshBatches.some((batch) => batch.material.includes(":verdant"))).toBe(true);
+    const selectionRing = frame.spriteBatches.find(
+      (batch) => batch.texture === "selection-ring"
+    );
+    expect(selectionRing?.instances[0]?.scale).toEqual([3.2, 3.2, 1]);
+    expect(selectionRing?.instances[0]?.color).toEqual([0.62, 0.98, 0.84, 0.55]);
+
+    const auraRing = frame.spriteBatches.find((batch) => batch.texture === "mist-ring");
+    expect(auraRing?.instances[0]?.color).toEqual([0.32, 0.86, 0.74, 0.28]);
+
+    const criticalRing = frame.spriteBatches.find(
+      (batch) =>
+        batch.texture === "danger-ring" &&
+        batch.instances.some((instance) => instance.sourceEntity === 9)
+    );
+    expect(criticalRing?.instances[0]?.scale).toEqual([4.2, 4.2, 1]);
+    expect(criticalRing?.instances[0]?.color).toEqual([1, 0.18, 0.16, 0.5]);
   });
 
   test("encodes browser direct-connect client messages with Rust enum tags", () => {

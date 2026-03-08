@@ -1,6 +1,7 @@
 import type {
   BrowserAction,
   BrowserCompanionCommand,
+  NetworkAtmosphereProfile,
   NetworkCombatStyle,
   NetworkEncounterKind,
   NetworkEntityInteractionHints,
@@ -801,6 +802,24 @@ function createPlayerEntity(playerName: string): LocalEntity {
     metadata: metadata("Player", {
       teamId: 1,
       combatStyle: "Melee",
+      actorPresentation: {
+        profileId: "hero-ranger",
+        meshAssetId: "adventurer-hero",
+        materialPaletteId: "verdant-hero",
+        animationSetId: "humanoid-explorer",
+        scaleMultiplier: 1.04,
+        footprintRadius: 1.15,
+        selectionRingScale: 2.8,
+        auraColor: [0.18, 0.38, 0.52, 0.14]
+      },
+      combatPresentation: {
+        profileId: "hero-combat",
+        hitFlashColor: [0.96, 0.42, 0.26, 0.22],
+        criticalRingColor: [0.96, 0.42, 0.26, 0.26],
+        selectionRingColor: [0.62, 0.98, 0.84, 0.38],
+        emissiveBoost: [0.08, 0.06, 0.02],
+        impactScale: 1.12
+      },
       interaction: interactionHints({
         canInspect: true,
         canInteract: true,
@@ -836,6 +855,16 @@ function createNpcEntity(id: number, label: string, position: Vec2Tuple): LocalE
     metadata: metadata("Npc", {
       teamId: 2,
       combatStyle: "Magic",
+      actorPresentation: {
+        profileId: "hub-npc",
+        meshAssetId: "adventurer-avatar",
+        materialPaletteId: "archive-cloth",
+        animationSetId: "humanoid-idle",
+        scaleMultiplier: 1,
+        footprintRadius: 1,
+        selectionRingScale: 2.2,
+        auraColor: [0, 0, 0, 0]
+      },
       interaction: interactionHints({
         canInspect: true,
         canInteract: true,
@@ -878,6 +907,24 @@ function createWildCreatureEntity(
       speciesId: slug(speciesName),
       speciesName,
       encounterKind: "WildCreature",
+      actorPresentation: {
+        profileId: slug(speciesName),
+        meshAssetId: "rift-beast",
+        materialPaletteId: "wild-creature",
+        animationSetId: "beast-stalker",
+        scaleMultiplier: 1.08,
+        footprintRadius: 1.45,
+        selectionRingScale: 2.5,
+        auraColor: [0.42, 0.12, 0.08, 0.08]
+      },
+      combatPresentation: {
+        profileId: "wild-danger",
+        hitFlashColor: [0.92, 0.36, 0.24, 0.2],
+        criticalRingColor: [0.92, 0.36, 0.24, 0.24],
+        selectionRingColor: [0.62, 0.78, 0.92, 0.14],
+        emissiveBoost: [0.04, 0.02, 0.01],
+        impactScale: 1.1
+      },
       interaction: interactionHints({
         canInspect: true,
         canAttack: true,
@@ -918,6 +965,16 @@ function createResourceEntity(
     metadata: metadata("ResourceNode", {
       resourceSkill: skill,
       resourceTier: 1,
+      actorPresentation: {
+        profileId: skill === "Woodcutting" ? "tree-resource" : "ore-resource",
+        meshAssetId: skill === "Woodcutting" ? "canopy-tree" : "weathered-boulder",
+        materialPaletteId: skill === "Woodcutting" ? "verdant-resource" : "ore-seam",
+        animationSetId: "static-prop",
+        scaleMultiplier: 1,
+        footprintRadius: 1.4,
+        selectionRingScale: 2.2,
+        auraColor: [0, 0, 0, 0]
+      },
       interaction: interactionHints({
         canInspect: true,
         canGather: true
@@ -955,6 +1012,16 @@ function createLootEntity(
     health: null,
     maxHealth: null,
     metadata: metadata("LootContainer", {
+      actorPresentation: {
+        profileId: "loot-cache",
+        meshAssetId: "supply-crate",
+        materialPaletteId: "bronze-cache",
+        animationSetId: "static-prop",
+        scaleMultiplier: 1,
+        footprintRadius: 1.1,
+        selectionRingScale: 2.1,
+        auraColor: [0.48, 0.32, 0.08, 0.1]
+      },
       interaction: interactionHints({
         canInspect: true,
         canLoot: true
@@ -996,6 +1063,24 @@ function createCompanionEntity(
       combatStyle: "Summoning",
       speciesId,
       speciesName,
+      actorPresentation: {
+        profileId: speciesId,
+        meshAssetId: "spirit-companion",
+        materialPaletteId: "summon-shell",
+        animationSetId: "companion-hover",
+        scaleMultiplier: 1,
+        footprintRadius: 0.95,
+        selectionRingScale: 2.2,
+        auraColor: [0.28, 0.82, 0.7, 0.18]
+      },
+      combatPresentation: {
+        profileId: "companion-combat",
+        hitFlashColor: [0.4, 0.92, 0.78, 0.18],
+        criticalRingColor: [0.4, 0.92, 0.78, 0.22],
+        selectionRingColor: [0.42, 0.88, 0.74, 0.28],
+        emissiveBoost: [0.03, 0.08, 0.06],
+        impactScale: 1.05
+      },
       interaction: interactionHints({
         canInspect: true,
         canCommandCompanion: true
@@ -1032,6 +1117,27 @@ function createSceneryEntity(
     health: null,
     maxHealth: null,
     metadata: metadata("Scenery", {
+      actorPresentation: {
+        profileId: slug(label),
+        meshAssetId: null,
+        materialPaletteId: "world-prop",
+        animationSetId: "static-prop",
+        scaleMultiplier: 1,
+        footprintRadius: 1.6,
+        selectionRingScale: 2.4,
+        auraColor: [0, 0, 0, 0]
+      },
+      atmosphere:
+        label === "glass spire"
+          ? verdantAtmosphereProfile()
+          : null,
+      atmosphereVolume:
+        label === "glass spire"
+          ? {
+              radius: 9.5,
+              priority: 3
+            }
+          : null,
       interaction: interactionHints({
         canInspect: true
       })
@@ -1063,8 +1169,34 @@ function metadata(
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    atmosphere: null,
+    atmosphereVolume: null,
+    actorPresentation: null,
+    combatPresentation: null,
     interaction: interactionHints(),
     ...overrides
+  };
+}
+
+function verdantAtmosphereProfile(): NetworkAtmosphereProfile {
+  return {
+    biomeId: "verdant-hollow",
+    skyColor: [0.05, 0.08, 0.12, 1],
+    fogColor: [0.06, 0.12, 0.1, 1],
+    fogNear: 22,
+    fogFar: 148,
+    ambientColor: [0.7, 0.88, 0.84],
+    ambientIntensity: 1.28,
+    sunColor: [1, 0.95, 0.82],
+    sunIntensity: 2.7,
+    sunDirection: [20, 38, 12],
+    fillColor: [0.42, 0.78, 0.92],
+    fillIntensity: 0.78,
+    fillDirection: [-16, 11, -8],
+    rimColor: [0.34, 0.9, 0.82],
+    rimIntensity: 11,
+    groundColor: [0.08, 0.16, 0.12, 1],
+    starfieldIntensity: 0.72
   };
 }
 

@@ -15,6 +15,10 @@ function metadata(
     resourceSkill: null,
     resourceTier: null,
     encounterKind: null,
+    atmosphere: null,
+    atmosphereVolume: null,
+    actorPresentation: null,
+    combatPresentation: null,
     interaction: {
       canInspect: false,
       canInteract: false,

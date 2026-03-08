@@ -1,4 +1,5 @@
 import type {
+  ThreeJsEnvironment,
   ThreeJsInstance,
   ThreeJsMeshBatch,
   ThreeJsSpriteBatch,
@@ -18,6 +19,7 @@ export function createDemoFrame(seconds: number): ThreeJsWebGpuFrame {
       viewportHeight: window.innerHeight
     },
     backgroundColor: [0.05, 0.09, 0.15, 1],
+    environment: createDemoEnvironment(),
     overlayCommands: [],
     meshBatches: createMeshBatches(seconds),
     spriteBatches: createSpriteBatches(seconds),
@@ -35,6 +37,28 @@ export function createDemoFrame(seconds: number): ThreeJsWebGpuFrame {
       transparentDepthWrite: false,
       maxPixelRatio: 2
     }
+  };
+}
+
+function createDemoEnvironment(): ThreeJsEnvironment {
+  return {
+    biomeId: "demo-rift",
+    skyColor: [0.05, 0.09, 0.15, 1],
+    fogColor: [0.06, 0.11, 0.16, 1],
+    fogNear: 24,
+    fogFar: 190,
+    ambientColor: [0.64, 0.8, 1],
+    ambientIntensity: 1.18,
+    sunColor: [1, 0.95, 0.84],
+    sunIntensity: 2.8,
+    sunDirection: [28, 38, 16],
+    fillColor: [0.4, 0.72, 1],
+    fillIntensity: 0.78,
+    fillDirection: [-20, 12, -8],
+    rimColor: [0.33, 0.82, 1],
+    rimIntensity: 11.5,
+    groundColor: [0.06, 0.1, 0.15, 1],
+    starfieldIntensity: 0.82
   };
 }
 
