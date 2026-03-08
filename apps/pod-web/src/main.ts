@@ -1,7 +1,9 @@
 import {
+  type BrowserAction,
   buildAuthoritativeWorldFrame,
+  type NetworkEntitySnapshot,
+  type NetworkWorldSnapshot,
   parseLiveDebugDocument,
-  type DirectConnectServerMessage,
   parseRenderFrame,
   parseReplayFile,
   parseShardIncidentSummary,
@@ -59,8 +61,11 @@ const backendLabel = document.querySelector<HTMLElement>("#backend-label");
 const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
+const targetLabel = document.querySelector<HTMLElement>("#target-label");
 const qualityLabel = document.querySelector<HTMLElement>("#quality-label");
 const statsLabel = document.querySelector<HTMLElement>("#stats-label");
+const chatForm = document.querySelector<HTMLFormElement>("#chat-form");
+const chatInput = document.querySelector<HTMLInputElement>("#chat-input");
 const telemetryToggle = document.querySelector<HTMLButtonElement>("#telemetry-toggle");
 const telemetrySelectionLabel =
   document.querySelector<HTMLElement>("#telemetry-selection");
@@ -89,8 +94,11 @@ if (
   !frameSourceLabel ||
   !connectionLabel ||
   !worldLabel ||
+  !targetLabel ||
   !qualityLabel ||
   !statsLabel ||
+  !chatForm ||
+  !chatInput ||
   !telemetryToggle ||
   !telemetrySelectionLabel ||
   !telemetryTrailLabel ||
@@ -112,6 +120,9 @@ if (
 const telemetryToggleButton = telemetryToggle;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
+const targetNode = targetLabel;
+const chatFormNode = chatForm;
+const chatInputNode = chatInput;
 const telemetrySelectionNode = telemetrySelectionLabel;
 const telemetryTrailNode = telemetryTrailLabel;
 const telemetryActionsNode = telemetryActionsLabel;
@@ -142,6 +153,7 @@ let latestToolEventSummary: ToolCallEventSummary | null = null;
 let latestRollupSummary: TickRollupSummary | null = null;
 let liveReplayDocuments = 0;
 let liveIncidentDocuments = 0;
+let latestSnapshot: NetworkWorldSnapshot | null = null;
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
   ? {
       phase: "idle",
@@ -161,6 +173,8 @@ if (runtimeConfig?.debugTelemetry) {
 const liveClient = runtimeConfig
   ? new PodWebDirectConnectClient(runtimeConfig, {
       onFrame(snapshot, frameOptions, status) {
+        latestSnapshot = snapshot;
+        syncSelectedTarget();
         latestFrame = buildAuthoritativeWorldFrame(snapshot, {
           ...frameOptions,
           viewportWidth: canvas.clientWidth || window.innerWidth,
@@ -178,6 +192,233 @@ const liveClient = runtimeConfig
       }
     })
   : null;
+const pressedKeys = new Set<string>();
+let selectedTargetId: number | null = null;
+let autoRetaliateEnabled = true;
+let lastMovementSignature = "stop";
+let lastMovementSubmitAtMs = 0;
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
+function controlledEntity(): NetworkEntitySnapshot | null {
+  const controlledId = liveConnectionStatus?.controlledEntity ?? null;
+  if (latestSnapshot == null || controlledId == null) {
+    return null;
+  }
+
+  return latestSnapshot.entities.find((entity) => entity.id === controlledId) ?? null;
+}
+
+function targetableEntities(): NetworkEntitySnapshot[] {
+  if (!latestSnapshot) {
+    return [];
+  }
+
+  const selfId = liveConnectionStatus?.controlledEntity ?? null;
+  const selfEntity = controlledEntity();
+
+  return latestSnapshot.entities
+    .filter((entity) => entity.id !== selfId)
+    .filter((entity) => {
+      const label = entity.label?.toLowerCase() ?? "";
+      return !label.includes("wall") && !label.includes("obstacle");
+    })
+    .sort((left, right) => {
+      if (!selfEntity) {
+        return left.id - right.id;
+      }
+      const leftDistance = Math.hypot(
+        left.position[0] - selfEntity.position[0],
+        left.position[1] - selfEntity.position[1]
+      );
+      const rightDistance = Math.hypot(
+        right.position[0] - selfEntity.position[0],
+        right.position[1] - selfEntity.position[1]
+      );
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance;
+      }
+      return left.id - right.id;
+    });
+}
+
+function selectedTarget(): NetworkEntitySnapshot | null {
+  syncSelectedTarget();
+  if (selectedTargetId == null) {
+    return null;
+  }
+  return targetableEntities().find((entity) => entity.id === selectedTargetId) ?? null;
+}
+
+function syncSelectedTarget(): void {
+  const candidates = targetableEntities();
+  if (candidates.length === 0) {
+    selectedTargetId = null;
+    return;
+  }
+
+  if (selectedTargetId == null || !candidates.some((entity) => entity.id === selectedTargetId)) {
+    selectedTargetId = candidates[0]?.id ?? null;
+  }
+}
+
+function cycleTargetSelection(delta: number): void {
+  const candidates = targetableEntities();
+  if (candidates.length === 0) {
+    selectedTargetId = null;
+    return;
+  }
+
+  const currentIndex = candidates.findIndex((entity) => entity.id === selectedTargetId);
+  const nextIndex =
+    currentIndex === -1
+      ? 0
+      : (currentIndex + delta + candidates.length) % candidates.length;
+  selectedTargetId = candidates[nextIndex]?.id ?? null;
+}
+
+function submitActions(actions: BrowserAction[]): void {
+  if (!liveClient) {
+    return;
+  }
+  liveClient.submitActions(actions);
+}
+
+function movementDirection(): [number, number] | null {
+  const horizontal =
+    (pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight") ? 1 : 0) -
+    (pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft") ? 1 : 0);
+  const vertical =
+    (pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown") ? 1 : 0) -
+    (pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp") ? 1 : 0);
+
+  if (horizontal === 0 && vertical === 0) {
+    return null;
+  }
+
+  const length = Math.hypot(horizontal, vertical);
+  return [horizontal / length, vertical / length];
+}
+
+function maybeSubmitMovement(timestamp: number): void {
+  const direction = movementDirection();
+  const signature = direction
+    ? `${direction[0].toFixed(3)}:${direction[1].toFixed(3)}`
+    : "stop";
+  const resendDue = timestamp - lastMovementSubmitAtMs >= 90;
+
+  if (direction) {
+    if (signature !== lastMovementSignature || resendDue) {
+      submitActions([{ kind: "move", direction }]);
+      lastMovementSignature = signature;
+      lastMovementSubmitAtMs = timestamp;
+    }
+    return;
+  }
+
+  if (lastMovementSignature !== "stop") {
+    submitActions([{ kind: "stop" }]);
+    lastMovementSignature = "stop";
+    lastMovementSubmitAtMs = timestamp;
+  }
+}
+
+function submitTargetedAction(
+  actionBuilder: (target: NetworkEntitySnapshot) => BrowserAction
+): void {
+  const target = selectedTarget();
+  if (!target) {
+    return;
+  }
+  submitActions([actionBuilder(target)]);
+}
+
+window.addEventListener("keydown", (event) => {
+  if (isEditableTarget(event.target)) {
+    return;
+  }
+
+  switch (event.code) {
+    case "Tab":
+      event.preventDefault();
+      cycleTargetSelection(event.shiftKey ? -1 : 1);
+      return;
+    case "Space":
+      event.preventDefault();
+      submitTargetedAction((target) => ({ kind: "attackTarget", target: target.id }));
+      return;
+    case "KeyE":
+      submitTargetedAction((target) => ({ kind: "interactWith", target: target.id }));
+      return;
+    case "KeyG":
+      submitTargetedAction((target) => ({
+        kind: "gatherResource",
+        target: target.id,
+        skill: "Mining"
+      }));
+      return;
+    case "KeyR":
+      submitTargetedAction((target) => ({ kind: "loot", target: target.id }));
+      return;
+    case "KeyC":
+      submitTargetedAction((target) => ({ kind: "captureCreature", target: target.id }));
+      return;
+    case "Digit1":
+      submitActions([{ kind: "summonCompanion", slot: 0 }]);
+      return;
+    case "KeyF":
+      submitActions([
+        {
+          kind: "commandCompanion",
+          slot: 0,
+          command: "Follow",
+          target: selectedTarget()?.id ?? null
+        }
+      ]);
+      return;
+    case "KeyP":
+      autoRetaliateEnabled = !autoRetaliateEnabled;
+      submitActions([{ kind: "setAutoRetaliate", enabled: autoRetaliateEnabled }]);
+      return;
+    case "Enter":
+      event.preventDefault();
+      chatInputNode.focus();
+      return;
+    default:
+      break;
+  }
+
+  if (event.code.startsWith("Key") || event.code.startsWith("Arrow")) {
+    pressedKeys.add(event.code);
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  pressedKeys.delete(event.code);
+});
+
+chatFormNode.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const message = chatInputNode.value.trim();
+  if (message.length === 0) {
+    return;
+  }
+
+  submitActions([
+    {
+      kind: "speak",
+      message,
+      volume: "Normal"
+    }
+  ]);
+  chatInputNode.value = "";
+});
 
 telemetryToggleButton.addEventListener("click", () => {
   setTelemetryEnabled(telemetryState, !telemetryState.enabled);
@@ -270,6 +511,8 @@ function applyLiveDebugDocument(document: string): void {
 }
 
 async function tick(timestamp: number): Promise<void> {
+  maybeSubmitMovement(timestamp);
+
   if (lastTelemetryRevision !== telemetryState.revision) {
     const samples = telemetryState.enabled
       ? selectedTrajectorySamples(telemetryState)
@@ -309,6 +552,7 @@ async function tick(timestamp: number): Promise<void> {
 
 function renderTelemetryHud(): void {
   const stats = telemetryStats(telemetryState);
+  const target = selectedTarget();
   connectionNode.textContent = liveConnectionStatus
     ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
     : "offline demo / bridge mode";
@@ -321,6 +565,9 @@ function renderTelemetryHud(): void {
             : `controlled E(${liveConnectionStatus.controlledEntity})`
         }`
     : "demo scene";
+  targetNode.textContent = target
+    ? `${target.label ?? "Target"} · E(${target.id})`
+    : "No target selected";
   telemetryToggleButton.textContent = stats.enabled ? "Disable Telemetry" : "Enable Telemetry";
   telemetryPanelNode.dataset.telemetryEnabled = String(stats.enabled);
   telemetrySelectionNode.textContent = stats.selectedLabel;

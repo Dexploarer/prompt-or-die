@@ -653,5 +653,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `cargo run -p pod-server --bin pod-server`
   - `git diff --check`
 
-**Last updated**: Iteration 70
-**Current focus**: Iteration 71 MMO world/runtime completion beyond snapshot visualization, starting with browser-side action submission, chat/combat loop interaction, and richer streamed world presentation on top of the live authoritative socket
+### Iteration 71
+- [x] Extended `apps/pod-web` with browser-side action encoding for the shared `pod-core::Action` contract so human browser input emits the same Rust enum-tagged `ActionBatch` payloads the authoritative server already validates for AI agents.
+- [x] Extended the direct-connect browser websocket client with action submission on top of authoritative tick state, keeping reconnect-token recovery and debug-telemetry behavior intact while enabling browser-side human interaction.
+- [x] Added a minimal MMO control surface to `pod-web`: keyboard movement, target cycling, combat/interact/gather/loot/capture triggers, companion summon/follow commands, auto-retaliate toggle, and shard chat submission.
+- [x] Surfaced target selection and browser action controls directly in the browser HUD so creators can inspect and drive the live authoritative shard without dropping back to a native client or debug console.
+- [x] Added deterministic Bun coverage proving the browser websocket client sends a real Rust-shaped `ActionBatch` after `Welcome`, alongside the existing contract tests for direct-connect message parsing and world-frame generation.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 71
+**Current focus**: Iteration 72 richer MMO browser loop completion, starting with surfacing chat/combat outcomes from authoritative events, streamed-world presentation depth, and more direct browser-side interaction feedback on top of the live socket
