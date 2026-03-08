@@ -619,6 +619,20 @@ pub struct SpacetimeDashboardState {
     pub reducer_calls: u32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SelectedEntityDebugSummary {
+    pub entity_id: u64,
+    pub latest_tick: u64,
+    pub recent_tool_call_count: usize,
+    pub recent_rollup_count: usize,
+    pub rejected_actions: usize,
+    pub tool_errors: usize,
+    pub trajectory_distance: f32,
+    pub average_tool_latency_ms: f32,
+    pub latest_tool_call: Option<AgentToolCallEvent>,
+    pub latest_rollup: Option<AgentTickRollup>,
+}
+
 impl Default for SpacetimeDashboardState {
     fn default() -> Self {
         Self {
@@ -905,6 +919,91 @@ impl SpacetimeDashboardState {
     pub fn apply_population_state(&mut self, population_state: WorldPopulationState) {
         self.latest_tick = self.latest_tick.max(population_state.tick);
         self.population_state = population_state;
+    }
+
+    pub fn debug_summary_for_entity(&self, entity_id: u64) -> Option<SelectedEntityDebugSummary> {
+        let tool_events = self
+            .recent_tool_call_events
+            .iter()
+            .filter(|event| event.agent_entity_id == entity_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        let rollups = self
+            .recent_tick_rollups
+            .iter()
+            .filter(|rollup| rollup.agent_entity_id == entity_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        let latest_tool_call = tool_events.last().cloned();
+        let latest_rollup = rollups.last().cloned();
+        let agent_summary = self
+            .agent_summaries
+            .iter()
+            .find(|summary| summary.entity_id == Some(entity_id));
+
+        if latest_tool_call.is_none() && latest_rollup.is_none() && agent_summary.is_none() {
+            return None;
+        }
+
+        let recent_tool_call_count = tool_events.len();
+        let recent_rollup_count = rollups.len();
+        let tool_errors = if recent_tool_call_count > 0 {
+            tool_events
+                .iter()
+                .filter(|event| {
+                    !matches!(
+                        event.trace.status,
+                        ToolCallStatus::Requested | ToolCallStatus::Succeeded
+                    )
+                })
+                .count()
+        } else if let Some(rollup) = &latest_rollup {
+            rollup.tool_error_count as usize
+        } else {
+            agent_summary.map(|summary| summary.tool_errors).unwrap_or_default()
+        };
+        let trajectory_distance = latest_rollup
+            .as_ref()
+            .map(|rollup| rollup.total_distance)
+            .or_else(|| agent_summary.map(|summary| summary.trajectory_distance))
+            .unwrap_or_default();
+        let rejected_actions = latest_rollup
+            .as_ref()
+            .map(|rollup| rollup.rejected_action_count as usize)
+            .or_else(|| agent_summary.map(|summary| summary.rejected_actions))
+            .unwrap_or_default();
+        let average_tool_latency_ms = if recent_tool_call_count > 0 {
+            tool_events
+                .iter()
+                .map(|event| event.trace.latency_ms as f32)
+                .sum::<f32>()
+                / recent_tool_call_count as f32
+        } else {
+            latest_rollup
+                .as_ref()
+                .map(|rollup| rollup.average_tool_latency_ms)
+                .unwrap_or_default()
+        };
+        let latest_tick = latest_tool_call
+            .as_ref()
+            .map(|event| event.tick)
+            .into_iter()
+            .chain(latest_rollup.as_ref().map(|rollup| rollup.tick_end))
+            .max()
+            .unwrap_or(self.latest_tick);
+
+        Some(SelectedEntityDebugSummary {
+            entity_id,
+            latest_tick,
+            recent_tool_call_count,
+            recent_rollup_count,
+            rejected_actions,
+            tool_errors,
+            trajectory_distance,
+            average_tool_latency_ms,
+            latest_tool_call,
+            latest_rollup,
+        })
     }
 
     pub fn to_toon_document(&self) -> String {
@@ -2195,6 +2294,7 @@ pub struct EditorSnapshotExport {
     pub selected_entity_transform: Option<Transform2D>,
     pub selected_entity_world_binding: Option<EditorEntityWorldBinding>,
     pub selected_entity_trajectory: Vec<TrajectorySample>,
+    pub selected_entity_debug_summary: Option<SelectedEntityDebugSummary>,
     pub assets: Vec<EditorAsset>,
     pub world_graph: EditorWorldGraphState,
     pub creator_catalog: CreatorCatalog,
@@ -2223,6 +2323,9 @@ impl EditorSnapshotExport {
             .selected_entity
             .map(|entity_id| state.telemetry.trajectory_for_entity(entity_id))
             .unwrap_or_default();
+        let selected_entity_debug_summary = state
+            .selected_entity
+            .and_then(|entity_id| state.spacetime_dashboard.debug_summary_for_entity(entity_id));
 
         Self {
             project_name: state.project_name.clone(),
@@ -2234,6 +2337,7 @@ impl EditorSnapshotExport {
             selected_entity_transform,
             selected_entity_world_binding,
             selected_entity_trajectory,
+            selected_entity_debug_summary,
             assets: state.asset_browser.assets.clone(),
             world_graph: state.world_graph.clone(),
             creator_catalog: state.creator_catalog.clone(),
@@ -2530,6 +2634,12 @@ impl PodEditorApp {
 
     pub fn export_snapshot_toon_document(&self) -> String {
         EditorSnapshotExport::from_state(&self.state).to_toon_document()
+    }
+
+    pub fn selected_entity_debug_summary(&self) -> Option<SelectedEntityDebugSummary> {
+        self.state
+            .selected_entity
+            .and_then(|entity_id| self.state.spacetime_dashboard.debug_summary_for_entity(entity_id))
     }
 
     pub fn import_replay_toon_document(&mut self, document: &str) -> Result<(), String> {
@@ -3603,6 +3713,21 @@ impl PodEditorApp {
                     }
                 }
             }
+            if let Some(summary) = self.state.spacetime_dashboard.debug_summary_for_entity(entity_id)
+            {
+                ui.label(format!(
+                    "Selected debug focus: {} tool calls · {} rollups · {:.1}ms avg tool latency",
+                    summary.recent_tool_call_count,
+                    summary.recent_rollup_count,
+                    summary.average_tool_latency_ms
+                ));
+                ui.label(format!(
+                    "Selected debug totals: {:.2}u moved · {} rejected · {} tool errors",
+                    summary.trajectory_distance,
+                    summary.rejected_actions,
+                    summary.tool_errors
+                ));
+            }
         }
         ui.separator();
         ui.label("Per-agent trajectory distance");
@@ -3774,6 +3899,45 @@ impl PodEditorApp {
                         trajectory.end.position.x,
                         trajectory.end.position.y
                     ));
+                }
+            } else if let Some(summary) =
+                self.state.spacetime_dashboard.debug_summary_for_entity(entity_id)
+            {
+                ui.label(format!(
+                    "Entity-scoped raw debug telemetry @ tick {}",
+                    summary.latest_tick
+                ));
+                ui.label(format!(
+                    "Raw docs: {} tool calls · {} rollups",
+                    summary.recent_tool_call_count, summary.recent_rollup_count
+                ));
+                ui.label(format!(
+                    "Actions: {} rejected · distance {:.2}u",
+                    summary.rejected_actions, summary.trajectory_distance
+                ));
+                if let Some(rollup) = &summary.latest_rollup {
+                    ui.label(format!(
+                        "Rollup window: {}-{} · {} visible · {} audible · {} messages",
+                        rollup.tick_start,
+                        rollup.tick_end,
+                        rollup.visible_entity_count,
+                        rollup.audible_event_count,
+                        rollup.message_count
+                    ));
+                }
+                if let Some(tool) = &summary.latest_tool_call {
+                    ui.label(format!(
+                        "Tool call: {} via {} · {:?} · {}ms",
+                        tool.trace.tool_name,
+                        tool.trace.provider,
+                        tool.trace.status,
+                        tool.trace.latency_ms
+                    ));
+                    if let Some(error) = &tool.trace.error_message {
+                        ui.label(format!("Last tool error: {error}"));
+                    }
+                } else {
+                    ui.label("Tool calls: none");
                 }
             } else {
                 ui.label("No telemetry recorded for the selected entity yet.");
@@ -5057,6 +5221,37 @@ mod tests {
         assert!(app.state.spacetime_dashboard.tool_call_error_rate > 0.0);
         assert_eq!(app.state.spacetime_dashboard.visible_entity_count, 12);
         assert_eq!(app.state.spacetime_dashboard.agent_summaries.len(), 1);
+    }
+
+    #[test]
+    fn editor_selected_entity_debug_summary_survives_without_tick_timeline() {
+        let mut app = PodEditorApp::default();
+        let tool_event = sample_tool_call_event(16, 1001);
+        let rollup = sample_tick_rollup(1001);
+
+        app.import_agent_tool_call_toon_document(&tool_event.to_toon_document())
+            .expect("tool-call TOON should import");
+        app.import_agent_tick_rollup_toon_document(&rollup.to_toon_document())
+            .expect("rollup TOON should import");
+
+        let summary = app
+            .selected_entity_debug_summary()
+            .expect("selected entity debug summary available");
+        assert_eq!(summary.entity_id, 1001);
+        assert_eq!(summary.recent_tool_call_count, 1);
+        assert_eq!(summary.recent_rollup_count, 1);
+        assert_eq!(summary.rejected_actions, rollup.rejected_action_count as usize);
+        assert_eq!(summary.tool_errors, rollup.tool_error_count as usize);
+        assert_eq!(summary.trajectory_distance, rollup.total_distance);
+        assert_eq!(
+            summary
+                .latest_tool_call
+                .as_ref()
+                .expect("tool-call present")
+                .trace
+                .tool_name,
+            tool_event.trace.tool_name
+        );
     }
 
     #[test]

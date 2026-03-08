@@ -27,3 +27,5 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added entity-scoped SpacetimeDB debug subscription helpers in `pod-stdb` and `pod-net`, so editor/debug clients can request raw telemetry for a focused selection without defaulting to full-shard telemetry table subscriptions.
 - Hardened the `pod-web` gameplay surface with explicit canvas focus ownership, blur/visibility key reset, and a runtime gameplay-state inspection API so input bugs are testable without HUD scraping.
 - Added a deterministic Playwright smoke harness for `pod-web` that proves both main-thread and worker-thread routes accept movement input under automation, using `?backend=webgl2` as the stable parity backend for browser CI/debug runs.
+- Wired `pod-editor` selected-entity telemetry consumption to raw SpacetimeDB tool-call and rollup docs, so narrow entity-scoped debug subscriptions still produce useful per-selection telemetry and export data even without full tick frames.
+- Added a `pod-net` helper that mirrors editor selection into the active entity-scoped SpacetimeDB debug subscription profile, reducing consumer-side profile plumbing.
