@@ -316,6 +316,130 @@ describe("buildFramePlan", () => {
     expect(plan.meshBatches).toHaveLength(1);
     expect(plan.meshBatches[0]?.visibleCount).toBe(1);
   });
+
+  test("tracks visible chunks separately from nearby warm chunks", () => {
+    const frame: ThreeJsWebGpuFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: Math.PI,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      overlayCommands: [],
+      meshBatches: [
+        {
+          mesh: "tower",
+          material: "stone",
+          layer: 0,
+          phase: "opaque",
+          sortDepth: 0,
+          renderOrder: 0,
+          transparent: false,
+          doubleSided: false,
+          castShadows: true,
+          receiveShadows: true,
+          tint: [1, 1, 1, 1],
+          roughness: 1,
+          metallic: 0,
+          emissive: [0, 0, 0],
+          depthWrite: true,
+          depthTest: true,
+          instances: [{ position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }]
+        },
+        {
+          mesh: "canopy-tree",
+          material: "leaf",
+          layer: 0,
+          phase: "opaque",
+          sortDepth: 0,
+          renderOrder: 1,
+          transparent: false,
+          doubleSided: false,
+          castShadows: true,
+          receiveShadows: true,
+          tint: [1, 1, 1, 1],
+          roughness: 1,
+          metallic: 0,
+          emissive: [0, 0, 0],
+          depthWrite: true,
+          depthTest: true,
+          instances: [
+            { position: [30, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+            { position: [34, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }
+          ]
+        }
+      ],
+      spriteBatches: [
+        {
+          texture: "mist",
+          frame: 0,
+          layer: 2,
+          billboard: true,
+          phase: "transparent",
+          sortDepth: 18,
+          renderOrder: 2,
+          transparent: true,
+          depthWrite: false,
+          depthTest: true,
+          instances: [
+            {
+              position: [32, 0, 0],
+              rotation: [0, 0, 0, 1],
+              scale: [2, 2, 1],
+              color: [1, 1, 1, 0.25]
+            }
+          ]
+        }
+      ],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    };
+
+    const plan = buildFramePlan(frame, {
+      frustumCulling: false,
+      fov: 140,
+      pitch: 0,
+      height: 0,
+      baseDistance: 12,
+      minDistance: 12,
+      maxDistance: 12,
+      meshCullDistance: 14,
+      spriteCullDistance: 14,
+      worldChunkSize: 24,
+      preloadChunkRadius: 1
+    });
+
+    expect(plan.visibleWorldChunks).toEqual(["0:0"]);
+    expect(plan.preloadedWorldChunks).toContain("1:0");
+    expect(plan.preloadedWorldChunks).toHaveLength(9);
+    expect(plan.meshBatches).toHaveLength(1);
+    expect(plan.spriteBatches).toHaveLength(0);
+    expect(plan.prewarmMeshRequests).toHaveLength(3);
+    expect(
+      plan.prewarmMeshRequests.map((request) => [request.batch.mesh, request.lodLevel])
+    ).toEqual([
+      ["canopy-tree", 0],
+      ["canopy-tree", 1],
+      ["tower", 0]
+    ]);
+    expect(plan.prewarmSpriteRequests).toHaveLength(1);
+    expect(plan.prewarmSpriteRequests[0]?.batch.texture).toBe("mist");
+  });
 });
 
 describe("resolveQualityProfile", () => {

@@ -67,6 +67,8 @@ export interface PodThreeRendererStats {
   residentSpriteAssets: number;
   pendingGeometryAssets: number;
   pendingSpriteAssets: number;
+  visibleWorldChunks: number;
+  preloadedWorldChunks: number;
 }
 
 export interface RenderSurfaceMetrics {
@@ -124,6 +126,8 @@ export class PodThreeWorldRenderer {
   private smoothedFrameMs = 16.7;
   private adjustmentCooldown = 0;
   private surfaceMetrics: RenderSurfaceMetrics | null;
+  private visibleWorldChunks = 0;
+  private preloadedWorldChunks = 0;
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
 
@@ -180,6 +184,8 @@ export class PodThreeWorldRenderer {
       ...this.options.cameraRig,
       ...planningOptionsFromQuality(this.quality)
     });
+    this.visibleWorldChunks = planned.visibleWorldChunks.length;
+    this.preloadedWorldChunks = planned.preloadedWorldChunks.length;
     this.applyCamera(planned.camera, frame.camera);
     await this.prewarmPlannedAssets(planned);
     await this.syncMeshBatches(planned.meshBatches);
@@ -545,7 +551,9 @@ export class PodThreeWorldRenderer {
       residentGeometryAssets: residency.residentGeometryAssets,
       residentSpriteAssets: residency.residentSpriteAssets,
       pendingGeometryAssets: residency.pendingGeometryAssets,
-      pendingSpriteAssets: residency.pendingSpriteAssets
+      pendingSpriteAssets: residency.pendingSpriteAssets,
+      visibleWorldChunks: this.visibleWorldChunks,
+      preloadedWorldChunks: this.preloadedWorldChunks
     };
   }
 
@@ -554,17 +562,16 @@ export class PodThreeWorldRenderer {
   ): Promise<void> {
     await Promise.all([
       this.assetRegistry.prefetchMeshes?.(
-        planned.meshBatches
-          .filter((batch) => batch.visibleCount > 0)
-          .map((batch) => ({ batch: batch.batch, lodLevel: batch.lodLevel }))
+        planned.prewarmMeshRequests.map((request) => ({
+          batch: request.batch,
+          lodLevel: request.lodLevel
+        }))
       ),
       this.assetRegistry.prefetchSprites?.(
-        planned.spriteBatches
-          .filter((batch) => batch.visibleCount > 0)
-          .map((batch) => ({
+        planned.prewarmSpriteRequests.map((request) => ({
             batch: {
-              texture: batch.batch.texture,
-              frame: batch.batch.frame
+              texture: request.batch.texture,
+              frame: request.batch.frame
             },
             anisotropy: this.quality.anisotropy
           }))

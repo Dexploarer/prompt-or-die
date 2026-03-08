@@ -8,7 +8,8 @@ import {
   ManifestBackedPodThreeAssetRegistry,
   parsePodThreeAssetManifest,
   resolveManifestMeshAsset,
-  resolveManifestSpriteAsset
+  resolveManifestSpriteAsset,
+  shouldUseProceduralSpriteTexture
 } from "./assets";
 import type { ThreeJsMeshBatch } from "./contracts";
 
@@ -66,6 +67,13 @@ describe("createMeshMaterial", () => {
 });
 
 describe("createProceduralSpriteTexture", () => {
+  test("routes shipped ring overlays through the procedural texture path", () => {
+    expect(shouldUseProceduralSpriteTexture("/assets/textures/selection-ring.svg")).toBe(true);
+    expect(shouldUseProceduralSpriteTexture("/assets/textures/danger-ring.svg")).toBe(true);
+    expect(shouldUseProceduralSpriteTexture("/assets/textures/mist-ring.svg")).toBe(true);
+    expect(shouldUseProceduralSpriteTexture("/assets/textures/canopy-tree.png")).toBe(false);
+  });
+
   test("creates a worker-safe ring texture for SVG overlay assets", () => {
     const texture = createProceduralSpriteTexture("/assets/textures/selection-ring.svg");
     const image = texture.image as { data: Uint8Array; width: number; height: number };

@@ -770,5 +770,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `http://127.0.0.1:4174/` and `http://127.0.0.1:4174/?renderThread=worker`
   - Figma capture of the upgraded world test scene
 
-**Last updated**: Iteration 80
-**Current focus**: Iteration 81 browser-first flagship world delivery, continuing with chunk-streamed asset residency beyond the in-memory manifest cache, cleanup of remaining WebGPU texture warnings, and replacement of emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 81
+- [x] Extended `apps/pod-web` frame planning with chunk-aware visibility and warmup metadata, including explicit `visibleWorldChunks`, `preloadedWorldChunks`, and prewarm request lists for nearby mesh and sprite assets instead of only prefetching whatever is already visible.
+- [x] Updated `PodThreeWorldRenderer` and the browser HUD to surface chunk residency alongside asset residency, so creators can see what the runtime is actively drawing versus warming for nearby traversal.
+- [x] Removed the remaining built-in overlay SVG texture path from the runtime texture loader by routing shipped ring overlays through the procedural texture path on all render threads, eliminating the prior `CopyExternalImageToTexture()` warning from POD-owned assets.
+- [x] Added deterministic Bun coverage for chunk planning/warmup behavior and the new procedural-overlay routing.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - live browser smoke via Playwright against `http://127.0.0.1:4174/` and `http://127.0.0.1:4174/?renderThread=worker`
+  - `git diff --check`
+
+**Last updated**: Iteration 81
+**Current focus**: Iteration 82 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, and replacement of emulated SpacetimeDB client paths with generated typed bindings
