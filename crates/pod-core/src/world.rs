@@ -1,6 +1,7 @@
 use crate::action::{Action, AgentAction};
 use crate::agent::{Agent, AgentSlot};
 use crate::component::*;
+use crate::contract::{WorldChunkDefinition, WorldRegionDefinition};
 use crate::event::EventBus;
 use crate::id::AgentId;
 use crate::telemetry::TickTelemetryFrame;
@@ -29,8 +30,100 @@ pub struct World {
     next_entity_id: u64,
     /// Whether the simulation is paused
     pub paused: bool,
+    /// Authored streamed-world metadata used by authoritative snapshot and
+    /// tooling surfaces.
+    pub streaming: WorldStreamingMetadata,
     /// Externally submitted actions (e.g., from network clients).
     external_actions: Vec<AgentAction>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorldStreamingMetadata {
+    pub chunk_size: f32,
+    pub chunks: Vec<WorldChunkDefinition>,
+    pub regions: Vec<WorldRegionDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedWorldChunkMetadata {
+    pub chunk_key: String,
+    pub region_id: Option<String>,
+    pub region_name: Option<String>,
+    pub quest_graph_ids: Vec<String>,
+    pub faction_track_id: Option<String>,
+    pub encounter_table_id: Option<String>,
+}
+
+impl WorldStreamingMetadata {
+    pub fn new(chunk_size: f32) -> Self {
+        Self {
+            chunk_size: chunk_size.max(0.001),
+            chunks: Vec::new(),
+            regions: Vec::new(),
+        }
+    }
+
+    pub fn resolve_position(&self, position: Vec2) -> ResolvedWorldChunkMetadata {
+        let chunk_key = self.chunk_key_for_position(position);
+        let chunk = self
+            .chunks
+            .iter()
+            .find(|chunk| chunk.chunk_key == chunk_key);
+        let region = chunk
+            .and_then(|chunk| {
+                self.regions
+                    .iter()
+                    .find(|region| region.region_id == chunk.region_id)
+            })
+            .or_else(|| {
+                self.regions
+                    .iter()
+                    .find(|region| region.chunk_keys.iter().any(|value| value == &chunk_key))
+            });
+
+        let quest_graph_ids = if let Some(chunk) = chunk {
+            if chunk.quest_graph_ids.is_empty() {
+                region
+                    .map(|region| region.active_quest_graph_ids.clone())
+                    .unwrap_or_default()
+            } else {
+                chunk.quest_graph_ids.clone()
+            }
+        } else {
+            region
+                .map(|region| region.active_quest_graph_ids.clone())
+                .unwrap_or_default()
+        };
+
+        let faction_track_id = chunk
+            .and_then(|chunk| chunk.faction_track_ids.first().cloned())
+            .or_else(|| {
+                region.and_then(|region| {
+                    (!region.dominant_faction_track_id.is_empty())
+                        .then(|| region.dominant_faction_track_id.clone())
+                })
+            });
+
+        let encounter_table_id = chunk
+            .and_then(|chunk| chunk.encounter_table_ids.first().cloned())
+            .or_else(|| region.and_then(|region| region.encounter_table_ids.first().cloned()));
+
+        ResolvedWorldChunkMetadata {
+            chunk_key,
+            region_id: region.map(|region| region.region_id.clone()),
+            region_name: region.map(|region| region.display_name.clone()),
+            quest_graph_ids,
+            faction_track_id,
+            encounter_table_id,
+        }
+    }
+
+    fn chunk_key_for_position(&self, position: Vec2) -> String {
+        let chunk_size = self.chunk_size.max(0.001);
+        let chunk_x = (position.x / chunk_size).floor() as i32;
+        let chunk_y = (position.y / chunk_size).floor() as i32;
+        format!("{chunk_x}:{chunk_y}")
+    }
 }
 
 impl World {
@@ -44,8 +137,26 @@ impl World {
             rng: ChaCha8Rng::seed_from_u64(seed),
             next_entity_id: 1,
             paused: false,
+            streaming: WorldStreamingMetadata::new(8.0),
             external_actions: Vec::new(),
         }
+    }
+
+    pub fn set_streaming_metadata(
+        &mut self,
+        chunk_size: f32,
+        chunks: Vec<WorldChunkDefinition>,
+        regions: Vec<WorldRegionDefinition>,
+    ) {
+        self.streaming = WorldStreamingMetadata {
+            chunk_size: chunk_size.max(0.001),
+            chunks,
+            regions,
+        };
+    }
+
+    pub fn resolve_streaming_metadata(&self, position: Vec2) -> ResolvedWorldChunkMetadata {
+        self.streaming.resolve_position(position)
     }
 
     /// Advance the simulation by one tick
@@ -164,6 +275,79 @@ impl World {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_streaming_metadata_resolves_chunk_and_region_context() {
+        let mut world = World::new(9);
+
+        let mut heart_chunk = WorldChunkDefinition::new("0:0", "verdant-heart", "verdant-hollow");
+        heart_chunk.quest_graph_ids.push("verdant-intro".into());
+        heart_chunk.faction_track_ids.push("verdant-wardens".into());
+        heart_chunk
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
+
+        let mut spire_chunk = WorldChunkDefinition::new("0:1", "spirewatch", "spirewatch");
+        spire_chunk
+            .encounter_table_ids
+            .push("spirewatch-encounters".into());
+
+        let mut heart_region =
+            WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
+        heart_region.chunk_keys.push("0:0".into());
+        heart_region
+            .active_quest_graph_ids
+            .push("verdant-intro".into());
+        heart_region.dominant_faction_track_id = "verdant-wardens".into();
+        heart_region
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
+
+        let mut spire_region = WorldRegionDefinition::new("spirewatch", "Spirewatch", "spirewatch");
+        spire_region.chunk_keys.push("0:1".into());
+        spire_region
+            .active_quest_graph_ids
+            .push("spire-attunement".into());
+        spire_region.dominant_faction_track_id = "ancient-spirekeepers".into();
+        spire_region
+            .encounter_table_ids
+            .push("spirewatch-encounters".into());
+
+        world.set_streaming_metadata(
+            8.0,
+            vec![heart_chunk, spire_chunk],
+            vec![heart_region, spire_region],
+        );
+
+        let heart = world.resolve_streaming_metadata(Vec2::new(2.0, 3.0));
+        assert_eq!(heart.chunk_key, "0:0");
+        assert_eq!(heart.region_id.as_deref(), Some("verdant-heart"));
+        assert_eq!(heart.region_name.as_deref(), Some("Verdant Heart"));
+        assert_eq!(heart.quest_graph_ids, vec!["verdant-intro".to_string()]);
+        assert_eq!(heart.faction_track_id.as_deref(), Some("verdant-wardens"));
+        assert_eq!(
+            heart.encounter_table_id.as_deref(),
+            Some("verdant-heart-wildlife")
+        );
+
+        let spire = world.resolve_streaming_metadata(Vec2::new(1.0, 8.2));
+        assert_eq!(spire.chunk_key, "0:1");
+        assert_eq!(spire.region_id.as_deref(), Some("spirewatch"));
+        assert_eq!(spire.region_name.as_deref(), Some("Spirewatch"));
+        assert_eq!(
+            spire.encounter_table_id.as_deref(),
+            Some("spirewatch-encounters")
+        );
+        assert_eq!(
+            spire.faction_track_id.as_deref(),
+            Some("ancient-spirekeepers")
+        );
+    }
+}
+
 // ========================================
 // ENTITY BUILDER (fluent API)
 // ========================================
@@ -245,7 +429,8 @@ impl<'w> EntityBuilder<'w> {
     }
 
     pub fn with_atmosphere_volume(mut self, volume: AtmosphereVolume) -> Self {
-        self.components.push(ComponentToAdd::AtmosphereVolume(volume));
+        self.components
+            .push(ComponentToAdd::AtmosphereVolume(volume));
         self
     }
 
@@ -304,7 +489,8 @@ impl<'w> EntityBuilder<'w> {
     }
 
     pub fn with_quest_anchor(mut self, quest_anchor: QuestAnchor) -> Self {
-        self.components.push(ComponentToAdd::QuestAnchor(quest_anchor));
+        self.components
+            .push(ComponentToAdd::QuestAnchor(quest_anchor));
         self
     }
 

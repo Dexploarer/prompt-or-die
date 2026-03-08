@@ -94,7 +94,7 @@ pub use toon::{
     decode_toon_document, decode_toon_string, decode_toon_value, encode_toon_document,
     encode_toon_string,
 };
-pub use world::World;
+pub use world::{ResolvedWorldChunkMetadata, World, WorldStreamingMetadata};
 
 /// Fixed tick rate — all agents operate on the same clock
 pub const TICKS_PER_SECOND: u32 = 60;
