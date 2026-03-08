@@ -29,6 +29,7 @@ import {
   runtimeConfigFromLocation,
   type DirectConnectStatus
 } from "./direct-connect";
+import { PodWebLocalWorld, renderGameToText } from "./local-world";
 import { createDemoFrame } from "./sample-frame";
 import { createPodRenderRuntime, type PodThreeRenderRuntime } from "./render-runtime";
 import {
@@ -43,6 +44,8 @@ import {
 
 declare global {
   interface Window {
+    render_game_to_text: () => string;
+    advanceTime: (ms: number) => Promise<void>;
     podRender: {
       render: (frame: string) => void;
       renderThreeJsWebGpuFrame: (frame: string) => void;
@@ -133,6 +136,8 @@ if (
 }
 
 const telemetryToggleButton = telemetryToggle;
+const renderCanvas = canvas;
+const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
 const targetNode = targetLabel;
@@ -156,12 +161,15 @@ const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
 
-const renderer = await createPodRenderRuntime(canvas);
+const renderer = await createPodRenderRuntime(renderCanvas);
 backendLabel.textContent = renderer.backend;
 qualityLabel.textContent = renderer.qualityPreset;
 const runtimeStatsLabel = statsLabel;
 const telemetryState = createTelemetryOverlayState(300);
 const runtimeConfig = runtimeConfigFromLocation(window.location);
+const offlinePlayerName =
+  new URLSearchParams(window.location.search).get("player")?.trim() || "WebPlayer";
+const localSandbox = runtimeConfig ? null : new PodWebLocalWorld(offlinePlayerName);
 
 let liveFrameSource: "demo" | "legacy" | "threejs" = "demo";
 let latestFrame: string | ReturnType<typeof buildAuthoritativeWorldFrame> | null = null;
@@ -181,8 +189,11 @@ let latestActionStatus: DirectConnectActionState = {
   lastRejectedReason: null,
   lastActionSummary: null
 };
-let latestFeedback = "Awaiting authoritative outcomes";
+let latestFeedback = runtimeConfig
+  ? "Awaiting authoritative outcomes"
+  : "Local sandbox ready: WASD move, Tab target, then test combat, gather, loot, capture, summon, and chat";
 let recentWorldEvents: NetworkGameEvent[] = [];
+let manualFrameOverride = false;
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
   ? {
       phase: "idle",
@@ -206,11 +217,11 @@ const liveClient = runtimeConfig
         syncSelectedTarget();
         latestFrame = buildAuthoritativeWorldFrame(snapshot, {
           ...frameOptions,
-      viewportWidth: canvas.clientWidth || window.innerWidth,
-      viewportHeight: canvas.clientHeight || window.innerHeight
+          viewportWidth: renderCanvas.clientWidth || window.innerWidth,
+          viewportHeight: renderCanvas.clientHeight || window.innerHeight
         });
         liveFrameSource = "threejs";
-        frameSourceLabel.textContent = "authoritative websocket";
+        frameSourceNode.textContent = "authoritative websocket";
         liveConnectionStatus = status;
       },
       onEventBatch(batch) {
@@ -383,12 +394,22 @@ function cycleTargetSelection(delta: number): void {
 }
 
 function submitActions(actions: BrowserAction[]): void {
-  if (!liveClient) {
+  if (liveClient) {
+    if (!liveClient.submitActions(actions)) {
+      latestFeedback = "Action could not be submitted";
+    }
+    return;
+  }
+
+  if (!localSandbox) {
     latestFeedback = "Direct-connect is not active";
     return;
   }
-  if (!liveClient.submitActions(actions)) {
+
+  if (!localSandbox.submitActions(actions)) {
     latestFeedback = "Action could not be submitted";
+  } else {
+    latestActionStatus = localSandbox.currentActionState();
   }
 }
 
@@ -537,14 +558,16 @@ telemetryNextButton.addEventListener("click", () => {
 
 window.podRender = {
   render(frame: string) {
+    manualFrameOverride = true;
     latestFrame = frame;
     liveFrameSource = "legacy";
-    frameSourceLabel.textContent = "legacy pod-render frame";
+    frameSourceNode.textContent = "legacy pod-render frame";
   },
   renderThreeJsWebGpuFrame(frame: string) {
+    manualFrameOverride = true;
     latestFrame = frame;
     liveFrameSource = "threejs";
-    frameSourceLabel.textContent = "Three.js WebGPU frame";
+    frameSourceNode.textContent = "Three.js WebGPU frame";
   },
   renderTickTelemetry(frame: string) {
     applyTickTelemetry(telemetryState, parseTickTelemetryEnvelope(frame));
@@ -564,14 +587,30 @@ window.podRender = {
   streamShardIncidentSummary(document: string) {
     applyLiveDebugDocument(document);
   },
-    resetTelemetry() {
+  resetTelemetry() {
     resetTelemetry(telemetryState);
     renderer.clearTelemetryTrail();
   },
   resetDemo() {
+    manualFrameOverride = false;
+    recentWorldEvents = [];
+    latestReplaySummary = null;
+    latestIncidentSummary = null;
+    latestToolEventSummary = null;
+    latestRollupSummary = null;
+    liveReplayDocuments = 0;
+    liveIncidentDocuments = 0;
+    if (localSandbox) {
+      localSandbox.reset();
+      latestFeedback =
+        "Local sandbox ready: WASD move, Tab target, then test combat, gather, loot, capture, summon, and chat";
+      refreshLocalSandboxFrame();
+      renderTelemetryHud();
+      return;
+    }
     latestFrame = null;
     liveFrameSource = "demo";
-    frameSourceLabel.textContent = "demo frame";
+    frameSourceNode.textContent = "demo frame";
   },
   getBackend() {
     return renderer.backend;
@@ -588,6 +627,40 @@ window.podRender = {
   getIncidentSummary() {
     return latestIncidentSummary;
   }
+};
+
+window.render_game_to_text = () => {
+  if (latestSnapshot) {
+    return renderGameToText(
+      latestSnapshot,
+      liveConnectionStatus?.controlledEntity ?? null,
+      selectedTargetId,
+      latestActionStatus,
+      latestFeedback,
+      recentWorldEvents,
+      localSandbox?.companionRoster() ?? []
+    );
+  }
+
+  return JSON.stringify({
+    mode: liveFrameSource === "demo" ? "demo" : "bridge",
+    feedback: latestFeedback,
+    connection: liveConnectionStatus?.detail ?? "no active world",
+    target: selectedTargetId
+  });
+};
+
+window.advanceTime = async (ms: number) => {
+  if (localSandbox && !manualFrameOverride) {
+    localSandbox.step(ms);
+    refreshLocalSandboxFrame();
+    await renderCurrentFrame(performance.now());
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 };
 
 function applyLiveDebugDocument(document: string): void {
@@ -614,9 +687,49 @@ function applyLiveDebugDocument(document: string): void {
   }
 }
 
+function refreshLocalSandboxFrame(): void {
+  if (!localSandbox) {
+    return;
+  }
+
+  const batch = localSandbox.drainEventBatch();
+  if (batch) {
+    applyAuthoritativeEventBatch(batch);
+  }
+
+  latestSnapshot = localSandbox.snapshotState();
+  latestActionStatus = localSandbox.currentActionState();
+  liveConnectionStatus = localSandbox.currentStatus();
+  syncSelectedTarget();
+  latestFrame = buildAuthoritativeWorldFrame(latestSnapshot, {
+    controlledEntity: localSandbox.controlledEntityId(),
+    viewportWidth: renderCanvas.clientWidth || window.innerWidth,
+    viewportHeight: renderCanvas.clientHeight || window.innerHeight
+  });
+  liveFrameSource = "threejs";
+  frameSourceNode.textContent = "local sandbox shard";
+}
+
+let lastTickTimestamp = performance.now();
+
 async function tick(timestamp: number): Promise<void> {
+  const deltaMs = Math.min(Math.max(timestamp - lastTickTimestamp, 0), 250);
+  lastTickTimestamp = timestamp;
   maybeSubmitMovement(timestamp);
 
+  if (localSandbox && !manualFrameOverride) {
+    localSandbox.step(deltaMs);
+    refreshLocalSandboxFrame();
+  }
+
+  await renderCurrentFrame(timestamp);
+
+  requestAnimationFrame((nextTimestamp) => {
+    void tick(nextTimestamp);
+  });
+}
+
+async function renderCurrentFrame(timestamp: number): Promise<void> {
   if (lastTelemetryRevision !== telemetryState.revision) {
     const samples = telemetryState.enabled
       ? selectedTrajectorySamples(telemetryState)
@@ -650,10 +763,6 @@ async function tick(timestamp: number): Promise<void> {
     stats.residentGeometryAssets + stats.residentSpriteAssets
   } resident / ${stats.pendingGeometryAssets + stats.pendingSpriteAssets} pending`;
   renderTelemetryHud();
-
-  requestAnimationFrame((nextTimestamp) => {
-    void tick(nextTimestamp);
-  });
 }
 
 function renderTelemetryHud(): void {
@@ -719,4 +828,9 @@ function renderTelemetryHud(): void {
 }
 
 liveClient?.connect();
+if (localSandbox) {
+  localSandbox.connect();
+  refreshLocalSandboxFrame();
+  renderTelemetryHud();
+}
 void tick(performance.now());

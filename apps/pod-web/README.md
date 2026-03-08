@@ -16,6 +16,7 @@ It consumes the `pod-render` browser frame contract and provides:
 - a 2D overlay scene for the legacy `RenderFrame` contract
 - a demo bridge via `window.podRender.*` so the app is useful before the Rust wasm entrypoint is wired in
 - direct browser websocket connection to the authoritative `pod-server` runtime using `Welcome` / `StateDelta` / `DebugDocument` JSON messages
+- a default local shard sandbox, `Verdant Hollow`, with a safe spawn, NPC hub, combat lane, resources, loot caches, and landmark scenery for browser-first MMO smoke testing
 
 ## Run
 
@@ -35,6 +36,24 @@ http://127.0.0.1:5173/?server=127.0.0.1:7778&player=WebPlayer&debug=1
 ```
 
 `server` may be `host:port`, `ws://host:port`, or `wss://host:port`.
+
+### Local AAA test world
+
+With no `?server=` parameter, `pod-web` now boots straight into the local `Verdant Hollow` test biome instead of the old static fallback. This is the default browser smoke target for graphics and interaction work.
+
+Recommended local routes:
+
+```text
+http://127.0.0.1:4174/
+http://127.0.0.1:4174/?renderThread=worker
+```
+
+The local shard includes:
+
+- a safe spawn with nearby NPCs and loot
+- multiple wild creatures for combat and capture
+- woodcutting and mining nodes
+- landmark scenery using the shipped canopy-tree, glass-spire, basalt-column, boulder, crate, companion, creature, and humanoid assets
 
 ### Render thread selection
 
