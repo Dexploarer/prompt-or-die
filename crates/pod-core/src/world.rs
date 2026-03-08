@@ -182,11 +182,15 @@ enum ComponentToAdd {
     Health(Health),
     Sprite(Sprite),
     ColorRect(ColorRect),
+    AtmosphereProfile(AtmosphereProfile),
+    AtmosphereVolume(AtmosphereVolume),
     Label(Label),
     Perception(Perception),
     Movement(Movement),
     Script(Script),
     CombatLoadout(CombatLoadout),
+    ActorPresentation(ActorPresentation),
+    CombatPresentation(CombatPresentation),
     SkillBook(SkillBook),
     Inventory(Inventory),
     CreatureIdentity(CreatureIdentity),
@@ -230,6 +234,17 @@ impl<'w> EntityBuilder<'w> {
         self
     }
 
+    pub fn with_atmosphere_profile(mut self, atmosphere: AtmosphereProfile) -> Self {
+        self.components
+            .push(ComponentToAdd::AtmosphereProfile(atmosphere));
+        self
+    }
+
+    pub fn with_atmosphere_volume(mut self, volume: AtmosphereVolume) -> Self {
+        self.components.push(ComponentToAdd::AtmosphereVolume(volume));
+        self
+    }
+
     pub fn with_movement(mut self, max_speed: f32) -> Self {
         self.components.push(ComponentToAdd::Movement(Movement {
             max_speed,
@@ -263,6 +278,18 @@ impl<'w> EntityBuilder<'w> {
 
     pub fn with_combat_loadout(mut self, loadout: CombatLoadout) -> Self {
         self.components.push(ComponentToAdd::CombatLoadout(loadout));
+        self
+    }
+
+    pub fn with_actor_presentation(mut self, presentation: ActorPresentation) -> Self {
+        self.components
+            .push(ComponentToAdd::ActorPresentation(presentation));
+        self
+    }
+
+    pub fn with_combat_presentation(mut self, presentation: CombatPresentation) -> Self {
+        self.components
+            .push(ComponentToAdd::CombatPresentation(presentation));
         self
     }
 
@@ -328,6 +355,12 @@ impl<'w> EntityBuilder<'w> {
                 ComponentToAdd::ColorRect(cr) => {
                     self.world.ecs.insert_one(entity, cr).unwrap();
                 }
+                ComponentToAdd::AtmosphereProfile(atmosphere) => {
+                    self.world.ecs.insert_one(entity, atmosphere).unwrap();
+                }
+                ComponentToAdd::AtmosphereVolume(volume) => {
+                    self.world.ecs.insert_one(entity, volume).unwrap();
+                }
                 ComponentToAdd::Label(l) => {
                     self.world.ecs.insert_one(entity, l).unwrap();
                 }
@@ -342,6 +375,12 @@ impl<'w> EntityBuilder<'w> {
                 }
                 ComponentToAdd::CombatLoadout(loadout) => {
                     self.world.ecs.insert_one(entity, loadout).unwrap();
+                }
+                ComponentToAdd::ActorPresentation(presentation) => {
+                    self.world.ecs.insert_one(entity, presentation).unwrap();
+                }
+                ComponentToAdd::CombatPresentation(presentation) => {
+                    self.world.ecs.insert_one(entity, presentation).unwrap();
                 }
                 ComponentToAdd::SkillBook(skill_book) => {
                     self.world.ecs.insert_one(entity, skill_book).unwrap();

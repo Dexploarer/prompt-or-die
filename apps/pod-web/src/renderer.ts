@@ -22,6 +22,7 @@ import {
   type RenderCommand,
   type RenderFrame,
   type TelemetryTrajectorySample,
+  type ThreeJsEnvironment,
   type ThreeJsWebGpuFrame
 } from "./contracts";
 import {
@@ -53,6 +54,10 @@ const INLINE_TSL_FN_WARNING =
   "THREE.TSL: Return statement used in an inline 'Fn()'. Define a layout struct to allow return values.";
 let installedThreeConsoleFilter = false;
 let didReportInlineFnWarning = false;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
 export interface PodThreeRendererStats {
   backend: "webgpu" | "webgl2";
@@ -122,6 +127,12 @@ export class PodThreeWorldRenderer {
   private readonly overlayObjects = new Array<THREE.Object3D>();
   private readonly resizeObserver: ResizeObserver | null;
   private readonly options: PodThreeWorldRendererOptions;
+  private hemisphereLight: THREE.HemisphereLight | null = null;
+  private sunLight: THREE.DirectionalLight | null = null;
+  private fillLight: THREE.DirectionalLight | null = null;
+  private rimLight: THREE.PointLight | null = null;
+  private groundMaterial: THREE.MeshStandardMaterial | null = null;
+  private starfieldMaterial: THREE.PointsMaterial | null = null;
   private adaptivePixelRatio: number;
   private smoothedFrameMs = 16.7;
   private adjustmentCooldown = 0;
@@ -178,7 +189,7 @@ export class PodThreeWorldRenderer {
   }
 
   async applyFrame(frame: ThreeJsWebGpuFrame): Promise<void> {
-    this.scene.background = new THREE.Color(...frame.backgroundColor.slice(0, 3));
+    this.applyEnvironment(frame.environment);
 
     const planned = buildFramePlan(frame, {
       ...this.options.cameraRig,
@@ -230,6 +241,7 @@ export class PodThreeWorldRenderer {
 
     const hemisphere = new THREE.HemisphereLight(0xa8d1ff, 0x14263f, 1.2);
     this.scene.add(hemisphere);
+    this.hemisphereLight = hemisphere;
 
     const sun = new THREE.DirectionalLight(0xfff0cf, 2.6);
     sun.position.set(24, 42, 18);
@@ -242,23 +254,25 @@ export class PodThreeWorldRenderer {
     sun.shadow.camera.top = 60;
     sun.shadow.camera.bottom = -60;
     this.scene.add(sun);
+    this.sunLight = sun;
 
     const fill = new THREE.DirectionalLight(0x6cbcff, 0.7);
     fill.position.set(-18, 14, -10);
     this.scene.add(fill);
+    this.fillLight = fill;
 
     const rim = new THREE.PointLight(0x4bc1ff, 12, 180, 2.2);
     rim.position.set(0, 26, 0);
     this.scene.add(rim);
+    this.rimLight = rim;
 
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(140, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x0e1724,
-        roughness: 0.95,
-        metalness: 0.02
-      })
-    );
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0e1724,
+      roughness: 0.95,
+      metalness: 0.02
+    });
+    this.groundMaterial = groundMaterial;
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(140, 64), groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
@@ -269,23 +283,88 @@ export class PodThreeWorldRenderer {
       this.scene.add(grid);
     }
 
-    const skyline = new THREE.Points(
-      createStarfieldGeometry(640, 220),
-      new THREE.PointsMaterial({
-        color: 0xcde7ff,
-        size: 0.9,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.9,
-        depthWrite: false
-      })
-    );
+    const starfieldMaterial = new THREE.PointsMaterial({
+      color: 0xcde7ff,
+      size: 0.9,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false
+    });
+    this.starfieldMaterial = starfieldMaterial;
+    const skyline = new THREE.Points(createStarfieldGeometry(640, 220), starfieldMaterial);
     skyline.position.y = 36;
     this.scene.add(skyline);
 
     this.overlayScene.background = null;
     this.overlayCamera.position.set(0, 0, 5);
     this.overlayCamera.lookAt(0, 0, 0);
+  }
+
+  private applyEnvironment(environment: ThreeJsEnvironment): void {
+    this.scene.background = new THREE.Color(...environment.skyColor.slice(0, 3));
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.Fog) {
+      fog.color.setRGB(
+        environment.fogColor[0],
+        environment.fogColor[1],
+        environment.fogColor[2]
+      );
+      fog.near = environment.fogNear;
+      fog.far = environment.fogFar;
+    }
+
+    this.hemisphereLight?.color.setRGB(
+      environment.ambientColor[0],
+      environment.ambientColor[1],
+      environment.ambientColor[2]
+    );
+    this.hemisphereLight?.groundColor.setRGB(
+      environment.groundColor[0] * 0.75,
+      environment.groundColor[1] * 0.75,
+      environment.groundColor[2] * 0.75
+    );
+    if (this.hemisphereLight) {
+      this.hemisphereLight.intensity = environment.ambientIntensity;
+    }
+
+    this.sunLight?.color.setRGB(
+      environment.sunColor[0],
+      environment.sunColor[1],
+      environment.sunColor[2]
+    );
+    this.sunLight?.position.set(...environment.sunDirection);
+    if (this.sunLight) {
+      this.sunLight.intensity = environment.sunIntensity;
+    }
+
+    this.fillLight?.color.setRGB(
+      environment.fillColor[0],
+      environment.fillColor[1],
+      environment.fillColor[2]
+    );
+    this.fillLight?.position.set(...environment.fillDirection);
+    if (this.fillLight) {
+      this.fillLight.intensity = environment.fillIntensity;
+    }
+
+    this.rimLight?.color.setRGB(
+      environment.rimColor[0],
+      environment.rimColor[1],
+      environment.rimColor[2]
+    );
+    if (this.rimLight) {
+      this.rimLight.intensity = environment.rimIntensity;
+    }
+
+    this.groundMaterial?.color.setRGB(
+      environment.groundColor[0],
+      environment.groundColor[1],
+      environment.groundColor[2]
+    );
+    if (this.starfieldMaterial) {
+      this.starfieldMaterial.opacity = clamp(environment.starfieldIntensity, 0, 1);
+    }
   }
 
   private applyCamera(

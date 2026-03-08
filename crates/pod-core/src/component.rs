@@ -420,6 +420,120 @@ impl ColorRect {
     }
 }
 
+/// Zone or biome atmosphere that drives sky, fog, and lighting defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AtmosphereProfile {
+    pub biome_id: String,
+    pub sky_color: [f32; 4],
+    pub fog_color: [f32; 4],
+    pub fog_near: f32,
+    pub fog_far: f32,
+    pub ambient_color: [f32; 3],
+    pub ambient_intensity: f32,
+    pub sun_color: [f32; 3],
+    pub sun_intensity: f32,
+    pub sun_direction: [f32; 3],
+    pub fill_color: [f32; 3],
+    pub fill_intensity: f32,
+    pub fill_direction: [f32; 3],
+    pub rim_color: [f32; 3],
+    pub rim_intensity: f32,
+    pub ground_color: [f32; 4],
+    pub starfield_intensity: f32,
+}
+
+impl Default for AtmosphereProfile {
+    fn default() -> Self {
+        Self {
+            biome_id: "neutral-shard".to_string(),
+            sky_color: [0.04, 0.06, 0.1, 1.0],
+            fog_color: [0.035, 0.06, 0.1, 1.0],
+            fog_near: 28.0,
+            fog_far: 180.0,
+            ambient_color: [0.66, 0.82, 1.0],
+            ambient_intensity: 1.2,
+            sun_color: [1.0, 0.94, 0.82],
+            sun_intensity: 2.6,
+            sun_direction: [24.0, 42.0, 18.0],
+            fill_color: [0.42, 0.74, 1.0],
+            fill_intensity: 0.7,
+            fill_direction: [-18.0, 14.0, -10.0],
+            rim_color: [0.29, 0.76, 1.0],
+            rim_intensity: 12.0,
+            ground_color: [0.055, 0.09, 0.14, 1.0],
+            starfield_intensity: 0.9,
+        }
+    }
+}
+
+/// Radius/priority used to select atmosphere volumes around the player.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AtmosphereVolume {
+    pub radius: f32,
+    pub priority: u8,
+}
+
+impl Default for AtmosphereVolume {
+    fn default() -> Self {
+        Self {
+            radius: 220.0,
+            priority: 0,
+        }
+    }
+}
+
+/// Presentation defaults for actor silhouettes, animation sets, and selection affordances.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActorPresentation {
+    pub profile_id: String,
+    pub mesh_asset_id: Option<String>,
+    pub material_palette_id: String,
+    pub animation_set_id: String,
+    pub scale_multiplier: f32,
+    pub footprint_radius: f32,
+    pub selection_ring_scale: f32,
+    pub aura_color: [f32; 4],
+}
+
+impl Default for ActorPresentation {
+    fn default() -> Self {
+        Self {
+            profile_id: "default-actor".to_string(),
+            mesh_asset_id: None,
+            material_palette_id: "default".to_string(),
+            animation_set_id: "humanoid-explorer".to_string(),
+            scale_multiplier: 1.0,
+            footprint_radius: 1.0,
+            selection_ring_scale: 2.2,
+            aura_color: [0.0, 0.0, 0.0, 0.0],
+        }
+    }
+}
+
+/// Reusable combat readability defaults for hit flashes, ring colors, and impact sizing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CombatPresentation {
+    pub profile_id: String,
+    pub hit_flash_color: [f32; 4],
+    pub critical_ring_color: [f32; 4],
+    pub selection_ring_color: [f32; 4],
+    pub emissive_boost: [f32; 3],
+    pub impact_scale: f32,
+}
+
+impl Default for CombatPresentation {
+    fn default() -> Self {
+        Self {
+            profile_id: "default-combat".to_string(),
+            hit_flash_color: [0.92, 0.34, 0.30, 0.22],
+            critical_ring_color: [0.92, 0.34, 0.30, 0.22],
+            selection_ring_color: [0.62, 0.98, 0.84, 0.34],
+            emissive_boost: [0.08, 0.06, 0.02],
+            impact_scale: 1.0,
+        }
+    }
+}
+
 // ============================================================
 // GAMEPLAY COMPONENTS
 // ============================================================

@@ -4,6 +4,28 @@ import type { ThreeJsWebGpuFrame } from "./contracts";
 import { buildCameraPose, buildFramePlan, splitSpriteBatchesByTint } from "./frame-plan";
 import { resolveQualityProfile } from "./quality";
 
+function testEnvironment(): ThreeJsWebGpuFrame["environment"] {
+  return {
+    biomeId: "test-biome",
+    skyColor: [0.04, 0.06, 0.1, 1],
+    fogColor: [0.035, 0.06, 0.1, 1],
+    fogNear: 28,
+    fogFar: 180,
+    ambientColor: [0.66, 0.82, 1],
+    ambientIntensity: 1.2,
+    sunColor: [1, 0.94, 0.82],
+    sunIntensity: 2.6,
+    sunDirection: [24, 42, 18],
+    fillColor: [0.42, 0.74, 1],
+    fillIntensity: 0.7,
+    fillDirection: [-18, 14, -10],
+    rimColor: [0.29, 0.76, 1],
+    rimIntensity: 12,
+    groundColor: [0.055, 0.09, 0.14, 1],
+    starfieldIntensity: 0.9
+  };
+}
+
 describe("buildCameraPose", () => {
   test("maps 2D camera target and zoom into a perspective rig", () => {
     const pose = buildCameraPose({
@@ -101,6 +123,7 @@ describe("buildFramePlan", () => {
         viewportHeight: 720
       },
       backgroundColor: [0, 0, 0, 1],
+      environment: testEnvironment(),
       overlayCommands: [],
       meshBatches: [
         {
@@ -186,6 +209,7 @@ describe("buildFramePlan", () => {
         viewportHeight: 720
       },
       backgroundColor: [0, 0, 0, 1],
+      environment: testEnvironment(),
       overlayCommands: [],
       meshBatches: [
         {
@@ -264,6 +288,7 @@ describe("buildFramePlan", () => {
         viewportHeight: 720
       },
       backgroundColor: [0, 0, 0, 1],
+      environment: testEnvironment(),
       overlayCommands: [],
       meshBatches: [
         {
@@ -328,6 +353,7 @@ describe("buildFramePlan", () => {
         viewportHeight: 720
       },
       backgroundColor: [0, 0, 0, 1],
+      environment: testEnvironment(),
       overlayCommands: [],
       meshBatches: [
         {

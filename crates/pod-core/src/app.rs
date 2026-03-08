@@ -3,9 +3,10 @@ use std::collections::HashMap;
 
 use crate::action::AgentAction;
 use crate::component::{
-    AgentControlled, ColorRect, CombatLoadout, CompanionRoster, CreatureIdentity, EncounterState,
-    Health, Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook,
-    Sprite, Transform, Transform3D, Velocity,
+    ActorPresentation, AgentControlled, AtmosphereProfile, AtmosphereVolume, ColorRect,
+    CombatLoadout, CombatPresentation, CompanionRoster, CreatureIdentity, EncounterState, Health,
+    Inventory, Label, LootContainer, Movement, Perception, ResourceNode, Script, SkillBook, Sprite,
+    Transform, Transform3D, Velocity,
 };
 use crate::contract::{
     ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
@@ -289,6 +290,14 @@ impl App {
         self.types.register_component::<Velocity>("Velocity");
         self.types.register_component::<Sprite>("Sprite");
         self.types.register_component::<ColorRect>("ColorRect");
+        self.types
+            .register_component::<AtmosphereProfile>("AtmosphereProfile");
+        self.types
+            .register_component::<AtmosphereVolume>("AtmosphereVolume");
+        self.types
+            .register_component::<ActorPresentation>("ActorPresentation");
+        self.types
+            .register_component::<CombatPresentation>("CombatPresentation");
         self.types
             .register_component::<AgentControlled>("AgentControlled");
         self.types.register_component::<Health>("Health");

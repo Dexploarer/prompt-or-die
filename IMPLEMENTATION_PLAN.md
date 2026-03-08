@@ -782,5 +782,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - live browser smoke via Playwright against `http://127.0.0.1:4174/` and `http://127.0.0.1:4174/?renderThread=worker`
   - `git diff --check`
 
-**Last updated**: Iteration 81
-**Current focus**: Iteration 82 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, and replacement of emulated SpacetimeDB client paths with generated typed bindings
+### Iteration 82
+- [x] Added shared presentation primitives in `pod-core` for atmosphere zones, actor presentation, and combat presentation so creators can author biome lighting, silhouette defaults, and combat readability as native engine data instead of ad hoc browser-only overrides.
+- [x] Extended authoritative `pod-net` snapshots to carry those presentation primitives, including static atmosphere anchors and non-moving entities, so browser/editor consumers can build rich world views from the same server-owned metadata humans and AI agents share.
+- [x] Updated `apps/pod-web` authoritative frame generation and renderer environment application to honor biome atmosphere, actor mesh/material overrides, aura rings, and combat ring styling directly from snapshot metadata.
+- [x] Added deterministic coverage for presentation-driven environment selection, actor affordances, updated metadata fixtures, and static-scene affordance typing across the browser tests and `pod-net` snapshot tests.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/frame-plan.test.ts ./src/local-world.test.ts ./src/affordances.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 82
+**Current focus**: Iteration 83 browser-first flagship world delivery, continuing with true streamed chunk residency beyond the in-memory manifest cache, authored world chunk activation/deactivation, plus higher-level creator primitives for authored factions, quest hooks, encounter tables, and biome-linked spawn distributions
