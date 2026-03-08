@@ -21,6 +21,7 @@ import {
 } from "./contracts";
 import {
   PodWebDirectConnectClient,
+  type DirectConnectActionState,
   runtimeConfigFromLocation,
   type DirectConnectStatus
 } from "./direct-connect";
@@ -64,6 +65,7 @@ const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
 const targetLabel = document.querySelector<HTMLElement>("#target-label");
+const actionStatusLabel = document.querySelector<HTMLElement>("#action-status-label");
 const feedbackLabel = document.querySelector<HTMLElement>("#feedback-label");
 const eventFeedLabel = document.querySelector<HTMLElement>("#event-feed-label");
 const qualityLabel = document.querySelector<HTMLElement>("#quality-label");
@@ -99,6 +101,7 @@ if (
   !connectionLabel ||
   !worldLabel ||
   !targetLabel ||
+  !actionStatusLabel ||
   !feedbackLabel ||
   !eventFeedLabel ||
   !qualityLabel ||
@@ -127,6 +130,7 @@ const telemetryToggleButton = telemetryToggle;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
 const targetNode = targetLabel;
+const actionStatusNode = actionStatusLabel;
 const feedbackNode = feedbackLabel;
 const eventFeedNode = eventFeedLabel;
 const chatFormNode = chatForm;
@@ -162,6 +166,14 @@ let latestRollupSummary: TickRollupSummary | null = null;
 let liveReplayDocuments = 0;
 let liveIncidentDocuments = 0;
 let latestSnapshot: NetworkWorldSnapshot | null = null;
+let latestActionStatus: DirectConnectActionState = {
+  pendingCount: 0,
+  lastSubmittedTick: null,
+  lastAcknowledgedTick: null,
+  lastRejectedTick: null,
+  lastRejectedReason: null,
+  lastActionSummary: null
+};
 let latestFeedback = "Awaiting authoritative outcomes";
 let recentWorldEvents: NetworkGameEvent[] = [];
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
@@ -199,6 +211,9 @@ const liveClient = runtimeConfig
       },
       onDebugDocument(document) {
         applyLiveDebugDocument(document);
+      },
+      onActionState(state) {
+        latestActionStatus = state;
       },
       onStatus(status) {
         liveConnectionStatus = status;
@@ -316,6 +331,28 @@ function formatRecentEventFeed(): string {
   return recentWorldEvents
     .map((event) => `[${event.tick}] ${event.summary}`)
     .join("\n");
+}
+
+function formatActionStatus(): string {
+  if (latestActionStatus.lastRejectedReason) {
+    return `rejected @ ${
+      latestActionStatus.lastRejectedTick ?? "?"
+    } · ${latestActionStatus.lastRejectedReason}`;
+  }
+
+  if (latestActionStatus.pendingCount > 0) {
+    return `pending ${latestActionStatus.pendingCount} · ${
+      latestActionStatus.lastActionSummary ?? "action"
+    }`;
+  }
+
+  if (latestActionStatus.lastAcknowledgedTick != null) {
+    return `acknowledged @ ${latestActionStatus.lastAcknowledgedTick} · ${
+      latestActionStatus.lastActionSummary ?? "action"
+    }`;
+  }
+
+  return "idle";
 }
 
 function syncSelectedTarget(): void {
@@ -630,6 +667,7 @@ function renderTelemetryHud(): void {
   targetNode.textContent = target
     ? `${target.label ?? "Target"} · E(${target.id}) · ${entityHealthSummary(target)}`
     : "No target selected";
+  actionStatusNode.textContent = formatActionStatus();
   feedbackNode.textContent = latestFeedback;
   eventFeedNode.textContent = formatRecentEventFeed();
   telemetryToggleButton.textContent = stats.enabled ? "Disable Telemetry" : "Enable Telemetry";

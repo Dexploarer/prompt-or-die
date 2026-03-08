@@ -677,5 +677,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 72
-**Current focus**: Iteration 73 browser MMO loop completion beyond event feedback, starting with live combat/chat outcome staging, richer world-state presentation, and authoritative UI affordances for creators and players on the flagship shard path
+### Iteration 73
+- [x] Extended the browser direct-connect runtime with authoritative action staging so submitted `ActionBatch` payloads now track pending, acknowledged, and rejected states instead of disappearing into the websocket transport.
+- [x] Reclassified post-connect `Rejected` messages as action outcomes for the live shard path, keeping the browser session connected while surfacing the authoritative rejection reason to the player/creator HUD.
+- [x] Added a gameplay HUD action-status row in `apps/pod-web` driven by `acknowledged_action_tick` and rejection responses, alongside deterministic websocket coverage for pending -> acknowledged -> rejected transitions.
+- [x] Validated touched targets:
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 73
+**Current focus**: Iteration 74 browser MMO loop completion beyond action staging, starting with richer live world-state affordances, direct shard-side player/chat outcome surfaces, and tighter creator inspection UX on the flagship browser path

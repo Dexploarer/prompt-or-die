@@ -37,6 +37,15 @@ export interface DirectConnectStatus {
   authoritativeDigest: number | null;
 }
 
+export interface DirectConnectActionState {
+  pendingCount: number;
+  lastSubmittedTick: number | null;
+  lastAcknowledgedTick: number | null;
+  lastRejectedTick: number | null;
+  lastRejectedReason: string | null;
+  lastActionSummary: string | null;
+}
+
 interface DirectConnectHandlers {
   onFrame: (
     snapshot: NetworkWorldSnapshot,
@@ -45,11 +54,17 @@ interface DirectConnectHandlers {
   ) => void;
   onEventBatch: (batch: NetworkEventBatch) => void;
   onDebugDocument: (document: string) => void;
+  onActionState: (state: DirectConnectActionState) => void;
   onStatus: (status: DirectConnectStatus) => void;
 }
 
 const DEFAULT_PLAYER_NAME = "WebPlayer";
 const DEFAULT_RECONNECT_DELAY_MS = 1500;
+
+interface PendingActionBatch {
+  tick: number;
+  summary: string;
+}
 
 export function runtimeConfigFromLocation(
   location: Pick<Location, "search">
@@ -79,9 +94,11 @@ export class PodWebDirectConnectClient {
   private controlledEntity: number | null = null;
   private authoritativeDigest: number | null = null;
   private lastEventTick = 0;
+  private pendingActionBatches: PendingActionBatch[] = [];
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
   private status: DirectConnectStatus;
+  private actionState: DirectConnectActionState;
 
   constructor(
     private readonly config: DirectConnectRuntimeConfig,
@@ -96,6 +113,14 @@ export class PodWebDirectConnectClient {
       entityCount: 0,
       controlledEntity: null,
       authoritativeDigest: null
+    };
+    this.actionState = {
+      pendingCount: 0,
+      lastSubmittedTick: null,
+      lastAcknowledgedTick: null,
+      lastRejectedTick: null,
+      lastRejectedReason: null,
+      lastActionSummary: null
     };
   }
 
@@ -163,6 +188,10 @@ export class PodWebDirectConnectClient {
     return { ...this.status };
   }
 
+  currentActionState(): DirectConnectActionState {
+    return { ...this.actionState };
+  }
+
   snapshotState(): NetworkWorldSnapshot | null {
     return this.snapshot;
   }
@@ -177,6 +206,18 @@ export class PodWebDirectConnectClient {
     }
 
     const nextTick = (this.snapshot?.tick ?? this.status.tick ?? 0) + 1;
+    const summary = summarizeActions(actions);
+    this.pendingActionBatches.push({
+      tick: nextTick,
+      summary
+    });
+    this.actionState = {
+      ...this.actionState,
+      pendingCount: this.pendingActionBatches.length,
+      lastSubmittedTick: nextTick,
+      lastActionSummary: summary
+    };
+    this.handlers.onActionState(this.currentActionState());
     this.socket.send(encodeDirectConnectActionBatch(nextTick, actions));
     return true;
   }
@@ -199,6 +240,7 @@ export class PodWebDirectConnectClient {
             message.isFullSnapshot
           );
           this.authoritativeDigest = message.authoritativeDigest;
+          this.reconcileAcknowledgedActions(message.acknowledgedActionTick);
           this.updateWorldStatus("connected", `Authoritative tick ${message.tick}`);
           this.emitFrame();
         } catch {
@@ -228,7 +270,12 @@ export class PodWebDirectConnectClient {
         });
         break;
       case "rejected":
-        this.updateStatus("rejected", message.reason);
+        this.rejectLatestPendingAction(message.reason);
+        if (this.status.phase === "connected") {
+          this.updateWorldStatus("connected", `Rejected action: ${message.reason}`);
+        } else {
+          this.updateStatus("rejected", message.reason);
+        }
         break;
       case "pong":
         break;
@@ -288,6 +335,38 @@ export class PodWebDirectConnectClient {
       this.reconnectTimer = null;
     }
   }
+
+  private reconcileAcknowledgedActions(acknowledgedTick: number | null): void {
+    if (acknowledgedTick == null) {
+      return;
+    }
+
+    const acknowledged = this.pendingActionBatches
+      .filter((batch) => batch.tick <= acknowledgedTick)
+      .at(-1);
+    this.pendingActionBatches = this.pendingActionBatches.filter(
+      (batch) => batch.tick > acknowledgedTick
+    );
+    this.actionState = {
+      ...this.actionState,
+      pendingCount: this.pendingActionBatches.length,
+      lastAcknowledgedTick: acknowledgedTick,
+      lastActionSummary: acknowledged?.summary ?? this.actionState.lastActionSummary
+    };
+    this.handlers.onActionState(this.currentActionState());
+  }
+
+  private rejectLatestPendingAction(reason: string): void {
+    const rejected = this.pendingActionBatches.pop() ?? null;
+    this.actionState = {
+      ...this.actionState,
+      pendingCount: this.pendingActionBatches.length,
+      lastRejectedTick: rejected?.tick ?? this.actionState.lastRejectedTick,
+      lastRejectedReason: reason,
+      lastActionSummary: rejected?.summary ?? this.actionState.lastActionSummary
+    };
+    this.handlers.onActionState(this.currentActionState());
+  }
 }
 
 export function frameFromAuthoritativeSnapshot(
@@ -336,4 +415,10 @@ function parsePositiveInt(value: string | null): number | null {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function summarizeActions(actions: BrowserAction[]): string {
+  return actions
+    .map((action) => action.kind.replace(/([A-Z])/g, " $1").toLowerCase())
+    .join(" + ");
 }
