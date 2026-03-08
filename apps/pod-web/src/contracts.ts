@@ -2901,6 +2901,12 @@ export interface InteractionMarkerOptions {
   controlledSnapshot?: NetworkEntitySnapshot | null;
 }
 
+export interface WorldEventMarkerOptions {
+  events: NetworkGameEvent[];
+  worldSnapshot?: NetworkWorldSnapshot | null;
+  currentTick?: number | null;
+}
+
 export function withInteractionMarkers(
   frame: ThreeJsWebGpuFrame,
   options: InteractionMarkerOptions
@@ -3021,6 +3027,67 @@ export function withInteractionMarkers(
   };
 }
 
+export function withWorldEventMarkers(
+  frame: ThreeJsWebGpuFrame,
+  options: WorldEventMarkerOptions
+): ThreeJsWebGpuFrame {
+  if (options.events.length === 0) {
+    return frame;
+  }
+
+  const currentTick = options.currentTick ?? options.worldSnapshot?.tick ?? null;
+  const markers = new Array<ThreeJsSpriteBatch>();
+
+  for (const event of options.events) {
+    if (currentTick != null && currentTick - event.tick > 12) {
+      continue;
+    }
+
+    const position = resolveEventMarkerPosition(event, options.worldSnapshot);
+    if (!position) {
+      continue;
+    }
+
+    const ageTicks = currentTick == null ? 0 : Math.max(0, currentTick - event.tick);
+    const ageFade = clamp01(1 - ageTicks / 12);
+    const markerStyle = eventMarkerStyle(event.kind, ageFade);
+    markers.push({
+      texture: markerStyle.texture,
+      frame: 0,
+      layer: markerStyle.layer,
+      billboard: false,
+      phase: "transparent",
+      sortDepth: position[1],
+      renderOrder: markerStyle.renderOrder,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [
+            position[0],
+            sampleTerrainHeight(position[0], position[1]) + markerStyle.height,
+            position[1]
+          ],
+          rotation: GROUND_RING_ROTATION,
+          scale: [markerStyle.scale, markerStyle.scale, 1],
+          color: markerStyle.color,
+          animationSetId: markerStyle.animationSetId
+        }
+      ]
+    });
+  }
+
+  if (markers.length === 0) {
+    return frame;
+  }
+
+  return {
+    ...frame,
+    spriteBatches: [...frame.spriteBatches, ...markers]
+  };
+}
+
 export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFrame {
   return {
     camera: frame.camera,
@@ -3031,4 +3098,95 @@ export function legacyFrameToThreeJsFrame(frame: RenderFrame): ThreeJsWebGpuFram
     spriteBatches: [],
     hints: defaultFrameHints()
   };
+}
+
+function resolveEventMarkerPosition(
+  event: NetworkGameEvent,
+  worldSnapshot: NetworkWorldSnapshot | null | undefined
+): Vec2Tuple | null {
+  if (event.origin) {
+    return [event.origin[0] * WORLD_TO_RENDER_SCALE, event.origin[1] * WORLD_TO_RENDER_SCALE];
+  }
+
+  const entityPosition =
+    worldSnapshot?.entities.find((entity) => event.entityIds.includes(entity.id))?.position ?? null;
+  if (!entityPosition) {
+    return null;
+  }
+
+  return [
+    entityPosition[0] * WORLD_TO_RENDER_SCALE,
+    entityPosition[1] * WORLD_TO_RENDER_SCALE
+  ];
+}
+
+function eventMarkerStyle(kind: string, ageFade: number): {
+  texture: ThreeJsSpriteBatch["texture"];
+  animationSetId: string;
+  renderOrder: number;
+  layer: number;
+  scale: number;
+  height: number;
+  color: RgbaTuple;
+} {
+  const normalized = kind.toLowerCase();
+
+  if (
+    normalized.includes("damage") ||
+    normalized.includes("attack") ||
+    normalized.includes("hit") ||
+    normalized.includes("defeat")
+  ) {
+    return {
+      texture: "danger-ring",
+      animationSetId: "critical-ring",
+      renderOrder: 23,
+      layer: 9,
+      scale: 1.55 + ageFade * 0.32,
+      height: 0.09,
+      color: [1, 0.42, 0.34, 0.18 + ageFade * 0.28]
+    };
+  }
+
+  if (
+    normalized.includes("capture") ||
+    normalized.includes("summon") ||
+    normalized.includes("command")
+  ) {
+    return {
+      texture: "selection-ring",
+      animationSetId: "aura-ring",
+      renderOrder: 22,
+      layer: 9,
+      scale: 1.4 + ageFade * 0.26,
+      height: 0.08,
+      color: [0.48, 0.96, 0.78, 0.16 + ageFade * 0.24]
+    };
+  }
+
+  if (normalized.includes("loot") || normalized.includes("gather")) {
+    return {
+      texture: "selection-ring",
+      animationSetId: "destination-ring",
+      renderOrder: 21,
+      layer: 8,
+      scale: 1.22 + ageFade * 0.22,
+      height: 0.07,
+      color: [0.98, 0.84, 0.36, 0.14 + ageFade * 0.2]
+    };
+  }
+
+  return {
+    texture: "mist-ring",
+    animationSetId: "path-node",
+    renderOrder: 20,
+    layer: 8,
+    scale: 0.96 + ageFade * 0.18,
+    height: 0.06,
+    color: [0.7, 0.9, 1, 0.12 + ageFade * 0.16]
+  };
+}
+
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
 }

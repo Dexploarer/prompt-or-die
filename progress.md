@@ -15,3 +15,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Fixed the timelapse boot state so the world now starts in readable daylight instead of sometimes loading into near-night on first paint.
 - Added deterministic ambient chunk dressing driven by streamed chunk keys instead of hand-placed demo clutter: trees, boulders, basalt columns, and spires now populate visible/warm regions without overlapping the lagoon or central hub.
 - Verified live in Playwright that the flagship sandbox now renders with ambient density on WebGPU (`ambient 14`, `117277 tris`, `14 resident assets`, `0 pending`) while staying in daylight and loading cleanly.
+- Added browser-side world-event markers driven from authoritative shard events, so combat/action outcomes now decorate the scene in world space instead of only appearing as HUD text.
