@@ -9,6 +9,7 @@ import {
   type AuthoritativeWorldFrameOptions,
   type BrowserAction,
   type DirectConnectServerMessage,
+  type NetworkEventBatch,
   type NetworkWorldSnapshot
 } from "./contracts";
 
@@ -42,6 +43,7 @@ interface DirectConnectHandlers {
     frameOptions: AuthoritativeWorldFrameOptions,
     status: DirectConnectStatus
   ) => void;
+  onEventBatch: (batch: NetworkEventBatch) => void;
   onDebugDocument: (document: string) => void;
   onStatus: (status: DirectConnectStatus) => void;
 }
@@ -76,6 +78,7 @@ export class PodWebDirectConnectClient {
   private snapshot: NetworkWorldSnapshot | null = null;
   private controlledEntity: number | null = null;
   private authoritativeDigest: number | null = null;
+  private lastEventTick = 0;
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
   private status: DirectConnectStatus;
@@ -214,11 +217,20 @@ export class PodWebDirectConnectClient {
       case "debugDocument":
         this.handlers.onDebugDocument(message.document);
         break;
+      case "eventBatch":
+        if (message.tick < this.lastEventTick) {
+          break;
+        }
+        this.lastEventTick = message.tick;
+        this.handlers.onEventBatch({
+          tick: message.tick,
+          events: message.events
+        });
+        break;
       case "rejected":
         this.updateStatus("rejected", message.reason);
         break;
       case "pong":
-      case "eventBatch":
         break;
     }
   }

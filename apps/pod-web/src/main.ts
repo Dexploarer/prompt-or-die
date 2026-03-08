@@ -1,6 +1,8 @@
 import {
   type BrowserAction,
   buildAuthoritativeWorldFrame,
+  type NetworkEventBatch,
+  type NetworkGameEvent,
   type NetworkEntitySnapshot,
   type NetworkWorldSnapshot,
   parseLiveDebugDocument,
@@ -62,6 +64,8 @@ const frameSourceLabel = document.querySelector<HTMLElement>("#frame-source");
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label");
 const worldLabel = document.querySelector<HTMLElement>("#world-label");
 const targetLabel = document.querySelector<HTMLElement>("#target-label");
+const feedbackLabel = document.querySelector<HTMLElement>("#feedback-label");
+const eventFeedLabel = document.querySelector<HTMLElement>("#event-feed-label");
 const qualityLabel = document.querySelector<HTMLElement>("#quality-label");
 const statsLabel = document.querySelector<HTMLElement>("#stats-label");
 const chatForm = document.querySelector<HTMLFormElement>("#chat-form");
@@ -95,6 +99,8 @@ if (
   !connectionLabel ||
   !worldLabel ||
   !targetLabel ||
+  !feedbackLabel ||
+  !eventFeedLabel ||
   !qualityLabel ||
   !statsLabel ||
   !chatForm ||
@@ -121,6 +127,8 @@ const telemetryToggleButton = telemetryToggle;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
 const targetNode = targetLabel;
+const feedbackNode = feedbackLabel;
+const eventFeedNode = eventFeedLabel;
 const chatFormNode = chatForm;
 const chatInputNode = chatInput;
 const telemetrySelectionNode = telemetrySelectionLabel;
@@ -154,6 +162,8 @@ let latestRollupSummary: TickRollupSummary | null = null;
 let liveReplayDocuments = 0;
 let liveIncidentDocuments = 0;
 let latestSnapshot: NetworkWorldSnapshot | null = null;
+let latestFeedback = "Awaiting authoritative outcomes";
+let recentWorldEvents: NetworkGameEvent[] = [];
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
   ? {
       phase: "idle",
@@ -183,6 +193,9 @@ const liveClient = runtimeConfig
         liveFrameSource = "threejs";
         frameSourceLabel.textContent = "authoritative websocket";
         liveConnectionStatus = status;
+      },
+      onEventBatch(batch) {
+        applyAuthoritativeEventBatch(batch);
       },
       onDebugDocument(document) {
         applyLiveDebugDocument(document);
@@ -254,6 +267,55 @@ function selectedTarget(): NetworkEntitySnapshot | null {
     return null;
   }
   return targetableEntities().find((entity) => entity.id === selectedTargetId) ?? null;
+}
+
+function entityHealthSummary(entity: NetworkEntitySnapshot | null): string {
+  if (
+    entity == null ||
+    entity.health == null ||
+    entity.maxHealth == null ||
+    entity.maxHealth <= 0
+  ) {
+    return "status unknown";
+  }
+
+  return `${entity.health.toFixed(0)}/${entity.maxHealth.toFixed(0)} hp`;
+}
+
+function eventTouchesEntity(event: NetworkGameEvent, entityId: number | null): boolean {
+  return entityId != null && event.entityIds.includes(entityId);
+}
+
+function applyAuthoritativeEventBatch(batch: NetworkEventBatch): void {
+  if (batch.events.length === 0) {
+    return;
+  }
+
+  recentWorldEvents = [...recentWorldEvents, ...batch.events].slice(-6);
+
+  const controlledId = liveConnectionStatus?.controlledEntity ?? null;
+  const highlighted =
+    [...batch.events]
+      .reverse()
+      .find(
+        (event) =>
+          eventTouchesEntity(event, controlledId) ||
+          eventTouchesEntity(event, selectedTargetId)
+      ) ?? batch.events.at(-1);
+
+  if (highlighted) {
+    latestFeedback = `[${highlighted.kind}] ${highlighted.summary}`;
+  }
+}
+
+function formatRecentEventFeed(): string {
+  if (recentWorldEvents.length === 0) {
+    return "No authoritative events yet";
+  }
+
+  return recentWorldEvents
+    .map((event) => `[${event.tick}] ${event.summary}`)
+    .join("\n");
 }
 
 function syncSelectedTarget(): void {
@@ -566,8 +628,10 @@ function renderTelemetryHud(): void {
         }`
     : "demo scene";
   targetNode.textContent = target
-    ? `${target.label ?? "Target"} · E(${target.id})`
+    ? `${target.label ?? "Target"} · E(${target.id}) · ${entityHealthSummary(target)}`
     : "No target selected";
+  feedbackNode.textContent = latestFeedback;
+  eventFeedNode.textContent = formatRecentEventFeed();
   telemetryToggleButton.textContent = stats.enabled ? "Disable Telemetry" : "Enable Telemetry";
   telemetryPanelNode.dataset.telemetryEnabled = String(stats.enabled);
   telemetrySelectionNode.textContent = stats.selectedLabel;

@@ -93,6 +93,11 @@
         margin: 0;
       }
 
+      .hud__multiline {
+        white-space: pre-line;
+        line-height: 1.35;
+      }
+
       .hud__controls {
         display: flex;
         align-items: center;
@@ -166,6 +171,10 @@
           <dd id="world-label">demo scene</dd>
           <dt>Target</dt>
           <dd id="target-label">No target selected</dd>
+          <dt>Feedback</dt>
+          <dd id="feedback-label">Awaiting authoritative outcomes</dd>
+          <dt>Events</dt>
+          <dd class="hud__multiline" id="event-feed-label">No authoritative events yet</dd>
           <dt>Quality</dt>
           <dd id="quality-label">auto</dd>
           <dt>Source</dt>

@@ -18,7 +18,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
     Action, AgentTickRollup, AgentToolCallEvent, IdleAgent, TelemetryArchive, TelemetryConfig,
-    VersionedTickTelemetry, World,
+    VersionedTickTelemetry, World, GameEvent,
 };
 
 use crate::protocol::{
@@ -101,6 +101,8 @@ pub struct GameServer {
     last_snapshot: Option<WorldSnapshot>,
     /// Latest authoritative telemetry payload for debug/editor clients.
     last_tick_telemetry_json: Option<String>,
+    /// Game events emitted during the current authoritative tick.
+    pending_events: Vec<GameEvent>,
     /// Recent authoritative telemetry retained for live debug rollups.
     debug_archive: TelemetryArchive,
     /// TOON debug documents collected during the current authoritative tick.
@@ -124,6 +126,7 @@ impl GameServer {
             last_snapshot_tick: 0,
             last_snapshot: None,
             last_tick_telemetry_json: None,
+            pending_events: Vec::new(),
             debug_archive: TelemetryArchive::with_capacity(
                 TelemetryConfig::default().core_archive_ticks,
             ),
@@ -249,6 +252,7 @@ impl GameServer {
         self.debug_archive
             .record_tick(tick_result.telemetry.clone());
         self.pending_debug_documents.clear();
+        self.pending_events = tick_result.events.clone();
 
         let telemetry_document =
             VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document();
@@ -686,12 +690,14 @@ impl GameServer {
         };
 
         let has_state_update = should_snapshot || delta.change_count() > 0;
+        let has_event_update = !self.pending_events.is_empty();
         let clients = self.clients.read().await;
         let has_debug_subscribers = clients
             .values()
             .any(|session| session.debug_telemetry_enabled);
 
-        if !has_state_update && !has_debug_subscribers {
+        if !has_state_update && !has_debug_subscribers && !has_event_update {
+            self.pending_events.clear();
             self.pending_debug_documents.clear();
             return Ok(());
         }
@@ -708,6 +714,18 @@ impl GameServer {
                 if let Some(tx) = self.client_tx.read().await.get(client_id) {
                     if let Err(e) = tx.send(msg).await {
                         error!("Failed to send update to client {}: {}", client_id.0, e);
+                    }
+                }
+            }
+
+            if has_event_update {
+                let msg = ServerMessage::EventBatch {
+                    tick: self.tick,
+                    events: self.pending_events.clone(),
+                };
+                if let Some(tx) = self.client_tx.read().await.get(client_id) {
+                    if let Err(e) = tx.send(msg).await {
+                        error!("Failed to send event batch to client {}: {}", client_id.0, e);
                     }
                 }
             }
@@ -738,6 +756,7 @@ impl GameServer {
         if has_state_update {
             self.last_snapshot = Some(current_snapshot);
         }
+        self.pending_events.clear();
         self.pending_debug_documents.clear();
 
         Ok(())
@@ -998,10 +1017,11 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use pod_core::decode_toon_value;
-    use tokio_tungstenite::{connect_async, tungstenite::Message};
+    mod tests {
+        use super::*;
+        use pod_core::decode_toon_value;
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+        use pod_core::action::SpeakVolume;
 
     fn next_available_port() -> u16 {
         std::net::TcpListener::bind("127.0.0.1:0")
@@ -1098,6 +1118,109 @@ mod tests {
         }
 
         assert!(saw_tick_telemetry);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_emits_authoritative_event_batches() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("player".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+            },
+        );
+        server.tick = 12;
+        server.pending_events = vec![pod_core::GameEvent {
+            tick: 12,
+            origin: glam::Vec2::new(32.0, 48.0),
+            event: pod_core::Event::AgentSpoke {
+                agent_id: pod_core::AgentId::new(),
+                message: "hello shard".into(),
+                volume: 200.0,
+            },
+        }];
+
+        server.broadcast_updates().await.unwrap();
+
+        let mut saw_event_batch = false;
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::EventBatch { tick, events } = message {
+                saw_event_batch = true;
+                assert_eq!(tick, 12);
+                assert_eq!(events.len(), 1);
+                assert!(matches!(
+                    events[0].event,
+                    pod_core::Event::AgentSpoke { .. }
+                ));
+            }
+        }
+
+        assert!(saw_event_batch);
+        assert!(server.pending_events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_step_tick_promotes_speak_action_into_event_batch() {
+        let config = ProtoServerConfig::default();
+        let mut server = GameServer::new(config, World::new(42));
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        let (slot_index, _) = server.world.add_agent(Box::new(IdleAgent::new()));
+        let agent_id = server.world.agents[slot_index].agent.id();
+
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("speaker".into()),
+                agent_id: Some(agent_id),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+            },
+        );
+        server
+            .world
+            .submit_external_action(
+                agent_id,
+                Action::Speak {
+                    message: "authoritative hello".into(),
+                    volume: SpeakVolume::Normal,
+                },
+            );
+
+        server.step_tick().await.unwrap();
+        assert!(server.pending_events.iter().any(|event| matches!(
+            event.event,
+            pod_core::Event::AgentSpoke { .. }
+        )));
+
+        server.broadcast_updates().await.unwrap();
+
+        let mut saw_spoken_event = false;
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::EventBatch { events, .. } = message {
+                saw_spoken_event = events.iter().any(|event| matches!(
+                    event.event,
+                    pod_core::Event::AgentSpoke { .. }
+                ));
+            }
+        }
+
+        assert!(saw_spoken_event);
     }
 
     #[tokio::test]
