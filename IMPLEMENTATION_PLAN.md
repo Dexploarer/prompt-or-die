@@ -969,5 +969,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 97
-**Current focus**: Iteration 98 worker-route gameplay-input parity proof, then further HUD reduction, richer traversal/combat feedback, and shard-side interest partitioning for debug/telemetry streams
+### Iteration 98
+- [x] Extended `pod-net` direct-connect debug delivery with per-client TOON debug-document filtering, so tick telemetry, tool-call events, and rollups now follow the same shard-interest window as snapshots and gameplay events.
+- [x] Preserved full-fidelity behavior for unbounded editor/debug subscribers, while bounded player-linked clients now receive only the telemetry documents relevant to their visible entity set.
+- [x] Added deterministic server coverage proving bounded debug clients receive filtered telemetry/tool-call documents and unbounded debug subscribers still receive full tick telemetry.
+- [x] Revalidated native, SpacetimeDB-enabled, and wasm `pod-net` targets after the debug-interest change.
+- [x] Validated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 98
+**Current focus**: Iteration 99 shard-side debug/telemetry subscription partitioning on the `pod-stdb` path, then worker-route gameplay-input parity proof and richer traversal/combat feedback

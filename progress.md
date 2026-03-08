@@ -23,3 +23,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Welcome and full-resync snapshot paths now use the same filtered authoritative interest window, keeping reconnect/recovery correctness aligned with the new network scaling path.
 - Added deterministic network coverage for chunk-window snapshot filtering and server-side per-client broadcast partitioning, and revalidated native, wasm, and SpacetimeDB-enabled `pod-net` targets.
 - Extended `pod-net` authoritative event delivery with the same per-client interest window, so combat/chat/world events now partition by shard locality instead of broadcasting every event to every connected player.
+- Extended `pod-net` direct-connect debug delivery with the same shard-interest partitioning, so TOON tick telemetry, tool-call events, and rollups now scope to the client’s visible entity set while unbounded editor/debug subscribers still retain full-fidelity shard telemetry.

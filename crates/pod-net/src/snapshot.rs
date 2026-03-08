@@ -140,7 +140,7 @@ impl SnapshotInterest {
         }
     }
 
-    fn is_unbounded(&self) -> bool {
+    pub fn is_unbounded(&self) -> bool {
         self.controlled_entity.is_none()
             && self.center.is_none()
             && self.radius.is_none()

@@ -18,7 +18,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
     Action, AgentTickRollup, AgentToolCallEvent, GameEvent, IdleAgent, TelemetryArchive,
-    TelemetryConfig, VersionedTickTelemetry, World,
+    TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry, World,
 };
 
 use crate::protocol::{
@@ -65,6 +65,23 @@ struct ClientBroadcastTarget {
     acknowledged_action_tick: Option<u64>,
     debug_telemetry_enabled: bool,
     last_sent_snapshot: Option<WorldSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+enum PendingDebugDocument {
+    TickTelemetry(VersionedTickTelemetry),
+    AgentToolCallEvent(AgentToolCallEvent),
+    AgentTickRollup(AgentTickRollup),
+}
+
+impl PendingDebugDocument {
+    fn to_toon_document(&self) -> String {
+        match self {
+            Self::TickTelemetry(document) => document.to_toon_document(),
+            Self::AgentToolCallEvent(document) => document.to_toon_document(),
+            Self::AgentTickRollup(document) => document.to_toon_document(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,7 +134,7 @@ pub struct GameServer {
     /// Recent authoritative telemetry retained for live debug rollups.
     debug_archive: TelemetryArchive,
     /// TOON debug documents collected during the current authoritative tick.
-    pending_debug_documents: Vec<String>,
+    pending_debug_documents: Vec<PendingDebugDocument>,
 }
 
 impl GameServer {
@@ -265,10 +282,10 @@ impl GameServer {
         self.pending_debug_documents.clear();
         self.pending_events = tick_result.events.clone();
 
-        let telemetry_document =
-            VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document();
-        self.last_tick_telemetry_json = Some(telemetry_document.clone());
-        self.pending_debug_documents.push(telemetry_document);
+        let telemetry_document = VersionedTickTelemetry::new(tick_result.telemetry.clone());
+        self.last_tick_telemetry_json = Some(telemetry_document.to_toon_document());
+        self.pending_debug_documents
+            .push(PendingDebugDocument::TickTelemetry(telemetry_document));
 
         for agent in &tick_result.telemetry.agents {
             let Some(entity_id) = agent.entity_id else {
@@ -276,13 +293,16 @@ impl GameServer {
             };
             for trace in &agent.tool_calls {
                 self.pending_debug_documents
-                    .push(AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document());
+                    .push(PendingDebugDocument::AgentToolCallEvent(
+                        AgentToolCallEvent::new(entity_id.0, trace.clone()),
+                    ));
             }
         }
 
         if (tick_result.tick + 1) % 60 == 0 {
             for rollup in self.debug_rollups_for_tick(tick_result.tick) {
-                self.pending_debug_documents.push(rollup.to_toon_document());
+                self.pending_debug_documents
+                    .push(PendingDebugDocument::AgentTickRollup(rollup));
             }
         }
 
@@ -720,6 +740,11 @@ impl GameServer {
             let interest =
                 self.snapshot_interest_for_agent(&authoritative_snapshot, target.agent_id);
             let filtered_snapshot = authoritative_snapshot.for_interest(&interest);
+            let interested_entities = filtered_snapshot
+                .entities
+                .iter()
+                .map(|entity| entity.id)
+                .collect::<std::collections::HashSet<_>>();
             let authoritative_digest = filtered_snapshot.digest();
             let is_full_snapshot = should_snapshot || target.last_sent_snapshot.is_none();
             let delta = if is_full_snapshot {
@@ -782,14 +807,14 @@ impl GameServer {
             }
 
             if target.debug_telemetry_enabled {
-                for document in &self.pending_debug_documents {
+                let debug_documents = self.debug_documents_for_interest(
+                    &self.pending_debug_documents,
+                    &interest,
+                    &interested_entities,
+                );
+                for document in debug_documents {
                     let sent = self
-                        .send_to_client(
-                            target.client_id,
-                            ServerMessage::DebugDocument {
-                                document: document.clone(),
-                            },
-                        )
+                        .send_to_client(target.client_id, ServerMessage::DebugDocument { document })
                         .await;
                     if !sent {
                         break;
@@ -985,6 +1010,63 @@ impl GameServer {
                 chunk_keys.contains(event_chunk_key.as_str())
             })
             .cloned()
+            .collect()
+    }
+
+    fn filter_tick_telemetry_for_entities(
+        &self,
+        telemetry: &VersionedTickTelemetry,
+        interested_entities: &std::collections::HashSet<u64>,
+    ) -> Option<VersionedTickTelemetry> {
+        let agents = telemetry
+            .payload
+            .agents
+            .iter()
+            .filter(|agent| {
+                agent
+                    .entity_id
+                    .map(|entity_id| interested_entities.contains(&entity_id.0))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if agents.is_empty() {
+            return None;
+        }
+
+        Some(VersionedTickTelemetry::new(TickTelemetryFrame {
+            tick: telemetry.payload.tick,
+            agents,
+        }))
+    }
+
+    fn debug_documents_for_interest(
+        &self,
+        documents: &[PendingDebugDocument],
+        interest: &SnapshotInterest,
+        interested_entities: &std::collections::HashSet<u64>,
+    ) -> Vec<String> {
+        if interest.is_unbounded() {
+            return documents
+                .iter()
+                .map(PendingDebugDocument::to_toon_document)
+                .collect();
+        }
+
+        documents
+            .iter()
+            .filter_map(|document| match document {
+                PendingDebugDocument::TickTelemetry(telemetry) => self
+                    .filter_tick_telemetry_for_entities(telemetry, interested_entities)
+                    .map(|filtered| filtered.to_toon_document()),
+                PendingDebugDocument::AgentToolCallEvent(event) => interested_entities
+                    .contains(&event.agent_entity_id)
+                    .then(|| event.to_toon_document()),
+                PendingDebugDocument::AgentTickRollup(rollup) => interested_entities
+                    .contains(&rollup.agent_entity_id)
+                    .then(|| rollup.to_toon_document()),
+            })
             .collect()
     }
 
@@ -1328,6 +1410,139 @@ mod tests {
         }
 
         assert!(saw_tick_telemetry);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_filters_debug_documents_per_client_interest() {
+        use pod_core::telemetry::{AgentTelemetryFrame, AgentToolCallTrace, ToolCallStatus};
+        use pod_core::AgentRuntimeProfile;
+
+        let config = ProtoServerConfig::default();
+        let mut world = World::new(42);
+        let (alpha_slot, alpha_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        let (spire_slot, spire_entity) = world.add_agent(Box::new(IdleAgent::new()));
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(alpha_entity)
+            .expect("alpha transform")
+            .position = glam::Vec2::new(1.0, 1.0);
+        world
+            .ecs
+            .get::<&mut pod_core::Transform>(spire_entity)
+            .expect("spire transform")
+            .position = glam::Vec2::new(30.0, 1.0);
+
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("alpha-debug".into()),
+                agent_id: Some(server.world.agents[alpha_slot].agent.id()),
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: true,
+                last_sent_snapshot: None,
+            },
+        );
+
+        let alpha_trace = AgentToolCallTrace::success(7, "llm.complete", "openai", 24, 40, 12);
+        let spire_trace = AgentToolCallTrace::new(
+            7,
+            "llm.complete",
+            "openai",
+            ToolCallStatus::Failed,
+            31,
+            50,
+            0,
+            Some("timeout".into()),
+        );
+        server.pending_debug_documents = vec![
+            PendingDebugDocument::TickTelemetry(VersionedTickTelemetry::new(TickTelemetryFrame {
+                tick: 7,
+                agents: vec![
+                    AgentTelemetryFrame {
+                        tick: 7,
+                        agent_id: server.world.agents[alpha_slot].agent.id(),
+                        entity_id: Some(pod_core::EntityId(alpha_entity.id() as u64)),
+                        runtime_profile: AgentRuntimeProfile::default(),
+                        visible_entity_count: 2,
+                        audible_event_count: 1,
+                        message_count: 0,
+                        available_action_count: 3,
+                        objective_count: 1,
+                        encounter: None,
+                        trajectory: None,
+                        action_trace: Vec::new(),
+                        tool_calls: vec![alpha_trace.clone()],
+                    },
+                    AgentTelemetryFrame {
+                        tick: 7,
+                        agent_id: server.world.agents[spire_slot].agent.id(),
+                        entity_id: Some(pod_core::EntityId(spire_entity.id() as u64)),
+                        runtime_profile: AgentRuntimeProfile::default(),
+                        visible_entity_count: 3,
+                        audible_event_count: 0,
+                        message_count: 0,
+                        available_action_count: 3,
+                        objective_count: 1,
+                        encounter: None,
+                        trajectory: None,
+                        action_trace: Vec::new(),
+                        tool_calls: vec![spire_trace.clone()],
+                    },
+                ],
+            })),
+            PendingDebugDocument::AgentToolCallEvent(AgentToolCallEvent::new(
+                alpha_entity.id() as u64,
+                alpha_trace,
+            )),
+            PendingDebugDocument::AgentToolCallEvent(AgentToolCallEvent::new(
+                spire_entity.id() as u64,
+                spire_trace,
+            )),
+        ];
+
+        server.broadcast_updates().await.unwrap();
+
+        let mut documents = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::DebugDocument { document } = message {
+                documents.push(document);
+            }
+        }
+
+        assert_eq!(documents.len(), 2);
+        let tick_doc = documents
+            .iter()
+            .find(|document| document.contains("versioned_tick_telemetry"))
+            .expect("tick telemetry document");
+        let tick_value =
+            decode_toon_value(tick_doc).expect("filtered tick telemetry TOON should decode");
+        let agent_frames = tick_value["payload"]["payload"]["agents"]
+            .as_array()
+            .expect("agents array");
+        assert_eq!(agent_frames.len(), 1);
+        assert_eq!(
+            agent_frames[0]["entity_id"].as_u64(),
+            Some(alpha_entity.id() as u64)
+        );
+
+        assert!(documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| {
+                    value["document_type"] == "agent_tool_call_event"
+                        && value["payload"]["agent_entity_id"] == alpha_entity.id() as u64
+                })
+                .unwrap_or(false)
+        }));
+        assert!(!documents
+            .iter()
+            .any(|document| document.contains("timeout")));
     }
 
     #[tokio::test]
