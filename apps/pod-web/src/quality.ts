@@ -12,6 +12,9 @@ export interface PodThreeQualityProfile {
   mediumDetailDistance: number;
   shadowDistance: number;
   shadowMapSize: number;
+  terrainTextureSize: number;
+  waterTextureSize: number;
+  skyTextureSize: number;
   anisotropy: number;
   toneMappingExposure: number;
   maxPixelRatio: number;
@@ -41,6 +44,9 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     mediumDetailDistance: 132,
     shadowDistance: 88,
     shadowMapSize: 2048,
+    terrainTextureSize: 1536,
+    waterTextureSize: 1024,
+    skyTextureSize: 1024,
     anisotropy: 16,
     toneMappingExposure: 1.14,
     maxPixelRatio: 2,
@@ -60,6 +66,9 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     mediumDetailDistance: 110,
     shadowDistance: 72,
     shadowMapSize: 1536,
+    terrainTextureSize: 1280,
+    waterTextureSize: 896,
+    skyTextureSize: 896,
     anisotropy: 12,
     toneMappingExposure: 1.1,
     maxPixelRatio: 1.75,
@@ -79,6 +88,9 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     mediumDetailDistance: 92,
     shadowDistance: 54,
     shadowMapSize: 1024,
+    terrainTextureSize: 1024,
+    waterTextureSize: 768,
+    skyTextureSize: 768,
     anisotropy: 8,
     toneMappingExposure: 1.02,
     maxPixelRatio: 1.35,
@@ -98,6 +110,9 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     mediumDetailDistance: 60,
     shadowDistance: 32,
     shadowMapSize: 768,
+    terrainTextureSize: 768,
+    waterTextureSize: 512,
+    skyTextureSize: 512,
     anisotropy: 4,
     toneMappingExposure: 0.96,
     maxPixelRatio: 1,

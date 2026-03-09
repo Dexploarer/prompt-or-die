@@ -59,3 +59,7 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added a real close-range combat camera-pressure model in `pod-web`, so the camera now tightens framing from actual target proximity instead of relying only on generic event shake and low-health pressure.
 - Upgraded combat pulse animation so humanoids lunge forward and beasts drive heavier through impact moments instead of every pulse reading like the same neutral bounce.
 - Revalidated the browser smoke harness after the change, and both the main-thread and worker render routes still accept gameplay input cleanly.
+- Moved flagship terrain and water look into shared deterministic landscape helpers instead of keeping the shading logic split between static canvas painting and ad hoc runtime color tweaks.
+- Raised baked landscape surface fidelity by quality tier, so the flagship browser shard now uses sharper terrain, water, and sky textures on stronger hardware without changing the authoring contract.
+- Added a shared water visual state that drives color, emissive response, opacity, repeat, and scrolling offsets from the same daylight/time-lapse path, which makes the lagoon read more like a world surface and less like a flat debug sheet.
+- Revalidated the terrain/water pass with targeted Bun coverage, clean typecheck/build, and the existing Playwright smoke loop (`2 passed`) on both main-thread and worker routes.

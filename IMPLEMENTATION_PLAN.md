@@ -1119,5 +1119,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run test:smoke`
   - `git diff --check`
 
-**Last updated**: Iteration 111
-**Current focus**: Iteration 112 terrain/water material polish under real browser GPU conditions, closer-range combat readability in the flagship shard, and further shard/runtime observability improvements beyond browser-only smoke
+### Iteration 112
+- [x] Moved flagship terrain shading into shared `sampleTerrainMaterial(...)` helpers in `apps/pod-web/src/landscape.ts`, so shoreline, rock, highland, and foam tinting no longer drift between baked texture generation and the gameplay world model.
+- [x] Added shared `sampleWaterSurfaceStyle(...)` helpers and rewired the renderer to drive lagoon color, emissive response, opacity, scroll offsets, and repeat from the same daylight/time-lapse state used by the rest of the environment.
+- [x] Raised landscape surface fidelity by quality preset (`terrainTextureSize`, `waterTextureSize`, `skyTextureSize`) so stronger browser hardware gets sharper baked terrain/water/sky surfaces without changing content contracts.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/quality.test.ts ./src/renderer.test.ts ./src/controls.test.ts ./src/local-world.test.ts ./src/frame-plan.test.ts ./src/contracts.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+**Last updated**: Iteration 112
+**Current focus**: Iteration 113 closer-range combat readability in the flagship shard, richer water/shoreline response under live combat traversal, and further shard/runtime observability improvements beyond browser-only smoke

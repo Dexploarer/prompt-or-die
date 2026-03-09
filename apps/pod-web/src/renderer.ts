@@ -40,12 +40,13 @@ import {
   clamp,
   describeEnvironmentPreset,
   fractalNoise,
-  mixScalar,
   mixVec3,
   sampleLakeMask,
   sampleTerrainHeight,
+  sampleTerrainMaterial,
   sampleTerrainSlope,
   sampleTimeLapseEnvironment,
+  sampleWaterSurfaceStyle,
   smoothstep
 } from "./landscape";
 import {
@@ -109,6 +110,19 @@ function getPaintContext(surface: PaintSurface): OffscreenCanvasRenderingContext
   return context;
 }
 
+function resolveLandscapeSurfaceSize(
+  quality: PodThreeQualityProfile,
+  kind: "terrain" | "water" | "sky"
+): number {
+  if (kind === "terrain") {
+    return quality.terrainTextureSize;
+  }
+  if (kind === "water") {
+    return quality.waterTextureSize;
+  }
+  return quality.skyTextureSize;
+}
+
 function createTerrainGeometry(
   size = LANDSCAPE_WORLD_SIZE,
   segments = 168
@@ -134,55 +148,17 @@ function paintTerrainTexture(
   const context = getPaintContext(surface);
   const width = "width" in surface ? surface.width : 512;
   const height = "height" in surface ? surface.height : 512;
-  const grass = mixVec3(
-    environment.groundColor.slice(0, 3) as [number, number, number],
-    [0.2, 0.35, 0.22],
-    0.45
-  );
-  const moss = mixVec3(grass, [0.36, 0.49, 0.24], 0.52);
-  const cliff = mixVec3(grass, [0.38, 0.35, 0.31], 0.78);
-  const basalt: [number, number, number] = [0.22, 0.24, 0.28];
-  const highland: [number, number, number] = [0.54, 0.52, 0.46];
-  const sand: [number, number, number] = [0.72, 0.66, 0.48];
   const imageData = context.createImageData(width, height);
-  const worldHalfSize = LANDSCAPE_WORLD_SIZE * 0.5;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const worldX = (x / Math.max(width - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
       const worldZ = (y / Math.max(height - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
-      const terrainHeight = sampleTerrainHeight(worldX, worldZ);
-      const slope = sampleTerrainSlope(worldX, worldZ);
-      const lake = sampleLakeMask(worldX, worldZ);
-      const shore = lake * (1 - smoothstep(2.4, 8.4, Math.abs(terrainHeight - WATER_LEVEL)));
-      const cliffMask = clamp((slope - 0.55) / 1.9 + Math.max(terrainHeight - 10, 0) / 18, 0, 1);
-      const meadowNoise = fractalNoise(worldX * 0.12 + 8, worldZ * 0.12 - 12);
-      const ridgeNoise = fractalNoise(worldX * 0.032 - 14, worldZ * 0.032 + 21);
-      const distanceFalloff = 1 - clamp(Math.hypot(worldX, worldZ) / worldHalfSize, 0, 1);
-      const highlandMask = clamp((terrainHeight - 16) / 16, 0, 1);
-      const rockMask = clamp(cliffMask * 0.7 + highlandMask * 0.8 + ridgeNoise * 0.24, 0, 1);
-      const foamMask = clamp(shore * 1.35, 0, 1);
-
-      let tint = mixVec3(grass, moss, meadowNoise * 0.75 + distanceFalloff * 0.15);
-      tint = mixVec3(tint, sand, shore * 0.7);
-      tint = mixVec3(tint, cliff, cliffMask * 0.72);
-      tint = mixVec3(tint, highland, highlandMask * 0.52);
-      tint = mixVec3(tint, basalt, rockMask * 0.58);
-      tint = mixVec3(tint, [0.92, 0.9, 0.82], foamMask * 0.14);
-
-      const brightness = clamp(
-        0.72 +
-          terrainHeight * 0.011 -
-          cliffMask * 0.06 +
-          meadowNoise * 0.12 +
-          foamMask * 0.08,
-        0.34,
-        1.18
-      );
+      const material = sampleTerrainMaterial(environment, worldX, worldZ);
       const index = (y * width + x) * 4;
-      imageData.data[index] = Math.round(tint[0] * brightness * 255);
-      imageData.data[index + 1] = Math.round(tint[1] * brightness * 255);
-      imageData.data[index + 2] = Math.round(tint[2] * brightness * 255);
+      imageData.data[index] = Math.round(material.tint[0] * material.brightness * 255);
+      imageData.data[index + 1] = Math.round(material.tint[1] * material.brightness * 255);
+      imageData.data[index + 2] = Math.round(material.tint[2] * material.brightness * 255);
       imageData.data[index + 3] = 255;
     }
   }
@@ -190,15 +166,34 @@ function paintTerrainTexture(
   context.putImageData(imageData, 0, 0);
 }
 
-function paintWaterTexture(surface: PaintSurface): void {
+function paintWaterTexture(
+  surface: PaintSurface,
+  environment: ThreeJsEnvironment,
+  elapsedSeconds: number
+): void {
   const context = getPaintContext(surface);
   const width = "width" in surface ? surface.width : 512;
   const height = "height" in surface ? surface.height : 512;
+  const style = sampleWaterSurfaceStyle(environment, elapsedSeconds);
   const gradient = context.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "rgb(178, 235, 244)");
-  gradient.addColorStop(0.3, "rgb(92, 182, 214)");
-  gradient.addColorStop(0.68, "rgb(29, 104, 152)");
-  gradient.addColorStop(1, "rgb(10, 42, 78)");
+  gradient.addColorStop(
+    0,
+    `rgb(${Math.round(style.highlightColor[0] * 255)}, ${Math.round(
+      style.highlightColor[1] * 255
+    )}, ${Math.round(style.highlightColor[2] * 255)})`
+  );
+  gradient.addColorStop(
+    0.34,
+    `rgb(${Math.round(style.shallowColor[0] * 255)}, ${Math.round(
+      style.shallowColor[1] * 255
+    )}, ${Math.round(style.shallowColor[2] * 255)})`
+  );
+  gradient.addColorStop(
+    1,
+    `rgb(${Math.round(style.deepColor[0] * 255)}, ${Math.round(
+      style.deepColor[1] * 255
+    )}, ${Math.round(style.deepColor[2] * 255)})`
+  );
   context.fillStyle = gradient;
   context.fillRect(0, 0, width, height);
 
@@ -210,13 +205,13 @@ function paintWaterTexture(surface: PaintSurface): void {
     height * 0.5,
     width * 0.56
   );
-  radial.addColorStop(0, "rgba(255,255,255,0.16)");
-  radial.addColorStop(0.45, "rgba(170,232,255,0.08)");
+  radial.addColorStop(0, `rgba(255,255,255,${(0.11 + style.waveStrength * 0.08).toFixed(3)})`);
+  radial.addColorStop(0.45, `rgba(170,232,255,${(0.04 + style.waveStrength * 0.06).toFixed(3)})`);
   radial.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = radial;
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(255, 255, 255, 0.14)";
+  context.strokeStyle = `rgba(255, 255, 255, ${(0.08 + style.waveStrength * 0.1).toFixed(3)})`;
   context.lineWidth = 2.5;
   for (let stripe = 0; stripe < 22; stripe += 1) {
     const offsetY = (stripe / 22) * height;
@@ -224,7 +219,12 @@ function paintWaterTexture(surface: PaintSurface): void {
     for (let x = 0; x <= width; x += 16) {
       const waveY =
         offsetY +
-        Math.sin((x / width) * Math.PI * 4 + stripe * 0.9) * (5 + (stripe % 3) * 1.6);
+        Math.sin(
+          (x / width) * Math.PI * 4 +
+            stripe * 0.9 +
+            elapsedSeconds * (0.8 + style.waveStrength * 0.35)
+        ) *
+          (5 + (stripe % 3) * 1.6 + style.waveStrength * 2.6);
       if (x === 0) {
         context.moveTo(x, waveY);
       } else {
@@ -234,7 +234,7 @@ function paintWaterTexture(surface: PaintSurface): void {
     context.stroke();
   }
 
-  context.strokeStyle = "rgba(210, 246, 255, 0.24)";
+  context.strokeStyle = `rgba(210, 246, 255, ${(0.16 + style.waveStrength * 0.12).toFixed(3)})`;
   context.lineWidth = 1.5;
   for (let ring = 0; ring < 5; ring += 1) {
     const radius = width * (0.16 + ring * 0.11);
@@ -683,7 +683,8 @@ export class PodThreeWorldRenderer {
     this.scene.add(rim);
     this.rimLight = rim;
 
-    this.skyTextureSurface = createPaintSurface(512, 512);
+    const skyTextureSize = resolveLandscapeSurfaceSize(this.quality, "sky");
+    this.skyTextureSurface = createPaintSurface(skyTextureSize, skyTextureSize);
     paintSkyTexture(this.skyTextureSurface, defaultEnvironment);
     const skyTexture = new THREE.CanvasTexture(this.skyTextureSurface);
     skyTexture.colorSpace = THREE.SRGBColorSpace;
@@ -710,7 +711,11 @@ export class PodThreeWorldRenderer {
     this.scene.add(sunOrb);
     this.sunOrb = sunOrb;
 
-    this.terrainTextureSurface = createPaintSurface(512, 512);
+    const terrainTextureSize = resolveLandscapeSurfaceSize(this.quality, "terrain");
+    this.terrainTextureSurface = createPaintSurface(
+      terrainTextureSize,
+      terrainTextureSize
+    );
     paintTerrainTexture(this.terrainTextureSurface, defaultEnvironment);
     const terrainTexture = new THREE.CanvasTexture(this.terrainTextureSurface);
     terrainTexture.colorSpace = THREE.SRGBColorSpace;
@@ -732,13 +737,25 @@ export class PodThreeWorldRenderer {
     this.scene.add(ground);
     this.terrainMesh = ground;
 
-    this.waterTextureSurface = createPaintSurface(384, 384);
-    paintWaterTexture(this.waterTextureSurface);
+    const waterTextureSize = resolveLandscapeSurfaceSize(this.quality, "water");
+    this.waterTextureSurface = createPaintSurface(waterTextureSize, waterTextureSize);
+    paintWaterTexture(
+      this.waterTextureSurface,
+      defaultEnvironment,
+      DAYLIGHT_START_OFFSET_SECONDS
+    );
     const waterTexture = new THREE.CanvasTexture(this.waterTextureSurface);
     waterTexture.colorSpace = THREE.SRGBColorSpace;
     waterTexture.wrapS = THREE.RepeatWrapping;
     waterTexture.wrapT = THREE.RepeatWrapping;
-    waterTexture.repeat.set(1.4, 1.4);
+    const defaultWaterStyle = sampleWaterSurfaceStyle(
+      defaultEnvironment,
+      DAYLIGHT_START_OFFSET_SECONDS
+    );
+    waterTexture.repeat.set(
+      defaultWaterStyle.textureRepeat[0],
+      defaultWaterStyle.textureRepeat[1]
+    );
     this.waterTexture = waterTexture;
     const waterMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0.24, 0.62, 0.76),
@@ -821,6 +838,8 @@ export class PodThreeWorldRenderer {
     this.baseEnvironment = environment;
     const signature = environmentSignature(environment);
     if (signature !== this.lastEnvironmentSignature) {
+      const elapsedSeconds =
+        (performance.now() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
       if (this.skyTextureSurface && this.skyTexture) {
         paintSkyTexture(this.skyTextureSurface, environment);
         this.skyTexture.needsUpdate = true;
@@ -829,16 +848,27 @@ export class PodThreeWorldRenderer {
         paintTerrainTexture(this.terrainTextureSurface, environment);
         this.terrainTexture.needsUpdate = true;
       }
+      if (this.waterTextureSurface && this.waterTexture) {
+        paintWaterTexture(this.waterTextureSurface, environment, elapsedSeconds);
+        this.waterTexture.needsUpdate = true;
+      }
       this.lastEnvironmentSignature = signature;
     }
 
+    const elapsedSeconds =
+      (performance.now() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
     this.applyDynamicEnvironment(
-      sampleTimeLapseEnvironment(environment, performance.now() / 1000).environment
+      sampleTimeLapseEnvironment(environment, elapsedSeconds).environment,
+      elapsedSeconds
     );
   }
 
-  private applyDynamicEnvironment(environment: ThreeJsEnvironment): void {
+  private applyDynamicEnvironment(
+    environment: ThreeJsEnvironment,
+    elapsedSeconds: number
+  ): void {
     this.environmentPreset = describeEnvironmentPreset(environment);
+    const waterStyle = sampleWaterSurfaceStyle(environment, elapsedSeconds);
 
     this.scene.background = new THREE.Color(...environment.skyColor.slice(0, 3));
     const fog = this.scene.fog;
@@ -901,25 +931,30 @@ export class PodThreeWorldRenderer {
       environment.groundColor[2]
     );
     if (this.waterMesh) {
-      this.waterMesh.material.color.setRGB(0.18, 0.48 + environment.skyColor[1] * 0.18, 0.62 + environment.skyColor[2] * 0.1);
-      this.waterMesh.material.emissive.setRGB(
-        0.04 + environment.skyColor[0] * 0.05,
-        0.08 + environment.skyColor[1] * 0.08,
-        0.12 + environment.skyColor[2] * 0.08
+      this.waterMesh.material.color.setRGB(
+        waterStyle.shallowColor[0],
+        waterStyle.shallowColor[1],
+        waterStyle.shallowColor[2]
       );
-      this.waterMesh.material.emissiveIntensity = 0.4 + environment.sunIntensity * 0.03;
+      this.waterMesh.material.emissive.setRGB(
+        waterStyle.emissiveColor[0],
+        waterStyle.emissiveColor[1],
+        waterStyle.emissiveColor[2]
+      );
+      this.waterMesh.material.emissiveIntensity = waterStyle.emissiveIntensity;
+      this.waterMesh.material.opacity = waterStyle.opacity;
     }
     if (this.shorelineMesh) {
       this.shorelineMesh.material.color.setRGB(
-        0.68 + environment.sunColor[0] * 0.1,
-        0.62 + environment.sunColor[1] * 0.1,
-        0.54 + environment.sunColor[2] * 0.04
+        waterStyle.shorelineColor[0],
+        waterStyle.shorelineColor[1],
+        waterStyle.shorelineColor[2]
       );
-      this.shorelineMesh.material.opacity = 0.3 + environment.sunIntensity * 0.05;
+      this.shorelineMesh.material.opacity = waterStyle.shorelineOpacity;
       this.shorelineMesh.material.emissive.setRGB(
-        0.08 + environment.skyColor[0] * 0.04,
-        0.08 + environment.skyColor[1] * 0.04,
-        0.07 + environment.skyColor[2] * 0.03
+        waterStyle.shorelineEmissive[0],
+        waterStyle.shorelineEmissive[1],
+        waterStyle.shorelineEmissive[2]
       );
     }
     if (this.mountainBackdrop) {
@@ -1292,12 +1327,42 @@ export class PodThreeWorldRenderer {
         frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
       );
       this.timeOfDayHours = timeLapse.timeOfDayHours;
-      this.applyDynamicEnvironment(timeLapse.environment);
+      this.applyDynamicEnvironment(
+        timeLapse.environment,
+        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+      );
     }
     if (this.waterTexture) {
+      const waterStyle = sampleWaterSurfaceStyle(
+        this.baseEnvironment ??
+          ({
+            biomeId: "verdant-hollow",
+            skyColor: [0.64, 0.8, 0.98, 1],
+            fogColor: [0.73, 0.84, 0.78, 1],
+            fogNear: 30,
+            fogFar: 196,
+            ambientColor: [0.82, 0.92, 0.88],
+            ambientIntensity: 1.4,
+            sunColor: [1, 0.96, 0.84],
+            sunIntensity: 2.9,
+            sunDirection: [30, 48, 18],
+            fillColor: [0.44, 0.74, 0.94],
+            fillIntensity: 0.88,
+            fillDirection: [-18, 14, -10],
+            rimColor: [0.42, 0.88, 0.78],
+            rimIntensity: 9,
+            groundColor: [0.19, 0.33, 0.21, 1],
+            starfieldIntensity: 0.08
+          } satisfies ThreeJsEnvironment),
+        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+      );
       this.waterTexture.offset.set(
-        (frameStart * 0.000045) % 1,
-        (frameStart * 0.00003) % 1
+        waterStyle.textureOffset[0],
+        waterStyle.textureOffset[1]
+      );
+      this.waterTexture.repeat.set(
+        waterStyle.textureRepeat[0],
+        waterStyle.textureRepeat[1]
       );
     }
     const previousAutoClear = this.renderer.autoClear;
