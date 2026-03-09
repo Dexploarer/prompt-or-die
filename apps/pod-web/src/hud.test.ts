@@ -70,9 +70,11 @@ describe("hud formatting", () => {
         entityCount: 22,
         controlledEntity: 12,
         authoritativeDigest: 9912,
+        clientId: "client-a",
         roundTripMs: 42,
         jitterMs: 6,
-        lastPongServerTick: 128
+        lastPongServerTick: 128,
+        heartbeatAgeMs: 120
       })
     ).toBe("connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter");
   });
@@ -88,9 +90,11 @@ describe("hud formatting", () => {
           entityCount: 22,
           controlledEntity: 12,
           authoritativeDigest: 9912,
+          clientId: "client-a",
           roundTripMs: 42,
           jitterMs: 6,
-          lastPongServerTick: 128
+          lastPongServerTick: 128,
+          heartbeatAgeMs: 240
         },
         {
           shard_id: "direct-connect",

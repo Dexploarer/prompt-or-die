@@ -55,7 +55,8 @@ class MockWebSocket {
 describe("direct-connect runtime config", () => {
   test("builds a websocket config from server query params", () => {
     const config = runtimeConfigFromLocation({
-      search: "?server=127.0.0.1:7778&player=Scout&debug=1&reconnectMs=2500&pingMs=900"
+      search:
+        "?server=127.0.0.1:7778&player=Scout&debug=1&reconnectMs=2500&pingMs=900&heartbeatMs=4500&pendingBatches=4"
     } as Location);
 
     expect(config).not.toBeNull();
@@ -64,6 +65,8 @@ describe("direct-connect runtime config", () => {
     expect(config?.debugTelemetry).toBe(true);
     expect(config?.reconnectDelayMs).toBe(2500);
     expect(config?.pingIntervalMs).toBe(900);
+    expect(config?.heartbeatTimeoutMs).toBe(4500);
+    expect(config?.maxPendingActionBatches).toBe(4);
   });
 
   test("returns null when no direct-connect params are present", () => {
@@ -127,7 +130,9 @@ describe("direct-connect runtime config", () => {
           playerName: "BrowserPilot",
           debugTelemetry: true,
           reconnectDelayMs: 1000,
-          pingIntervalMs: 5000
+          pingIntervalMs: 5000,
+          heartbeatTimeoutMs: 6500,
+          maxPendingActionBatches: 6
         },
         {
           onFrame(snapshot) {
@@ -332,6 +337,160 @@ describe("direct-connect runtime config", () => {
           }
         })
       );
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test("requests recovery when the client-side action backlog saturates", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    MockWebSocket.instances = [];
+
+    const actionStates: Array<{
+      pendingCount: number;
+      lastSubmittedTick: number | null;
+      lastAcknowledgedTick: number | null;
+      lastRejectedTick: number | null;
+      lastRejectedReason: string | null;
+      lastActionSummary: string | null;
+    }> = [];
+
+    try {
+      const client = new PodWebDirectConnectClient(
+        {
+          url: "ws://127.0.0.1:7778",
+          playerName: "BrowserPilot",
+          debugTelemetry: false,
+          reconnectDelayMs: 1000,
+          pingIntervalMs: 5000,
+          heartbeatTimeoutMs: 6500,
+          maxPendingActionBatches: 1
+        },
+        {
+          onFrame() {},
+          onEventBatch() {},
+          onDebugDocument() {},
+          onActionState(state) {
+            actionStates.push(state);
+          },
+          onStatus() {}
+        }
+      );
+
+      client.connect();
+      const socket = MockWebSocket.instances[0];
+      socket?.open();
+      socket?.emitMessage(
+        JSON.stringify({
+          Welcome: {
+            client_id: "client-1",
+            reconnect_token: "resume-1",
+            tick: 18,
+            controlled_entity: 12,
+            authoritative_digest: 999,
+            snapshot: {
+              tick: 18,
+              entities: [
+                {
+                  id: 12,
+                  position: [10, 10],
+                  velocity: [0, 0],
+                  rotation: 0,
+                  label: "Hero"
+                }
+              ]
+            }
+          }
+        })
+      );
+
+      expect(client.submitActions([{ kind: "move", direction: [1, 0] }])).toBe(true);
+      expect(
+        client.submitActions([{ kind: "move", direction: [0, 1] }])
+      ).toBe(false);
+      expect(JSON.parse(socket?.sent.at(-1) ?? "null")).toEqual({
+        RequestFullSnapshot: {
+          last_known_tick: 18,
+          last_known_digest: 999
+        }
+      });
+      expect(actionStates.at(-1)?.lastRejectedReason).toBe(
+        "client backlog saturated (1)"
+      );
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test("forces reconnect when authority heartbeat times out", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    MockWebSocket.instances = [];
+    const originalDateNow = Date.now;
+
+    const statuses: string[] = [];
+
+    try {
+      let now = 20_000;
+      Date.now = () => now;
+      const client = new PodWebDirectConnectClient(
+        {
+          url: "ws://127.0.0.1:7778",
+          playerName: "BrowserPilot",
+          debugTelemetry: false,
+          reconnectDelayMs: 1000,
+          pingIntervalMs: 5000,
+          heartbeatTimeoutMs: 2500,
+          maxPendingActionBatches: 6
+        },
+        {
+          onFrame() {},
+          onEventBatch() {},
+          onDebugDocument() {},
+          onActionState() {},
+          onStatus(status) {
+            statuses.push(`${status.phase}:${status.detail}`);
+          }
+        }
+      );
+
+      client.connect();
+      const socket = MockWebSocket.instances[0];
+      socket?.open();
+      socket?.emitMessage(
+        JSON.stringify({
+          Welcome: {
+            client_id: "client-1",
+            reconnect_token: "resume-1",
+            tick: 18,
+            controlled_entity: 12,
+            authoritative_digest: 999,
+            snapshot: {
+              tick: 18,
+              entities: [
+                {
+                  id: 12,
+                  position: [10, 10],
+                  velocity: [0, 0],
+                  rotation: 0,
+                  label: "Hero"
+                }
+              ]
+            }
+          }
+        })
+      );
+
+      now = 22_800;
+      client.updateNetworkHealth(now);
+
+      expect(client.currentStatus().phase).toBe("reconnecting");
+      expect(statuses.some((status) => status.includes("heartbeat timed out"))).toBe(
+        true
+      );
+      expect(socket?.readyState).toBe(MockWebSocket.CLOSED);
     } finally {
       Date.now = originalDateNow;
       globalThis.WebSocket = originalWebSocket;

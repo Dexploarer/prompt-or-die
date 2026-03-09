@@ -1166,5 +1166,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `git diff --check`
 
-**Last updated**: Iteration 115
-**Current focus**: Iteration 116 client-side heartbeat watchdogs, stale-authority recovery, and queue-aware reconnect behavior across browser and native clients so degraded shard links fail fast and recover cleanly
+### Iteration 116
+- [x] Added direct-connect browser heartbeat watchdog controls (`heartbeatTimeoutMs`, `maxPendingActionBatches`) and a real authority-silence timeout path, so the flagship web client now fails fast and reconnects when the shard stops answering pings instead of waiting for the socket to die on its own.
+- [x] Added queue-aware browser recovery behavior: when authoritative acknowledgements stall and the pending action backlog saturates, `pod-web` now requests a full snapshot recovery first and escalates to reconnect under stale-authority conditions.
+- [x] Extended browser connection state with `clientId` and `heartbeatAgeMs`, then updated local sandbox/default status objects plus direct-connect tests so the stronger connection-health contract stays deterministic.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/hud.test.ts ./src/contracts.test.ts ./src/live-debug.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 116
+**Current focus**: Iteration 117 smoother worker-route gameplay input parity proof, tighter close-range hit feedback, and native/web client heartbeat parity beyond the flagship browser runtime

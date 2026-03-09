@@ -273,9 +273,11 @@ let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
       entityCount: 0,
       controlledEntity: null,
       authoritativeDigest: null,
+      clientId: null,
       roundTripMs: null,
       jitterMs: null,
-      lastPongServerTick: null
+      lastPongServerTick: null,
+      heartbeatAgeMs: null
     }
   : null;
 

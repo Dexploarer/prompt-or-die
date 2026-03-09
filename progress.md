@@ -86,3 +86,10 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-server --bin pod-server`
   - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
   - `cd apps/pod-web && bun run typecheck`
+- Added real direct-connect browser heartbeat watchdog controls (`heartbeatTimeoutMs`, `maxPendingActionBatches`) so the flagship web client now treats silent authority as a runtime failure instead of waiting indefinitely for the socket layer to notice.
+- Added queue-aware browser recovery: saturated pending action batches now request an authoritative full snapshot first and escalate to reconnect when backlog growth happens under stale authority.
+- Extended browser connection state with `clientId` and `heartbeatAgeMs`, then updated default/local sandbox status producers plus direct-connect tests so the connection-health contract remains deterministic.
+- Revalidated the browser heartbeat/recovery pass with:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/hud.test.ts ./src/contracts.test.ts ./src/live-debug.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
