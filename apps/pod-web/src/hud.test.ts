@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { compactRuntimeStats, highlightEventFeedback } from "./hud";
+import { compactRuntimeStats, formatConnectionSummary, highlightEventFeedback } from "./hud";
 import type { NetworkGameEvent } from "./contracts";
 import type { PodThreeRendererStats } from "./renderer";
 
@@ -58,5 +58,22 @@ describe("hud formatting", () => {
     expect(highlightEventFeedback(sampleEvent("Dialogue", "Merchant greeted you"))).toBe(
       "Merchant greeted you"
     );
+  });
+
+  test("adds shard RTT and jitter without bloating the connection line", () => {
+    expect(
+      formatConnectionSummary({
+        phase: "connected",
+        detail: "Authoritative tick 128",
+        url: "ws://127.0.0.1:7778",
+        tick: 128,
+        entityCount: 22,
+        controlledEntity: 12,
+        authoritativeDigest: 9912,
+        roundTripMs: 42,
+        jitterMs: 6,
+        lastPongServerTick: 128
+      })
+    ).toBe("connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter");
   });
 });

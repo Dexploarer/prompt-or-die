@@ -2385,7 +2385,10 @@ function createStatus(state: LocalWorldState): DirectConnectStatus {
     tick: state.tick,
     entityCount: state.entities.length,
     controlledEntity: PLAYER_ID,
-    authoritativeDigest: state.tick
+    authoritativeDigest: state.tick,
+    roundTripMs: null,
+    jitterMs: null,
+    lastPongServerTick: null
   };
 }
 

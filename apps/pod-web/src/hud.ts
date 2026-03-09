@@ -1,3 +1,4 @@
+import type { DirectConnectStatus } from "./direct-connect";
 import type { NetworkGameEvent } from "./contracts";
 import type { PodThreeRendererStats } from "./renderer";
 
@@ -57,4 +58,19 @@ export function highlightEventFeedback(event: NetworkGameEvent | null): string {
   }
 
   return event.summary;
+}
+
+export function formatConnectionSummary(status: DirectConnectStatus | null): string {
+  if (!status) {
+    return "offline demo / bridge mode";
+  }
+
+  const network =
+    status.roundTripMs == null
+      ? null
+      : `net ${status.roundTripMs.toFixed(0)}ms rtt${
+          status.jitterMs == null ? "" : ` / ${status.jitterMs.toFixed(0)}ms jitter`
+        }`;
+
+  return [status.phase, status.detail, network].filter(Boolean).join(" · ");
 }

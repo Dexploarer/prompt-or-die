@@ -1098,5 +1098,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 109
-**Current focus**: Iteration 110 worker-route gameplay-input parity proof, richer close-range combat response, and terrain/water material polish under real browser GPU conditions
+### Iteration 110
+- [x] Added live direct-connect shard RTT/jitter sampling in `apps/pod-web`, using the existing ping/pong protocol instead of guessing whether runtime jerkiness is render-side or network-side.
+- [x] Surfaced compact network quality information in the browser connection summary without widening the main HUD back into a debug slab.
+- [x] Hardened the direct-connect client timer path to use `globalThis` scheduling, keeping runtime logic portable across browser and test environments.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 110
+**Current focus**: Iteration 111 richer close-range combat response, terrain/water material polish under real browser GPU conditions, and further shard/runtime observability improvements beyond browser-only smoke

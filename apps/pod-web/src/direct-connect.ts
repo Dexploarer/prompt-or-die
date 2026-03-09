@@ -6,6 +6,7 @@ import {
   encodeDirectConnectDebugFocusMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
+  encodeDirectConnectPingMessage,
   parseDirectConnectServerMessage,
   type AuthoritativeWorldFrameOptions,
   type BrowserAction,
@@ -19,6 +20,7 @@ export interface DirectConnectRuntimeConfig {
   playerName: string;
   debugTelemetry: boolean;
   reconnectDelayMs: number;
+  pingIntervalMs: number;
 }
 
 export interface DirectConnectStatus {
@@ -36,6 +38,9 @@ export interface DirectConnectStatus {
   entityCount: number;
   controlledEntity: number | null;
   authoritativeDigest: number | null;
+  roundTripMs: number | null;
+  jitterMs: number | null;
+  lastPongServerTick: number | null;
 }
 
 export interface DirectConnectActionState {
@@ -69,6 +74,7 @@ interface DirectConnectHandlers {
 
 const DEFAULT_PLAYER_NAME = "WebPlayer";
 const DEFAULT_RECONNECT_DELAY_MS = 1500;
+const DEFAULT_PING_INTERVAL_MS = 2000;
 
 interface PendingActionBatch {
   tick: number;
@@ -91,7 +97,8 @@ export function runtimeConfigFromLocation(
     url,
     playerName: params.get("player")?.trim() || DEFAULT_PLAYER_NAME,
     debugTelemetry: parseBooleanParam(params.get("debug")),
-    reconnectDelayMs: parsePositiveInt(params.get("reconnectMs")) ?? DEFAULT_RECONNECT_DELAY_MS
+    reconnectDelayMs: parsePositiveInt(params.get("reconnectMs")) ?? DEFAULT_RECONNECT_DELAY_MS,
+    pingIntervalMs: parsePositiveInt(params.get("pingMs")) ?? DEFAULT_PING_INTERVAL_MS
   };
 }
 
@@ -130,6 +137,8 @@ export class PodWebDirectConnectClient {
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
   private debugFocusEntity: number | null = null;
+  private pingTimer: number | null = null;
+  private lastRoundTripSampleMs: number | null = null;
   private status: DirectConnectStatus;
   private actionState: DirectConnectActionState;
 
@@ -145,7 +154,10 @@ export class PodWebDirectConnectClient {
       tick: null,
       entityCount: 0,
       controlledEntity: null,
-      authoritativeDigest: null
+      authoritativeDigest: null,
+      roundTripMs: null,
+      jitterMs: null,
+      lastPongServerTick: null
     };
     this.actionState = {
       pendingCount: 0,
@@ -173,6 +185,7 @@ export class PodWebDirectConnectClient {
         socket.send(encodeDirectConnectDebugTelemetryMessage(true));
       }
       socket.send(encodeDirectConnectDebugFocusMessage(this.debugFocusEntity));
+      this.startPingLoop();
     });
 
     socket.addEventListener("message", (event) => {
@@ -190,6 +203,7 @@ export class PodWebDirectConnectClient {
 
     socket.addEventListener("close", () => {
       this.socket = null;
+      this.stopPingLoop();
       if (this.closedExplicitly) {
         this.updateStatus("disconnected", "Disconnected");
         return;
@@ -206,6 +220,7 @@ export class PodWebDirectConnectClient {
   disconnect(): void {
     this.closedExplicitly = true;
     this.clearReconnectTimer();
+    this.stopPingLoop();
     this.socket?.close();
     this.socket = null;
     this.updateStatus("disconnected", "Disconnected");
@@ -319,6 +334,7 @@ export class PodWebDirectConnectClient {
         }
         break;
       case "pong":
+        this.recordPong(message.clientTimestamp, message.serverTimestamp);
         break;
     }
   }
@@ -365,16 +381,53 @@ export class PodWebDirectConnectClient {
 
   private scheduleReconnect(): void {
     this.clearReconnectTimer();
-    this.reconnectTimer = window.setTimeout(() => {
+    this.reconnectTimer = globalThis.setTimeout(() => {
       this.connect();
     }, this.config.reconnectDelayMs);
   }
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer != null) {
-      window.clearTimeout(this.reconnectTimer);
+      globalThis.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+  }
+
+  private startPingLoop(): void {
+    this.stopPingLoop();
+    this.sendPing();
+    this.pingTimer = globalThis.setInterval(() => {
+      this.sendPing();
+    }, this.config.pingIntervalMs);
+  }
+
+  private stopPingLoop(): void {
+    if (this.pingTimer != null) {
+      globalThis.clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private sendPing(): void {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    this.socket.send(encodeDirectConnectPingMessage(Date.now()));
+  }
+
+  private recordPong(clientTimestamp: number, serverTick: number): void {
+    const roundTripMs = Math.max(0, Date.now() - clientTimestamp);
+    const jitterMs =
+      this.lastRoundTripSampleMs == null
+        ? 0
+        : Math.abs(roundTripMs - this.lastRoundTripSampleMs);
+    this.lastRoundTripSampleMs = roundTripMs;
+    this.updateStatus(this.status.phase, this.status.detail, {
+      roundTripMs,
+      jitterMs,
+      lastPongServerTick: serverTick
+    });
   }
 
   private reconcileAcknowledgedActions(acknowledgedTick: number | null): void {
