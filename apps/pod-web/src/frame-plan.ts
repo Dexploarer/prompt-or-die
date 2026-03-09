@@ -39,6 +39,13 @@ export interface PodThreePlanningOptions extends PodThreeCameraRigOptions {
 
 export const DEFAULT_WORLD_CHUNK_SIZE = 24;
 
+export interface CombatCameraSubject {
+  position: [number, number];
+  health?: number | null;
+  maxHealth?: number | null;
+  canAttack?: boolean;
+}
+
 export interface PlannedCameraPose {
   position: [number, number, number];
   target: [number, number, number];
@@ -88,6 +95,46 @@ export interface PlannedFrame {
   preloadedWorldChunks: string[];
   prewarmMeshRequests: PlannedMeshPrewarmRequest[];
   prewarmSpriteRequests: PlannedSpritePrewarmRequest[];
+}
+
+export function computeCombatCameraPressure(
+  controlled: CombatCameraSubject | null,
+  target: CombatCameraSubject | null,
+  cameraImpact: number
+): {
+  lowHealthPressure: number;
+  closeRangeBlend: number;
+  targetPressure: number;
+  combatPressure: number;
+} {
+  const healthRatio =
+    controlled && controlled.maxHealth != null && controlled.maxHealth > 0
+      ? clamp((controlled.health ?? controlled.maxHealth) / controlled.maxHealth, 0, 1)
+      : 1;
+  const lowHealthPressure = healthRatio < 0.45 ? (0.45 - healthRatio) / 0.45 : 0;
+
+  let closeRangeBlend = 0;
+  if (controlled && target?.canAttack) {
+    const distance = Math.hypot(
+      target.position[0] - controlled.position[0],
+      target.position[1] - controlled.position[1]
+    );
+    closeRangeBlend = clamp(1 - (distance - 1.8) / 7.2, 0, 1);
+  }
+
+  const targetPressure = target?.canAttack ? 0.28 + closeRangeBlend * 0.44 : 0;
+  const combatPressure = Math.max(
+    targetPressure,
+    lowHealthPressure * 0.9,
+    clamp(cameraImpact, 0, 1.4) * 0.75
+  );
+
+  return {
+    lowHealthPressure,
+    closeRangeBlend,
+    targetPressure,
+    combatPressure
+  };
 }
 
 export function buildCameraPose(
@@ -351,6 +398,16 @@ export function sampleAnimatedInstanceTransform(
   const strideWave = Math.sin(elapsedSeconds * (2.8 + motion * 5.4) + phase);
   const hoverWave = Math.sin(elapsedSeconds * 2.35 + phase);
   const pulseAmount = clamp(pulse, 0, 1);
+  const isBeast = animationSetId.includes("beast");
+  const isHumanoid =
+    animationSetId.includes("humanoid") ||
+    animationSetId.includes("hero") ||
+    animationSetId.includes("explorer") ||
+    animationSetId.includes("runescape");
+  const isRingLike =
+    animationSetId.includes("ring") ||
+    animationSetId.includes("path-node") ||
+    animationSetId.includes("destination");
 
   let yOffset = 0;
   let scaleX = instance.scale[0];
@@ -487,6 +544,20 @@ export function sampleAnimatedInstanceTransform(
     scaleY *= 1 - easedPulse * 0.08;
     scaleZ *= 1 + easedPulse * 0.12;
     pitchOffset += easedPulse * 0.05;
+    if (!isRingLike) {
+      if (isBeast) {
+        zOffset += easedPulse * (0.18 + motion * 0.07);
+        yOffset += easedPulse * 0.05;
+        scaleZ *= 1 + easedPulse * 0.05;
+        rollOffset += Math.sin(elapsedSeconds * 14 + phase) * 0.018 * easedPulse;
+        pitchOffset += easedPulse * 0.045;
+      } else if (isHumanoid) {
+        zOffset += easedPulse * (0.12 + motion * 0.06);
+        xOffset += Math.sin(elapsedSeconds * 10.5 + phase) * 0.018 * easedPulse;
+        rollOffset += Math.cos(elapsedSeconds * 12.2 + phase) * 0.016 * easedPulse;
+        pitchOffset += easedPulse * 0.03;
+      }
+    }
   }
 
   const baseRotation = new Quaternion(...instance.rotation);

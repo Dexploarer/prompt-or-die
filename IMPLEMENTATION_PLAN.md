@@ -1108,5 +1108,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 110
-**Current focus**: Iteration 111 richer close-range combat response, terrain/water material polish under real browser GPU conditions, and further shard/runtime observability improvements beyond browser-only smoke
+### Iteration 111
+- [x] Added a pure close-range combat camera-pressure model in `apps/pod-web` so target proximity now tightens framing and camera pressure based on actual engagement distance instead of only generic event shake and low-health state.
+- [x] Upgraded actor pulse response in `frame-plan` so combat pulses drive forward lunge/weight for humanoids and heavier forward drive for beasts instead of only vertical bob and uniform scale pop.
+- [x] Revalidated both main-thread and worker-route gameplay smoke after the camera/combat change, proving the flagship browser client still accepts movement input on both render paths.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/frame-plan.test.ts ./src/contracts.test.ts ./src/renderer.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+**Last updated**: Iteration 111
+**Current focus**: Iteration 112 terrain/water material polish under real browser GPU conditions, closer-range combat readability in the flagship shard, and further shard/runtime observability improvements beyond browser-only smoke

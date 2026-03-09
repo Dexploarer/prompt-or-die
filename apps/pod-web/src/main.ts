@@ -55,6 +55,7 @@ import {
   formatPopulationHeatmapLegend,
   renderPopulationHeatmap
 } from "./population-heatmap";
+import { computeCombatCameraPressure } from "./frame-plan";
 import {
   compactRuntimeStats,
   formatConnectionSummary,
@@ -535,13 +536,24 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
     ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
     : 0;
   const leadDistance = Math.min(1.4, speed * 0.16);
-  const healthRatio =
-    controlled && controlled.maxHealth != null && controlled.maxHealth > 0
-      ? Math.max(0, Math.min(1, (controlled.health ?? controlled.maxHealth) / controlled.maxHealth))
-      : 1;
-  const lowHealthPressure = healthRatio < 0.45 ? (0.45 - healthRatio) / 0.45 : 0;
-  const targetPressure = target?.metadata.interaction.canAttack ? 0.45 : 0;
-  const combatPressure = Math.max(targetPressure, lowHealthPressure * 0.9, cameraImpact * 0.75);
+  const combatCamera = computeCombatCameraPressure(
+    controlled
+      ? {
+          position: controlled.position,
+          health: controlled.health,
+          maxHealth: controlled.maxHealth
+        }
+      : null,
+    target
+      ? {
+          position: target.position,
+          canAttack: target.metadata.interaction.canAttack
+        }
+      : null,
+    cameraImpact
+  );
+  const combatPressure = combatCamera.combatPressure;
+  const closeRangeBlend = combatCamera.closeRangeBlend;
   const leadScale = 1 + swimCameraBlend * 0.14 - combatPressure * 0.06;
   const leadX =
     controlled && speed > 0.05
@@ -560,11 +572,17 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
   const swimZoomOffset = swimCameraBlend * 0.082;
   const swimDistanceOffset = swimCameraBlend * 1.6;
   const swimShoulderOffset = baseShoulderOffset - swimCameraBlend * 0.42;
-  const combatFovKick = combatPressure * 2.4 + cameraImpact * 3;
-  const swimFocusHeight = baseFocusHeight + swimCameraBlend * 0.12;
-  const swimFollowDistance = baseFollowDistance + swimDistanceOffset - combatPressure * 0.65;
+  const combatFovKick = combatPressure * 2.4 + cameraImpact * 3 + closeRangeBlend * 0.9;
+  const swimFocusHeight = baseFocusHeight + swimCameraBlend * 0.12 + closeRangeBlend * 0.08;
+  const swimFollowDistance =
+    baseFollowDistance +
+    swimDistanceOffset -
+    combatPressure * 0.65 -
+    closeRangeBlend * 0.95;
   const blendedShoulderOffset =
-    baseShoulderOffset + (swimShoulderOffset - baseShoulderOffset) * swimCameraBlend;
+    baseShoulderOffset +
+    (swimShoulderOffset - baseShoulderOffset) * swimCameraBlend +
+    closeRangeBlend * 0.14;
 
   const interactionFrame = withInteractionMarkers(
     {
@@ -572,8 +590,24 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
       camera: {
         ...baseFrame.camera,
         rotation: cameraRig.yaw + shakeYaw,
-        pitch: clampScalar(cameraRig.pitch + swimPitchOffset + shakePitch - combatPressure * 0.012, 0.18, 0.76),
-        zoom: clampScalar(cameraRig.zoom - swimZoomOffset - combatPressure * 0.035 + cameraImpact * 0.028, 0.72, 1.65),
+        pitch: clampScalar(
+          cameraRig.pitch +
+            swimPitchOffset +
+            shakePitch -
+            combatPressure * 0.012 -
+            closeRangeBlend * 0.018,
+          0.18,
+          0.76
+        ),
+        zoom: clampScalar(
+          cameraRig.zoom -
+            swimZoomOffset -
+            combatPressure * 0.035 -
+            closeRangeBlend * 0.045 +
+            cameraImpact * 0.028,
+          0.72,
+          1.65
+        ),
         fov: clampScalar((baseFrame.camera.fov ?? 52) + combatFovKick, 50, 62),
         focusHeight: swimFocusHeight,
         followDistance: swimFollowDistance,
