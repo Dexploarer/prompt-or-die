@@ -93,3 +93,11 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/hud.test.ts ./src/contracts.test.ts ./src/live-debug.test.ts`
   - `cd apps/pod-web && bun run typecheck`
   - `cd apps/pod-web && bun run build`
+- Added shared `pod-net::protocol::ClientConfig` heartbeat and pending-action limits (`heartbeat_timeout_ms`, `max_pending_actions`) so native and web transport clients now derive failure/backpressure thresholds from one source of truth instead of browser-only runtime config.
+- Added native/web `pod-net` client-side pending-action saturation handling and heartbeat timeout enforcement, so lower-level QUIC/WebSocket clients now fail fast on silent authority and refuse runaway local action buffering.
+- Added shared RTT/jitter sampling to `pod-net` native and web clients from real `Ping/Pong` traffic, so transport-quality introspection is no longer confined to the flagship browser runtime.
+- Revalidated the shared-client transport work with:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`

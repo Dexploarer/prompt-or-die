@@ -220,6 +220,12 @@ pub struct ClientConfig {
     pub player_name: String,
     /// Connection timeout in milliseconds
     pub timeout_ms: u64,
+    /// Max milliseconds the client will tolerate without any server traffic
+    /// before treating the connection as stale.
+    pub heartbeat_timeout_ms: u64,
+    /// Max queued actions or unacknowledged predicted batches retained client-side
+    /// before new input is refused.
+    pub max_pending_actions: usize,
 }
 
 impl Default for ClientConfig {
@@ -229,6 +235,8 @@ impl Default for ClientConfig {
             server_port: 5000,
             player_name: "Player".to_string(),
             timeout_ms: 5000,
+            heartbeat_timeout_ms: 6500,
+            max_pending_actions: 32,
         }
     }
 }
@@ -396,4 +404,13 @@ mod tests {
             other => panic!("Wrong message type: {other:?}"),
         }
     }
+}
+
+#[test]
+fn test_client_config_defaults_include_heartbeat_limits() {
+    let config = ClientConfig::default();
+
+    assert_eq!(config.timeout_ms, 5000);
+    assert_eq!(config.heartbeat_timeout_ms, 6500);
+    assert_eq!(config.max_pending_actions, 32);
 }

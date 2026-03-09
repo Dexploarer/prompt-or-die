@@ -1176,5 +1176,24 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run build`
   - `git diff --check`
 
-**Last updated**: Iteration 116
-**Current focus**: Iteration 117 smoother worker-route gameplay input parity proof, tighter close-range hit feedback, and native/web client heartbeat parity beyond the flagship browser runtime
+### Iteration 117
+- [x] Extended shared `pod-net::protocol::ClientConfig` with heartbeat and pending-action limits (`heartbeat_timeout_ms`, `max_pending_actions`) so native and web clients now derive failure/backpressure thresholds from one source of truth instead of browser-only runtime config.
+- [x] Added native/web client-side pending-action saturation handling and authoritative heartbeat timeout enforcement in `pod-net`, so both QUIC and WebSocket clients now refuse runaway local input growth and fail fast on silent authority instead of drifting indefinitely.
+- [x] Added deterministic native `pod-net` coverage for action saturation and heartbeat-timeout cleanup, and revalidated the touched targets on native, SpacetimeDB-enabled, and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+### Iteration 118
+- [x] Added shared ping/pong RTT and jitter tracking in `pod-net` native and web clients, so transport-quality sampling is no longer a `pod-web`-only concern and lower-level runtime consumers can inspect real connection latency on both client implementations.
+- [x] Wired RTT/jitter updates directly into `ServerMessage::Pong` handling and added deterministic native coverage for latency/jitter smoothing.
+- [x] Revalidated the touched `pod-net` targets on native and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+**Last updated**: Iteration 118
+**Current focus**: Iteration 119 native reconnect/session recovery parity beyond the browser watchdog path, plus continued flagship traversal/combat feel work on top of the stabilized shard transport layer
