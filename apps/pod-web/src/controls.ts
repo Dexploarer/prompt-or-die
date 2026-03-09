@@ -2,12 +2,17 @@ import * as THREE from "three";
 
 import type { CameraState, NetworkEntitySnapshot, Vec2Tuple } from "./contracts";
 import { buildCameraPose } from "./frame-plan";
-import { sampleTerrainHeight } from "./landscape";
+import { sampleSurfaceHeight } from "./landscape";
 
 export interface GameplaySurface {
   tabIndex?: number;
   focus?: (options?: { preventScroll?: boolean }) => void;
   setAttribute?: (name: string, value: string) => void;
+}
+
+export interface CameraDirectionInput {
+  yaw: number;
+  pitch: number;
 }
 
 function normalizeDirection(x: number, y: number): Vec2Tuple | null {
@@ -25,11 +30,11 @@ export function cameraRelativeMovementDirection(
 ): Vec2Tuple | null {
   const activeKeys = new Set(pressedKeys);
   const forwardIntent =
-    (activeKeys.has("KeyW") || activeKeys.has("ArrowUp") ? 1 : 0) -
-    (activeKeys.has("KeyS") || activeKeys.has("ArrowDown") ? 1 : 0);
+    (activeKeys.has("KeyW") ? 1 : 0) -
+    (activeKeys.has("KeyS") ? 1 : 0);
   const strafeIntent =
-    (activeKeys.has("KeyD") || activeKeys.has("ArrowRight") ? 1 : 0) -
-    (activeKeys.has("KeyA") || activeKeys.has("ArrowLeft") ? 1 : 0);
+    (activeKeys.has("KeyD") ? 1 : 0) -
+    (activeKeys.has("KeyA") ? 1 : 0);
 
   if (forwardIntent === 0 && strafeIntent === 0) {
     return null;
@@ -44,6 +49,20 @@ export function cameraRelativeMovementDirection(
     forwardX * forwardIntent + rightX * strafeIntent,
     forwardY * forwardIntent + rightY * strafeIntent
   );
+}
+
+export function cameraDirectionInput(
+  pressedKeys: Iterable<string>
+): CameraDirectionInput {
+  const activeKeys = new Set(pressedKeys);
+  return {
+    yaw:
+      (activeKeys.has("ArrowLeft") ? 1 : 0) -
+      (activeKeys.has("ArrowRight") ? 1 : 0),
+    pitch:
+      (activeKeys.has("ArrowUp") ? 1 : 0) -
+      (activeKeys.has("ArrowDown") ? 1 : 0)
+  };
 }
 
 export function isGameplayKeyCode(code: string): boolean {
@@ -119,7 +138,7 @@ export function pickWorldGroundPoint(
 
   const terrainDelta = (distance: number): number => {
     const point = raycaster.ray.at(distance, new THREE.Vector3());
-    return point.y - sampleTerrainHeight(point.x, point.z);
+    return point.y - sampleSurfaceHeight(point.x, point.z);
   };
 
   let previousDistance = camera.near;

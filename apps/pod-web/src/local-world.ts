@@ -22,6 +22,7 @@ import type {
   DirectConnectActionState,
   DirectConnectStatus
 } from "./direct-connect";
+import { sampleLandscapeSurface } from "./landscape";
 
 const LOCAL_WORLD_URL = "local://verdant-hollow";
 const LOCAL_WORLD_NAME = "Verdant Hollow";
@@ -44,6 +45,8 @@ type LocalEntityRole =
   | "loot"
   | "companion"
   | "scenery";
+
+type LocalSurfaceMode = "ground" | "swim";
 
 type CompanionMode = "Follow" | "Guard" | "Attack";
 
@@ -69,6 +72,7 @@ interface LocalEntity {
   companionSlot: number | null;
   companionMode: CompanionMode | null;
   anchor: Vec2Tuple | null;
+  surfaceMode: LocalSurfaceMode;
 }
 
 interface CompanionRosterEntry {
@@ -1018,18 +1022,23 @@ export class PodWebLocalWorld {
 
   private integrateMovement(): void {
     for (const entity of this.state.entities) {
+      entity.surfaceMode = surfaceModeAtPosition(entity, entity.position);
       const desired = entity.desiredMove;
+      const movementScale = movementSpeedScale(entity);
       const targetVelocity: Vec2Tuple = desired
-        ? [desired[0] * entity.movementSpeed, desired[1] * entity.movementSpeed]
+        ? [
+            desired[0] * entity.movementSpeed * movementScale,
+            desired[1] * entity.movementSpeed * movementScale
+          ]
         : [0, 0];
       const acceleration =
         entity.role === "player"
-          ? entity.movementSpeed * 0.18
-          : entity.movementSpeed * 0.14;
+          ? entity.movementSpeed * movementScale * 0.18
+          : entity.movementSpeed * movementScale * 0.14;
       const deceleration =
         entity.role === "player"
-          ? entity.movementSpeed * 0.24
-          : entity.movementSpeed * 0.18;
+          ? entity.movementSpeed * movementScale * 0.24
+          : entity.movementSpeed * movementScale * 0.18;
       const velocityStep =
         desired != null
           ? Math.max(0.08, acceleration)
@@ -1045,12 +1054,21 @@ export class PodWebLocalWorld {
         entity.velocity = [0, 0];
       }
 
-      entity.position = [
-        clamp(entity.position[0] + entity.velocity[0] / 60, -WORLD_LIMIT, WORLD_LIMIT),
-        clamp(entity.position[1] + entity.velocity[1] / 60, -WORLD_LIMIT, WORLD_LIMIT)
+      const previousPosition: Vec2Tuple = [...entity.position];
+      entity.position = resolveMovementPosition(
+        entity,
+        entity.velocity,
+        this.state.entities,
+        previousPosition
+      );
+      entity.velocity = [
+        (entity.position[0] - previousPosition[0]) * 60,
+        (entity.position[1] - previousPosition[1]) * 60
       ];
+      entity.surfaceMode = surfaceModeAtPosition(entity, entity.position);
+      const resolvedSpeed = Math.hypot(entity.velocity[0], entity.velocity[1]);
 
-      if (speed > 0) {
+      if (resolvedSpeed > 0) {
         entity.rotation = rotateTowardAngle(
           entity.rotation,
           Math.atan2(entity.velocity[0], entity.velocity[1]),
@@ -1239,11 +1257,15 @@ export function renderGameToText(
     coordinateSystem: "world x east-west, y north-south",
     tick: snapshot.tick,
     player: player
-      ? {
+        ? {
           id: player.id,
           label: player.label,
           position: player.position,
           velocity: player.velocity,
+          surfaceMode: player.metadata.actorPresentation?.animationSetId?.includes("swim")
+            ? "swim"
+            : "ground",
+          animationSetId: player.metadata.actorPresentation?.animationSetId ?? null,
           health: player.health,
           maxHealth: player.maxHealth
         }
@@ -1327,9 +1349,8 @@ function createInitialState(playerName: string): LocalWorldState {
     encounterTables
   };
 
-  syncStreamingMetadataForEntity(player, draftState);
-
   for (const template of templates) {
+    template.surfaceMode = surfaceModeAtPosition(template, template.position);
     syncStreamingMetadataForEntity(template, draftState);
     templateEntities.set(template.id, template);
     const chunkKey = template.metadata.chunkKey ?? chunkKeyFromPosition(template.position);
@@ -1337,6 +1358,12 @@ function createInitialState(playerName: string): LocalWorldState {
     chunkEntityIds.push(template.id);
     templateChunkEntityIds.set(chunkKey, chunkEntityIds);
   }
+
+  const playerSpawn = resolveSafeSpawnPosition(player.position, templateEntities.values());
+  player.position = [...playerSpawn];
+  player.spawn = [...playerSpawn];
+  player.surfaceMode = surfaceModeAtPosition(player, player.position);
+  syncStreamingMetadataForEntity(player, draftState);
 
   draftState.activeChunkKeys = expandDesiredChunkKeys(
     chunkKeyFromPosition(player.position),
@@ -1828,7 +1855,8 @@ function createPlayerEntity(playerName: string): LocalEntity {
     lootItemId: null,
     companionSlot: null,
     companionMode: null,
-    anchor: null
+    anchor: null,
+    surfaceMode: "ground"
   };
 }
 
@@ -1891,7 +1919,8 @@ function createNpcEntity(id: number, label: string, position: Vec2Tuple): LocalE
     lootItemId: null,
     companionSlot: null,
     companionMode: null,
-    anchor: [...position]
+    anchor: [...position],
+    surfaceMode: "ground"
   };
 }
 
@@ -1954,7 +1983,8 @@ function createWildCreatureEntity(
     lootItemId: null,
     companionSlot: null,
     companionMode: null,
-    anchor: [...position]
+    anchor: [...position],
+    surfaceMode: "ground"
   };
 }
 
@@ -2010,7 +2040,8 @@ function createResourceEntity(
     lootItemId: itemId,
     companionSlot: null,
     companionMode: null,
-    anchor: [...position]
+    anchor: [...position],
+    surfaceMode: "ground"
   };
 }
 
@@ -2065,7 +2096,8 @@ function createLootEntity(
     lootItemId: itemId,
     companionSlot: null,
     companionMode: null,
-    anchor: [...position]
+    anchor: [...position],
+    surfaceMode: "ground"
   };
 }
 
@@ -2125,7 +2157,8 @@ function createCompanionEntity(
     lootItemId: null,
     companionSlot: slot,
     companionMode: "Follow",
-    anchor: null
+    anchor: null,
+    surfaceMode: "ground"
   };
 }
 
@@ -2193,7 +2226,8 @@ function createSceneryEntity(
     lootItemId: null,
     companionSlot: null,
     companionMode: null,
-    anchor: [...position]
+    anchor: [...position],
+    surfaceMode: "ground"
   };
 }
 
@@ -2365,36 +2399,32 @@ function cloneEntity(entity: LocalEntity): LocalEntity {
     ...entity,
     position: [...entity.position],
     velocity: [...entity.velocity],
-    metadata: {
-      ...entity.metadata,
-      questGraphIds: entity.metadata.questGraphIds.slice(),
-      faction: entity.metadata.faction ? { ...entity.metadata.faction } : null,
-      questAnchor: entity.metadata.questAnchor
-        ? {
-            ...entity.metadata.questAnchor,
-            questIds: entity.metadata.questAnchor.questIds.slice(),
-            stageTags: entity.metadata.questAnchor.stageTags.slice()
-          }
-        : null,
-      encounterProfile: entity.metadata.encounterProfile
-        ? { ...entity.metadata.encounterProfile }
-        : null,
-      spawnProfile: entity.metadata.spawnProfile ? { ...entity.metadata.spawnProfile } : null,
-      atmosphere: entity.metadata.atmosphere ? { ...entity.metadata.atmosphere } : null,
-      atmosphereVolume: entity.metadata.atmosphereVolume
-        ? { ...entity.metadata.atmosphereVolume }
-        : null,
-      actorPresentation: entity.metadata.actorPresentation
-        ? { ...entity.metadata.actorPresentation }
-        : null,
-      combatPresentation: entity.metadata.combatPresentation
-        ? { ...entity.metadata.combatPresentation }
-        : null,
-      interaction: { ...entity.metadata.interaction }
-    },
+    metadata: cloneMetadata(entity.metadata),
     spawn: [...entity.spawn],
     desiredMove: entity.desiredMove ? [...entity.desiredMove] : null,
     anchor: entity.anchor ? [...entity.anchor] : null
+  };
+}
+
+function cloneMetadata(metadata: NetworkEntityMetadataSnapshot): NetworkEntityMetadataSnapshot {
+  return {
+    ...metadata,
+    questGraphIds: metadata.questGraphIds.slice(),
+    faction: metadata.faction ? { ...metadata.faction } : null,
+    questAnchor: metadata.questAnchor
+      ? {
+          ...metadata.questAnchor,
+          questIds: metadata.questAnchor.questIds.slice(),
+          stageTags: metadata.questAnchor.stageTags.slice()
+        }
+      : null,
+    encounterProfile: metadata.encounterProfile ? { ...metadata.encounterProfile } : null,
+    spawnProfile: metadata.spawnProfile ? { ...metadata.spawnProfile } : null,
+    atmosphere: metadata.atmosphere ? { ...metadata.atmosphere } : null,
+    atmosphereVolume: metadata.atmosphereVolume ? { ...metadata.atmosphereVolume } : null,
+    actorPresentation: metadata.actorPresentation ? { ...metadata.actorPresentation } : null,
+    combatPresentation: metadata.combatPresentation ? { ...metadata.combatPresentation } : null,
+    interaction: { ...metadata.interaction }
   };
 }
 
@@ -2739,6 +2769,11 @@ function canRespawnTemplate(
 }
 
 function toSnapshot(entity: LocalEntity): NetworkEntitySnapshot {
+  const metadata = cloneMetadata(entity.metadata);
+  if (metadata.actorPresentation) {
+    metadata.actorPresentation.animationSetId = presentationAnimationSetId(entity);
+  }
+
   return {
     id: entity.id,
     position: entity.position,
@@ -2748,8 +2783,32 @@ function toSnapshot(entity: LocalEntity): NetworkEntitySnapshot {
     maxHealth: entity.maxHealth,
     movementSpeed: entity.movementSpeed,
     label: entity.label,
-    metadata: entity.metadata
+    metadata
   };
+}
+
+function presentationAnimationSetId(entity: LocalEntity): string {
+  const base =
+    entity.metadata.actorPresentation?.animationSetId?.trim() ?? "static-prop";
+  if (entity.surfaceMode !== "swim") {
+    return base;
+  }
+
+  if (base.includes("companion") || base.includes("hover")) {
+    return "companion-swim";
+  }
+  if (base.includes("beast")) {
+    return "beast-swim";
+  }
+  if (
+    base.includes("humanoid") ||
+    base.includes("hero") ||
+    base.includes("explorer") ||
+    base.includes("merchant")
+  ) {
+    return "humanoid-swim";
+  }
+  return "swim";
 }
 
 function requireEntity(state: LocalWorldState, id: number): LocalEntity {
@@ -2770,6 +2829,181 @@ function distanceBetween(a: Vec2Tuple, b: Vec2Tuple): number {
 
 function moveToward(a: Vec2Tuple, b: Vec2Tuple): Vec2Tuple | null {
   return normalize([b[0] - a[0], b[1] - a[1]]);
+}
+
+function entityCanSwim(entity: LocalEntity): boolean {
+  return (
+    entity.role === "player" ||
+    entity.role === "npc" ||
+    entity.role === "wild" ||
+    entity.role === "companion"
+  );
+}
+
+function surfaceModeAtPosition(
+  entity: LocalEntity,
+  position: Vec2Tuple
+): LocalSurfaceMode {
+  if (!entityCanSwim(entity)) {
+    return "ground";
+  }
+
+  return sampleLandscapeSurface(position[0], position[1]).isSwimmable
+    ? "swim"
+    : "ground";
+}
+
+function movementSpeedScale(entity: LocalEntity): number {
+  if (entity.surfaceMode !== "swim") {
+    return 1;
+  }
+
+  switch (entity.role) {
+    case "player":
+      return 0.64;
+    case "companion":
+      return 0.72;
+    case "wild":
+      return 0.78;
+    case "npc":
+      return 0.68;
+    default:
+      return 1;
+  }
+}
+
+function collisionRadius(entity: LocalEntity): number {
+  const footprint = entity.metadata.actorPresentation?.footprintRadius ?? 1;
+  if (
+    entity.role === "player" ||
+    entity.role === "npc" ||
+    entity.role === "wild" ||
+    entity.role === "companion"
+  ) {
+    return Math.max(0.45, footprint * 0.48);
+  }
+
+  return Math.max(0.8, footprint * 0.72);
+}
+
+function isSolidObstacle(entity: LocalEntity): boolean {
+  return entity.role === "scenery" || entity.role === "resource" || entity.role === "loot";
+}
+
+function resolveMovementPosition(
+  entity: LocalEntity,
+  velocity: Vec2Tuple,
+  entities: LocalEntity[],
+  start: Vec2Tuple
+): Vec2Tuple {
+  const deltaX = velocity[0] / 60;
+  const deltaY = velocity[1] / 60;
+
+  let candidate: Vec2Tuple = [
+    clamp(start[0] + deltaX, -WORLD_LIMIT, WORLD_LIMIT),
+    start[1]
+  ];
+  candidate = resolveSolidOverlap(entity, start, candidate, entities);
+  candidate = [
+    candidate[0],
+    clamp(candidate[1] + deltaY, -WORLD_LIMIT, WORLD_LIMIT)
+  ];
+  candidate = resolveSolidOverlap(entity, start, candidate, entities);
+  return candidate;
+}
+
+function resolveSolidOverlap(
+  entity: LocalEntity,
+  start: Vec2Tuple,
+  candidate: Vec2Tuple,
+  entities: LocalEntity[]
+): Vec2Tuple {
+  let resolved: Vec2Tuple = [...candidate];
+  const moverRadius = collisionRadius(entity);
+
+  for (let iteration = 0; iteration < 2; iteration += 1) {
+    for (const obstacle of entities) {
+      if (obstacle.id === entity.id || !isSolidObstacle(obstacle)) {
+        continue;
+      }
+
+      const radius = moverRadius + collisionRadius(obstacle);
+      const dx = resolved[0] - obstacle.position[0];
+      const dy = resolved[1] - obstacle.position[1];
+      const distance = Math.hypot(dx, dy);
+
+      if (distance >= radius) {
+        continue;
+      }
+
+      let nx = dx;
+      let ny = dy;
+      if (distance <= 0.0001) {
+        nx = candidate[0] - start[0];
+        ny = candidate[1] - start[1];
+        const fallbackLength = Math.hypot(nx, ny);
+        if (fallbackLength <= 0.0001) {
+          nx = obstacle.id % 2 === 0 ? 1 : -1;
+          ny = 0;
+        } else {
+          nx /= fallbackLength;
+          ny /= fallbackLength;
+        }
+      } else {
+        nx /= distance;
+        ny /= distance;
+      }
+
+      resolved = [
+        obstacle.position[0] + nx * radius,
+        obstacle.position[1] + ny * radius
+      ];
+    }
+  }
+
+  return [
+    clamp(resolved[0], -WORLD_LIMIT, WORLD_LIMIT),
+    clamp(resolved[1], -WORLD_LIMIT, WORLD_LIMIT)
+  ];
+}
+
+function resolveSafeSpawnPosition(
+  preferred: Vec2Tuple,
+  templateEntities: Iterable<LocalEntity>
+): Vec2Tuple {
+  const obstacles = Array.from(templateEntities).filter(isSolidObstacle);
+  const candidateOffsets: Vec2Tuple[] = [
+    [0, 0],
+    [-2.4, 0],
+    [2.4, 0],
+    [0, 2.4],
+    [0, -2.4],
+    [-3.4, 2.2],
+    [3.4, 2.2],
+    [-3.4, -2.2],
+    [3.4, -2.2]
+  ];
+
+  for (const offset of candidateOffsets) {
+    const candidate: Vec2Tuple = [
+      preferred[0] + offset[0],
+      preferred[1] + offset[1]
+    ];
+    const surface = sampleLandscapeSurface(candidate[0], candidate[1]);
+    if (surface.hasWaterSurface) {
+      continue;
+    }
+
+    const blocked = obstacles.some((obstacle) =>
+      distanceBetween(candidate, obstacle.position) <
+      collisionRadius(obstacle) + 0.9
+    );
+    if (!blocked) {
+      return candidate;
+    }
+  }
+
+  return preferred;
 }
 
 function normalize(vector: Vec2Tuple): Vec2Tuple | null {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { CameraState, NetworkEntitySnapshot } from "./contracts";
 import {
+  cameraDirectionInput,
   cameraRelativeMovementDirection,
   focusGameplaySurface,
   isGameplayKeyCode,
@@ -87,10 +88,20 @@ describe("pod-web controls", () => {
     expect(cameraRelativeMovementDirection(["KeyW"], 0)).toEqual([0, -1]);
     expect(cameraRelativeMovementDirection(["KeyD"], 0)?.[0]).toBeCloseTo(1, 6);
     expect(cameraRelativeMovementDirection(["KeyD"], 0)?.[1]).toBeCloseTo(0, 6);
+    expect(cameraRelativeMovementDirection(["ArrowUp"], 0)).toBeNull();
 
     const rotatedForward = cameraRelativeMovementDirection(["KeyW"], Math.PI / 2);
     expect(rotatedForward?.[0]).toBeCloseTo(-1, 6);
     expect(rotatedForward?.[1]).toBeCloseTo(0, 6);
+  });
+
+  test("maps arrow keys to camera orbit input", () => {
+    expect(cameraDirectionInput(["ArrowLeft"])).toEqual({ yaw: 1, pitch: 0 });
+    expect(cameraDirectionInput(["ArrowRight", "ArrowUp"])).toEqual({
+      yaw: -1,
+      pitch: 1
+    });
+    expect(cameraDirectionInput(["KeyW"])).toEqual({ yaw: 0, pitch: 0 });
   });
 
   test("identifies gameplay hotkeys and movement keys", () => {

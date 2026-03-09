@@ -8,7 +8,7 @@ import type {
   ThreeJsSpriteBatch,
   ThreeJsWebGpuFrame
 } from "./contracts";
-import { sampleTerrainHeight } from "./landscape";
+import { sampleSurfaceHeight } from "./landscape";
 import type { PodThreeQualityProfile } from "./quality";
 
 const DEFAULT_UP = new Vector3(0, 1, 0);
@@ -100,7 +100,7 @@ export function buildCameraPose(
   const maxDistance = options.maxDistance ?? 26;
   const distance = clamp(followDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
   const focusHeight = camera.focusHeight ?? options.height ?? 2.2;
-  const terrainHeight = sampleTerrainHeight(camera.x, camera.y);
+  const terrainHeight = sampleSurfaceHeight(camera.x, camera.y);
   const leadX = camera.leadX ?? 0;
   const leadY = camera.leadY ?? 0;
   const target = new Vector3(camera.x + leadX, terrainHeight + focusHeight, camera.y + leadY);
@@ -123,7 +123,7 @@ export function buildCameraPose(
     position: position.toArray(),
     target: target.toArray(),
     quaternion,
-    fov: options.fov ?? 52,
+    fov: camera.fov ?? options.fov ?? 52,
     near: options.near ?? 0.1,
     far: options.far ?? 1024
   };
@@ -138,7 +138,7 @@ function resolveCameraCollision(target: Vector3, desiredPosition: Vector3): Vect
   for (let step = 1; step <= sweepSteps; step += 1) {
     const t = step / sweepSteps;
     const sample = target.clone().lerp(desiredPosition, t);
-    const terrainHeight = sampleTerrainHeight(sample.x, sample.z) + cameraClearance;
+    const terrainHeight = sampleSurfaceHeight(sample.x, sample.z) + cameraClearance;
     if (sample.y < terrainHeight) {
       obstructionT = Math.max(0.12, (step - 1) / sweepSteps);
       break;
@@ -148,7 +148,7 @@ function resolveCameraCollision(target: Vector3, desiredPosition: Vector3): Vect
   safePosition.lerpVectors(target, desiredPosition, obstructionT);
   safePosition.y = Math.max(
     safePosition.y,
-    sampleTerrainHeight(safePosition.x, safePosition.z) + cameraClearance
+    sampleSurfaceHeight(safePosition.x, safePosition.z) + cameraClearance
   );
 
   return safePosition;
@@ -388,6 +388,24 @@ export function sampleAnimatedInstanceTransform(
     const ringScale = 1 + ringPulse * 0.045;
     scaleX *= ringScale;
     scaleY *= ringScale;
+  } else if (animationSetId.includes("swim")) {
+    const stroke = Math.sin(elapsedSeconds * (1.6 + motion * 2.8) + phase);
+    const glide = Math.cos(elapsedSeconds * (1.2 + motion * 1.8) + phase * 0.7);
+    yOffset += 0.06 + hoverWave * 0.05 + Math.max(motion, 0.18) * 0.04;
+    scaleX *= 1 + Math.abs(stroke) * 0.02;
+    scaleY *= 0.93 - Math.max(motion, 0.2) * 0.03;
+    scaleZ *= 1 + Math.abs(glide) * 0.025;
+    pitchOffset += 0.09 + Math.abs(stroke) * 0.04;
+    yawOffset += glide * 0.025;
+    rollOffset += stroke * 0.045;
+    if (animationSetId.includes("companion")) {
+      yOffset += 0.05;
+      scaleY *= 0.97;
+    } else if (animationSetId.includes("beast")) {
+      scaleX *= 1.04;
+      scaleZ *= 1.04;
+      pitchOffset += 0.02;
+    }
   } else if (animationSetId.includes("companion") || animationSetId.includes("hover")) {
     const driftWave = Math.sin(elapsedSeconds * 1.15 + phase * 0.6);
     yOffset += 0.18 + hoverWave * 0.14 + driftWave * 0.03;

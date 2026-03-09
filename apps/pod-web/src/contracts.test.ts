@@ -24,7 +24,7 @@ import {
   withInteractionMarkers,
   withWorldEventMarkers
 } from "./contracts";
-import { sampleTerrainHeight } from "./landscape";
+import { sampleLandscapeSurface, sampleTerrainHeight } from "./landscape";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -861,6 +861,74 @@ describe("TOON contract parsing", () => {
     );
   });
 
+  test("anchors swimmers to the water surface while static props stay on the terrain bed", () => {
+    const lakeSurface = sampleLandscapeSurface(18, -14);
+    const snapshot: NetworkWorldSnapshot = {
+      tick: 21,
+      population: populationState(21),
+      entities: [
+        {
+          id: 1,
+          position: [18, -14],
+          velocity: [2.4, 0.2],
+          rotation: 0,
+          health: 24,
+          maxHealth: 24,
+          movementSpeed: 4.8,
+          label: "WebPlayer",
+          metadata: typedEntityMetadata("Player", {
+            actorPresentation: {
+              profileId: "hero-swim",
+              meshAssetId: "adventurer-hero",
+              materialPaletteId: "verdant-hero",
+              animationSetId: "humanoid-swim",
+              scaleMultiplier: 1,
+              footprintRadius: 1.1,
+              selectionRingScale: 3,
+              auraColor: [0, 0, 0, 0]
+            }
+          })
+        },
+        {
+          id: 7,
+          position: [18, -14],
+          velocity: [0, 0],
+          rotation: 0,
+          label: "Lake Crate",
+          metadata: typedEntityMetadata("LootContainer", {
+            actorPresentation: {
+              profileId: "crate",
+              meshAssetId: "supply-crate",
+              materialPaletteId: "bronze-cache",
+              animationSetId: "static-prop",
+              scaleMultiplier: 1,
+              footprintRadius: 1,
+              selectionRingScale: 2,
+              auraColor: [0, 0, 0, 0]
+            }
+          })
+        }
+      ]
+    };
+
+    const frame = buildAuthoritativeWorldFrame(snapshot, {
+      controlledEntity: 1,
+      viewportWidth: 1280,
+      viewportHeight: 720
+    });
+
+    const heroInstance = frame.meshBatches
+      .flatMap((batch) => batch.instances)
+      .find((instance) => instance.sourceEntity === 1);
+    const crateInstance = frame.meshBatches
+      .flatMap((batch) => batch.instances)
+      .find((instance) => instance.sourceEntity === 7);
+
+    expect(lakeSurface.isSwimmable).toBe(true);
+    expect(heroInstance?.animationSetId).toBe("humanoid-swim");
+    expect(heroInstance?.position[1]).toBeGreaterThan((crateInstance?.position[1] ?? -999) + 8);
+  });
+
   test("adds point-click and target selection markers without mutating the base frame", () => {
     const target = {
       id: 12,
@@ -872,6 +940,16 @@ describe("TOON contract parsing", () => {
       movementSpeed: 4,
       label: "Verdant Lynx",
       metadata: typedEntityMetadata("WildCreature", {
+        interaction: {
+          canInspect: true,
+          canInteract: false,
+          canAttack: true,
+          canGather: false,
+          canLoot: false,
+          canCapture: false,
+          canCommandCompanion: false,
+          canChat: false
+        },
         actorPresentation: {
           profileId: "lynx",
           meshAssetId: "rift-beast",
@@ -950,7 +1028,7 @@ describe("TOON contract parsing", () => {
     });
 
     expect(baseFrame.spriteBatches).toHaveLength(0);
-    expect(decorated.spriteBatches).toHaveLength(3);
+    expect(decorated.spriteBatches).toHaveLength(4);
     expect(
       decorated.spriteBatches.some((batch) =>
         batch.instances.some((instance) => instance.animationSetId === "destination-ring")
@@ -968,6 +1046,55 @@ describe("TOON contract parsing", () => {
         )
       )
     ).toBe(true);
+    const tetherBatch = decorated.spriteBatches.find(
+      (batch) =>
+        batch.texture === "danger-ring" &&
+        batch.instances.length > 1 &&
+        batch.instances.every((instance) => instance.sourceEntity === 12)
+    );
+    expect(tetherBatch?.instances.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("camera state responds to controlled traversal speed", () => {
+    const snapshot: NetworkWorldSnapshot = {
+      tick: 44,
+      population: populationState(44),
+      entities: [
+        {
+          id: 1,
+          position: [4, 6],
+          velocity: [4.8, 1.2],
+          rotation: 0.28,
+          health: 30,
+          maxHealth: 30,
+          movementSpeed: 4.8,
+          label: "WebPlayer",
+          metadata: typedEntityMetadata("Player", {})
+        },
+        {
+          id: 12,
+          position: [9, 10],
+          velocity: [0, 0],
+          rotation: 0,
+          health: 16,
+          maxHealth: 20,
+          movementSpeed: 3.2,
+          label: "Rift Beast",
+          metadata: typedEntityMetadata("WildCreature", {})
+        }
+      ]
+    };
+
+    const frame = buildAuthoritativeWorldFrame(snapshot, {
+      controlledEntity: 1,
+      viewportWidth: 1440,
+      viewportHeight: 900
+    });
+
+    expect(frame.camera.fov).toBeGreaterThan(52);
+    expect(frame.camera.followDistance).toBeGreaterThan(13.5);
+    expect(frame.camera.leadX).toBeGreaterThan(1);
+    expect(frame.camera.leadY).toBeGreaterThan(0.2);
   });
 
   test("adds recent world-event markers without mutating the base frame", () => {

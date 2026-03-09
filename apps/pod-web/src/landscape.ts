@@ -28,6 +28,16 @@ export interface TimeLapseEnvironmentState {
   environment: LandscapeEnvironment;
 }
 
+export interface LandscapeSurfaceSample {
+  terrainHeight: number;
+  waterHeight: number | null;
+  surfaceHeight: number;
+  waterDepth: number;
+  lakeMask: number;
+  hasWaterSurface: boolean;
+  isSwimmable: boolean;
+}
+
 export const LANDSCAPE_PROFILE_ID = "cliff-lagoon-heightfield";
 export const WATER_PROFILE_ID = "animated-lagoon";
 export const LANDSCAPE_WORLD_SIZE = 260;
@@ -164,6 +174,31 @@ export function sampleTerrainPoint(
   clearance = 0
 ): LandscapeVec3Tuple {
   return [x, sampleTerrainHeight(x, z) + clearance, z];
+}
+
+export function sampleLandscapeSurface(
+  x: number,
+  z: number
+): LandscapeSurfaceSample {
+  const terrainHeight = sampleTerrainHeight(x, z);
+  const lakeMask = sampleLakeMask(x, z);
+  const waterDepth = Math.max(0, WATER_LEVEL - terrainHeight);
+  const hasWaterSurface = lakeMask >= 0.055 && waterDepth >= 0.18;
+  const waterHeight = hasWaterSurface ? WATER_LEVEL : null;
+
+  return {
+    terrainHeight,
+    waterHeight,
+    surfaceHeight: waterHeight ?? terrainHeight,
+    waterDepth: waterHeight == null ? 0 : waterDepth,
+    lakeMask,
+    hasWaterSurface,
+    isSwimmable: hasWaterSurface && waterDepth >= 0.95
+  };
+}
+
+export function sampleSurfaceHeight(x: number, z: number): number {
+  return sampleLandscapeSurface(x, z).surfaceHeight;
 }
 
 export function describeEnvironmentPreset(
