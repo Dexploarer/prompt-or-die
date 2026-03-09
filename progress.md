@@ -107,3 +107,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Extended shard transport observability again with explicit recovery delivery metrics (`recovery_snapshots_sent`, `recovery_delivery_failures`), so full recovery pressure is now visible as first-class transport telemetry rather than inferred from generic full-snapshot counts.
 - Updated the direct-connect server’s authoritative recovery path to count successful and failed recovery snapshot deliveries, then added deterministic `pod-net` coverage for both cases.
 - Surfaced those recovery metrics in the browser/editor shard summaries, keeping reconnect, recovery, timeout, and queue-pressure diagnosis aligned across all debug consumers.
+- Extended the shared `pod-net` welcome contract with `acknowledged_action_tick`, so resumed sessions can carry the server’s last processed action boundary through the reconnect handshake.
+- Updated native and web `pod-net` clients to preserve prediction history across resumed welcomes and replay only unacknowledged action batches instead of dropping local prediction state on session recovery.
+- Propagated the replay-aware welcome change through the direct-connect server, SpacetimeDB adapter, and `pod-web` direct-connect parser/runtime, then revalidated native, SpacetimeDB-enabled, wasm-facing, and browser parser targets.

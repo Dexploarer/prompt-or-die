@@ -715,6 +715,7 @@ export type DirectConnectServerMessage =
       reconnectToken: string;
       tick: number;
       controlledEntity: number | null;
+      acknowledgedActionTick: number | null;
       authoritativeDigest: number;
       snapshot: NetworkWorldSnapshot;
     }
@@ -2096,6 +2097,7 @@ export function parseDirectConnectServerMessage(
         reconnectToken: welcome.reconnect_token,
         tick: welcome.tick,
         controlledEntity: optionalNumber(welcome.controlled_entity) ?? null,
+        acknowledgedActionTick: optionalNumber(welcome.acknowledged_action_tick) ?? null,
         authoritativeDigest: welcome.authoritative_digest,
         snapshot
       };

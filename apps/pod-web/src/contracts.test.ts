@@ -461,6 +461,7 @@ describe("TOON contract parsing", () => {
           reconnect_token: "reconnect-1",
           tick: 12,
           controlled_entity: 44,
+          acknowledged_action_tick: 11,
           authoritative_digest: 991,
           snapshot: {
             tick: 12,
@@ -561,6 +562,11 @@ describe("TOON contract parsing", () => {
     if (delta.kind !== "stateDelta") {
       throw new Error("expected delta");
     }
+    expect(welcome.kind).toBe("welcome");
+    if (welcome.kind !== "welcome") {
+      throw new Error("expected welcome");
+    }
+    expect(welcome.acknowledgedActionTick).toBe(11);
     expect(delta.delta.updated[0]?.position).toEqual([14, 19]);
     expect(delta.acknowledgedActionTick).toBe(12);
     expect(delta.delta.updated[0]?.metadata.teamId).toBe(2);
@@ -1497,6 +1503,7 @@ describe("TOON contract parsing", () => {
           reconnect_token: "resume-1",
           tick: 24,
           controlled_entity: 1,
+          acknowledged_action_tick: 23,
           authoritative_digest: 77,
           snapshot: {
             tick: 24,
