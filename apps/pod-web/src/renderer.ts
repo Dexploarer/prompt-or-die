@@ -14,11 +14,13 @@ import {
   buildCameraPose,
   buildFramePlan,
   composeAnimatedInstanceMatrix,
+  sampleAnimatedInstanceTransform,
   planningOptionsFromQuality,
   type PodThreeCameraRigOptions,
   type PlannedMeshBatch,
   type PlannedSpriteBatch
 } from "./frame-plan";
+import { meshGroundAnchorHeight } from "./mesh-bounds";
 import {
   legacyFrameToThreeJsFrame,
   type NetworkGameEvent,
@@ -69,6 +71,13 @@ interface InstancedEntry {
   capacity: number;
   mesh: THREE.InstancedMesh;
   material: THREE.Material;
+}
+
+interface SmoothedInstanceTransform {
+  position: THREE.Vector3;
+  rotation: THREE.Quaternion;
+  scale: THREE.Vector3;
+  updatedAt: number;
 }
 
 const INLINE_TSL_FN_WARNING =
@@ -491,6 +500,7 @@ export class PodThreeWorldRenderer {
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
   private readonly entityPulseUntilMs = new Map<number, number>();
+  private readonly smoothedInstanceTransforms = new Map<string, SmoothedInstanceTransform>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -988,6 +998,7 @@ export class PodThreeWorldRenderer {
 
   private async syncMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
+    const activeTransformKeys = new Set<string>();
     const now =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
@@ -1035,12 +1046,17 @@ export class PodThreeWorldRenderer {
         if (!instance) {
           continue;
         }
+        const transformKey = `${planned.key}:mesh:${instance.sourceEntity ?? index}`;
+        activeTransformKeys.add(transformKey);
         entry.mesh.setMatrixAt(
           index,
-          composeAnimatedInstanceMatrix(
+          composeSmoothedInstanceMatrix(
+            this.smoothedInstanceTransforms,
+            transformKey,
             instance,
             elapsedSeconds,
-            pulseStrengthForEntity(this.entityPulseUntilMs, instance.sourceEntity, now)
+            pulseStrengthForEntity(this.entityPulseUntilMs, instance.sourceEntity, now),
+            now
           )
         );
       }
@@ -1049,10 +1065,12 @@ export class PodThreeWorldRenderer {
     }
 
     cleanupUnusedEntries(this.scene, this.meshEntries, activeKeys);
+    pruneInactiveTransforms(this.smoothedInstanceTransforms, activeTransformKeys, now);
   }
 
   private async syncSpriteBatches(batches: PlannedSpriteBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
+    const activeTransformKeys = new Set<string>();
     const now =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
@@ -1093,12 +1111,17 @@ export class PodThreeWorldRenderer {
         if (!instance) {
           continue;
         }
+        const transformKey = `${planned.key}:sprite:${instance.sourceEntity ?? index}`;
+        activeTransformKeys.add(transformKey);
         entry.mesh.setMatrixAt(
           index,
-          composeAnimatedInstanceMatrix(
+          composeSmoothedInstanceMatrix(
+            this.smoothedInstanceTransforms,
+            transformKey,
             instance,
             elapsedSeconds,
             pulseStrengthForEntity(this.entityPulseUntilMs, instance.sourceEntity, now),
+            now,
             planned.batch.billboard ? this.camera.quaternion : undefined
           )
         );
@@ -1108,6 +1131,7 @@ export class PodThreeWorldRenderer {
     }
 
     cleanupUnusedEntries(this.scene, this.spriteEntries, activeKeys);
+    pruneInactiveTransforms(this.smoothedInstanceTransforms, activeTransformKeys, now);
   }
 
   private async syncAmbientMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
@@ -1495,7 +1519,6 @@ interface AmbientChunkArchetype {
   receiveShadows: boolean;
   renderOrder: number;
   baseScale: [number, number, number];
-  halfHeight: number;
   densities: Record<PodThreeQualityPreset, number>;
   lakeMaskMax: number;
   minSlope: number;
@@ -1519,7 +1542,6 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     receiveShadows: true,
     renderOrder: 4,
     baseScale: [1.9, 2.5, 1.9],
-    halfHeight: 1.7,
     densities: {
       ultra: 4,
       high: 3,
@@ -1545,7 +1567,6 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     receiveShadows: true,
     renderOrder: 5,
     baseScale: [1.2, 1, 1.15],
-    halfHeight: 1,
     densities: {
       ultra: 3,
       high: 2,
@@ -1571,7 +1592,6 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     receiveShadows: true,
     renderOrder: 5,
     baseScale: [0.82, 1.25, 0.82],
-    halfHeight: 2.6,
     densities: {
       ultra: 2,
       high: 2,
@@ -1598,7 +1618,6 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     receiveShadows: true,
     renderOrder: 6,
     baseScale: [1.05, 1.55, 1.05],
-    halfHeight: 2.4,
     densities: {
       ultra: 1,
       high: 1,
@@ -1786,11 +1805,12 @@ function sampleAmbientChunkInstances(
         archetype.baseScale[1] * scaleVariance,
         archetype.baseScale[2] * scaleVariance
       ];
+      const anchorHeight = meshGroundAnchorHeight(archetype.mesh, scale[1]);
 
       instances.push({
         archetype,
         instance: {
-          position: [x, height + archetype.halfHeight * scale[1], z],
+          position: [x, height + anchorHeight, z],
           rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
           scale,
           animationSetId: "static-prop"
@@ -1915,6 +1935,64 @@ function ensureInstancedEntry(
     mesh,
     material
   };
+}
+
+function composeSmoothedInstanceMatrix(
+  transforms: Map<string, SmoothedInstanceTransform>,
+  key: string,
+  instance: Parameters<typeof sampleAnimatedInstanceTransform>[0],
+  elapsedSeconds: number,
+  pulse: number,
+  now: number,
+  rotationOverride?: THREE.Quaternion
+): THREE.Matrix4 {
+  const sampled = sampleAnimatedInstanceTransform(instance, elapsedSeconds, pulse);
+  const targetPosition = new THREE.Vector3(...sampled.position);
+  const targetRotation = rotationOverride ?? new THREE.Quaternion(...sampled.rotation);
+  const targetScale = new THREE.Vector3(...sampled.scale);
+  const previous = transforms.get(key);
+
+  if (
+    !previous ||
+    now - previous.updatedAt > 260 ||
+    previous.position.distanceToSquared(targetPosition) > 64
+  ) {
+    transforms.set(key, {
+      position: targetPosition.clone(),
+      rotation: targetRotation.clone(),
+      scale: targetScale.clone(),
+      updatedAt: now
+    });
+  } else {
+    const deltaSeconds = clamp((now - previous.updatedAt) / 1000, 1 / 240, 0.05);
+    const alpha = 1 - Math.exp(-deltaSeconds * 22);
+    previous.position.lerp(targetPosition, alpha);
+    previous.rotation.slerp(targetRotation, alpha);
+    previous.scale.lerp(targetScale, alpha);
+    previous.updatedAt = now;
+  }
+
+  const resolved = transforms.get(key);
+  const matrix = new THREE.Matrix4();
+  matrix.compose(
+    resolved?.position ?? targetPosition,
+    resolved?.rotation ?? targetRotation,
+    resolved?.scale ?? targetScale
+  );
+  return matrix;
+}
+
+function pruneInactiveTransforms(
+  transforms: Map<string, SmoothedInstanceTransform>,
+  activeKeys: Set<string>,
+  now: number
+): void {
+  for (const [key, transform] of transforms) {
+    if (activeKeys.has(key) || now - transform.updatedAt <= 360) {
+      continue;
+    }
+    transforms.delete(key);
+  }
 }
 
 function cleanupUnusedEntries(

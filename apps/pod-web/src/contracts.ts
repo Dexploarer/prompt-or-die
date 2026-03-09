@@ -1,6 +1,7 @@
 import { decode as decodeToon } from "@toon-format/toon";
 
 import { sampleLandscapeSurface, sampleSurfaceHeight } from "./landscape";
+import { meshGroundAnchorHeight } from "./mesh-bounds";
 
 export type Vec3Tuple = [number, number, number];
 export type Vec4Tuple = [number, number, number, number];
@@ -2770,31 +2771,6 @@ function meshBatchKey(profile: EntityRenderProfile): string {
   ].join("|");
 }
 
-function meshHalfHeight(mesh: string): number {
-  switch (mesh) {
-    case "adventurer-avatar":
-      return 1.1;
-    case "adventurer-hero":
-      return 1.205;
-    case "basalt-column":
-      return 1.6;
-    case "canopy-tree":
-      return 1.2;
-    case "glass-spire":
-      return 1.5;
-    case "rift-beast":
-      return 1.1;
-    case "spirit-companion":
-      return 0.95;
-    case "supply-crate":
-      return 0.55;
-    case "weathered-boulder":
-      return 1.0;
-    default:
-      return 0.5;
-  }
-}
-
 export function buildAuthoritativeWorldFrame(
   snapshot: NetworkWorldSnapshot,
   options: AuthoritativeWorldFrameOptions = {}
@@ -2850,10 +2826,10 @@ export function buildAuthoritativeWorldFrame(
     const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
     const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
     const groundHeight = entityAnchorHeight(entity);
-    const halfHeight = meshHalfHeight(profile.mesh) * profile.scale[1];
+    const anchorHeight = meshGroundAnchorHeight(profile.mesh, profile.scale[1]);
     const position: Vec3Tuple = [
       worldX,
-      groundHeight + halfHeight + profile.groundOffset,
+      groundHeight + anchorHeight + profile.groundOffset,
       worldZ
     ];
     const instance: ThreeJsInstance = {

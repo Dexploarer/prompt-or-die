@@ -25,6 +25,7 @@ import {
   withWorldEventMarkers
 } from "./contracts";
 import { sampleLandscapeSurface, sampleTerrainHeight } from "./landscape";
+import { meshGroundAnchorHeight } from "./mesh-bounds";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -832,7 +833,9 @@ describe("TOON contract parsing", () => {
     expect(heroInstance?.motionSpeed).toBeGreaterThan(0.3);
     expect(heroInstance?.controlled).toBe(true);
     expect(heroInstance?.position[1]).toBeCloseTo(
-      sampleTerrainHeight(8, 10) + 1.205 * (2.0 * 1.15) + 0.1,
+      sampleTerrainHeight(8, 10) +
+        meshGroundAnchorHeight("adventurer-hero", 2.0 * 1.15) +
+        0.1,
       5
     );
     const selectionRing = frame.spriteBatches.find(
@@ -856,7 +859,7 @@ describe("TOON contract parsing", () => {
       .flatMap((batch) => batch.instances)
       .find((instance) => instance.sourceEntity === 9);
     expect(beastInstance?.position[1]).toBeCloseTo(
-      sampleTerrainHeight(12, 10) + 1.1 * 1.9 + 0.08,
+      sampleTerrainHeight(12, 10) + meshGroundAnchorHeight("rift-beast", 1.9) + 0.08,
       5
     );
   });

@@ -8,6 +8,7 @@ import {
   sampleTimeLapseEnvironment,
   WATER_LEVEL
 } from "./landscape";
+import { meshGroundAnchorHeight } from "./mesh-bounds";
 
 describe("pod-web renderer landscape helpers", () => {
   test("classifies bright flagship environments as daylight", () => {
@@ -113,9 +114,13 @@ describe("pod-web renderer landscape helpers", () => {
 
     for (const batch of left.meshBatches) {
       for (const instance of batch.instances) {
-        const [x, _y, z] = instance.position;
+        const [x, y, z] = instance.position;
         expect(Math.hypot(x, z)).toBeGreaterThan(11.99);
         expect(sampleLakeMask(x, z)).toBeLessThan(0.21);
+        expect(y).toBeCloseTo(
+          sampleTerrainHeight(x, z) + meshGroundAnchorHeight(batch.batch.mesh, instance.scale[1]),
+          5
+        );
       }
     }
   });

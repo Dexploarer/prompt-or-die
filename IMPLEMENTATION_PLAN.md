@@ -1086,5 +1086,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - Live Playwright MCP proof on `http://127.0.0.1:4179/` for camera orbit, click/WASD traversal, and swim-state transition
   - `git diff --check`
 
-**Last updated**: Iteration 108
-**Current focus**: Iteration 109 worker-route gameplay-input parity proof, richer close-range combat response, and further reduction of debug chrome in the flagship browser client without losing creator inspection depth
+### Iteration 109
+- [x] Removed the debug grid as a default flagship-world surface cue by making it opt-in only (`?grid=1` / `?debugGrid=1`), so the runtime no longer looks like the player is standing under a dev board on first load.
+- [x] Added shared real mesh bounds in `apps/pod-web` and reused them for authoritative world-frame placement plus ambient chunk dressing, replacing the drift-prone hard-coded half-height guesses that were causing props and actors to intersect terrain incorrectly.
+- [x] Added renderer-side transform smoothing for mesh and sprite batches, so replicated actors and markers no longer snap between updates and the flagship shard reads more smoothly under normal movement/event churn.
+- [x] Corrected browser gameplay-state surface reporting to use the shared landscape sampler instead of animation-name inference, keeping swim/ground debug state aligned with actual terrain/water logic.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/mesh-bounds.test.ts ./src/quality.test.ts ./src/contracts.test.ts ./src/renderer.test.ts`
+  - `cd apps/pod-web && bun test ./src/controls.test.ts ./src/local-world.test.ts ./src/frame-plan.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+**Last updated**: Iteration 109
+**Current focus**: Iteration 110 worker-route gameplay-input parity proof, richer close-range combat response, and terrain/water material polish under real browser GPU conditions

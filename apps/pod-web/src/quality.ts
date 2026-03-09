@@ -50,7 +50,7 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     environmentIntensity: 1.15,
     enableAdaptiveResolution: true,
     enableShadows: true,
-    showGrid: true
+    showGrid: false
   },
   high: {
     preset: "high",
@@ -69,7 +69,7 @@ const PRESETS: Record<PodThreeQualityPreset, PodThreeQualityProfile> = {
     environmentIntensity: 1.05,
     enableAdaptiveResolution: true,
     enableShadows: true,
-    showGrid: true
+    showGrid: false
   },
   balanced: {
     preset: "balanced",
