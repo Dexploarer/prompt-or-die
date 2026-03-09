@@ -1136,6 +1136,8 @@ async fn run_network_server(
         bind_port,
         enable_websocket: config.enable_websocket,
         websocket_port: config.websocket_port,
+        client_inactivity_timeout_ticks: 600,
+        queue_pressure_warn_depth: 192,
     };
 
     let mut server = pod_net::GameServer::new(net_config, world);

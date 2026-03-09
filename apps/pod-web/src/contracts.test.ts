@@ -243,7 +243,10 @@ describe("TOON contract parsing", () => {
         shard_id: "direct-connect",
         latest_tick: 360,
         client_count: 2,
+        client_inactivity_timeout_ticks: 600,
+        queue_pressure_warn_depth: 192,
         total_pending_action_queue_depth: 1,
+        queue_pressure_client_count: 1,
         total_inbound_messages: 21,
         total_outbound_messages: 44,
         total_inbound_bytes: 1024,
@@ -255,14 +258,18 @@ describe("TOON contract parsing", () => {
         event_batches_sent: 7,
         debug_documents_sent: 11,
         rejected_messages_sent: 2,
+        timed_out_clients: 3,
+        queue_pressure_events: 5,
         clients: [
           {
             client_id: "client-a",
             player_name: "debug",
             controlled_entity: 44,
             last_seen_tick: 360,
+            ticks_since_last_seen: 0,
             last_sent_tick: 360,
             pending_action_queue_depth: 1,
+            queue_pressure: true,
             inbound_messages: 10,
             outbound_messages: 20,
             inbound_bytes: 512,
@@ -283,6 +290,7 @@ describe("TOON contract parsing", () => {
     const summary = parseShardTransportSummary(document);
     expect(summary.shard_id).toBe("direct-connect");
     expect(summary.client_count).toBe(2);
+    expect(summary.queue_pressure_client_count).toBe(1);
     expect(summary.clients[0]?.client_id).toBe("client-a");
   });
 
@@ -406,7 +414,10 @@ describe("TOON contract parsing", () => {
           shard_id: "direct-connect",
           latest_tick: 18,
           client_count: 1,
+          client_inactivity_timeout_ticks: 600,
+          queue_pressure_warn_depth: 192,
           total_pending_action_queue_depth: 0,
+          queue_pressure_client_count: 0,
           total_inbound_messages: 2,
           total_outbound_messages: 6,
           total_inbound_bytes: 64,
@@ -418,6 +429,8 @@ describe("TOON contract parsing", () => {
           event_batches_sent: 1,
           debug_documents_sent: 3,
           rejected_messages_sent: 0,
+          timed_out_clients: 0,
+          queue_pressure_events: 0,
           clients: []
         }
       })

@@ -68,8 +68,10 @@ pub struct ClientTransportSummary {
     pub player_name: Option<String>,
     pub controlled_entity: Option<u64>,
     pub last_seen_tick: u64,
+    pub ticks_since_last_seen: u64,
     pub last_sent_tick: Option<u64>,
     pub pending_action_queue_depth: usize,
+    pub queue_pressure: bool,
     pub inbound_messages: u64,
     pub outbound_messages: u64,
     pub inbound_bytes: u64,
@@ -89,7 +91,10 @@ pub struct ShardTransportSummary {
     pub shard_id: String,
     pub latest_tick: u64,
     pub client_count: usize,
+    pub client_inactivity_timeout_ticks: u64,
+    pub queue_pressure_warn_depth: usize,
     pub total_pending_action_queue_depth: usize,
+    pub queue_pressure_client_count: usize,
     pub total_inbound_messages: u64,
     pub total_outbound_messages: u64,
     pub total_inbound_bytes: u64,
@@ -101,6 +106,8 @@ pub struct ShardTransportSummary {
     pub event_batches_sent: u64,
     pub debug_documents_sent: u64,
     pub rejected_messages_sent: u64,
+    pub timed_out_clients: u64,
+    pub queue_pressure_events: u64,
     pub clients: Vec<ClientTransportSummary>,
 }
 
@@ -329,7 +336,10 @@ mod tests {
             shard_id: "direct-connect".to_string(),
             latest_tick: 1440,
             client_count: 2,
+            client_inactivity_timeout_ticks: 600,
+            queue_pressure_warn_depth: 192,
             total_pending_action_queue_depth: 3,
+            queue_pressure_client_count: 1,
             total_inbound_messages: 21,
             total_outbound_messages: 44,
             total_inbound_bytes: 1024,
@@ -341,13 +351,17 @@ mod tests {
             event_batches_sent: 7,
             debug_documents_sent: 11,
             rejected_messages_sent: 2,
+            timed_out_clients: 3,
+            queue_pressure_events: 5,
             clients: vec![ClientTransportSummary {
                 client_id: "client-a".to_string(),
                 player_name: Some("debug".to_string()),
                 controlled_entity: Some(41),
                 last_seen_tick: 1440,
+                ticks_since_last_seen: 0,
                 last_sent_tick: Some(1440),
                 pending_action_queue_depth: 1,
+                queue_pressure: true,
                 inbound_messages: 10,
                 outbound_messages: 20,
                 inbound_bytes: 512,
@@ -367,7 +381,10 @@ mod tests {
             decode_toon_value(&summary.to_toon_document()).expect("transport summary should decode");
         assert_eq!(value["document_type"], "shard_transport_summary");
         assert_eq!(value["payload"]["client_count"], 2);
+        assert_eq!(value["payload"]["queue_pressure_client_count"], 1);
+        assert_eq!(value["payload"]["timed_out_clients"], 3);
         assert_eq!(value["payload"]["clients"][0]["client_id"], "client-a");
+        assert_eq!(value["payload"]["clients"][0]["queue_pressure"], true);
         assert_eq!(value["payload"]["clients"][0]["debug_telemetry_enabled"], true);
     }
 }

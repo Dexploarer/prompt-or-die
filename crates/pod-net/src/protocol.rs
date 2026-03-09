@@ -183,6 +183,10 @@ pub struct ServerConfig {
     pub enable_websocket: bool,
     /// WebSocket endpoint port
     pub websocket_port: u16,
+    /// Max ticks a client may stay silent before heartbeat timeout disconnect.
+    pub client_inactivity_timeout_ticks: u64,
+    /// Pending action depth that should be treated as queue pressure.
+    pub queue_pressure_warn_depth: usize,
 }
 
 impl Default for ServerConfig {
@@ -195,6 +199,8 @@ impl Default for ServerConfig {
             bind_port: 5000,
             enable_websocket: true,
             websocket_port: 5001,
+            client_inactivity_timeout_ticks: 600,
+            queue_pressure_warn_depth: 192,
         }
     }
 }

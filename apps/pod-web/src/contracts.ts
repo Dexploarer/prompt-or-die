@@ -350,8 +350,10 @@ export interface ClientTransportSummaryDocument {
   player_name?: string | null;
   controlled_entity?: number | null;
   last_seen_tick: number;
+  ticks_since_last_seen: number;
   last_sent_tick?: number | null;
   pending_action_queue_depth: number;
+  queue_pressure: boolean;
   inbound_messages: number;
   outbound_messages: number;
   inbound_bytes: number;
@@ -370,7 +372,10 @@ export interface ShardTransportSummaryDocument {
   shard_id: string;
   latest_tick: number;
   client_count: number;
+  client_inactivity_timeout_ticks: number;
+  queue_pressure_warn_depth: number;
   total_pending_action_queue_depth: number;
+  queue_pressure_client_count: number;
   total_inbound_messages: number;
   total_outbound_messages: number;
   total_inbound_bytes: number;
@@ -382,6 +387,8 @@ export interface ShardTransportSummaryDocument {
   event_batches_sent: number;
   debug_documents_sent: number;
   rejected_messages_sent: number;
+  timed_out_clients: number;
+  queue_pressure_events: number;
   clients: ClientTransportSummaryDocument[];
 }
 

@@ -151,7 +151,10 @@ describe("live debug state", () => {
         shard_id: "direct-connect",
         latest_tick: 22,
         client_count: 1,
+        client_inactivity_timeout_ticks: 600,
+        queue_pressure_warn_depth: 192,
         total_pending_action_queue_depth: 0,
+        queue_pressure_client_count: 0,
         total_inbound_messages: 2,
         total_outbound_messages: 4,
         total_inbound_bytes: 64,
@@ -163,6 +166,8 @@ describe("live debug state", () => {
         event_batches_sent: 1,
         debug_documents_sent: 3,
         rejected_messages_sent: 0,
+        timed_out_clients: 0,
+        queue_pressure_events: 0,
         clients: []
       }
     } as LiveDebugDocument);

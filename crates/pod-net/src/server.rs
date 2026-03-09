@@ -164,6 +164,10 @@ pub struct GameServer {
     pending_debug_documents: Vec<PendingDebugDocument>,
     /// Last tick when server transport stats were logged.
     last_transport_log_tick: u64,
+    /// Total number of clients disconnected due to inactivity timeout.
+    timed_out_clients: u64,
+    /// Total number of queue-pressure incidents observed.
+    queue_pressure_events: u64,
 }
 
 impl GameServer {
@@ -189,6 +193,8 @@ impl GameServer {
             ),
             pending_debug_documents: Vec::new(),
             last_transport_log_tick: 0,
+            timed_out_clients: 0,
+            queue_pressure_events: 0,
         }
     }
 
@@ -256,13 +262,16 @@ impl GameServer {
             // Handle client connections
             self.handle_connections().await?;
 
+            // Disconnect clients that stopped sending any heartbeat/activity.
+            self.prune_stale_clients().await;
+
             // Send updates to clients
             self.broadcast_updates().await?;
 
             if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
                 let transport = self.transport_summary().await;
                 info!(
-                    "[NET] tick={} clients={} in={} msgs/{} B out={} msgs/{} B queue={} batches={} full_resync={} debug_docs={}",
+                    "[NET] tick={} clients={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
                     transport.latest_tick,
                     transport.client_count,
                     transport.total_inbound_messages,
@@ -270,9 +279,11 @@ impl GameServer {
                     transport.total_outbound_messages,
                     transport.total_outbound_bytes,
                     transport.total_pending_action_queue_depth,
+                    transport.queue_pressure_client_count,
                     transport.action_batches_received,
                     transport.full_snapshot_requests,
                     transport.debug_documents_sent,
+                    transport.timed_out_clients,
                 );
                 self.last_transport_log_tick = self.tick;
             }
@@ -364,16 +375,62 @@ impl GameServer {
         Ok(())
     }
 
+    fn queue_pressure_warn_depth(&self) -> usize {
+        self.config
+            .queue_pressure_warn_depth
+            .min(ACTION_QUEUE_MAX_DEPTH)
+            .max(1)
+    }
+
+    fn is_queue_pressure_depth(&self, depth: usize) -> bool {
+        depth >= self.queue_pressure_warn_depth()
+    }
+
+    async fn prune_stale_clients(&mut self) {
+        let timeout_ticks = self.config.client_inactivity_timeout_ticks;
+        if timeout_ticks == 0 {
+            return;
+        }
+
+        let stale_clients = {
+            let clients = self.clients.read().await;
+            clients
+                .iter()
+                .filter_map(|(client_id, session)| {
+                    let ticks_since_last_seen = self.tick.saturating_sub(session.transport.last_seen_tick);
+                    (ticks_since_last_seen > timeout_ticks).then_some((*client_id, ticks_since_last_seen))
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (client_id, ticks_since_last_seen) in stale_clients {
+            self.timed_out_clients = self.timed_out_clients.saturating_add(1);
+            warn!(
+                "Client {} timed out after {} ticks without heartbeat/activity",
+                client_id.0, ticks_since_last_seen
+            );
+            self.disconnect_client(
+                client_id,
+                &format!(
+                    "heartbeat timeout after {ticks_since_last_seen} ticks without inbound activity"
+                ),
+            )
+            .await;
+        }
+    }
+
     async fn register_pending_client(
         &mut self,
         client_id: ClientId,
     ) -> mpsc::Receiver<ServerMessage> {
         let (outbound_tx, outbound_rx) = mpsc::channel::<ServerMessage>(256);
         self.client_tx.write().await.insert(client_id, outbound_tx);
+        let mut session = ClientSession::new("pending".into());
+        session.transport.last_seen_tick = self.tick;
         self.clients
             .write()
             .await
-            .insert(client_id, ClientSession::new("pending".into()));
+            .insert(client_id, session);
         outbound_rx
     }
 
@@ -652,8 +709,11 @@ impl GameServer {
                         let mut unregistered = false;
                         let mut stale_tick = false;
                         let mut out_of_window = false;
+                        let mut queue_pressure = false;
+                        let mut queue_depth = 0usize;
                         let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
                         let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
+                        let queue_pressure_warn_depth = self.queue_pressure_warn_depth();
                         {
                             let mut clients = self.clients.write().await;
                             if let Some(session) = clients.get_mut(&client_id) {
@@ -683,10 +743,22 @@ impl GameServer {
                                         for action in actions.into_iter().take(available) {
                                             session.pending_actions.push((tick, action));
                                         }
+                                        queue_depth = session.pending_actions.len();
+                                        queue_pressure = queue_depth >= queue_pressure_warn_depth;
                                         session.last_action_tick = Some(tick);
                                     }
                                 }
                             }
+                        }
+                        if queue_pressure || overflow {
+                            self.queue_pressure_events =
+                                self.queue_pressure_events.saturating_add(1);
+                            warn!(
+                                "Client {} pending action queue reached pressure depth {} (threshold {})",
+                                client_id.0,
+                                queue_depth,
+                                queue_pressure_warn_depth
+                            );
                         }
                         if unregistered {
                             self.send_to_client(
@@ -1066,8 +1138,10 @@ impl GameServer {
                     .agent_id
                     .and_then(|agent_id| self.controlled_entity_for_agent(agent_id)),
                 last_seen_tick: session.transport.last_seen_tick,
+                ticks_since_last_seen: self.tick.saturating_sub(session.transport.last_seen_tick),
                 last_sent_tick: session.transport.last_sent_tick,
                 pending_action_queue_depth: session.pending_actions.len(),
+                queue_pressure: self.is_queue_pressure_depth(session.pending_actions.len()),
                 inbound_messages: session.transport.inbound_messages,
                 outbound_messages: session.transport.outbound_messages,
                 inbound_bytes: session.transport.inbound_bytes,
@@ -1088,10 +1162,16 @@ impl GameServer {
             shard_id: "direct-connect".to_string(),
             latest_tick: self.tick,
             client_count: client_summaries.len(),
+            client_inactivity_timeout_ticks: self.config.client_inactivity_timeout_ticks,
+            queue_pressure_warn_depth: self.queue_pressure_warn_depth(),
             total_pending_action_queue_depth: client_summaries
                 .iter()
                 .map(|client| client.pending_action_queue_depth)
                 .sum(),
+            queue_pressure_client_count: client_summaries
+                .iter()
+                .filter(|client| client.queue_pressure)
+                .count(),
             total_inbound_messages: client_summaries
                 .iter()
                 .map(|client| client.inbound_messages)
@@ -1130,6 +1210,8 @@ impl GameServer {
                 .iter()
                 .map(|client| client.rejected_messages_sent)
                 .sum(),
+            timed_out_clients: self.timed_out_clients,
+            queue_pressure_events: self.queue_pressure_events,
             clients: client_summaries,
         }
     }
@@ -1821,9 +1903,14 @@ mod tests {
                 .map(|value| value["document_type"] == "shard_transport_summary")
                 .unwrap_or(false)
         }));
-        assert!(!documents
-            .iter()
-            .any(|document| document.contains("timeout")));
+        assert!(!documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| {
+                    value["document_type"] == "agent_tool_call_event"
+                        && value["payload"]["agent_entity_id"] == spire_entity.id() as u64
+                })
+                .unwrap_or(false)
+        }));
     }
 
     #[tokio::test]
@@ -1867,6 +1954,77 @@ mod tests {
         assert!(summary.total_outbound_messages >= 1);
         assert_eq!(summary.ping_requests, 1);
         assert_eq!(summary.clients[0].client_id, client_id.0.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_transport_summary_marks_queue_pressure_clients() {
+        let config = ProtoServerConfig {
+            queue_pressure_warn_depth: 2,
+            ..ProtoServerConfig::default()
+        };
+        let world = World::new(42);
+        let server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, _rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: vec![(1, Action::Idle), (1, Action::Stop)],
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: Some(1),
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: true,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.queue_pressure_client_count, 1);
+        assert_eq!(summary.clients[0].pending_action_queue_depth, 2);
+        assert!(summary.clients[0].queue_pressure);
+    }
+
+    #[tokio::test]
+    async fn test_prune_stale_clients_disconnects_inactive_sessions() {
+        let config = ProtoServerConfig {
+            client_inactivity_timeout_ticks: 3,
+            ..ProtoServerConfig::default()
+        };
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, _rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("idle".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters {
+                    last_seen_tick: 1,
+                    ..ClientTransportCounters::default()
+                },
+            },
+        );
+        server.tick = 5;
+
+        server.prune_stale_clients().await;
+
+        assert_eq!(server.client_count().await, 0);
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.timed_out_clients, 1);
     }
 
     #[tokio::test]

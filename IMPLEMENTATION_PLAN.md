@@ -1153,5 +1153,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `git diff --check`
 
-**Last updated**: Iteration 114
-**Current focus**: Iteration 115 stale-client detection, heartbeat timeout handling, and bounded shard backpressure so direct-connect runtime behavior stays smooth under degraded network conditions
+### Iteration 115
+- [x] Added direct-connect heartbeat timeout controls in `pod-net::protocol::ServerConfig` and server-side stale-client pruning, so inactive sessions now disconnect deterministically instead of lingering forever in shard state.
+- [x] Extended shard transport summaries with queue-pressure and inactivity metadata (`ticks_since_last_seen`, `queue_pressure`, `queue_pressure_client_count`, `timed_out_clients`, `queue_pressure_events`) and wired those metrics through `pod-core`, `pod-net`, `pod-editor`, and `pod-web`.
+- [x] Added queue-pressure detection/logging for saturated pending-action queues in `pod-net`, plus browser/editor-facing compact summaries so degraded shard conditions are visible without scraping raw logs.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 115
+**Current focus**: Iteration 116 client-side heartbeat watchdogs, stale-authority recovery, and queue-aware reconnect behavior across browser and native clients so degraded shard links fail fast and recover cleanly

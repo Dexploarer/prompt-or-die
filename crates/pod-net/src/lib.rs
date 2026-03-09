@@ -42,6 +42,8 @@
 //!     bind_port: 5000,
 //!     enable_websocket: true,
 //!     websocket_port: 5001,
+//!     client_inactivity_timeout_ticks: 600,
+//!     queue_pressure_warn_depth: 192,
 //! };
 //! ```
 

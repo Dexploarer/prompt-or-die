@@ -76,3 +76,13 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-editor --lib`
   - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
   - `cd apps/pod-web && bun run typecheck`
+- Added direct-connect heartbeat timeout controls and stale-client pruning in `pod-net`, so inactive sessions now disconnect deterministically instead of lingering in authoritative shard state forever.
+- Extended shared shard transport summaries with inactivity and queue-pressure state (`ticks_since_last_seen`, `queue_pressure`, `queue_pressure_client_count`, `timed_out_clients`, `queue_pressure_events`) and pushed that through `pod-core`, `pod-net`, `pod-editor`, and `pod-web`.
+- Added queue-pressure detection/logging in the direct-connect server path and compact browser HUD surfacing for pressured clients/timeouts, so degraded shard conditions are visible without log scraping.
+- Revalidated the heartbeat/backpressure pass with targeted coverage:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`

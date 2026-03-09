@@ -81,9 +81,19 @@ export function formatConnectionSummary(
   const shardTransport =
     transport == null
       ? null
-      : `shard ${transport.client_count}c / q${transport.total_pending_action_queue_depth} / ${formatKilo(
-          transport.total_outbound_bytes
-        )}B out`;
+      : [
+          `shard ${transport.client_count}c`,
+          `q${transport.total_pending_action_queue_depth}`,
+          transport.queue_pressure_client_count > 0
+            ? `pressure ${transport.queue_pressure_client_count}`
+            : null,
+          transport.timed_out_clients > 0
+            ? `timeouts ${transport.timed_out_clients}`
+            : null,
+          `${formatKilo(transport.total_outbound_bytes)}B out`
+        ]
+          .filter(Boolean)
+          .join(" / ");
 
   return [status.phase, status.detail, network, shardTransport]
     .filter(Boolean)

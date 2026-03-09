@@ -1440,7 +1440,7 @@ function renderTelemetryHud(): void {
   incidentSummaryNode.textContent = latestIncidentSummary
     ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveDebugState.liveIncidentDocuments}`
     : latestTransportSummary
-      ? `transport · ${latestTransportSummary.client_count} clients · ${latestTransportSummary.total_pending_action_queue_depth} queued · ${liveDebugState.liveTransportDocuments} samples`
+      ? `transport · ${latestTransportSummary.client_count} clients · ${latestTransportSummary.total_pending_action_queue_depth} queued · ${latestTransportSummary.queue_pressure_client_count} pressured · ${latestTransportSummary.timed_out_clients} timed out · ${liveDebugState.liveTransportDocuments} samples`
       : "No shard incident summary loaded";
   toolEventSummaryNode.textContent = focusedToolEvent
     ? `E(${focusedToolEvent.agentEntityId}) · ${focusedToolEvent.toolName} · ${focusedToolEvent.status} · ${focusedToolEvent.latencyMs}ms${
