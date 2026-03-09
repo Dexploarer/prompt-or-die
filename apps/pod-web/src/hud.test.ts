@@ -100,6 +100,7 @@ describe("hud formatting", () => {
           shard_id: "direct-connect",
           latest_tick: 128,
           client_count: 3,
+          resumed_sessions: 2,
           client_inactivity_timeout_ticks: 600,
           queue_pressure_warn_depth: 192,
           total_pending_action_queue_depth: 9,
@@ -121,7 +122,7 @@ describe("hud formatting", () => {
         }
       )
     ).toBe(
-      "connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter · shard 3c / q9 / pressure 2 / timeouts 1 / 20kB out"
+      "connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter · shard 3c / resumes 2 / q9 / pressure 2 / timeouts 1 / 20kB out"
     );
   });
 });

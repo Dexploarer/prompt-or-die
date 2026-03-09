@@ -101,3 +101,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-net --features spacetimedb --lib`
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
   - `git diff --check`
+- Added native reconnect/session recovery parity to `pod-net` by teaching the QUIC client to track fatal runtime closure, back off reconnect attempts, and explicitly recover the transport session instead of only timing out and disconnecting.
+- Added deterministic native `pod-net` coverage for reconnect-needed detection and reconnect-backoff handling, keeping the lower-level client behavior aligned with the stronger browser watchdog path.
+- Extended shard transport observability with resumed-session counters at both client and shard scope, then pushed those new fields through `pod-core`, `pod-net`, `pod-editor`, and `pod-web` so reconnect churn is visible in TOON debug consumers instead of only internal runtime state.

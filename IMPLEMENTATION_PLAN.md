@@ -1195,5 +1195,27 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 118
-**Current focus**: Iteration 119 native reconnect/session recovery parity beyond the browser watchdog path, plus continued flagship traversal/combat feel work on top of the stabilized shard transport layer
+### Iteration 119
+- [x] Added native reconnect/session recovery parity to `pod-net` by teaching the QUIC client to track fatal runtime closure, back off reconnect attempts, and explicitly recover the transport session instead of only failing stale.
+- [x] Extended native transport tests with deterministic reconnect-needed, reconnect-backoff, heartbeat-timeout cleanup, and RTT/jitter coverage so the lower-level client path now matches the browser watchdog expectations.
+- [x] Revalidated the touched `pod-net` targets on native, SpacetimeDB-enabled, and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+### Iteration 120
+- [x] Hardened shard-side transport observability for resumed sessions by extending `ClientTransportSummary` / `ShardTransportSummary` with resume counts and wiring those through `pod-core`, `pod-net`, `pod-editor`, and `pod-web`.
+- [x] Updated direct-connect server runtime counters so reconnect-token session resumes increment per-client and shard-wide resume telemetry instead of disappearing into logs.
+- [x] Revalidated the touched Rust and browser/editor consumers after the transport-summary schema change.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 120
+**Current focus**: Iteration 121 shard-side recovery observability hardening beyond resume counts, then native reconnect/session replay polish on top of the stabilized transport layer

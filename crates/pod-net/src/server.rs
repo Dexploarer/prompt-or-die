@@ -67,6 +67,7 @@ impl ClientSession {
 struct ClientTransportCounters {
     last_seen_tick: u64,
     last_sent_tick: Option<u64>,
+    session_resumes: u64,
     inbound_messages: u64,
     outbound_messages: u64,
     inbound_bytes: u64,
@@ -168,6 +169,8 @@ pub struct GameServer {
     timed_out_clients: u64,
     /// Total number of queue-pressure incidents observed.
     queue_pressure_events: u64,
+    /// Total number of session resumes completed through reconnect tokens.
+    resumed_sessions: u64,
 }
 
 impl GameServer {
@@ -195,6 +198,7 @@ impl GameServer {
             last_transport_log_tick: 0,
             timed_out_clients: 0,
             queue_pressure_events: 0,
+            resumed_sessions: 0,
         }
     }
 
@@ -271,9 +275,10 @@ impl GameServer {
             if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
                 let transport = self.transport_summary().await;
                 info!(
-                    "[NET] tick={} clients={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
+                    "[NET] tick={} clients={} resumes={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
                     transport.latest_tick,
                     transport.client_count,
+                    transport.resumed_sessions,
                     transport.total_inbound_messages,
                     transport.total_inbound_bytes,
                     transport.total_outbound_messages,
@@ -1137,6 +1142,7 @@ impl GameServer {
                 controlled_entity: session
                     .agent_id
                     .and_then(|agent_id| self.controlled_entity_for_agent(agent_id)),
+                session_resumes: session.transport.session_resumes,
                 last_seen_tick: session.transport.last_seen_tick,
                 ticks_since_last_seen: self.tick.saturating_sub(session.transport.last_seen_tick),
                 last_sent_tick: session.transport.last_sent_tick,
@@ -1162,6 +1168,7 @@ impl GameServer {
             shard_id: "direct-connect".to_string(),
             latest_tick: self.tick,
             client_count: client_summaries.len(),
+            resumed_sessions: self.resumed_sessions,
             client_inactivity_timeout_ticks: self.config.client_inactivity_timeout_ticks,
             queue_pressure_warn_depth: self.queue_pressure_warn_depth(),
             total_pending_action_queue_depth: client_summaries
@@ -1471,6 +1478,8 @@ impl GameServer {
                         session.pending_actions.clear();
                         session.last_sent_snapshot = None;
                         session.transport = prev.transport;
+                        session.transport.session_resumes =
+                            session.transport.session_resumes.saturating_add(1);
                     } else if session.player_name.is_none() {
                         session.player_name = Some(player_name.clone());
                     }
@@ -1481,6 +1490,7 @@ impl GameServer {
 
             if let Some(previous_client_id) = previous_client_id {
                 self.client_tx.write().await.remove(&previous_client_id);
+                self.resumed_sessions = self.resumed_sessions.saturating_add(1);
                 info!(
                     "Client {} resumed prior session {}",
                     client_id.0, previous_client_id.0
@@ -1963,7 +1973,8 @@ mod tests {
             ..ProtoServerConfig::default()
         };
         let world = World::new(42);
-        let server = GameServer::new(config, world);
+        let mut server = GameServer::new(config, world);
+        server.resumed_sessions = 2;
         let client_id = ClientId::new();
         let (tx, _rx) = mpsc::channel(8);
         server.client_tx.write().await.insert(client_id, tx);
@@ -1979,12 +1990,17 @@ mod tests {
                 debug_telemetry_enabled: true,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
-                transport: ClientTransportCounters::default(),
+                transport: ClientTransportCounters {
+                    session_resumes: 2,
+                    ..ClientTransportCounters::default()
+                },
             },
         );
 
         let summary = server.transport_summary().await;
+        assert_eq!(summary.resumed_sessions, 2);
         assert_eq!(summary.queue_pressure_client_count, 1);
+        assert_eq!(summary.clients[0].session_resumes, 2);
         assert_eq!(summary.clients[0].pending_action_queue_depth, 2);
         assert!(summary.clients[0].queue_pressure);
     }

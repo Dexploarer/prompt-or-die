@@ -83,6 +83,7 @@ export function formatConnectionSummary(
       ? null
       : [
           `shard ${transport.client_count}c`,
+          transport.resumed_sessions > 0 ? `resumes ${transport.resumed_sessions}` : null,
           `q${transport.total_pending_action_queue_depth}`,
           transport.queue_pressure_client_count > 0
             ? `pressure ${transport.queue_pressure_client_count}`
