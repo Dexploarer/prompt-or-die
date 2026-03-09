@@ -1,5 +1,8 @@
 import type { DirectConnectStatus } from "./direct-connect";
-import type { NetworkGameEvent } from "./contracts";
+import type {
+  NetworkGameEvent,
+  ShardTransportSummaryDocument
+} from "./contracts";
 import type { PodThreeRendererStats } from "./renderer";
 
 function formatKilo(value: number): string {
@@ -60,7 +63,10 @@ export function highlightEventFeedback(event: NetworkGameEvent | null): string {
   return event.summary;
 }
 
-export function formatConnectionSummary(status: DirectConnectStatus | null): string {
+export function formatConnectionSummary(
+  status: DirectConnectStatus | null,
+  transport?: ShardTransportSummaryDocument | null
+): string {
   if (!status) {
     return "offline demo / bridge mode";
   }
@@ -72,5 +78,31 @@ export function formatConnectionSummary(status: DirectConnectStatus | null): str
           status.jitterMs == null ? "" : ` / ${status.jitterMs.toFixed(0)}ms jitter`
         }`;
 
-  return [status.phase, status.detail, network].filter(Boolean).join(" · ");
+  const shardTransport =
+    transport == null
+      ? null
+      : [
+          `shard ${transport.client_count}c`,
+          transport.resumed_sessions > 0 ? `resumes ${transport.resumed_sessions}` : null,
+          transport.recovery_snapshots_sent > 0
+            ? `recover ${transport.recovery_snapshots_sent}`
+            : null,
+          transport.recovery_delivery_failures > 0
+            ? `recover-fail ${transport.recovery_delivery_failures}`
+            : null,
+          `q${transport.total_pending_action_queue_depth}`,
+          transport.queue_pressure_client_count > 0
+            ? `pressure ${transport.queue_pressure_client_count}`
+            : null,
+          transport.timed_out_clients > 0
+            ? `timeouts ${transport.timed_out_clients}`
+            : null,
+          `${formatKilo(transport.total_outbound_bytes)}B out`
+        ]
+          .filter(Boolean)
+          .join(" / ");
+
+  return [status.phase, status.detail, network, shardTransport]
+    .filter(Boolean)
+    .join(" · ");
 }

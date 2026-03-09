@@ -1119,5 +1119,116 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run test:smoke`
   - `git diff --check`
 
-**Last updated**: Iteration 111
-**Current focus**: Iteration 112 terrain/water material polish under real browser GPU conditions, closer-range combat readability in the flagship shard, and further shard/runtime observability improvements beyond browser-only smoke
+### Iteration 112
+- [x] Moved flagship terrain shading into shared `sampleTerrainMaterial(...)` helpers in `apps/pod-web/src/landscape.ts`, so shoreline, rock, highland, and foam tinting no longer drift between baked texture generation and the gameplay world model.
+- [x] Added shared `sampleWaterSurfaceStyle(...)` helpers and rewired the renderer to drive lagoon color, emissive response, opacity, scroll offsets, and repeat from the same daylight/time-lapse state used by the rest of the environment.
+- [x] Raised landscape surface fidelity by quality preset (`terrainTextureSize`, `waterTextureSize`, `skyTextureSize`) so stronger browser hardware gets sharper baked terrain/water/sky surfaces without changing content contracts.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/quality.test.ts ./src/renderer.test.ts ./src/controls.test.ts ./src/local-world.test.ts ./src/frame-plan.test.ts ./src/contracts.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 113
+- [x] Added procedural combat-readability sprite primitives (`combat-banner`, `health-bar`) so selected hostile fights can render world-space focus state without relying on a separate authored HUD asset pack.
+- [x] Added `withCombatFocusMarkers(...)` to the shared authoritative browser frame-decoration path and wired it into `main.ts`, so selected attackable targets and the controlled player now get billboarded combat focus/health strips from real snapshot data instead of HUD-only summaries.
+- [x] Added lightweight motion treatment for combat banners and health bars in `frame-plan`, keeping the new combat cues readable without introducing another static overlay layer.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/assets.test.ts ./src/contracts.test.ts ./src/frame-plan.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 114
+- [x] Added shared shard transport observability contracts in `pod-core` (`ClientTransportSummary`, `ShardTransportSummary`) with first-class TOON export so runtime, editor, and browser debug consumers can inspect per-client traffic, queue depth, and snapshot/event/debug message pressure from one typed document.
+- [x] Extended `pod-net` direct-connect server runtime to track inbound/outbound bytes, per-message-class counts, action/full-resync/ping intake, and periodic shard transport summaries, then emit those summaries into the same debug-document stream used by existing telemetry/tool/rollup consumers.
+- [x] Extended `pod-web` live-debug parsing/HUD and `pod-editor` dashboard import paths to consume `shard_transport_summary` TOON documents, so debug surfaces can show shard transport pressure without scraping logs or requiring full raw tick telemetry.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+### Iteration 115
+- [x] Added direct-connect heartbeat timeout controls in `pod-net::protocol::ServerConfig` and server-side stale-client pruning, so inactive sessions now disconnect deterministically instead of lingering forever in shard state.
+- [x] Extended shard transport summaries with queue-pressure and inactivity metadata (`ticks_since_last_seen`, `queue_pressure`, `queue_pressure_client_count`, `timed_out_clients`, `queue_pressure_events`) and wired those metrics through `pod-core`, `pod-net`, `pod-editor`, and `pod-web`.
+- [x] Added queue-pressure detection/logging for saturated pending-action queues in `pod-net`, plus browser/editor-facing compact summaries so degraded shard conditions are visible without scraping raw logs.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+### Iteration 116
+- [x] Added direct-connect browser heartbeat watchdog controls (`heartbeatTimeoutMs`, `maxPendingActionBatches`) and a real authority-silence timeout path, so the flagship web client now fails fast and reconnects when the shard stops answering pings instead of waiting for the socket to die on its own.
+- [x] Added queue-aware browser recovery behavior: when authoritative acknowledgements stall and the pending action backlog saturates, `pod-web` now requests a full snapshot recovery first and escalates to reconnect under stale-authority conditions.
+- [x] Extended browser connection state with `clientId` and `heartbeatAgeMs`, then updated local sandbox/default status objects plus direct-connect tests so the stronger connection-health contract stays deterministic.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/hud.test.ts ./src/contracts.test.ts ./src/live-debug.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `git diff --check`
+
+### Iteration 117
+- [x] Extended shared `pod-net::protocol::ClientConfig` with heartbeat and pending-action limits (`heartbeat_timeout_ms`, `max_pending_actions`) so native and web clients now derive failure/backpressure thresholds from one source of truth instead of browser-only runtime config.
+- [x] Added native/web client-side pending-action saturation handling and authoritative heartbeat timeout enforcement in `pod-net`, so both QUIC and WebSocket clients now refuse runaway local input growth and fail fast on silent authority instead of drifting indefinitely.
+- [x] Added deterministic native `pod-net` coverage for action saturation and heartbeat-timeout cleanup, and revalidated the touched targets on native, SpacetimeDB-enabled, and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+### Iteration 118
+- [x] Added shared ping/pong RTT and jitter tracking in `pod-net` native and web clients, so transport-quality sampling is no longer a `pod-web`-only concern and lower-level runtime consumers can inspect real connection latency on both client implementations.
+- [x] Wired RTT/jitter updates directly into `ServerMessage::Pong` handling and added deterministic native coverage for latency/jitter smoothing.
+- [x] Revalidated the touched `pod-net` targets on native and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+### Iteration 119
+- [x] Added native reconnect/session recovery parity to `pod-net` by teaching the QUIC client to track fatal runtime closure, back off reconnect attempts, and explicitly recover the transport session instead of only failing stale.
+- [x] Extended native transport tests with deterministic reconnect-needed, reconnect-backoff, heartbeat-timeout cleanup, and RTT/jitter coverage so the lower-level client path now matches the browser watchdog expectations.
+- [x] Revalidated the touched `pod-net` targets on native, SpacetimeDB-enabled, and wasm builds.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `git diff --check`
+
+### Iteration 120
+- [x] Hardened shard-side transport observability for resumed sessions by extending `ClientTransportSummary` / `ShardTransportSummary` with resume counts and wiring those through `pod-core`, `pod-net`, `pod-editor`, and `pod-web`.
+- [x] Updated direct-connect server runtime counters so reconnect-token session resumes increment per-client and shard-wide resume telemetry instead of disappearing into logs.
+- [x] Revalidated the touched Rust and browser/editor consumers after the transport-summary schema change.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+### Iteration 121
+- [x] Hardened shard-side recovery observability by extending `ClientTransportSummary` / `ShardTransportSummary` with explicit recovery delivery metrics (`recovery_snapshots_sent`, `recovery_delivery_failures`) instead of relying on generic full-snapshot counters alone.
+- [x] Updated `pod-net` direct-connect server recovery paths to increment those metrics when full recovery snapshots are successfully delivered or fail to reach the client, and added deterministic server coverage for both success and failure cases.
+- [x] Propagated the new recovery metrics through `pod-core`, `pod-editor`, and `pod-web`, so browser/editor transport summaries now expose real recovery churn alongside resumes, queue pressure, and timeouts.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 121
+**Current focus**: Iteration 122 native reconnect/session replay polish on top of the stabilized transport layer, then deeper shard-side recovery diagnostics beyond transport counters alone

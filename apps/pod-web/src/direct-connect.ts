@@ -21,6 +21,8 @@ export interface DirectConnectRuntimeConfig {
   debugTelemetry: boolean;
   reconnectDelayMs: number;
   pingIntervalMs: number;
+  heartbeatTimeoutMs: number;
+  maxPendingActionBatches: number;
 }
 
 export interface DirectConnectStatus {
@@ -38,9 +40,11 @@ export interface DirectConnectStatus {
   entityCount: number;
   controlledEntity: number | null;
   authoritativeDigest: number | null;
+  clientId: string | null;
   roundTripMs: number | null;
   jitterMs: number | null;
   lastPongServerTick: number | null;
+  heartbeatAgeMs: number | null;
 }
 
 export interface DirectConnectActionState {
@@ -75,6 +79,8 @@ interface DirectConnectHandlers {
 const DEFAULT_PLAYER_NAME = "WebPlayer";
 const DEFAULT_RECONNECT_DELAY_MS = 1500;
 const DEFAULT_PING_INTERVAL_MS = 2000;
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 6500;
+const DEFAULT_MAX_PENDING_ACTION_BATCHES = 6;
 
 interface PendingActionBatch {
   tick: number;
@@ -98,7 +104,11 @@ export function runtimeConfigFromLocation(
     playerName: params.get("player")?.trim() || DEFAULT_PLAYER_NAME,
     debugTelemetry: parseBooleanParam(params.get("debug")),
     reconnectDelayMs: parsePositiveInt(params.get("reconnectMs")) ?? DEFAULT_RECONNECT_DELAY_MS,
-    pingIntervalMs: parsePositiveInt(params.get("pingMs")) ?? DEFAULT_PING_INTERVAL_MS
+    pingIntervalMs: parsePositiveInt(params.get("pingMs")) ?? DEFAULT_PING_INTERVAL_MS,
+    heartbeatTimeoutMs:
+      parsePositiveInt(params.get("heartbeatMs")) ?? DEFAULT_HEARTBEAT_TIMEOUT_MS,
+    maxPendingActionBatches:
+      parsePositiveInt(params.get("pendingBatches")) ?? DEFAULT_MAX_PENDING_ACTION_BATCHES
   };
 }
 
@@ -128,17 +138,21 @@ export function initialHudStateFromLocation(
 export class PodWebDirectConnectClient {
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private heartbeatWatchdogTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private reconnectToken: string | null = null;
+  private clientId: string | null = null;
   private snapshot: NetworkWorldSnapshot | null = null;
   private controlledEntity: number | null = null;
   private authoritativeDigest: number | null = null;
   private lastEventTick = 0;
+  private lastServerActivityAtMs: number | null = null;
   private pendingActionBatches: PendingActionBatch[] = [];
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
   private debugFocusEntity: number | null = null;
   private pingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private lastRoundTripSampleMs: number | null = null;
+  private reconnectReason: string | null = null;
   private status: DirectConnectStatus;
   private actionState: DirectConnectActionState;
 
@@ -155,9 +169,11 @@ export class PodWebDirectConnectClient {
       entityCount: 0,
       controlledEntity: null,
       authoritativeDigest: null,
+      clientId: null,
       roundTripMs: null,
       jitterMs: null,
-      lastPongServerTick: null
+      lastPongServerTick: null,
+      heartbeatAgeMs: null
     };
     this.actionState = {
       pendingCount: 0,
@@ -176,8 +192,10 @@ export class PodWebDirectConnectClient {
 
     const socket = new WebSocket(this.config.url);
     this.socket = socket;
+    this.lastServerActivityAtMs = Date.now();
 
     socket.addEventListener("open", () => {
+      this.lastServerActivityAtMs = Date.now();
       socket.send(
         encodeDirectConnectConnectMessage(this.config.playerName, this.reconnectToken)
       );
@@ -186,12 +204,15 @@ export class PodWebDirectConnectClient {
       }
       socket.send(encodeDirectConnectDebugFocusMessage(this.debugFocusEntity));
       this.startPingLoop();
+      this.startHeartbeatWatchdog();
     });
 
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
         return;
       }
+
+      this.lastServerActivityAtMs = Date.now();
 
       try {
         this.handleServerMessage(parseDirectConnectServerMessage(event.data));
@@ -204,11 +225,16 @@ export class PodWebDirectConnectClient {
     socket.addEventListener("close", () => {
       this.socket = null;
       this.stopPingLoop();
+      this.stopHeartbeatWatchdog();
       if (this.closedExplicitly) {
         this.updateStatus("disconnected", "Disconnected");
         return;
       }
-      this.updateStatus("reconnecting", `Connection lost, retrying in ${this.config.reconnectDelayMs}ms`);
+      const reason =
+        this.reconnectReason ??
+        `Connection lost, retrying in ${this.config.reconnectDelayMs}ms`;
+      this.reconnectReason = null;
+      this.updateStatus("reconnecting", reason);
       this.scheduleReconnect();
     });
 
@@ -221,6 +247,7 @@ export class PodWebDirectConnectClient {
     this.closedExplicitly = true;
     this.clearReconnectTimer();
     this.stopPingLoop();
+    this.stopHeartbeatWatchdog();
     this.socket?.close();
     this.socket = null;
     this.updateStatus("disconnected", "Disconnected");
@@ -241,7 +268,11 @@ export class PodWebDirectConnectClient {
   }
 
   currentStatus(): DirectConnectStatus {
-    return { ...this.status };
+    return {
+      ...this.status,
+      clientId: this.clientId,
+      heartbeatAgeMs: this.currentHeartbeatAgeMs(Date.now())
+    };
   }
 
   currentActionState(): DirectConnectActionState {
@@ -263,6 +294,18 @@ export class PodWebDirectConnectClient {
 
     const nextTick = (this.snapshot?.tick ?? this.status.tick ?? 0) + 1;
     const summary = summarizeActions(actions);
+    if (this.pendingActionBatches.length >= this.config.maxPendingActionBatches) {
+      this.actionState = {
+        ...this.actionState,
+        pendingCount: this.pendingActionBatches.length,
+        lastRejectedTick: nextTick,
+        lastRejectedReason: `client backlog saturated (${this.config.maxPendingActionBatches})`,
+        lastActionSummary: summary
+      };
+      this.handlers.onActionState(this.currentActionState());
+      this.handlePendingBacklogSaturation();
+      return false;
+    }
     this.pendingActionBatches.push({
       tick: nextTick,
       summary
@@ -281,10 +324,12 @@ export class PodWebDirectConnectClient {
   private handleServerMessage(message: DirectConnectServerMessage): void {
     switch (message.kind) {
       case "welcome":
+        this.clientId = message.clientId;
         this.reconnectToken = message.reconnectToken;
         this.snapshot = message.snapshot;
         this.controlledEntity = message.controlledEntity;
         this.authoritativeDigest = message.authoritativeDigest;
+        this.lastServerActivityAtMs = Date.now();
         this.updateWorldStatus("connected", `Connected as ${this.config.playerName}`);
         this.emitFrame();
         break;
@@ -408,6 +453,20 @@ export class PodWebDirectConnectClient {
     }
   }
 
+  private startHeartbeatWatchdog(): void {
+    this.stopHeartbeatWatchdog();
+    this.heartbeatWatchdogTimer = globalThis.setInterval(() => {
+      this.updateNetworkHealth();
+    }, Math.min(this.config.pingIntervalMs, 1000));
+  }
+
+  private stopHeartbeatWatchdog(): void {
+    if (this.heartbeatWatchdogTimer != null) {
+      globalThis.clearInterval(this.heartbeatWatchdogTimer);
+      this.heartbeatWatchdogTimer = null;
+    }
+  }
+
   private sendPing(): void {
     if (this.socket?.readyState !== WebSocket.OPEN) {
       return;
@@ -417,6 +476,7 @@ export class PodWebDirectConnectClient {
   }
 
   private recordPong(clientTimestamp: number, serverTick: number): void {
+    this.lastServerActivityAtMs = Date.now();
     const roundTripMs = Math.max(0, Date.now() - clientTimestamp);
     const jitterMs =
       this.lastRoundTripSampleMs == null
@@ -428,6 +488,62 @@ export class PodWebDirectConnectClient {
       jitterMs,
       lastPongServerTick: serverTick
     });
+  }
+
+  updateNetworkHealth(nowMs = Date.now()): void {
+    const heartbeatAgeMs = this.currentHeartbeatAgeMs(nowMs);
+    if (
+      heartbeatAgeMs != null &&
+      this.socket?.readyState === WebSocket.OPEN &&
+      heartbeatAgeMs > this.config.heartbeatTimeoutMs
+    ) {
+      this.forceReconnect(
+        `Authority heartbeat timed out after ${heartbeatAgeMs}ms`
+      );
+      return;
+    }
+
+    if (heartbeatAgeMs != null && this.status.phase === "connected") {
+      this.updateStatus(this.status.phase, this.status.detail, {
+        heartbeatAgeMs
+      });
+    }
+  }
+
+  private currentHeartbeatAgeMs(nowMs: number): number | null {
+    return this.lastServerActivityAtMs == null ? null : Math.max(0, nowMs - this.lastServerActivityAtMs);
+  }
+
+  private handlePendingBacklogSaturation(): void {
+    const heartbeatAgeMs = this.currentHeartbeatAgeMs(Date.now()) ?? 0;
+    if (heartbeatAgeMs >= this.config.heartbeatTimeoutMs / 2) {
+      this.forceReconnect(
+        `Action backlog saturated (${this.config.maxPendingActionBatches}) under stale authority`
+      );
+      return;
+    }
+
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        encodeDirectConnectFullSnapshotRequest(
+          this.snapshot?.tick ?? null,
+          this.authoritativeDigest
+        )
+      );
+      this.updateStatus("reconnecting", "Action backlog saturated, requested recovery");
+    }
+  }
+
+  private forceReconnect(reason: string): void {
+    this.reconnectReason = reason;
+    this.updateStatus("reconnecting", reason, {
+      heartbeatAgeMs: this.currentHeartbeatAgeMs(Date.now())
+    });
+    if (this.socket != null && this.socket.readyState < WebSocket.CLOSING) {
+      this.socket.close();
+      return;
+    }
+    this.scheduleReconnect();
   }
 
   private reconcileAcknowledgedActions(acknowledgedTick: number | null): void {

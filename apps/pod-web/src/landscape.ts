@@ -38,6 +38,31 @@ export interface LandscapeSurfaceSample {
   isSwimmable: boolean;
 }
 
+export interface TerrainMaterialSample {
+  tint: LandscapeVec3Tuple;
+  brightness: number;
+  shoreMask: number;
+  cliffMask: number;
+  highlandMask: number;
+  rockMask: number;
+  foamMask: number;
+}
+
+export interface WaterSurfaceStyle {
+  shallowColor: LandscapeVec3Tuple;
+  deepColor: LandscapeVec3Tuple;
+  highlightColor: LandscapeVec3Tuple;
+  emissiveColor: LandscapeVec3Tuple;
+  emissiveIntensity: number;
+  opacity: number;
+  shorelineColor: LandscapeVec3Tuple;
+  shorelineOpacity: number;
+  shorelineEmissive: LandscapeVec3Tuple;
+  textureOffset: LandscapeVec2Tuple;
+  textureRepeat: LandscapeVec2Tuple;
+  waveStrength: number;
+}
+
 export const LANDSCAPE_PROFILE_ID = "cliff-lagoon-heightfield";
 export const WATER_PROFILE_ID = "animated-lagoon";
 export const LANDSCAPE_WORLD_SIZE = 260;
@@ -168,6 +193,69 @@ export function sampleTerrainSlope(x: number, z: number): number {
   return Math.hypot(dx, dz) / step;
 }
 
+export function sampleTerrainMaterial(
+  environment: LandscapeEnvironment,
+  x: number,
+  z: number
+): TerrainMaterialSample {
+  const terrainHeight = sampleTerrainHeight(x, z);
+  const slope = sampleTerrainSlope(x, z);
+  const lake = sampleLakeMask(x, z);
+  const shoreMask =
+    lake * (1 - smoothstep(2.4, 8.4, Math.abs(terrainHeight - WATER_LEVEL)));
+  const cliffMask = clamp(
+    (slope - 0.55) / 1.9 + Math.max(terrainHeight - 10, 0) / 18,
+    0,
+    1
+  );
+  const meadowNoise = fractalNoise(x * 0.12 + 8, z * 0.12 - 12);
+  const ridgeNoise = fractalNoise(x * 0.032 - 14, z * 0.032 + 21);
+  const distanceFalloff =
+    1 - clamp(Math.hypot(x, z) / (LANDSCAPE_WORLD_SIZE * 0.5), 0, 1);
+  const highlandMask = clamp((terrainHeight - 16) / 16, 0, 1);
+  const rockMask = clamp(
+    cliffMask * 0.7 + highlandMask * 0.8 + ridgeNoise * 0.24,
+    0,
+    1
+  );
+  const foamMask = clamp(shoreMask * 1.35, 0, 1);
+  const grass = mixVec3(
+    environment.groundColor.slice(0, 3) as LandscapeVec3Tuple,
+    [0.2, 0.35, 0.22],
+    0.45
+  );
+  const moss = mixVec3(grass, [0.36, 0.49, 0.24], 0.52);
+  const cliff = mixVec3(grass, [0.38, 0.35, 0.31], 0.78);
+  const basalt: LandscapeVec3Tuple = [0.22, 0.24, 0.28];
+  const highland: LandscapeVec3Tuple = [0.54, 0.52, 0.46];
+  const sand: LandscapeVec3Tuple = [0.72, 0.66, 0.48];
+
+  let tint = mixVec3(grass, moss, meadowNoise * 0.75 + distanceFalloff * 0.15);
+  tint = mixVec3(tint, sand, shoreMask * 0.7);
+  tint = mixVec3(tint, cliff, cliffMask * 0.72);
+  tint = mixVec3(tint, highland, highlandMask * 0.52);
+  tint = mixVec3(tint, basalt, rockMask * 0.58);
+  tint = mixVec3(tint, [0.92, 0.9, 0.82], foamMask * 0.14);
+
+  return {
+    tint,
+    brightness: clamp(
+      0.72 +
+        terrainHeight * 0.011 -
+        cliffMask * 0.06 +
+        meadowNoise * 0.12 +
+        foamMask * 0.08,
+      0.34,
+      1.18
+    ),
+    shoreMask,
+    cliffMask,
+    highlandMask,
+    rockMask,
+    foamMask
+  };
+}
+
 export function sampleTerrainPoint(
   x: number,
   z: number,
@@ -199,6 +287,78 @@ export function sampleLandscapeSurface(
 
 export function sampleSurfaceHeight(x: number, z: number): number {
   return sampleLandscapeSurface(x, z).surfaceHeight;
+}
+
+export function sampleWaterSurfaceStyle(
+  environment: LandscapeEnvironment,
+  elapsedSeconds: number
+): WaterSurfaceStyle {
+  const skyBrightness =
+    environment.skyColor[0] * 0.32 +
+    environment.skyColor[1] * 0.48 +
+    environment.skyColor[2] * 0.2;
+  const daylight = clamp((skyBrightness - 0.18) / 0.62, 0, 1);
+  const twilight = clamp(1 - Math.abs(daylight - 0.45) / 0.45, 0, 1);
+  const waveStrength = 0.48 + daylight * 0.18 + twilight * 0.08;
+  const shallowColor = mixVec3(
+    [0.16, 0.41, 0.55],
+    [0.32, 0.74, 0.82],
+    daylight * 0.82 + twilight * 0.12
+  );
+  const deepColor = mixVec3(
+    [0.05, 0.1, 0.18],
+    [0.12, 0.28, 0.42],
+    daylight * 0.76 + twilight * 0.12
+  );
+  const highlightColor = mixVec3(
+    [0.48, 0.66, 0.78],
+    [0.9, 0.97, 1],
+    daylight * 0.7 + twilight * 0.22
+  );
+  const emissiveColor = mixVec3(
+    [0.03, 0.06, 0.1],
+    [
+      0.04 + environment.skyColor[0] * 0.08,
+      0.06 + environment.skyColor[1] * 0.1,
+      0.09 + environment.skyColor[2] * 0.12
+    ],
+    daylight * 0.88 + twilight * 0.08
+  );
+  const shorelineColor = mixVec3(
+    [0.58, 0.53, 0.41],
+    [
+      0.7 + environment.sunColor[0] * 0.08,
+      0.64 + environment.sunColor[1] * 0.08,
+      0.54 + environment.sunColor[2] * 0.04
+    ],
+    daylight * 0.85 + twilight * 0.08
+  );
+  const shorelineEmissive = mixVec3(
+    [0.06, 0.06, 0.05],
+    [
+      0.08 + environment.skyColor[0] * 0.05,
+      0.08 + environment.skyColor[1] * 0.05,
+      0.07 + environment.skyColor[2] * 0.04
+    ],
+    daylight * 0.74 + twilight * 0.12
+  );
+  const textureOffsetX = (((elapsedSeconds * 0.031) % 1) + 1) % 1;
+  const textureOffsetY = (((elapsedSeconds * 0.019) % 1) + 1) % 1;
+
+  return {
+    shallowColor,
+    deepColor,
+    highlightColor,
+    emissiveColor,
+    emissiveIntensity: 0.34 + daylight * 0.14 + twilight * 0.05,
+    opacity: 0.76 + daylight * 0.14,
+    shorelineColor,
+    shorelineOpacity: 0.28 + daylight * 0.12 + twilight * 0.04,
+    shorelineEmissive,
+    textureOffset: [textureOffsetX, textureOffsetY],
+    textureRepeat: [1.55 + daylight * 0.18, 1.42 + waveStrength * 0.16],
+    waveStrength
+  };
 }
 
 export function describeEnvironmentPreset(

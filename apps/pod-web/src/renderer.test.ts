@@ -3,36 +3,39 @@ import { describe, expect, test } from "bun:test";
 import { buildAmbientChunkDressingPlan } from "./renderer";
 import {
   describeEnvironmentPreset,
+  type LandscapeEnvironment,
   sampleLakeMask,
+  sampleTerrainMaterial,
   sampleTerrainHeight,
   sampleTimeLapseEnvironment,
+  sampleWaterSurfaceStyle,
   WATER_LEVEL
 } from "./landscape";
 import { meshGroundAnchorHeight } from "./mesh-bounds";
 
 describe("pod-web renderer landscape helpers", () => {
+  const flagshipEnvironment: LandscapeEnvironment = {
+    biomeId: "verdant-hollow",
+    skyColor: [0.64, 0.8, 0.98, 1],
+    fogColor: [0.72, 0.84, 0.78, 1],
+    fogNear: 30,
+    fogFar: 196,
+    ambientColor: [0.82, 0.92, 0.88],
+    ambientIntensity: 1.4,
+    sunColor: [1, 0.96, 0.84],
+    sunIntensity: 2.95,
+    sunDirection: [30, 48, 18],
+    fillColor: [0.48, 0.76, 0.94],
+    fillIntensity: 0.88,
+    fillDirection: [-18, 14, -10],
+    rimColor: [0.4, 0.88, 0.78],
+    rimIntensity: 8.5,
+    groundColor: [0.19, 0.33, 0.21, 1],
+    starfieldIntensity: 0.08
+  };
+
   test("classifies bright flagship environments as daylight", () => {
-    expect(
-      describeEnvironmentPreset({
-        biomeId: "verdant-hollow",
-        skyColor: [0.64, 0.8, 0.98, 1],
-        fogColor: [0.72, 0.84, 0.78, 1],
-        fogNear: 30,
-        fogFar: 196,
-        ambientColor: [0.82, 0.92, 0.88],
-        ambientIntensity: 1.4,
-        sunColor: [1, 0.96, 0.84],
-        sunIntensity: 2.95,
-        sunDirection: [30, 48, 18],
-        fillColor: [0.48, 0.76, 0.94],
-        fillIntensity: 0.88,
-        fillDirection: [-18, 14, -10],
-        rimColor: [0.4, 0.88, 0.78],
-        rimIntensity: 8.5,
-        groundColor: [0.19, 0.33, 0.21, 1],
-        starfieldIntensity: 0.08
-      })
-    ).toBe("daylight");
+    expect(describeEnvironmentPreset(flagshipEnvironment)).toBe("daylight");
   });
 
   test("builds a deterministic non-flat heightfield for the terrain mesh", () => {
@@ -49,32 +52,34 @@ describe("pod-web renderer landscape helpers", () => {
   });
 
   test("animates the flagship environment through a daylight cycle", () => {
-    const morning = sampleTimeLapseEnvironment(
-      {
-        biomeId: "verdant-hollow",
-        skyColor: [0.64, 0.8, 0.98, 1],
-        fogColor: [0.72, 0.84, 0.78, 1],
-        fogNear: 30,
-        fogFar: 196,
-        ambientColor: [0.82, 0.92, 0.88],
-        ambientIntensity: 1.4,
-        sunColor: [1, 0.96, 0.84],
-        sunIntensity: 2.95,
-        sunDirection: [30, 48, 18],
-        fillColor: [0.48, 0.76, 0.94],
-        fillIntensity: 0.88,
-        fillDirection: [-18, 14, -10],
-        rimColor: [0.4, 0.88, 0.78],
-        rimIntensity: 8.5,
-        groundColor: [0.19, 0.33, 0.21, 1],
-        starfieldIntensity: 0.08
-      },
-      0
-    );
+    const morning = sampleTimeLapseEnvironment(flagshipEnvironment, 0);
     const noon = sampleTimeLapseEnvironment(morning.environment, 45);
 
     expect(morning.timeOfDayHours).toBeGreaterThanOrEqual(0);
     expect(noon.environment.sunDirection[1]).toBeGreaterThan(morning.environment.sunDirection[1]);
+  });
+
+  test("pushes shoreline terrain warmer than highland cliffs", () => {
+    const shore = sampleTerrainMaterial(flagshipEnvironment, 0, -14);
+    const highland = sampleTerrainMaterial(flagshipEnvironment, -110, 110);
+
+    expect(shore.shoreMask).toBeGreaterThan(0.03);
+    expect(highland.highlandMask).toBeGreaterThan(shore.highlandMask);
+    expect(shore.tint[0] + shore.tint[1]).toBeGreaterThan(
+      highland.tint[0] + highland.tint[1]
+    );
+  });
+
+  test("keeps water visuals deterministic while shifting with time of day", () => {
+    const day = sampleWaterSurfaceStyle(flagshipEnvironment, 12);
+    const nightEnvironment = sampleTimeLapseEnvironment(flagshipEnvironment, 0).environment;
+    const night = sampleWaterSurfaceStyle(nightEnvironment, 12);
+    const later = sampleWaterSurfaceStyle(flagshipEnvironment, 24);
+
+    expect(day.opacity).toBeGreaterThan(night.opacity);
+    expect(day.shallowColor[1]).toBeGreaterThan(night.shallowColor[1]);
+    expect(day.textureOffset).not.toEqual(later.textureOffset);
+    expect(sampleWaterSurfaceStyle(flagshipEnvironment, 12)).toEqual(day);
   });
 
   test("builds deterministic ambient chunk dressing outside the lagoon and hub", () => {

@@ -62,10 +62,12 @@ export interface PodThreeAssetResidencyStats {
 export function shouldUseProceduralSpriteTexture(assetPath: string): boolean {
   const normalized = normalizeAssetKey(assetPath);
   return (
-    assetPath.trim().toLowerCase().endsWith(".svg") &&
-    (normalized.includes("selection-ring") ||
-      normalized.includes("danger-ring") ||
-      normalized.includes("mist-ring"))
+    normalized.includes("combat-banner") ||
+    normalized.includes("health-bar") ||
+    (assetPath.trim().toLowerCase().endsWith(".svg") &&
+      (normalized.includes("selection-ring") ||
+        normalized.includes("danger-ring") ||
+        normalized.includes("mist-ring")))
   );
 }
 
@@ -197,7 +199,9 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
       return { texture: cached };
     }
 
-    const texture = createRadialTexture(hashColor(batch.texture));
+    const texture = shouldUseProceduralSpriteTexture(batch.texture)
+      ? createProceduralSpriteTexture(batch.texture)
+      : createRadialTexture(hashColor(batch.texture));
     texture.anisotropy = anisotropy;
     this.textureCache.set(key, texture);
     return { texture };
@@ -531,10 +535,44 @@ export const SPRITE_PLANE_GEOMETRY = new PlaneGeometry(1, 1);
 export function createProceduralSpriteTexture(assetPath: string): Texture {
   const normalized = normalizeAssetKey(assetPath);
   const color = spritePalette(assetPath);
+  if (normalized.includes("combat-banner") || normalized.includes("health-bar")) {
+    return createBarTexture(color, assetPath);
+  }
   if (normalized.includes("ring")) {
     return createRingTexture(color, assetPath);
   }
   return createRadialTexture(color, assetPath);
+}
+
+function createBarTexture(color: [number, number, number], assetPath?: string): Texture {
+  const width = 64;
+  const height = 16;
+  const pixels = new Uint8Array(width * height * 4);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4;
+      const edgeX = Math.min(x, width - 1 - x) / Math.max((width - 1) * 0.5, 1);
+      const edgeY = Math.min(y, height - 1 - y) / Math.max((height - 1) * 0.5, 1);
+      const softness = Math.min(edgeX, edgeY);
+      const alpha = Math.max(0, Math.min(1, softness * 1.6));
+
+      pixels[index] = color[0];
+      pixels[index + 1] = color[1];
+      pixels[index + 2] = color[2];
+      pixels[index + 3] = Math.round(alpha * 255);
+    }
+  }
+
+  const texture = new DataTexture(pixels, width, height);
+  texture.needsUpdate = true;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
+  texture.colorSpace = NoColorSpace;
+  texture.name = assetPath ? `pod-bar:${assetPath}` : "pod-bar";
+  return texture;
 }
 
 function createRadialTexture(color: [number, number, number], assetPath?: string): Texture {

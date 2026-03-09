@@ -345,6 +345,59 @@ export interface ShardIncidentSummary {
   notes: string[];
 }
 
+export interface ClientTransportSummaryDocument {
+  client_id: string;
+  player_name?: string | null;
+  controlled_entity?: number | null;
+  session_resumes: number;
+  recovery_snapshots_sent: number;
+  recovery_delivery_failures: number;
+  last_seen_tick: number;
+  ticks_since_last_seen: number;
+  last_sent_tick?: number | null;
+  pending_action_queue_depth: number;
+  queue_pressure: boolean;
+  inbound_messages: number;
+  outbound_messages: number;
+  inbound_bytes: number;
+  outbound_bytes: number;
+  action_batches_received: number;
+  full_snapshot_requests: number;
+  ping_requests: number;
+  state_deltas_sent: number;
+  event_batches_sent: number;
+  debug_documents_sent: number;
+  rejected_messages_sent: number;
+  debug_telemetry_enabled: boolean;
+}
+
+export interface ShardTransportSummaryDocument {
+  shard_id: string;
+  latest_tick: number;
+  client_count: number;
+  resumed_sessions: number;
+  recovery_snapshots_sent: number;
+  recovery_delivery_failures: number;
+  client_inactivity_timeout_ticks: number;
+  queue_pressure_warn_depth: number;
+  total_pending_action_queue_depth: number;
+  queue_pressure_client_count: number;
+  total_inbound_messages: number;
+  total_outbound_messages: number;
+  total_inbound_bytes: number;
+  total_outbound_bytes: number;
+  action_batches_received: number;
+  full_snapshot_requests: number;
+  ping_requests: number;
+  state_deltas_sent: number;
+  event_batches_sent: number;
+  debug_documents_sent: number;
+  rejected_messages_sent: number;
+  timed_out_clients: number;
+  queue_pressure_events: number;
+  clients: ClientTransportSummaryDocument[];
+}
+
 export interface FocusedEntityDebugSummaryDocument {
   shard_id: string;
   entity_id: number;
@@ -413,6 +466,7 @@ export type LiveDebugDocument =
   | { kind: "tickTelemetry"; documentType: string; payload: TickTelemetryEnvelope }
   | { kind: "toolCallEvent"; documentType: string; payload: AgentToolCallEventDocument }
   | { kind: "tickRollup"; documentType: string; payload: AgentTickRollupDocument }
+  | { kind: "transport"; documentType: string; payload: ShardTransportSummaryDocument }
   | { kind: "focusedSummary"; documentType: string; payload: FocusedEntityDebugSummaryDocument }
   | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
   | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
@@ -1922,6 +1976,30 @@ export function parseFocusedEntityDebugSummary(
   throw new Error("Invalid focused entity debug summary payload");
 }
 
+export function parseShardTransportSummary(
+  summary: string | ShardTransportSummaryDocument
+): ShardTransportSummaryDocument {
+  const parsed =
+    typeof summary === "string" ? decodeStructuredString(summary) : summary;
+  const transportDocument = documentEnvelope(parsed);
+
+  if (transportDocument?.document_type === "shard_transport_summary") {
+    return transportDocument.payload as ShardTransportSummaryDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.shard_id === "string" &&
+    typeof parsed.latest_tick === "number" &&
+    typeof parsed.client_count === "number" &&
+    Array.isArray(parsed.clients)
+  ) {
+    return parsed as unknown as ShardTransportSummaryDocument;
+  }
+
+  throw new Error("Invalid shard transport summary payload");
+}
+
 export function summarizeAgentTickRollup(
   rollup: AgentTickRollupDocument
 ): TickRollupSummary {
@@ -1969,6 +2047,12 @@ export function parseLiveDebugDocument(document: string): LiveDebugDocument {
         kind: "focusedSummary",
         documentType: envelope.document_type,
         payload: parseFocusedEntityDebugSummary(document)
+      };
+    case "shard_transport_summary":
+      return {
+        kind: "transport",
+        documentType: envelope.document_type,
+        payload: parseShardTransportSummary(document)
       };
     case "replay_file":
       return {
@@ -2192,6 +2276,7 @@ export function applyNetworkStateDelta(
 
 const WORLD_TO_RENDER_SCALE = 1;
 const GROUND_RING_ROTATION: Vec4Tuple = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+const IDENTITY_QUATERNION: Vec4Tuple = [0, 0, 0, 1];
 
 interface EntityRenderProfile {
   mesh: string;
@@ -2998,6 +3083,11 @@ export interface InteractionMarkerOptions {
   controlledSnapshot?: NetworkEntitySnapshot | null;
 }
 
+export interface CombatFocusMarkerOptions {
+  selectedTarget?: NetworkEntitySnapshot | null;
+  controlledSnapshot?: NetworkEntitySnapshot | null;
+}
+
 export interface WorldEventMarkerOptions {
   events: NetworkGameEvent[];
   worldSnapshot?: NetworkWorldSnapshot | null;
@@ -3154,6 +3244,94 @@ export function withInteractionMarkers(
 
   if (markers.length === 0) {
     return frame;
+  }
+
+  return {
+    ...frame,
+    spriteBatches: [...frame.spriteBatches, ...markers]
+  };
+}
+
+export function withCombatFocusMarkers(
+  frame: ThreeJsWebGpuFrame,
+  options: CombatFocusMarkerOptions
+): ThreeJsWebGpuFrame {
+  const target = options.selectedTarget;
+  const controlled = options.controlledSnapshot;
+  if (!target?.metadata.interaction.canAttack) {
+    return frame;
+  }
+
+  const markers = new Array<ThreeJsSpriteBatch>();
+  const pushBanner = (
+    entity: NetworkEntitySnapshot,
+    emphasis: "player" | "target"
+  ): void => {
+    const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
+    const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
+    const anchorHeight = entityAnchorHeight(entity);
+    const scaleMultiplier = entity.metadata.actorPresentation?.scaleMultiplier ?? 1;
+    const bannerY = anchorHeight + 2.05 + scaleMultiplier * 0.42;
+    const ratio = clamp01(healthRatio(entity) ?? 1);
+    const critical = 1 - ratio;
+    const backColor: RgbaTuple =
+      emphasis === "player" ? [0.08, 0.16, 0.2, 0.42] : [0.1, 0.08, 0.08, 0.42];
+    const fillColor: RgbaTuple =
+      emphasis === "player"
+        ? [0.42, 0.9, 1, 0.72]
+        : [0.38 + critical * 0.56, 0.9 - critical * 0.4, 0.34, 0.66 + critical * 0.14];
+    const bannerWidth = emphasis === "player" ? 1.52 : 1.74;
+
+    markers.push({
+      texture: "combat-banner",
+      frame: 0,
+      layer: 10,
+      billboard: true,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 26,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, bannerY, worldZ],
+          rotation: IDENTITY_QUATERNION,
+          scale: [bannerWidth, 0.22, 1],
+          color: backColor,
+          sourceEntity: entity.id,
+          animationSetId: "combat-banner"
+        }
+      ]
+    });
+    markers.push({
+      texture: "health-bar",
+      frame: 0,
+      layer: 11,
+      billboard: true,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 27,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, bannerY, worldZ + 0.02],
+          rotation: IDENTITY_QUATERNION,
+          scale: [Math.max(0.42, bannerWidth * 0.86 * ratio), 0.14, 1],
+          color: fillColor,
+          sourceEntity: entity.id,
+          animationSetId: "health-bar",
+          healthRatio: ratio
+        }
+      ]
+    });
+  };
+
+  pushBanner(target, "target");
+  if (controlled) {
+    pushBanner(controlled, "player");
   }
 
   return {

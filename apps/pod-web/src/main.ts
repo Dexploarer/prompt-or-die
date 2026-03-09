@@ -13,6 +13,7 @@ import {
   parseThreeJsWebGpuFrame,
   parseTickTelemetryEnvelope,
   summarizeReplayFile,
+  withCombatFocusMarkers,
   withInteractionMarkers,
   withWorldEventMarkers,
   type ThreeJsWebGpuFrame,
@@ -272,9 +273,11 @@ let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
       entityCount: 0,
       controlledEntity: null,
       authoritativeDigest: null,
+      clientId: null,
       roundTripMs: null,
       jitterMs: null,
-      lastPongServerTick: null
+      lastPongServerTick: null,
+      heartbeatAgeMs: null
     }
   : null;
 
@@ -624,7 +627,12 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
     }
   );
 
-  return withWorldEventMarkers(interactionFrame, {
+  const combatFrame = withCombatFocusMarkers(interactionFrame, {
+    selectedTarget: target,
+    controlledSnapshot: controlled
+  });
+
+  return withWorldEventMarkers(combatFrame, {
     events: recentWorldEvents,
     worldSnapshot: latestSnapshot,
     currentTick: latestSnapshot?.tick ?? null
@@ -1286,6 +1294,8 @@ function applyLiveDebugDocument(document: string): void {
       break;
     case "tickRollup":
       break;
+    case "transport":
+      break;
     case "focusedSummary":
       break;
     case "replay":
@@ -1377,10 +1387,14 @@ function renderTelemetryHud(): void {
     liveDebugState,
     debugFocusEntityId
   );
+  const latestTransportSummary = liveDebugState.latestTransportSummary;
   const focusedToolEvent = selectedToolEventSummary(liveDebugState, debugFocusEntityId);
   const focusedRollup = selectedTickRollupSummary(liveDebugState, debugFocusEntityId);
   const populationHeatmap = currentPopulationHeatmap();
-  connectionNode.textContent = formatConnectionSummary(liveConnectionStatus);
+  connectionNode.textContent = formatConnectionSummary(
+    liveConnectionStatus,
+    latestTransportSummary
+  );
   worldNode.textContent = liveConnectionStatus
     ? liveConnectionStatus.tick == null
       ? `awaiting snapshot · ${liveConnectionStatus.url}`
@@ -1427,7 +1441,9 @@ function renderTelemetryHud(): void {
     : "No replay summary loaded";
   incidentSummaryNode.textContent = latestIncidentSummary
     ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveDebugState.liveIncidentDocuments}`
-    : "No shard incident summary loaded";
+    : latestTransportSummary
+      ? `transport · ${latestTransportSummary.client_count} clients · ${latestTransportSummary.total_pending_action_queue_depth} queued · ${latestTransportSummary.queue_pressure_client_count} pressured · ${latestTransportSummary.timed_out_clients} timed out · ${liveDebugState.liveTransportDocuments} samples`
+      : "No shard incident summary loaded";
   toolEventSummaryNode.textContent = focusedToolEvent
     ? `E(${focusedToolEvent.agentEntityId}) · ${focusedToolEvent.toolName} · ${focusedToolEvent.status} · ${focusedToolEvent.latencyMs}ms${
         debugFocusEntityId != null ? " · focus" : ""

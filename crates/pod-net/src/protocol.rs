@@ -183,6 +183,10 @@ pub struct ServerConfig {
     pub enable_websocket: bool,
     /// WebSocket endpoint port
     pub websocket_port: u16,
+    /// Max ticks a client may stay silent before heartbeat timeout disconnect.
+    pub client_inactivity_timeout_ticks: u64,
+    /// Pending action depth that should be treated as queue pressure.
+    pub queue_pressure_warn_depth: usize,
 }
 
 impl Default for ServerConfig {
@@ -195,6 +199,8 @@ impl Default for ServerConfig {
             bind_port: 5000,
             enable_websocket: true,
             websocket_port: 5001,
+            client_inactivity_timeout_ticks: 600,
+            queue_pressure_warn_depth: 192,
         }
     }
 }
@@ -214,6 +220,12 @@ pub struct ClientConfig {
     pub player_name: String,
     /// Connection timeout in milliseconds
     pub timeout_ms: u64,
+    /// Max milliseconds the client will tolerate without any server traffic
+    /// before treating the connection as stale.
+    pub heartbeat_timeout_ms: u64,
+    /// Max queued actions or unacknowledged predicted batches retained client-side
+    /// before new input is refused.
+    pub max_pending_actions: usize,
 }
 
 impl Default for ClientConfig {
@@ -223,6 +235,8 @@ impl Default for ClientConfig {
             server_port: 5000,
             player_name: "Player".to_string(),
             timeout_ms: 5000,
+            heartbeat_timeout_ms: 6500,
+            max_pending_actions: 32,
         }
     }
 }
@@ -390,4 +404,13 @@ mod tests {
             other => panic!("Wrong message type: {other:?}"),
         }
     }
+}
+
+#[test]
+fn test_client_config_defaults_include_heartbeat_limits() {
+    let config = ClientConfig::default();
+
+    assert_eq!(config.timeout_ms, 5000);
+    assert_eq!(config.heartbeat_timeout_ms, 6500);
+    assert_eq!(config.max_pending_actions, 32);
 }

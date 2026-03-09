@@ -9,6 +9,7 @@ import {
   encodeDirectConnectDebugFocusMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
+  type NetworkEntitySnapshot,
   type NetworkEntityMetadataSnapshot,
   type NetworkWorldSnapshot,
   parseAgentTickRollup,
@@ -17,10 +18,12 @@ import {
   parseLiveDebugDocument,
   parseReplayFile,
   parseShardIncidentSummary,
+  parseShardTransportSummary,
   parseTickTelemetryEnvelope,
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
+  withCombatFocusMarkers,
   withInteractionMarkers,
   withWorldEventMarkers
 } from "./contracts";
@@ -233,6 +236,76 @@ describe("TOON contract parsing", () => {
     expect(summary.notes).toHaveLength(1);
   });
 
+  test("accepts shard transport summary TOON documents", () => {
+    const document = encode({
+      document_type: "shard_transport_summary",
+      payload: {
+        shard_id: "direct-connect",
+        latest_tick: 360,
+        client_count: 2,
+        resumed_sessions: 1,
+        recovery_snapshots_sent: 3,
+        recovery_delivery_failures: 1,
+        client_inactivity_timeout_ticks: 600,
+        queue_pressure_warn_depth: 192,
+        total_pending_action_queue_depth: 1,
+        queue_pressure_client_count: 1,
+        total_inbound_messages: 21,
+        total_outbound_messages: 44,
+        total_inbound_bytes: 1024,
+        total_outbound_bytes: 4096,
+        action_batches_received: 8,
+        full_snapshot_requests: 1,
+        ping_requests: 5,
+        state_deltas_sent: 19,
+        event_batches_sent: 7,
+        debug_documents_sent: 11,
+        rejected_messages_sent: 2,
+        timed_out_clients: 3,
+        queue_pressure_events: 5,
+        clients: [
+          {
+            client_id: "client-a",
+            player_name: "debug",
+            controlled_entity: 44,
+            session_resumes: 1,
+            recovery_snapshots_sent: 2,
+            recovery_delivery_failures: 1,
+            last_seen_tick: 360,
+            ticks_since_last_seen: 0,
+            last_sent_tick: 360,
+            pending_action_queue_depth: 1,
+            queue_pressure: true,
+            inbound_messages: 10,
+            outbound_messages: 20,
+            inbound_bytes: 512,
+            outbound_bytes: 2048,
+            action_batches_received: 4,
+            full_snapshot_requests: 1,
+            ping_requests: 3,
+            state_deltas_sent: 9,
+            event_batches_sent: 4,
+            debug_documents_sent: 6,
+            rejected_messages_sent: 1,
+            debug_telemetry_enabled: true
+          }
+        ]
+      }
+    });
+
+    const summary = parseShardTransportSummary(document);
+    expect(summary.shard_id).toBe("direct-connect");
+    expect(summary.client_count).toBe(2);
+    expect(summary.resumed_sessions).toBe(1);
+    expect(summary.recovery_snapshots_sent).toBe(3);
+    expect(summary.recovery_delivery_failures).toBe(1);
+    expect(summary.queue_pressure_client_count).toBe(1);
+    expect(summary.clients[0]?.session_resumes).toBe(1);
+    expect(summary.clients[0]?.recovery_snapshots_sent).toBe(2);
+    expect(summary.clients[0]?.recovery_delivery_failures).toBe(1);
+    expect(summary.clients[0]?.client_id).toBe("client-a");
+  });
+
   test("accepts tool-call and rollup TOON documents", () => {
     const toolDocument = encode({
       document_type: "agent_tool_call_event",
@@ -345,6 +418,39 @@ describe("TOON contract parsing", () => {
       })
     );
     expect(focused.kind).toBe("focusedSummary");
+
+    const transport = parseLiveDebugDocument(
+      encode({
+        document_type: "shard_transport_summary",
+        payload: {
+          shard_id: "direct-connect",
+          latest_tick: 18,
+          client_count: 1,
+          client_inactivity_timeout_ticks: 600,
+          resumed_sessions: 0,
+          recovery_snapshots_sent: 0,
+          recovery_delivery_failures: 0,
+          queue_pressure_warn_depth: 192,
+          total_pending_action_queue_depth: 0,
+          queue_pressure_client_count: 0,
+          total_inbound_messages: 2,
+          total_outbound_messages: 6,
+          total_inbound_bytes: 64,
+          total_outbound_bytes: 256,
+          action_batches_received: 1,
+          full_snapshot_requests: 0,
+          ping_requests: 1,
+          state_deltas_sent: 2,
+          event_batches_sent: 1,
+          debug_documents_sent: 3,
+          rejected_messages_sent: 0,
+          timed_out_clients: 0,
+          queue_pressure_events: 0,
+          clients: []
+        }
+      })
+    );
+    expect(transport.kind).toBe("transport");
   });
 
   test("parses direct-connect welcome and delta messages", () => {
@@ -1056,6 +1162,131 @@ describe("TOON contract parsing", () => {
         batch.instances.every((instance) => instance.sourceEntity === 12)
     );
     expect(tetherBatch?.instances.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("adds world-space combat focus banners for selected hostile targets", () => {
+    const target: NetworkEntitySnapshot = {
+      id: 12,
+      position: [8, -5],
+      velocity: [0, 0],
+      rotation: 0,
+      health: 8,
+      maxHealth: 20,
+      movementSpeed: 3.8,
+      label: "Rift Beast",
+      metadata: typedEntityMetadata("WildCreature", {
+        actorPresentation: {
+          profileId: "rift-beast",
+          meshAssetId: "rift-beast",
+          materialPaletteId: "default",
+          scaleMultiplier: 1.1,
+          footprintRadius: 1.2,
+          selectionRingScale: 2.5,
+          auraColor: [0.12, 0.2, 0.28, 0.18],
+          animationSetId: "rift-beast"
+        },
+        interaction: {
+          canInspect: true,
+          canInteract: false,
+          canAttack: true,
+          canGather: false,
+          canLoot: false,
+          canCapture: false,
+          canCommandCompanion: false,
+          canChat: false
+        }
+      })
+    };
+    const controlled: NetworkEntitySnapshot = {
+      id: 1,
+      position: [0, 0],
+      velocity: [0, 0],
+      rotation: 0,
+      health: 24,
+      maxHealth: 24,
+      movementSpeed: 4,
+      label: "WebPlayer",
+      metadata: typedEntityMetadata("Player", {
+        actorPresentation: {
+          profileId: "hero-runescape",
+          meshAssetId: "adventurer-hero",
+          materialPaletteId: "default",
+          scaleMultiplier: 1,
+          footprintRadius: 0.9,
+          selectionRingScale: 2.3,
+          auraColor: [0.14, 0.22, 0.3, 0.2],
+          animationSetId: "hero-runescape"
+        }
+      })
+    };
+    const baseFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: 0,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      environment: {
+        biomeId: "verdant-hollow",
+        skyColor: [0.64, 0.8, 0.98, 1],
+        fogColor: [0.72, 0.84, 0.78, 1],
+        fogNear: 30,
+        fogFar: 196,
+        ambientColor: [0.82, 0.92, 0.88],
+        ambientIntensity: 1.4,
+        sunColor: [1, 0.96, 0.84],
+        sunIntensity: 2.95,
+        sunDirection: [30, 48, 18],
+        fillColor: [0.48, 0.76, 0.94],
+        fillIntensity: 0.88,
+        fillDirection: [-18, 14, -10],
+        rimColor: [0.4, 0.88, 0.78],
+        rimIntensity: 8.5,
+        groundColor: [0.19, 0.33, 0.21, 1],
+        starfieldIntensity: 0.08
+      },
+      overlayCommands: [],
+      meshBatches: [],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    } satisfies Parameters<typeof withCombatFocusMarkers>[0];
+
+    const decorated = withCombatFocusMarkers(baseFrame, {
+      selectedTarget: target,
+      controlledSnapshot: controlled
+    });
+
+    expect(baseFrame.spriteBatches).toHaveLength(0);
+    expect(decorated.spriteBatches).toHaveLength(4);
+    expect(
+      decorated.spriteBatches.filter((batch) => batch.texture === "combat-banner")
+    ).toHaveLength(2);
+    const healthBars = decorated.spriteBatches.filter(
+      (batch) => batch.texture === "health-bar"
+    );
+    expect(healthBars).toHaveLength(2);
+    expect(healthBars.every((batch) => batch.billboard)).toBe(true);
+    const targetBar = healthBars.find((batch) => batch.instances[0]?.sourceEntity === 12);
+    const playerBar = healthBars.find((batch) => batch.instances[0]?.sourceEntity === 1);
+    expect(targetBar?.instances[0]?.scale[0]).toBeLessThan(
+      playerBar?.instances[0]?.scale[0] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   test("camera state responds to controlled traversal speed", () => {

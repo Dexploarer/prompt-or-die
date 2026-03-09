@@ -27,6 +27,7 @@ const RECOVERY_REQUEST_RETRY_TICKS: u64 = 5;
 struct WebRuntimeState {
     closed: bool,
     last_error: Option<String>,
+    last_activity_ms: f64,
 }
 
 /// WebSocket-based client for web browsers
@@ -72,6 +73,10 @@ pub struct WebClient {
     render_clock: RenderClock,
     reconnect_attempts: u32,
     next_reconnect_at_ms: f64,
+    /// Latest round-trip latency sample derived from ping/pong.
+    last_ping_rtt_ms: Option<u64>,
+    /// Smoothed latency jitter estimate derived from recent RTT deltas.
+    ping_jitter_ms: Option<f32>,
 }
 
 impl WebClient {
@@ -104,6 +109,8 @@ impl WebClient {
             render_clock: RenderClock::default(),
             reconnect_attempts: 0,
             next_reconnect_at_ms: 0.0,
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
         };
         client.open_socket()?;
         Ok(client)
@@ -141,6 +148,7 @@ impl WebClient {
                 if let Ok(mut state) = runtime.lock() {
                     state.closed = false;
                     state.last_error = None;
+                    state.last_activity_ms = js_sys::Date::now();
                 }
                 if let Some(payload) = connect_payload.as_ref() {
                     if let Some(target) = event.target() {
@@ -159,10 +167,14 @@ impl WebClient {
 
         let onmessage = {
             let pending = pending_updates.clone();
+            let runtime = runtime_state.clone();
             Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                 if let Ok(text) = event.data().dyn_into::<js_sys::JsString>() {
                     let text_str = String::from(text);
                     if let Ok(msg) = ServerMessage::decode_json(&text_str) {
+                        if let Ok(mut state) = runtime.lock() {
+                            state.last_activity_ms = js_sys::Date::now();
+                        }
                         if let Ok(mut updates) = pending.lock() {
                             updates.push(msg);
                         }
@@ -237,6 +249,16 @@ impl WebClient {
 
     /// Queue an action to be sent to the server
     pub fn queue_action(&mut self, action: Action) {
+        if self.pending_actions.len() >= self.config.max_pending_actions {
+            web_sys::console::warn_1(
+                &format!(
+                    "Dropping queued client action because pending action buffer is saturated at {}",
+                    self.config.max_pending_actions
+                )
+                .into(),
+            );
+            return;
+        }
         self.pending_actions.push(action);
     }
 
@@ -244,6 +266,15 @@ impl WebClient {
     pub fn send_actions(&mut self, tick: u64) -> Result<(), ClientError> {
         if self.pending_actions.is_empty() {
             return Ok(());
+        }
+
+        if self.prediction_history.len() >= self.config.max_pending_actions {
+            let reason = format!(
+                "Pending action backlog saturated ({})",
+                self.prediction_history.len()
+            );
+            web_sys::console::warn_1(&reason.clone().into());
+            return Err(ClientError::Rejected(reason));
         }
 
         let actions = std::mem::take(&mut self.pending_actions);
@@ -385,7 +416,10 @@ impl WebClient {
                 self.last_event_tick = *tick;
                 true
             }
-            ServerMessage::Pong { .. } => true,
+            ServerMessage::Pong { client_ts, .. } => {
+                self.record_pong_latency(js_sys::Date::now() as u64, *client_ts);
+                true
+            }
             ServerMessage::TickTelemetry { frame_json } => {
                 self.record_debug_document(frame_json.clone());
                 true
@@ -402,6 +436,9 @@ impl WebClient {
     }
 
     fn maybe_reconnect(&mut self) {
+        let now = js_sys::Date::now();
+        self.enforce_heartbeat_timeout(now);
+
         let should_reconnect = if let Ok(state) = self.runtime_state.lock() {
             state.closed
         } else {
@@ -412,7 +449,6 @@ impl WebClient {
             return;
         }
 
-        let now = js_sys::Date::now();
         if now < self.next_reconnect_at_ms {
             return;
         }
@@ -556,6 +592,16 @@ impl WebClient {
         self.prediction_history.len()
     }
 
+    /// Most recent measured round-trip time, if any.
+    pub fn latency_ms(&self) -> Option<u64> {
+        self.last_ping_rtt_ms
+    }
+
+    /// Smoothed RTT jitter estimate in milliseconds, if any.
+    pub fn jitter_ms(&self) -> Option<f32> {
+        self.ping_jitter_ms
+    }
+
     /// Get the client ID
     pub fn client_id(&self) -> Option<ClientId> {
         self.client_id
@@ -610,6 +656,49 @@ impl WebClient {
     fn clear_presentation_state(&mut self) {
         self.render_buffer.clear();
         self.render_clock.reset();
+    }
+
+    fn record_pong_latency(&mut self, now_ms: u64, client_ts: u64) {
+        let Some(rtt_ms) = now_ms.checked_sub(client_ts) else {
+            return;
+        };
+        let jitter = self
+            .last_ping_rtt_ms
+            .map(|last_rtt_ms| last_rtt_ms.abs_diff(rtt_ms) as f32);
+        self.last_ping_rtt_ms = Some(rtt_ms);
+        self.ping_jitter_ms = Some(match (self.ping_jitter_ms, jitter) {
+            (Some(previous), Some(delta)) => (previous * 0.75) + (delta * 0.25),
+            (_, Some(delta)) => delta,
+            (Some(previous), None) => previous,
+            (None, None) => 0.0,
+        });
+    }
+
+    fn heartbeat_timed_out(&self, now_ms: f64) -> bool {
+        let Ok(state) = self.runtime_state.lock() else {
+            return false;
+        };
+
+        self.connected
+            && state.last_activity_ms > 0.0
+            && (now_ms - state.last_activity_ms) > self.config.heartbeat_timeout_ms as f64
+    }
+
+    fn enforce_heartbeat_timeout(&mut self, now_ms: f64) {
+        if !self.heartbeat_timed_out(now_ms) {
+            return;
+        }
+
+        if let Ok(mut state) = self.runtime_state.lock() {
+            state.closed = true;
+            state.last_error = Some("heartbeat timeout".to_string());
+            state.last_activity_ms = now_ms;
+        }
+        self.connected = false;
+
+        if let Some(websocket) = self.websocket.as_ref() {
+            let _ = websocket.close();
+        }
     }
 
     fn request_full_snapshot(&mut self, observed_server_tick: u64) {
@@ -737,9 +826,13 @@ mod tests {
             server_port: 5001,
             player_name: "WebPlayer".to_string(),
             timeout_ms: 5000,
+            heartbeat_timeout_ms: 6500,
+            max_pending_actions: 32,
         };
 
         assert_eq!(config.player_name, "WebPlayer");
         assert_eq!(config.server_port, 5001);
+        assert_eq!(config.heartbeat_timeout_ms, 6500);
+        assert_eq!(config.max_pending_actions, 32);
     }
 }

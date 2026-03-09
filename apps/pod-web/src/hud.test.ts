@@ -70,10 +70,61 @@ describe("hud formatting", () => {
         entityCount: 22,
         controlledEntity: 12,
         authoritativeDigest: 9912,
+        clientId: "client-a",
         roundTripMs: 42,
         jitterMs: 6,
-        lastPongServerTick: 128
+        lastPongServerTick: 128,
+        heartbeatAgeMs: 120
       })
     ).toBe("connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter");
+  });
+
+  test("surfaces shard pressure and timeout counts compactly", () => {
+    expect(
+      formatConnectionSummary(
+        {
+          phase: "connected",
+          detail: "Authoritative tick 128",
+          url: "ws://127.0.0.1:7778",
+          tick: 128,
+          entityCount: 22,
+          controlledEntity: 12,
+          authoritativeDigest: 9912,
+          clientId: "client-a",
+          roundTripMs: 42,
+          jitterMs: 6,
+          lastPongServerTick: 128,
+          heartbeatAgeMs: 240
+        },
+        {
+          shard_id: "direct-connect",
+          latest_tick: 128,
+          client_count: 3,
+          resumed_sessions: 2,
+          recovery_snapshots_sent: 4,
+          recovery_delivery_failures: 1,
+          client_inactivity_timeout_ticks: 600,
+          queue_pressure_warn_depth: 192,
+          total_pending_action_queue_depth: 9,
+          queue_pressure_client_count: 2,
+          total_inbound_messages: 32,
+          total_outbound_messages: 64,
+          total_inbound_bytes: 1024,
+          total_outbound_bytes: 20480,
+          action_batches_received: 12,
+          full_snapshot_requests: 1,
+          ping_requests: 9,
+          state_deltas_sent: 24,
+          event_batches_sent: 6,
+          debug_documents_sent: 4,
+          rejected_messages_sent: 1,
+          timed_out_clients: 1,
+          queue_pressure_events: 3,
+          clients: []
+        }
+      )
+    ).toBe(
+      "connected · Authoritative tick 128 · net 42ms rtt / 6ms jitter · shard 3c / resumes 2 / recover 4 / recover-fail 1 / q9 / pressure 2 / timeouts 1 / 20kB out"
+    );
   });
 });

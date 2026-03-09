@@ -5,7 +5,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use log::{debug, error, info, warn};
 use quinn::Endpoint;
@@ -25,6 +25,13 @@ use crate::snapshot::{
 
 const RECOVERY_REQUEST_RETRY_TICKS: u64 = 5;
 
+#[derive(Debug, Default)]
+struct NativeRuntimeState {
+    closed: bool,
+    last_error: Option<String>,
+    closed_explicitly: bool,
+}
+
 // ============================================================
 // NATIVE CLIENT
 // ============================================================
@@ -35,6 +42,7 @@ pub struct NativeClient {
     client_id: Option<ClientId>,
     connection: Option<quinn::Connection>,
     endpoint: Endpoint,
+    runtime_state: Arc<Mutex<NativeRuntimeState>>,
     /// Channel for receiving server messages
     rx: mpsc::Receiver<ServerMessage>,
     /// Channel for sending server messages (internal)
@@ -74,6 +82,14 @@ pub struct NativeClient {
     render_buffer: SnapshotInterpolationBuffer,
     /// Presentation clock for interpolation/catch-up recovery.
     render_clock: RenderClock,
+    /// Last time any authoritative server traffic was observed.
+    last_server_activity_at: std::time::Instant,
+    /// Latest round-trip latency sample derived from ping/pong.
+    last_ping_rtt_ms: Option<u64>,
+    /// Smoothed latency jitter estimate derived from recent RTT deltas.
+    ping_jitter_ms: Option<f32>,
+    reconnect_attempts: u32,
+    next_reconnect_at: Option<std::time::Instant>,
 }
 
 impl NativeClient {
@@ -139,12 +155,14 @@ impl NativeClient {
         info!("Connected to server");
 
         let (tx, rx) = mpsc::channel(128);
+        let runtime_state = Arc::new(Mutex::new(NativeRuntimeState::default()));
 
         let mut client = Self {
             config,
             client_id: None,
             connection: Some(connection),
             endpoint,
+            runtime_state,
             rx,
             tx,
             reader_task: None,
@@ -165,6 +183,11 @@ impl NativeClient {
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
         };
 
         // Send connect message
@@ -222,6 +245,12 @@ impl NativeClient {
                     predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
                     used_hard_resync: false,
                 });
+                self.last_server_activity_at = std::time::Instant::now();
+                if let Ok(mut runtime) = self.runtime_state.lock() {
+                    runtime.closed = false;
+                    runtime.closed_explicitly = false;
+                    runtime.last_error = None;
+                }
                 debug!("Received welcome from server, client_id: {}", client_id.0);
                 Ok(())
             } else if let ServerMessage::Rejected { reason } = msg {
@@ -242,11 +271,18 @@ impl NativeClient {
             return;
         };
         let tx = self.tx.clone();
+        let runtime_state = self.runtime_state.clone();
         self.reader_task = Some(tokio::spawn(async move {
             loop {
                 let mut recv = match connection.accept_uni().await {
                     Ok(recv) => recv,
                     Err(err) => {
+                        if let Ok(mut runtime) = runtime_state.lock() {
+                            runtime.closed = true;
+                            if !runtime.closed_explicitly {
+                                runtime.last_error = Some(err.to_string());
+                            }
+                        }
                         error!("Server stream accept failed: {}", err);
                         break;
                     }
@@ -269,6 +305,12 @@ impl NativeClient {
                 };
 
                 if tx.send(message).await.is_err() {
+                    if let Ok(mut runtime) = runtime_state.lock() {
+                        runtime.closed = true;
+                        if !runtime.closed_explicitly {
+                            runtime.last_error = Some("reader channel closed".to_string());
+                        }
+                    }
                     break;
                 }
             }
@@ -330,6 +372,13 @@ impl NativeClient {
 
     /// Queue an action to be sent to the server
     pub fn queue_action(&mut self, action: Action) {
+        if self.pending_actions.len() >= self.config.max_pending_actions {
+            warn!(
+                "Dropping queued client action because pending action buffer is saturated at {}",
+                self.config.max_pending_actions
+            );
+            return;
+        }
         self.pending_actions.push(action);
     }
 
@@ -337,6 +386,15 @@ impl NativeClient {
     pub async fn send_actions(&mut self, tick: u64) -> Result<(), ClientError> {
         if self.pending_actions.is_empty() {
             return Ok(());
+        }
+
+        if self.prediction_history.len() >= self.config.max_pending_actions {
+            let reason = format!(
+                "Pending action backlog saturated ({})",
+                self.prediction_history.len()
+            );
+            warn!("{reason}");
+            return Err(ClientError::Rejected(reason));
         }
 
         let actions = std::mem::take(&mut self.pending_actions);
@@ -358,6 +416,8 @@ impl NativeClient {
 
     /// Check for updates from the server (non-blocking)
     pub fn poll_updates(&mut self) -> Vec<ServerMessage> {
+        self.enforce_heartbeat_timeout_at(std::time::Instant::now());
+
         while let Ok(msg) = self.rx.try_recv() {
             if self.apply_server_message(&msg) {
                 self.pending_updates.push(msg);
@@ -368,6 +428,7 @@ impl NativeClient {
     }
 
     fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
+        self.last_server_activity_at = std::time::Instant::now();
         match message {
             ServerMessage::Welcome {
                 client_id,
@@ -463,7 +524,10 @@ impl NativeClient {
                 self.last_event_tick = *tick;
                 true
             }
-            ServerMessage::Pong { .. } => true,
+            ServerMessage::Pong { client_ts, .. } => {
+                self.record_pong_latency(system_time_millis(), *client_ts);
+                true
+            }
             ServerMessage::TickTelemetry { frame_json } => {
                 self.record_debug_document(frame_json.clone());
                 true
@@ -481,12 +545,10 @@ impl NativeClient {
 
     /// Send a ping to measure latency
     pub async fn ping(&mut self) -> Result<(), ClientError> {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        self.send_message(ClientMessage::Ping { timestamp }).await
+        self.send_message(ClientMessage::Ping {
+            timestamp: system_time_millis(),
+        })
+        .await
     }
 
     /// Opt-in to raw debug telemetry from the authoritative server.
@@ -507,6 +569,11 @@ impl NativeClient {
 
     /// Disconnect from the server
     pub async fn disconnect(&mut self, reason: Option<&str>) -> Result<(), ClientError> {
+        if let Ok(mut runtime) = self.runtime_state.lock() {
+            runtime.closed = true;
+            runtime.closed_explicitly = true;
+            runtime.last_error = reason.map(str::to_string);
+        }
         let msg = ClientMessage::Disconnect {
             reason: reason.map(|s| s.to_string()),
         };
@@ -531,6 +598,8 @@ impl NativeClient {
         self.last_debug_document = None;
         self.pending_debug_documents.clear();
         self.clear_presentation_state();
+        self.reconnect_attempts = 0;
+        self.next_reconnect_at = None;
 
         info!("Disconnected from server");
         Ok(())
@@ -627,6 +696,95 @@ impl NativeClient {
         self.prediction_history.len()
     }
 
+    /// Most recent measured round-trip time, if any.
+    pub fn latency_ms(&self) -> Option<u64> {
+        self.last_ping_rtt_ms
+    }
+
+    /// Smoothed RTT jitter estimate in milliseconds, if any.
+    pub fn jitter_ms(&self) -> Option<f32> {
+        self.ping_jitter_ms
+    }
+
+    /// Latest fatal transport error observed from the reader/runtime state.
+    pub fn last_connection_error(&self) -> Option<String> {
+        self.runtime_state
+            .lock()
+            .ok()
+            .and_then(|runtime| runtime.last_error.clone())
+    }
+
+    /// Returns true when the native transport needs a reconnect attempt.
+    pub fn reconnect_needed(&self) -> bool {
+        let Ok(runtime) = self.runtime_state.lock() else {
+            return false;
+        };
+
+        !runtime.closed_explicitly
+            && (runtime.closed
+                || ((self.client_id.is_some() || self.connection.is_some())
+                    && self.heartbeat_timed_out_at(std::time::Instant::now())))
+    }
+
+    /// Attempt to recover the native transport using the retained reconnect token.
+    pub async fn recover_connection(&mut self) -> Result<bool, ClientError> {
+        if !self.reconnect_needed() {
+            return Ok(false);
+        }
+
+        let now = std::time::Instant::now();
+        if let Some(next_attempt_at) = self.next_reconnect_at {
+            if now < next_attempt_at {
+                return Ok(false);
+            }
+        }
+
+        if let Some(reader_task) = self.reader_task.take() {
+            reader_task.abort();
+        }
+        if let Some(conn) = self.connection.take() {
+            conn.close(quinn::VarInt::from_u32(2), b"reconnect");
+        }
+        self.client_id = None;
+
+        let addr = format!("{}:{}", self.config.server_addr, self.config.server_port)
+            .parse()
+            .map_err(|e| ClientError::Config(format!("Invalid address: {e}")))?;
+
+        let connecting = match self.endpoint.connect(addr, "localhost") {
+            Ok(connecting) => connecting,
+            Err(err) => {
+                self.schedule_reconnect_backoff(now, err.to_string());
+                return Err(ClientError::Connection(err.to_string()));
+            }
+        };
+
+        let connection = match connecting.await {
+            Ok(connection) => connection,
+            Err(err) => {
+                self.schedule_reconnect_backoff(now, err.to_string());
+                return Err(ClientError::Connection(err.to_string()));
+            }
+        };
+
+        self.connection = Some(connection);
+        if let Err(err) = self.send_connect().await {
+            self.connection = None;
+            self.schedule_reconnect_backoff(now, err.to_string());
+            return Err(err);
+        }
+
+        self.start_reader_loop();
+        self.reconnect_attempts = 0;
+        self.next_reconnect_at = None;
+        if let Ok(mut runtime) = self.runtime_state.lock() {
+            runtime.closed = false;
+            runtime.closed_explicitly = false;
+            runtime.last_error = None;
+        }
+        Ok(true)
+    }
+
     /// Get the client ID
     pub fn client_id(&self) -> Option<ClientId> {
         self.client_id
@@ -666,6 +824,70 @@ impl NativeClient {
     fn clear_presentation_state(&mut self) {
         self.render_buffer.clear();
         self.render_clock.reset();
+    }
+
+    fn reconnect_delay_ms(&self) -> u64 {
+        (250u64.saturating_mul(2u64.pow(self.reconnect_attempts.min(6)))).min(10_000)
+    }
+
+    fn schedule_reconnect_backoff(
+        &mut self,
+        now: std::time::Instant,
+        reason: impl Into<String>,
+    ) {
+        self.reconnect_attempts = self.reconnect_attempts.saturating_add(1);
+        self.next_reconnect_at = Some(
+            now + std::time::Duration::from_millis(self.reconnect_delay_ms()),
+        );
+        if let Ok(mut runtime) = self.runtime_state.lock() {
+            runtime.closed = true;
+            runtime.closed_explicitly = false;
+            runtime.last_error = Some(reason.into());
+        }
+    }
+
+    fn record_pong_latency(&mut self, now_ms: u64, client_ts: u64) {
+        let Some(rtt_ms) = now_ms.checked_sub(client_ts) else {
+            return;
+        };
+        let jitter = self
+            .last_ping_rtt_ms
+            .map(|last_rtt_ms| last_rtt_ms.abs_diff(rtt_ms) as f32);
+        self.last_ping_rtt_ms = Some(rtt_ms);
+        self.ping_jitter_ms = Some(match (self.ping_jitter_ms, jitter) {
+            (Some(previous), Some(delta)) => (previous * 0.75) + (delta * 0.25),
+            (_, Some(delta)) => delta,
+            (Some(previous), None) => previous,
+            (None, None) => 0.0,
+        });
+    }
+
+    fn heartbeat_timed_out_at(&self, now: std::time::Instant) -> bool {
+        now.saturating_duration_since(self.last_server_activity_at)
+            > std::time::Duration::from_millis(self.config.heartbeat_timeout_ms)
+    }
+
+    fn enforce_heartbeat_timeout_at(&mut self, now: std::time::Instant) {
+        if (self.client_id.is_none() && self.connection.is_none())
+            || !self.heartbeat_timed_out_at(now)
+        {
+            return;
+        }
+
+        warn!(
+            "Disconnecting native client after {}ms without server traffic",
+            self.config.heartbeat_timeout_ms
+        );
+
+        if let Some(reader_task) = self.reader_task.take() {
+            reader_task.abort();
+        }
+        if let Some(conn) = self.connection.take() {
+            conn.close(quinn::VarInt::from_u32(1), b"heartbeat timeout");
+        }
+        self.client_id = None;
+        self.recovery_state.clear();
+        self.schedule_reconnect_backoff(now, "heartbeat timeout");
     }
 
     fn request_full_snapshot(&mut self, observed_server_tick: u64) {
@@ -860,6 +1082,13 @@ impl std::fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+fn system_time_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,6 +1101,8 @@ mod tests {
             server_port: 5000,
             player_name: "TestPlayer".to_string(),
             timeout_ms: 5000,
+            heartbeat_timeout_ms: 6500,
+            max_pending_actions: 32,
         };
 
         // Note: actual connection would require a running server
@@ -931,10 +1162,13 @@ mod tests {
                 server_port: 5000,
                 player_name: "Tester".into(),
                 timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
             },
             client_id: None,
             connection: None,
             endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
             rx,
             tx,
             reader_task: None,
@@ -960,6 +1194,11 @@ mod tests {
             recovery_state: RecoveryRequestState::default(),
             render_buffer,
             render_clock,
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
         };
 
         let diagnostics = client.catch_up_diagnostics();
@@ -984,10 +1223,13 @@ mod tests {
                 server_port: 5000,
                 player_name: "Tester".into(),
                 timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
             },
             client_id: None,
             connection: None,
             endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
             rx,
             tx,
             reader_task: None,
@@ -1008,6 +1250,11 @@ mod tests {
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
         };
 
         client.request_full_snapshot_without_connection_is_safe();
@@ -1024,10 +1271,13 @@ mod tests {
                 server_port: 5000,
                 player_name: "Tester".into(),
                 timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
             },
             client_id: None,
             connection: None,
             endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
             rx,
             tx,
             reader_task: None,
@@ -1048,6 +1298,11 @@ mod tests {
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
         };
 
         let message = ServerMessage::TickTelemetry {
@@ -1072,10 +1327,13 @@ mod tests {
                 server_port: 5000,
                 player_name: "Tester".into(),
                 timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
             },
             client_id: None,
             connection: None,
             endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
             rx,
             tx,
             reader_task: None,
@@ -1096,6 +1354,11 @@ mod tests {
             recovery_state: RecoveryRequestState::default(),
             render_buffer: SnapshotInterpolationBuffer::default(),
             render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
         };
 
         let message = ServerMessage::DebugDocument {
@@ -1112,5 +1375,314 @@ mod tests {
             .contains("agent_tool_call_event"));
         assert!(client.last_debug_telemetry_document().is_none());
         assert_eq!(client.drain_debug_documents().len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_pong_updates_latency_and_jitter() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        client.record_pong_latency(1_100, 1_000);
+        client.record_pong_latency(1_240, 1_100);
+
+        assert_eq!(client.latency_ms(), Some(140));
+        assert_eq!(client.jitter_ms(), Some(10.0));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_queue_action_respects_pending_limit() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 1,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        client.queue_action(Action::Idle);
+        client.queue_action(Action::Stop);
+
+        assert_eq!(client.pending_actions.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_send_actions_rejects_when_prediction_backlog_is_saturated() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 1,
+            },
+            client_id: Some(ClientId::new()),
+            connection: None,
+            endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: vec![Action::Idle],
+            prediction_history: vec![PredictedActionBatch {
+                tick: 4,
+                actions: vec![Action::Stop],
+            }],
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        let error = client
+            .send_actions(5)
+            .await
+            .expect_err("backlog should reject");
+        assert!(matches!(error, ClientError::Rejected(_)));
+        assert_eq!(client.pending_actions.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_enforce_heartbeat_timeout_clears_stale_session() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let now = std::time::Instant::now();
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 10,
+                max_pending_actions: 32,
+            },
+            client_id: Some(ClientId::new()),
+            connection: None,
+            endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: now,
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        assert!(client.heartbeat_timed_out_at(now + std::time::Duration::from_millis(11)));
+        client.enforce_heartbeat_timeout_at(now + std::time::Duration::from_millis(11));
+        assert!(client.client_id().is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_reconnect_needed_tracks_runtime_closed_state() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let runtime_state = Arc::new(Mutex::new(NativeRuntimeState::default()));
+        let client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
+            },
+            client_id: Some(ClientId::new()),
+            connection: None,
+            endpoint,
+            runtime_state: runtime_state.clone(),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        assert!(!client.reconnect_needed());
+        runtime_state.lock().unwrap().closed = true;
+        assert!(client.reconnect_needed());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_recover_connection_respects_backoff_window() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let runtime_state = Arc::new(Mutex::new(NativeRuntimeState {
+            closed: true,
+            last_error: Some("connection lost".into()),
+            closed_explicitly: false,
+        }));
+        let now = std::time::Instant::now();
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            runtime_state,
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: Vec::new(),
+            last_server_tick: 0,
+            last_acknowledged_action_tick: None,
+            last_event_tick: 0,
+            reconnect_token: None,
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: now,
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 2,
+            next_reconnect_at: Some(now + std::time::Duration::from_secs(1)),
+        };
+
+        assert!(!client.recover_connection().await.expect("backoff should defer"));
     }
 }

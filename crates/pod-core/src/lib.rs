@@ -80,8 +80,8 @@ pub use observation_filter::{
     FilteredObservation, ObservationFilter, ObservationHistory, SalienceScore,
 };
 pub use ops::{
-    summarize_focused_entity_debug, FocusedEntityDebugSummary, IncidentSeverity,
-    ShardIncidentSummary,
+    summarize_focused_entity_debug, ClientTransportSummary, FocusedEntityDebugSummary,
+    IncidentSeverity, ShardIncidentSummary, ShardTransportSummary,
 };
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
 pub use replay::{

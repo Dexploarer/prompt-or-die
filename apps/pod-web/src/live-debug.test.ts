@@ -144,14 +144,48 @@ describe("live debug state", () => {
         notes: []
       }
     } as LiveDebugDocument);
+    recordLiveDebugDocument(state, {
+      kind: "transport",
+      documentType: "shard_transport_summary",
+      payload: {
+        shard_id: "direct-connect",
+        latest_tick: 22,
+        client_count: 1,
+        resumed_sessions: 0,
+        recovery_snapshots_sent: 0,
+        recovery_delivery_failures: 0,
+        client_inactivity_timeout_ticks: 600,
+        queue_pressure_warn_depth: 192,
+        total_pending_action_queue_depth: 0,
+        queue_pressure_client_count: 0,
+        total_inbound_messages: 2,
+        total_outbound_messages: 4,
+        total_inbound_bytes: 64,
+        total_outbound_bytes: 256,
+        action_batches_received: 1,
+        full_snapshot_requests: 0,
+        ping_requests: 1,
+        state_deltas_sent: 2,
+        event_batches_sent: 1,
+        debug_documents_sent: 3,
+        rejected_messages_sent: 0,
+        timed_out_clients: 0,
+        queue_pressure_events: 0,
+        clients: []
+      }
+    } as LiveDebugDocument);
 
     expect(state.liveReplayDocuments).toBe(1);
     expect(state.liveIncidentDocuments).toBe(1);
+    expect(state.liveTransportDocuments).toBe(1);
+    expect(state.latestTransportSummary?.client_count).toBe(1);
 
     resetLiveDebugState(state);
 
     expect(state.liveReplayDocuments).toBe(0);
     expect(state.liveIncidentDocuments).toBe(0);
+    expect(state.liveTransportDocuments).toBe(0);
+    expect(state.latestTransportSummary).toBeNull();
     expect(selectedToolEventSummary(state, null)).toBeNull();
     expect(selectedTickRollupSummary(state, null)).toBeNull();
     expect(selectedFocusedDebugSummary(state, null)).toBeNull();
