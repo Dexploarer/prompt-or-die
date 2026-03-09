@@ -17,9 +17,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
-    summarize_focused_entity_debug, Action, AgentTickRollup, AgentToolCallEvent, GameEvent,
-    IdleAgent, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry,
-    World,
+    summarize_focused_entity_debug, Action, AgentTickRollup, AgentToolCallEvent,
+    ClientTransportSummary, GameEvent, IdleAgent, ShardTransportSummary, TelemetryArchive,
+    TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry, World,
 };
 
 use crate::protocol::{
@@ -42,6 +42,7 @@ struct ClientSession {
     debug_telemetry_enabled: bool,
     debug_focus_entity: Option<u64>,
     last_sent_snapshot: Option<WorldSnapshot>,
+    transport: ClientTransportCounters,
 }
 
 impl ClientSession {
@@ -57,8 +58,26 @@ impl ClientSession {
             debug_telemetry_enabled: false,
             debug_focus_entity: None,
             last_sent_snapshot: None,
+            transport: ClientTransportCounters::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ClientTransportCounters {
+    last_seen_tick: u64,
+    last_sent_tick: Option<u64>,
+    inbound_messages: u64,
+    outbound_messages: u64,
+    inbound_bytes: u64,
+    outbound_bytes: u64,
+    action_batches_received: u64,
+    full_snapshot_requests: u64,
+    ping_requests: u64,
+    state_deltas_sent: u64,
+    event_batches_sent: u64,
+    debug_documents_sent: u64,
+    rejected_messages_sent: u64,
 }
 
 #[derive(Clone)]
@@ -76,6 +95,7 @@ enum PendingDebugDocument {
     TickTelemetry(VersionedTickTelemetry),
     AgentToolCallEvent(AgentToolCallEvent),
     AgentTickRollup(AgentTickRollup),
+    ShardTransportSummary(ShardTransportSummary),
 }
 
 impl PendingDebugDocument {
@@ -84,6 +104,7 @@ impl PendingDebugDocument {
             Self::TickTelemetry(document) => document.to_toon_document(),
             Self::AgentToolCallEvent(document) => document.to_toon_document(),
             Self::AgentTickRollup(document) => document.to_toon_document(),
+            Self::ShardTransportSummary(document) => document.to_toon_document(),
         }
     }
 }
@@ -92,6 +113,7 @@ impl PendingDebugDocument {
 enum InboundPacket {
     Message {
         client_id: ClientId,
+        encoded_len: usize,
         message: ClientMessage,
     },
     Disconnected {
@@ -103,6 +125,7 @@ enum InboundPacket {
 const ACTION_QUEUE_MAX_DEPTH: usize = 256;
 const ACTION_WINDOW_BACKWARD_TICKS: u64 = 2;
 const ACTION_WINDOW_FORWARD_TICKS: u64 = 2;
+const TRANSPORT_SUMMARY_INTERVAL_TICKS: u64 = 60;
 
 // ============================================================
 // GAME SERVER
@@ -139,6 +162,8 @@ pub struct GameServer {
     debug_archive: TelemetryArchive,
     /// TOON debug documents collected during the current authoritative tick.
     pending_debug_documents: Vec<PendingDebugDocument>,
+    /// Last tick when server transport stats were logged.
+    last_transport_log_tick: u64,
 }
 
 impl GameServer {
@@ -163,6 +188,7 @@ impl GameServer {
                 TelemetryConfig::default().core_archive_ticks,
             ),
             pending_debug_documents: Vec::new(),
+            last_transport_log_tick: 0,
         }
     }
 
@@ -232,6 +258,24 @@ impl GameServer {
 
             // Send updates to clients
             self.broadcast_updates().await?;
+
+            if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
+                let transport = self.transport_summary().await;
+                info!(
+                    "[NET] tick={} clients={} in={} msgs/{} B out={} msgs/{} B queue={} batches={} full_resync={} debug_docs={}",
+                    transport.latest_tick,
+                    transport.client_count,
+                    transport.total_inbound_messages,
+                    transport.total_inbound_bytes,
+                    transport.total_outbound_messages,
+                    transport.total_outbound_bytes,
+                    transport.total_pending_action_queue_depth,
+                    transport.action_batches_received,
+                    transport.full_snapshot_requests,
+                    transport.debug_documents_sent,
+                );
+                self.last_transport_log_tick = self.tick;
+            }
 
             // Sleep to maintain tick rate
             let elapsed = frame_start.elapsed();
@@ -383,7 +427,11 @@ impl GameServer {
                             };
 
                             if inbound_tx
-                                .send(InboundPacket::Message { client_id, message })
+                                .send(InboundPacket::Message {
+                                    client_id,
+                                    encoded_len: text.len(),
+                                    message,
+                                })
                                 .await
                                 .is_err()
                             {
@@ -413,7 +461,11 @@ impl GameServer {
                             };
 
                             if inbound_tx
-                                .send(InboundPacket::Message { client_id, message })
+                                .send(InboundPacket::Message {
+                                    client_id,
+                                    encoded_len: text.len(),
+                                    message,
+                                })
                                 .await
                                 .is_err()
                             {
@@ -524,7 +576,11 @@ impl GameServer {
                         };
 
                         if inbound_tx
-                            .send(InboundPacket::Message { client_id, message })
+                            .send(InboundPacket::Message {
+                                client_id,
+                                encoded_len: bytes.len(),
+                                message,
+                            })
                             .await
                             .is_err()
                         {
@@ -566,7 +622,24 @@ impl GameServer {
 
         while let Ok(packet) = self.inbound_rx.try_recv() {
             match packet {
-                InboundPacket::Message { client_id, message } => match message {
+                InboundPacket::Message {
+                    client_id,
+                    encoded_len,
+                    message,
+                } => {
+                    {
+                        let mut clients = self.clients.write().await;
+                        if let Some(session) = clients.get_mut(&client_id) {
+                            session.transport.inbound_messages =
+                                session.transport.inbound_messages.saturating_add(1);
+                            session.transport.inbound_bytes = session
+                                .transport
+                                .inbound_bytes
+                                .saturating_add(encoded_len as u64);
+                            session.transport.last_seen_tick = self.tick;
+                        }
+                    }
+                    match message {
                     ClientMessage::Connect {
                         player_name,
                         reconnect_token,
@@ -584,6 +657,10 @@ impl GameServer {
                         {
                             let mut clients = self.clients.write().await;
                             if let Some(session) = clients.get_mut(&client_id) {
+                                session.transport.action_batches_received = session
+                                    .transport
+                                    .action_batches_received
+                                    .saturating_add(1);
                                 if session.agent_id.is_none() {
                                     unregistered = true;
                                 }
@@ -661,6 +738,15 @@ impl GameServer {
                         last_known_tick,
                         last_known_digest,
                     } => {
+                        {
+                            let mut clients = self.clients.write().await;
+                            if let Some(session) = clients.get_mut(&client_id) {
+                                session.transport.full_snapshot_requests = session
+                                    .transport
+                                    .full_snapshot_requests
+                                    .saturating_add(1);
+                            }
+                        }
                         debug!(
                             "Client {} requested full snapshot recovery (tick={:?}, digest={:?})",
                             client_id.0, last_known_tick, last_known_digest
@@ -680,6 +766,13 @@ impl GameServer {
                         }
                     }
                     ClientMessage::Ping { timestamp } => {
+                        {
+                            let mut clients = self.clients.write().await;
+                            if let Some(session) = clients.get_mut(&client_id) {
+                                session.transport.ping_requests =
+                                    session.transport.ping_requests.saturating_add(1);
+                            }
+                        }
                         self.send_to_client(
                             client_id,
                             ServerMessage::Pong {
@@ -696,7 +789,8 @@ impl GameServer {
                         )
                         .await;
                     }
-                },
+                }
+                }
                 InboundPacket::Disconnected { client_id, reason } => {
                     self.disconnect_client(client_id, &reason).await;
                 }
@@ -746,6 +840,13 @@ impl GameServer {
             .iter()
             .any(|target| target.last_sent_snapshot.is_none());
         let mut any_state_update = !has_authoritative_baseline;
+
+        if has_debug_subscribers && self.tick % TRANSPORT_SUMMARY_INTERVAL_TICKS == 0 {
+            self.pending_debug_documents
+                .push(PendingDebugDocument::ShardTransportSummary(
+                    self.transport_summary().await,
+                ));
+        }
 
         for target in &client_targets {
             let interest =
@@ -898,13 +999,139 @@ impl GameServer {
     }
 
     async fn send_to_client(&self, client_id: ClientId, message: ServerMessage) -> bool {
+        enum OutboundKind {
+            StateDelta,
+            EventBatch,
+            DebugDocument,
+            Rejected,
+            Other,
+        }
+
+        let outbound_kind = match &message {
+            ServerMessage::StateDelta { .. } => OutboundKind::StateDelta,
+            ServerMessage::EventBatch { .. } => OutboundKind::EventBatch,
+            ServerMessage::TickTelemetry { .. } | ServerMessage::DebugDocument { .. } => {
+                OutboundKind::DebugDocument
+            }
+            ServerMessage::Rejected { .. } => OutboundKind::Rejected,
+            ServerMessage::Welcome { .. } | ServerMessage::Pong { .. } => OutboundKind::Other,
+        };
+        let encoded_size = message.encode().map(|payload| payload.len()).unwrap_or_default() as u64;
+
         if let Some(tx) = self.client_tx.read().await.get(&client_id) {
             if let Err(err) = tx.send(message).await {
                 warn!("Failed to send message to {}: {}", client_id.0, err);
                 return false;
             }
         }
+        if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+            session.transport.outbound_messages =
+                session.transport.outbound_messages.saturating_add(1);
+            session.transport.outbound_bytes = session
+                .transport
+                .outbound_bytes
+                .saturating_add(encoded_size);
+            session.transport.last_sent_tick = Some(self.tick);
+            match outbound_kind {
+                OutboundKind::StateDelta => {
+                    session.transport.state_deltas_sent =
+                        session.transport.state_deltas_sent.saturating_add(1);
+                }
+                OutboundKind::EventBatch => {
+                    session.transport.event_batches_sent =
+                        session.transport.event_batches_sent.saturating_add(1);
+                }
+                OutboundKind::DebugDocument => {
+                    session.transport.debug_documents_sent =
+                        session.transport.debug_documents_sent.saturating_add(1);
+                }
+                OutboundKind::Rejected => {
+                    session.transport.rejected_messages_sent =
+                        session.transport.rejected_messages_sent.saturating_add(1);
+                }
+                OutboundKind::Other => {}
+            }
+        }
         true
+    }
+
+    pub async fn transport_summary(&self) -> ShardTransportSummary {
+        let clients = self.clients.read().await;
+        let mut client_summaries = clients
+            .iter()
+            .map(|(client_id, session)| ClientTransportSummary {
+                client_id: client_id.0.to_string(),
+                player_name: session.player_name.clone(),
+                controlled_entity: session
+                    .agent_id
+                    .and_then(|agent_id| self.controlled_entity_for_agent(agent_id)),
+                last_seen_tick: session.transport.last_seen_tick,
+                last_sent_tick: session.transport.last_sent_tick,
+                pending_action_queue_depth: session.pending_actions.len(),
+                inbound_messages: session.transport.inbound_messages,
+                outbound_messages: session.transport.outbound_messages,
+                inbound_bytes: session.transport.inbound_bytes,
+                outbound_bytes: session.transport.outbound_bytes,
+                action_batches_received: session.transport.action_batches_received,
+                full_snapshot_requests: session.transport.full_snapshot_requests,
+                ping_requests: session.transport.ping_requests,
+                state_deltas_sent: session.transport.state_deltas_sent,
+                event_batches_sent: session.transport.event_batches_sent,
+                debug_documents_sent: session.transport.debug_documents_sent,
+                rejected_messages_sent: session.transport.rejected_messages_sent,
+                debug_telemetry_enabled: session.debug_telemetry_enabled,
+            })
+            .collect::<Vec<_>>();
+        client_summaries.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+
+        ShardTransportSummary {
+            shard_id: "direct-connect".to_string(),
+            latest_tick: self.tick,
+            client_count: client_summaries.len(),
+            total_pending_action_queue_depth: client_summaries
+                .iter()
+                .map(|client| client.pending_action_queue_depth)
+                .sum(),
+            total_inbound_messages: client_summaries
+                .iter()
+                .map(|client| client.inbound_messages)
+                .sum(),
+            total_outbound_messages: client_summaries
+                .iter()
+                .map(|client| client.outbound_messages)
+                .sum(),
+            total_inbound_bytes: client_summaries.iter().map(|client| client.inbound_bytes).sum(),
+            total_outbound_bytes: client_summaries
+                .iter()
+                .map(|client| client.outbound_bytes)
+                .sum(),
+            action_batches_received: client_summaries
+                .iter()
+                .map(|client| client.action_batches_received)
+                .sum(),
+            full_snapshot_requests: client_summaries
+                .iter()
+                .map(|client| client.full_snapshot_requests)
+                .sum(),
+            ping_requests: client_summaries.iter().map(|client| client.ping_requests).sum(),
+            state_deltas_sent: client_summaries
+                .iter()
+                .map(|client| client.state_deltas_sent)
+                .sum(),
+            event_batches_sent: client_summaries
+                .iter()
+                .map(|client| client.event_batches_sent)
+                .sum(),
+            debug_documents_sent: client_summaries
+                .iter()
+                .map(|client| client.debug_documents_sent)
+                .sum(),
+            rejected_messages_sent: client_summaries
+                .iter()
+                .map(|client| client.rejected_messages_sent)
+                .sum(),
+            clients: client_summaries,
+        }
     }
 
     fn build_full_snapshot_message(
@@ -1091,6 +1318,9 @@ impl GameServer {
                 PendingDebugDocument::AgentTickRollup(rollup) => interested_entities
                     .contains(&rollup.agent_entity_id)
                     .then(|| rollup.to_toon_document()),
+                PendingDebugDocument::ShardTransportSummary(summary) => {
+                    Some(summary.to_toon_document())
+                }
             })
             .collect()
     }
@@ -1158,6 +1388,7 @@ impl GameServer {
                         session.debug_focus_entity = prev.debug_focus_entity;
                         session.pending_actions.clear();
                         session.last_sent_snapshot = None;
+                        session.transport = prev.transport;
                     } else if session.player_name.is_none() {
                         session.player_name = Some(player_name.clone());
                     }
@@ -1421,6 +1652,7 @@ mod tests {
                 debug_telemetry_enabled: true,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
 
@@ -1431,10 +1663,11 @@ mod tests {
         while let Ok(message) = rx.try_recv() {
             match message {
                 ServerMessage::DebugDocument { document } => {
-                    saw_tick_telemetry = true;
                     let value =
                         decode_toon_value(&document).expect("tick telemetry TOON should decode");
-                    assert_eq!(value["document_type"], "versioned_tick_telemetry");
+                    if value["document_type"] == "versioned_tick_telemetry" {
+                        saw_tick_telemetry = true;
+                    }
                 }
                 _ => {}
             }
@@ -1479,6 +1712,7 @@ mod tests {
                 debug_telemetry_enabled: true,
                 debug_focus_entity: Some(alpha_entity.id() as u64),
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
 
@@ -1550,7 +1784,7 @@ mod tests {
             }
         }
 
-        assert_eq!(documents.len(), 3);
+        assert_eq!(documents.len(), 4);
         let tick_doc = documents
             .iter()
             .find(|document| document.contains("versioned_tick_telemetry"))
@@ -1582,9 +1816,98 @@ mod tests {
                 })
                 .unwrap_or(false)
         }));
+        assert!(documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| value["document_type"] == "shard_transport_summary")
+                .unwrap_or(false)
+        }));
         assert!(!documents
             .iter()
             .any(|document| document.contains("timeout")));
+    }
+
+    #[tokio::test]
+    async fn test_transport_summary_tracks_message_counts() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, _rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: true,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+
+        server
+            .inbound_tx
+            .send(InboundPacket::Message {
+                client_id,
+                encoded_len: 88,
+                message: ClientMessage::Ping { timestamp: 7 },
+            })
+            .await
+            .expect("ping message queued");
+        server.handle_connections().await.unwrap();
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.client_count, 1);
+        assert_eq!(summary.total_inbound_messages, 1);
+        assert!(summary.total_outbound_messages >= 1);
+        assert_eq!(summary.ping_requests, 1);
+        assert_eq!(summary.clients[0].client_id, client_id.0.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_emits_shard_transport_summary_for_debug_clients() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: true,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+        server.tick = TRANSPORT_SUMMARY_INTERVAL_TICKS;
+
+        server.broadcast_updates().await.unwrap();
+
+        let mut saw_transport = false;
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::DebugDocument { document } = message {
+                let value = decode_toon_value(&document).expect("debug document should decode");
+                if value["document_type"] == "shard_transport_summary" {
+                    saw_transport = true;
+                    assert_eq!(value["payload"]["client_count"], 1);
+                }
+            }
+        }
+
+        assert!(saw_transport);
     }
 
     #[tokio::test]
@@ -1639,6 +1962,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
         server.clients.write().await.insert(
@@ -1653,6 +1977,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
 
@@ -1715,6 +2040,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
         server.tick = 12;
@@ -1791,6 +2117,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
         server.clients.write().await.insert(
@@ -1805,6 +2132,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
         server.tick = 21;
@@ -1874,6 +2202,7 @@ mod tests {
                 debug_telemetry_enabled: false,
                 debug_focus_entity: None,
                 last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
             },
         );
         server.world.submit_external_action(

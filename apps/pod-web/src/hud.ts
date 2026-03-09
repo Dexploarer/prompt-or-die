@@ -1,5 +1,8 @@
 import type { DirectConnectStatus } from "./direct-connect";
-import type { NetworkGameEvent } from "./contracts";
+import type {
+  NetworkGameEvent,
+  ShardTransportSummaryDocument
+} from "./contracts";
 import type { PodThreeRendererStats } from "./renderer";
 
 function formatKilo(value: number): string {
@@ -60,7 +63,10 @@ export function highlightEventFeedback(event: NetworkGameEvent | null): string {
   return event.summary;
 }
 
-export function formatConnectionSummary(status: DirectConnectStatus | null): string {
+export function formatConnectionSummary(
+  status: DirectConnectStatus | null,
+  transport?: ShardTransportSummaryDocument | null
+): string {
   if (!status) {
     return "offline demo / bridge mode";
   }
@@ -72,5 +78,14 @@ export function formatConnectionSummary(status: DirectConnectStatus | null): str
           status.jitterMs == null ? "" : ` / ${status.jitterMs.toFixed(0)}ms jitter`
         }`;
 
-  return [status.phase, status.detail, network].filter(Boolean).join(" · ");
+  const shardTransport =
+    transport == null
+      ? null
+      : `shard ${transport.client_count}c / q${transport.total_pending_action_queue_depth} / ${formatKilo(
+          transport.total_outbound_bytes
+        )}B out`;
+
+  return [status.phase, status.detail, network, shardTransport]
+    .filter(Boolean)
+    .join(" · ");
 }

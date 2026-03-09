@@ -345,6 +345,46 @@ export interface ShardIncidentSummary {
   notes: string[];
 }
 
+export interface ClientTransportSummaryDocument {
+  client_id: string;
+  player_name?: string | null;
+  controlled_entity?: number | null;
+  last_seen_tick: number;
+  last_sent_tick?: number | null;
+  pending_action_queue_depth: number;
+  inbound_messages: number;
+  outbound_messages: number;
+  inbound_bytes: number;
+  outbound_bytes: number;
+  action_batches_received: number;
+  full_snapshot_requests: number;
+  ping_requests: number;
+  state_deltas_sent: number;
+  event_batches_sent: number;
+  debug_documents_sent: number;
+  rejected_messages_sent: number;
+  debug_telemetry_enabled: boolean;
+}
+
+export interface ShardTransportSummaryDocument {
+  shard_id: string;
+  latest_tick: number;
+  client_count: number;
+  total_pending_action_queue_depth: number;
+  total_inbound_messages: number;
+  total_outbound_messages: number;
+  total_inbound_bytes: number;
+  total_outbound_bytes: number;
+  action_batches_received: number;
+  full_snapshot_requests: number;
+  ping_requests: number;
+  state_deltas_sent: number;
+  event_batches_sent: number;
+  debug_documents_sent: number;
+  rejected_messages_sent: number;
+  clients: ClientTransportSummaryDocument[];
+}
+
 export interface FocusedEntityDebugSummaryDocument {
   shard_id: string;
   entity_id: number;
@@ -413,6 +453,7 @@ export type LiveDebugDocument =
   | { kind: "tickTelemetry"; documentType: string; payload: TickTelemetryEnvelope }
   | { kind: "toolCallEvent"; documentType: string; payload: AgentToolCallEventDocument }
   | { kind: "tickRollup"; documentType: string; payload: AgentTickRollupDocument }
+  | { kind: "transport"; documentType: string; payload: ShardTransportSummaryDocument }
   | { kind: "focusedSummary"; documentType: string; payload: FocusedEntityDebugSummaryDocument }
   | { kind: "replay"; documentType: string; payload: ReplayFileDocument }
   | { kind: "incident"; documentType: string; payload: ShardIncidentSummary };
@@ -1922,6 +1963,30 @@ export function parseFocusedEntityDebugSummary(
   throw new Error("Invalid focused entity debug summary payload");
 }
 
+export function parseShardTransportSummary(
+  summary: string | ShardTransportSummaryDocument
+): ShardTransportSummaryDocument {
+  const parsed =
+    typeof summary === "string" ? decodeStructuredString(summary) : summary;
+  const transportDocument = documentEnvelope(parsed);
+
+  if (transportDocument?.document_type === "shard_transport_summary") {
+    return transportDocument.payload as ShardTransportSummaryDocument;
+  }
+
+  if (
+    isRecord(parsed) &&
+    typeof parsed.shard_id === "string" &&
+    typeof parsed.latest_tick === "number" &&
+    typeof parsed.client_count === "number" &&
+    Array.isArray(parsed.clients)
+  ) {
+    return parsed as unknown as ShardTransportSummaryDocument;
+  }
+
+  throw new Error("Invalid shard transport summary payload");
+}
+
 export function summarizeAgentTickRollup(
   rollup: AgentTickRollupDocument
 ): TickRollupSummary {
@@ -1969,6 +2034,12 @@ export function parseLiveDebugDocument(document: string): LiveDebugDocument {
         kind: "focusedSummary",
         documentType: envelope.document_type,
         payload: parseFocusedEntityDebugSummary(document)
+      };
+    case "shard_transport_summary":
+      return {
+        kind: "transport",
+        documentType: envelope.document_type,
+        payload: parseShardTransportSummary(document)
       };
     case "replay_file":
       return {

@@ -17,8 +17,9 @@ use pod_core::{
     CreatureIdentity, CreatureTemperament, EncounterSpawnEntry, FactionReputationTier,
     FactionReputationTrack, FocusedEntityDebugSummary, PopulationBreakdown, QuestStageDefinition,
     QuestStateGraph, RegionEncounterTable, RegionPopulationState, ReplayFile,
-    ShardIncidentSummary, TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
-    VersionedTickTelemetry, WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
+    ShardIncidentSummary, ShardTransportSummary, TelemetryConfig, TickTelemetryFrame,
+    ToolCallStatus, TrajectorySample, VersionedTickTelemetry, WorldChunkDefinition,
+    WorldPopulationState, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -610,6 +611,8 @@ pub struct SpacetimeDashboardState {
     #[serde(default)]
     pub latest_incident_summary: Option<ShardIncidentSummary>,
     #[serde(default)]
+    pub latest_transport_summary: Option<ShardTransportSummary>,
+    #[serde(default)]
     pub recent_tool_call_events: VecDeque<AgentToolCallEvent>,
     #[serde(default)]
     pub recent_tick_rollups: VecDeque<AgentTickRollup>,
@@ -653,6 +656,7 @@ impl Default for SpacetimeDashboardState {
             gather_actions: 0,
             loot_actions: 0,
             latest_incident_summary: None,
+            latest_transport_summary: None,
             recent_tool_call_events: VecDeque::new(),
             recent_tick_rollups: VecDeque::new(),
             recent_focused_debug_summaries: VecDeque::new(),
@@ -821,6 +825,11 @@ impl SpacetimeDashboardState {
         self.gather_actions = summary.gather_actions;
         self.loot_actions = summary.loot_actions;
         self.latest_incident_summary = Some(summary);
+    }
+
+    pub fn apply_transport_summary(&mut self, summary: ShardTransportSummary) {
+        self.latest_tick = self.latest_tick.max(summary.latest_tick);
+        self.latest_transport_summary = Some(summary);
     }
 
     pub fn apply_tool_call_event(&mut self, event: AgentToolCallEvent) {
@@ -2778,6 +2787,25 @@ impl PodEditorApp {
         Ok(())
     }
 
+    pub fn import_shard_transport_toon_document(
+        &mut self,
+        document: &str,
+    ) -> Result<(), String> {
+        let summary: ShardTransportSummary =
+            decode_toon_document(document, "shard_transport_summary")?;
+        let tick = summary.latest_tick;
+        let client_count = summary.client_count;
+
+        self.history.remember(self.state.clone());
+        self.state
+            .spacetime_dashboard
+            .apply_transport_summary(summary);
+        self.push_console(format!(
+            "Imported shard transport summary @ tick {tick} for {client_count} clients"
+        ));
+        Ok(())
+    }
+
     pub fn import_live_debug_toon_document(&mut self, document: &str) -> Result<(), String> {
         let document_type = decode_toon_value(document)?
             .get("document_type")
@@ -2807,6 +2835,7 @@ impl PodEditorApp {
             "focused_entity_debug_summary" => {
                 self.import_focused_entity_debug_toon_document(document)
             }
+            "shard_transport_summary" => self.import_shard_transport_toon_document(document),
             "world_population_state" => self.import_world_population_toon_document(document),
             "replay_file" => {
                 let replay: ReplayFile = decode_toon_document(document, "replay_file")?;
@@ -4563,6 +4592,46 @@ mod tests {
         }
     }
 
+    fn sample_shard_transport_summary() -> ShardTransportSummary {
+        ShardTransportSummary {
+            shard_id: "direct-connect".to_string(),
+            latest_tick: 24,
+            client_count: 2,
+            total_pending_action_queue_depth: 1,
+            total_inbound_messages: 12,
+            total_outbound_messages: 30,
+            total_inbound_bytes: 512,
+            total_outbound_bytes: 4096,
+            action_batches_received: 4,
+            full_snapshot_requests: 1,
+            ping_requests: 3,
+            state_deltas_sent: 12,
+            event_batches_sent: 4,
+            debug_documents_sent: 7,
+            rejected_messages_sent: 1,
+            clients: vec![pod_core::ClientTransportSummary {
+                client_id: "client-a".to_string(),
+                player_name: Some("debug".to_string()),
+                controlled_entity: Some(1001),
+                last_seen_tick: 24,
+                last_sent_tick: Some(24),
+                pending_action_queue_depth: 1,
+                inbound_messages: 6,
+                outbound_messages: 15,
+                inbound_bytes: 256,
+                outbound_bytes: 2048,
+                action_batches_received: 2,
+                full_snapshot_requests: 1,
+                ping_requests: 2,
+                state_deltas_sent: 6,
+                event_batches_sent: 2,
+                debug_documents_sent: 4,
+                rejected_messages_sent: 1,
+                debug_telemetry_enabled: true,
+            }],
+        }
+    }
+
     #[test]
     fn editor_default_state_is_viewport() {
         let app = PodEditorApp::default();
@@ -5288,6 +5357,25 @@ mod tests {
     }
 
     #[test]
+    fn editor_imports_shard_transport_toon_into_dashboard_state() {
+        let mut app = PodEditorApp::default();
+        let summary = sample_shard_transport_summary();
+
+        app.import_shard_transport_toon_document(&summary.to_toon_document())
+            .expect("transport TOON should import");
+
+        let transport = app
+            .state
+            .spacetime_dashboard
+            .latest_transport_summary
+            .as_ref()
+            .expect("transport stored");
+        assert_eq!(transport.latest_tick, 24);
+        assert_eq!(transport.client_count, 2);
+        assert_eq!(transport.clients[0].client_id, "client-a");
+    }
+
+    #[test]
     fn editor_imports_live_tool_call_and_rollup_toon_documents() {
         let mut app = PodEditorApp::default();
         let tool_event = sample_tool_call_event(16, 1001);
@@ -5396,6 +5484,8 @@ mod tests {
             .expect("replay TOON should route");
         app.import_live_debug_toon_document(&incident.to_toon_document())
             .expect("incident TOON should route");
+        app.import_live_debug_toon_document(&sample_shard_transport_summary().to_toon_document())
+            .expect("transport TOON should route");
 
         assert_eq!(
             app.state.telemetry.latest().expect("telemetry stored").tick,
@@ -5430,6 +5520,15 @@ mod tests {
             1
         );
         assert_eq!(app.state.spacetime_dashboard.recent_tick_rollups.len(), 1);
+        assert_eq!(
+            app.state
+                .spacetime_dashboard
+                .latest_transport_summary
+                .as_ref()
+                .expect("transport stored")
+                .client_count,
+            2
+        );
     }
 
     #[test]

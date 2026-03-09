@@ -18,6 +18,7 @@ import {
   parseLiveDebugDocument,
   parseReplayFile,
   parseShardIncidentSummary,
+  parseShardTransportSummary,
   parseTickTelemetryEnvelope,
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
@@ -235,6 +236,56 @@ describe("TOON contract parsing", () => {
     expect(summary.notes).toHaveLength(1);
   });
 
+  test("accepts shard transport summary TOON documents", () => {
+    const document = encode({
+      document_type: "shard_transport_summary",
+      payload: {
+        shard_id: "direct-connect",
+        latest_tick: 360,
+        client_count: 2,
+        total_pending_action_queue_depth: 1,
+        total_inbound_messages: 21,
+        total_outbound_messages: 44,
+        total_inbound_bytes: 1024,
+        total_outbound_bytes: 4096,
+        action_batches_received: 8,
+        full_snapshot_requests: 1,
+        ping_requests: 5,
+        state_deltas_sent: 19,
+        event_batches_sent: 7,
+        debug_documents_sent: 11,
+        rejected_messages_sent: 2,
+        clients: [
+          {
+            client_id: "client-a",
+            player_name: "debug",
+            controlled_entity: 44,
+            last_seen_tick: 360,
+            last_sent_tick: 360,
+            pending_action_queue_depth: 1,
+            inbound_messages: 10,
+            outbound_messages: 20,
+            inbound_bytes: 512,
+            outbound_bytes: 2048,
+            action_batches_received: 4,
+            full_snapshot_requests: 1,
+            ping_requests: 3,
+            state_deltas_sent: 9,
+            event_batches_sent: 4,
+            debug_documents_sent: 6,
+            rejected_messages_sent: 1,
+            debug_telemetry_enabled: true
+          }
+        ]
+      }
+    });
+
+    const summary = parseShardTransportSummary(document);
+    expect(summary.shard_id).toBe("direct-connect");
+    expect(summary.client_count).toBe(2);
+    expect(summary.clients[0]?.client_id).toBe("client-a");
+  });
+
   test("accepts tool-call and rollup TOON documents", () => {
     const toolDocument = encode({
       document_type: "agent_tool_call_event",
@@ -347,6 +398,31 @@ describe("TOON contract parsing", () => {
       })
     );
     expect(focused.kind).toBe("focusedSummary");
+
+    const transport = parseLiveDebugDocument(
+      encode({
+        document_type: "shard_transport_summary",
+        payload: {
+          shard_id: "direct-connect",
+          latest_tick: 18,
+          client_count: 1,
+          total_pending_action_queue_depth: 0,
+          total_inbound_messages: 2,
+          total_outbound_messages: 6,
+          total_inbound_bytes: 64,
+          total_outbound_bytes: 256,
+          action_batches_received: 1,
+          full_snapshot_requests: 0,
+          ping_requests: 1,
+          state_deltas_sent: 2,
+          event_batches_sent: 1,
+          debug_documents_sent: 3,
+          rejected_messages_sent: 0,
+          clients: []
+        }
+      })
+    );
+    expect(transport.kind).toBe("transport");
   });
 
   test("parses direct-connect welcome and delta messages", () => {

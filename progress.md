@@ -67,3 +67,12 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Wired those combat banners into the shared authoritative frame-decoration path in `contracts.ts`, which means selected hostile targets and the controlled player now get billboarded combat focus/health strips from the same snapshot data used by the rest of the browser client.
 - Added light motion treatment for combat banners/health bars in `frame-plan` instead of leaving them as dead static overlays.
 - Revalidated the combat-readability pass with targeted Bun coverage (`assets`, `contracts`, `frame-plan`), clean typecheck/build, and another clean Playwright smoke run (`2 passed`).
+- Added shared shard transport observability contracts in `pod-core` and TOON export helpers, so direct-connect runtime pressure can be inspected as typed debug documents instead of only ad hoc logs.
+- Extended `pod-net` direct-connect server sessions with per-client transport counters, periodic shard transport summaries, and debug-document emission of `shard_transport_summary`, covering bytes, message classes, ping/full-resync intake, and pending action depth.
+- Extended `pod-web` live-debug parsing/HUD plus `pod-editor` dashboard import paths to consume `shard_transport_summary` documents, making transport pressure visible to browser/editor debug consumers without widening gameplay traffic.
+- Revalidated the transport-observability pass with targeted Rust and Bun coverage:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`

@@ -62,6 +62,54 @@ impl FocusedEntityDebugSummary {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClientTransportSummary {
+    pub client_id: String,
+    pub player_name: Option<String>,
+    pub controlled_entity: Option<u64>,
+    pub last_seen_tick: u64,
+    pub last_sent_tick: Option<u64>,
+    pub pending_action_queue_depth: usize,
+    pub inbound_messages: u64,
+    pub outbound_messages: u64,
+    pub inbound_bytes: u64,
+    pub outbound_bytes: u64,
+    pub action_batches_received: u64,
+    pub full_snapshot_requests: u64,
+    pub ping_requests: u64,
+    pub state_deltas_sent: u64,
+    pub event_batches_sent: u64,
+    pub debug_documents_sent: u64,
+    pub rejected_messages_sent: u64,
+    pub debug_telemetry_enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ShardTransportSummary {
+    pub shard_id: String,
+    pub latest_tick: u64,
+    pub client_count: usize,
+    pub total_pending_action_queue_depth: usize,
+    pub total_inbound_messages: u64,
+    pub total_outbound_messages: u64,
+    pub total_inbound_bytes: u64,
+    pub total_outbound_bytes: u64,
+    pub action_batches_received: u64,
+    pub full_snapshot_requests: u64,
+    pub ping_requests: u64,
+    pub state_deltas_sent: u64,
+    pub event_batches_sent: u64,
+    pub debug_documents_sent: u64,
+    pub rejected_messages_sent: u64,
+    pub clients: Vec<ClientTransportSummary>,
+}
+
+impl ShardTransportSummary {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("shard_transport_summary", self)
+    }
+}
+
 pub fn summarize_focused_entity_debug(
     shard_id: impl Into<String>,
     archive: &TelemetryArchive,
@@ -161,8 +209,8 @@ mod tests {
     use crate::{AgentId, AgentRuntimeProfile, EntityId, TelemetryArchive, ToolCallStatus};
 
     use super::{
-        summarize_focused_entity_debug, FocusedEntityDebugSummary, IncidentSeverity,
-        ShardIncidentSummary,
+        summarize_focused_entity_debug, ClientTransportSummary, FocusedEntityDebugSummary,
+        IncidentSeverity, ShardIncidentSummary, ShardTransportSummary,
     };
 
     #[test]
@@ -273,5 +321,53 @@ mod tests {
         assert_eq!(summary.tool_error_count, 1);
         assert_eq!(summary.visible_entity_count, 7);
         assert_eq!(summary.latest_tool_name.as_deref(), Some("llm.complete"));
+    }
+
+    #[test]
+    fn shard_transport_summary_exports_to_toon() {
+        let summary = ShardTransportSummary {
+            shard_id: "direct-connect".to_string(),
+            latest_tick: 1440,
+            client_count: 2,
+            total_pending_action_queue_depth: 3,
+            total_inbound_messages: 21,
+            total_outbound_messages: 44,
+            total_inbound_bytes: 1024,
+            total_outbound_bytes: 4096,
+            action_batches_received: 8,
+            full_snapshot_requests: 1,
+            ping_requests: 5,
+            state_deltas_sent: 19,
+            event_batches_sent: 7,
+            debug_documents_sent: 11,
+            rejected_messages_sent: 2,
+            clients: vec![ClientTransportSummary {
+                client_id: "client-a".to_string(),
+                player_name: Some("debug".to_string()),
+                controlled_entity: Some(41),
+                last_seen_tick: 1440,
+                last_sent_tick: Some(1440),
+                pending_action_queue_depth: 1,
+                inbound_messages: 10,
+                outbound_messages: 20,
+                inbound_bytes: 512,
+                outbound_bytes: 2048,
+                action_batches_received: 4,
+                full_snapshot_requests: 1,
+                ping_requests: 3,
+                state_deltas_sent: 9,
+                event_batches_sent: 4,
+                debug_documents_sent: 6,
+                rejected_messages_sent: 1,
+                debug_telemetry_enabled: true,
+            }],
+        };
+
+        let value =
+            decode_toon_value(&summary.to_toon_document()).expect("transport summary should decode");
+        assert_eq!(value["document_type"], "shard_transport_summary");
+        assert_eq!(value["payload"]["client_count"], 2);
+        assert_eq!(value["payload"]["clients"][0]["client_id"], "client-a");
+        assert_eq!(value["payload"]["clients"][0]["debug_telemetry_enabled"], true);
     }
 }

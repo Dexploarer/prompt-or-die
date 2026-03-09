@@ -1141,5 +1141,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run test:smoke`
   - `git diff --check`
 
-**Last updated**: Iteration 113
-**Current focus**: Iteration 114 richer water/shoreline response under live combat traversal, stronger close-range hit readability beyond banner state, and further shard/runtime observability improvements beyond browser-only smoke
+### Iteration 114
+- [x] Added shared shard transport observability contracts in `pod-core` (`ClientTransportSummary`, `ShardTransportSummary`) with first-class TOON export so runtime, editor, and browser debug consumers can inspect per-client traffic, queue depth, and snapshot/event/debug message pressure from one typed document.
+- [x] Extended `pod-net` direct-connect server runtime to track inbound/outbound bytes, per-message-class counts, action/full-resync/ping intake, and periodic shard transport summaries, then emit those summaries into the same debug-document stream used by existing telemetry/tool/rollup consumers.
+- [x] Extended `pod-web` live-debug parsing/HUD and `pod-editor` dashboard import paths to consume `shard_transport_summary` TOON documents, so debug surfaces can show shard transport pressure without scraping logs or requiring full raw tick telemetry.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib server::`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 114
+**Current focus**: Iteration 115 stale-client detection, heartbeat timeout handling, and bounded shard backpressure so direct-connect runtime behavior stays smooth under degraded network conditions
