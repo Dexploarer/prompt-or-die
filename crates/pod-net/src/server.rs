@@ -1552,6 +1552,12 @@ impl GameServer {
                 .get(&client_id)
                 .and_then(|session| session.agent_id)
                 .and_then(|agent_id| self.controlled_entity_for_agent(agent_id));
+            let acknowledged_action_tick = self
+                .clients
+                .read()
+                .await
+                .get(&client_id)
+                .and_then(|session| session.last_processed_action_tick);
             let authoritative_snapshot = WorldSnapshot::capture(&self.world);
             let snapshot = self.snapshot_for_client(
                 &authoritative_snapshot,
@@ -1570,6 +1576,7 @@ impl GameServer {
                         reconnect_token,
                         tick: self.tick,
                         controlled_entity,
+                        acknowledged_action_tick,
                         authoritative_digest,
                         snapshot: snapshot.clone(),
                     },
@@ -1613,6 +1620,7 @@ impl GameServer {
                     reconnect_token,
                     tick: self.tick,
                     controlled_entity: Some(entity.id() as u64),
+                    acknowledged_action_tick: None,
                     authoritative_digest,
                     snapshot: snapshot.clone(),
                 },

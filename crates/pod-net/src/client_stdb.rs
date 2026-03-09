@@ -541,6 +541,7 @@ impl SpacetimeDBClient {
                                 reconnect_token: self.reconnect_token,
                                 tick,
                                 controlled_entity: None,
+                                acknowledged_action_tick: None,
                                 authoritative_digest: snapshot.digest(),
                                 snapshot,
                             });

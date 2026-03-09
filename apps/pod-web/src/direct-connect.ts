@@ -329,6 +329,7 @@ export class PodWebDirectConnectClient {
         this.snapshot = message.snapshot;
         this.controlledEntity = message.controlledEntity;
         this.authoritativeDigest = message.authoritativeDigest;
+        this.reconcileAcknowledgedActions(message.acknowledgedActionTick);
         this.lastServerActivityAtMs = Date.now();
         this.updateWorldStatus("connected", `Connected as ${this.config.playerName}`);
         this.emitFrame();

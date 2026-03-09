@@ -322,28 +322,40 @@ impl WebClient {
                 reconnect_token,
                 tick,
                 controlled_entity,
+                acknowledged_action_tick,
                 authoritative_digest,
                 snapshot,
             } => {
+                let resuming_session = self.reconnect_token.is_some();
                 self.client_id = Some(*client_id);
                 self.reconnect_token = Some(*reconnect_token);
                 self.controlled_entity = *controlled_entity;
                 self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot.clone());
                 self.ingest_authoritative_snapshot();
-                self.prediction_history.clear();
+                if resuming_session {
+                    self.prune_acknowledged_predictions(*acknowledged_action_tick);
+                    self.rebuild_predicted_snapshot();
+                } else {
+                    self.prediction_history.clear();
+                    self.last_acknowledged_action_tick = None;
+                }
                 self.connected = true;
                 self.last_server_tick = *tick;
-                self.last_acknowledged_action_tick = None;
                 self.last_event_tick = *tick;
                 self.recovery_state.clear();
                 self.reconnect_attempts = 0;
+                let replayed_action_count = self
+                    .prediction_history
+                    .iter()
+                    .map(|batch| batch.actions.len())
+                    .sum();
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: *tick,
                     authoritative_digest: *authoritative_digest,
-                    acknowledged_action_tick: None,
-                    pending_action_batches: 0,
-                    replayed_action_count: 0,
+                    acknowledged_action_tick: *acknowledged_action_tick,
+                    pending_action_batches: self.prediction_history.len(),
+                    replayed_action_count,
                     predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
                     used_hard_resync: false,
                 });
@@ -818,6 +830,8 @@ impl std::error::Error for ClientError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::{EntityMetadataSnapshot, EntitySnapshot};
+    use pod_core::WorldPopulationState;
 
     #[test]
     fn test_client_config() {
@@ -834,5 +848,98 @@ mod tests {
         assert_eq!(config.server_port, 5001);
         assert_eq!(config.heartbeat_timeout_ms, 6500);
         assert_eq!(config.max_pending_actions, 32);
+    }
+
+    #[test]
+    fn test_resumed_welcome_replays_unacknowledged_predictions() {
+        let authoritative = WorldSnapshot {
+            tick: 7,
+            entities: vec![EntitySnapshot {
+                id: 9,
+                position: glam::Vec2::ZERO,
+                velocity: glam::Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+                metadata: EntityMetadataSnapshot::default(),
+            }],
+            population: WorldPopulationState {
+                tick: 7,
+                ..Default::default()
+            },
+        };
+        let mut client = WebClient {
+            config: ClientConfig {
+                server_addr: "localhost".to_string(),
+                server_port: 5001,
+                player_name: "WebPlayer".to_string(),
+                timeout_ms: 5000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
+            },
+            client_id: None,
+            websocket: None,
+            connected: false,
+            pending_updates: Arc::new(Mutex::new(Vec::new())),
+            runtime_state: Arc::new(Mutex::new(WebRuntimeState::default())),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: vec![PredictedActionBatch {
+                tick: 7,
+                actions: vec![Action::Move {
+                    direction: glam::Vec2::X,
+                }],
+            }],
+            last_server_tick: 0,
+            last_acknowledged_action_tick: Some(5),
+            last_event_tick: 0,
+            reconnect_token: Some(ReconnectToken::new()),
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            reconnect_attempts: 0,
+            next_reconnect_at_ms: 0.0,
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+        };
+
+        assert!(client.apply_server_message(&ServerMessage::Welcome {
+            client_id: ClientId::new(),
+            reconnect_token: ReconnectToken::new(),
+            tick: 7,
+            controlled_entity: Some(9),
+            acknowledged_action_tick: Some(6),
+            authoritative_digest: authoritative.digest(),
+            snapshot: authoritative.clone(),
+        }));
+
+        assert_eq!(client.prediction_history.len(), 1);
+        assert_eq!(client.last_acknowledged_action_tick, Some(6));
+        assert_eq!(
+            client
+                .last_reconciliation
+                .as_ref()
+                .expect("reconciliation recorded")
+                .pending_action_batches,
+            1
+        );
+        assert!(
+            client
+                .local_snapshot
+                .as_ref()
+                .expect("predicted snapshot rebuilt")
+                .entities[0]
+                .position
+                .x
+                > authoritative.entities[0].position.x
+        );
     }
 }

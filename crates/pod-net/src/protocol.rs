@@ -111,6 +111,7 @@ pub enum ServerMessage {
         reconnect_token: ReconnectToken,
         tick: u64,
         controlled_entity: Option<u64>,
+        acknowledged_action_tick: Option<u64>,
         authoritative_digest: u64,
         snapshot: super::snapshot::WorldSnapshot,
     },
@@ -346,6 +347,7 @@ mod tests {
             reconnect_token: ReconnectToken::new(),
             tick: 100,
             controlled_entity: Some(42),
+            acknowledged_action_tick: Some(99),
             authoritative_digest: snapshot.digest(),
             snapshot,
         };
@@ -357,10 +359,12 @@ mod tests {
             ServerMessage::Welcome {
                 tick,
                 controlled_entity,
+                acknowledged_action_tick,
                 ..
             } => {
                 assert_eq!(tick, 100);
                 assert_eq!(controlled_entity, Some(42));
+                assert_eq!(acknowledged_action_tick, Some(99));
             }
             _ => panic!("Wrong message type"),
         }

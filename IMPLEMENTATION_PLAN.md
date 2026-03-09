@@ -1230,5 +1230,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `git diff --check`
 
-**Last updated**: Iteration 121
-**Current focus**: Iteration 122 native reconnect/session replay polish on top of the stabilized transport layer, then deeper shard-side recovery diagnostics beyond transport counters alone
+### Iteration 122
+- [x] Extended the shared `pod-net` welcome path with `acknowledged_action_tick`, so reconnect/session-resume handshakes can carry forward the server’s last processed action boundary instead of forcing clients to guess.
+- [x] Updated native and web `pod-net` clients to preserve and replay only unacknowledged prediction batches on resumed welcomes, keeping replay state alive across reconnect instead of clearing local prediction history on every resumed session.
+- [x] Propagated the welcome-contract change through the direct-connect server, SpacetimeDB adapter, and browser direct-connect parser/runtime, then added deterministic native/web parser coverage for replay-aware resumed welcomes.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo check -p pod-net --target wasm32-unknown-unknown --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/direct-connect.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 122
+**Current focus**: Iteration 123 deeper shard-side recovery diagnostics beyond transport counters alone, then further reconnect/session replay polish on top of the synchronized transport layer

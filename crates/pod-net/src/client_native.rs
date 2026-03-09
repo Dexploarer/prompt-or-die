@@ -199,6 +199,7 @@ impl NativeClient {
 
     /// Send a connect message to the server
     async fn send_connect(&mut self) -> Result<(), ClientError> {
+        let resuming_session = self.reconnect_token.is_some();
         let msg = ClientMessage::Connect {
             player_name: self.config.player_name.clone(),
             reconnect_token: self.reconnect_token,
@@ -218,6 +219,7 @@ impl NativeClient {
                 client_id,
                 reconnect_token,
                 controlled_entity,
+                acknowledged_action_tick,
                 authoritative_digest,
                 snapshot,
                 ..
@@ -229,9 +231,19 @@ impl NativeClient {
                 self.local_snapshot = Some(snapshot);
                 self.ingest_authoritative_snapshot();
                 self.reconnect_token = Some(reconnect_token);
-                self.prediction_history.clear();
-                self.last_acknowledged_action_tick = None;
+                if resuming_session {
+                    self.prune_acknowledged_predictions(acknowledged_action_tick);
+                    self.rebuild_predicted_snapshot();
+                } else {
+                    self.prediction_history.clear();
+                    self.last_acknowledged_action_tick = None;
+                }
                 self.recovery_state.clear();
+                let replayed_action_count = self
+                    .prediction_history
+                    .iter()
+                    .map(|batch| batch.actions.len())
+                    .sum();
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: self
                         .local_snapshot
@@ -239,9 +251,9 @@ impl NativeClient {
                         .map(|snapshot| snapshot.tick)
                         .unwrap_or_default(),
                     authoritative_digest,
-                    acknowledged_action_tick: None,
-                    pending_action_batches: 0,
-                    replayed_action_count: 0,
+                    acknowledged_action_tick,
+                    pending_action_batches: self.prediction_history.len(),
+                    replayed_action_count,
                     predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
                     used_hard_resync: false,
                 });
@@ -435,26 +447,38 @@ impl NativeClient {
                 reconnect_token,
                 tick,
                 controlled_entity,
+                acknowledged_action_tick,
                 authoritative_digest,
                 snapshot,
             } => {
+                let resuming_session = self.reconnect_token.is_some();
                 self.client_id = Some(*client_id);
                 self.controlled_entity = *controlled_entity;
                 self.authoritative_snapshot = Some(snapshot.clone());
                 self.local_snapshot = Some(snapshot.clone());
                 self.ingest_authoritative_snapshot();
-                self.prediction_history.clear();
-                self.last_acknowledged_action_tick = None;
+                if resuming_session {
+                    self.prune_acknowledged_predictions(*acknowledged_action_tick);
+                    self.rebuild_predicted_snapshot();
+                } else {
+                    self.prediction_history.clear();
+                    self.last_acknowledged_action_tick = None;
+                }
                 self.recovery_state.clear();
                 self.last_server_tick = *tick;
                 self.last_event_tick = *tick;
                 self.reconnect_token = Some(*reconnect_token);
+                let replayed_action_count = self
+                    .prediction_history
+                    .iter()
+                    .map(|batch| batch.actions.len())
+                    .sum();
                 self.last_reconciliation = Some(ReconciliationReport {
                     authoritative_tick: *tick,
                     authoritative_digest: *authoritative_digest,
-                    acknowledged_action_tick: None,
-                    pending_action_batches: 0,
-                    replayed_action_count: 0,
+                    acknowledged_action_tick: *acknowledged_action_tick,
+                    pending_action_batches: self.prediction_history.len(),
+                    replayed_action_count,
                     predicted_digest: self.local_snapshot.as_ref().map(WorldSnapshot::digest),
                     used_hard_resync: false,
                 });
@@ -1210,6 +1234,114 @@ mod tests {
         assert_eq!(
             client.rollback_preview(Some(20)).unwrap().replayed_batches,
             1
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_resumed_welcome_replays_unacknowledged_predictions() {
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let authoritative = WorldSnapshot {
+            tick: 7,
+            entities: vec![crate::snapshot::EntitySnapshot {
+                id: 9,
+                position: glam::Vec2::ZERO,
+                velocity: glam::Vec2::ZERO,
+                rotation: 0.0,
+                health: None,
+                max_health: None,
+                movement_speed: Some(120.0),
+                label: Some("player".into()),
+                metadata: crate::snapshot::EntityMetadataSnapshot::default(),
+            }],
+            population: pod_core::WorldPopulationState {
+                tick: 7,
+                ..Default::default()
+            },
+        };
+        let reconnect_token = ReconnectToken::new();
+        let mut client = NativeClient {
+            config: ProtoClientConfig {
+                server_addr: "localhost".into(),
+                server_port: 5000,
+                player_name: "Tester".into(),
+                timeout_ms: 1000,
+                heartbeat_timeout_ms: 6500,
+                max_pending_actions: 32,
+            },
+            client_id: None,
+            connection: None,
+            endpoint,
+            runtime_state: Arc::new(Mutex::new(NativeRuntimeState::default())),
+            rx,
+            tx,
+            reader_task: None,
+            pending_updates: Vec::new(),
+            authoritative_snapshot: None,
+            local_snapshot: None,
+            controlled_entity: None,
+            pending_actions: Vec::new(),
+            prediction_history: vec![PredictedActionBatch {
+                tick: 7,
+                actions: vec![Action::Move {
+                    direction: glam::Vec2::X,
+                }],
+            }],
+            last_server_tick: 0,
+            last_acknowledged_action_tick: Some(5),
+            last_event_tick: 0,
+            reconnect_token: Some(reconnect_token),
+            last_reconciliation: None,
+            last_debug_telemetry_json: None,
+            last_debug_document: None,
+            pending_debug_documents: Vec::new(),
+            recovery_state: RecoveryRequestState::default(),
+            render_buffer: SnapshotInterpolationBuffer::default(),
+            render_clock: RenderClock::default(),
+            last_server_activity_at: std::time::Instant::now(),
+            last_ping_rtt_ms: None,
+            ping_jitter_ms: None,
+            reconnect_attempts: 0,
+            next_reconnect_at: None,
+        };
+
+        assert!(client.apply_server_message(&ServerMessage::Welcome {
+            client_id: ClientId::new(),
+            reconnect_token: ReconnectToken::new(),
+            tick: 7,
+            controlled_entity: Some(9),
+            acknowledged_action_tick: Some(6),
+            authoritative_digest: authoritative.digest(),
+            snapshot: authoritative.clone(),
+        }));
+
+        assert_eq!(client.prediction_history.len(), 1);
+        assert_eq!(client.last_acknowledged_action_tick, Some(6));
+        assert_eq!(
+            client
+                .last_reconciliation
+                .as_ref()
+                .expect("reconciliation recorded")
+                .pending_action_batches,
+            1
+        );
+        assert_eq!(
+            client
+                .last_reconciliation
+                .as_ref()
+                .expect("reconciliation recorded")
+                .acknowledged_action_tick,
+            Some(6)
+        );
+        assert!(
+            client
+                .local_snapshot
+                .as_ref()
+                .expect("predicted snapshot rebuilt")
+                .entities[0]
+                .position
+                .x
+                > authoritative.entities[0].position.x
         );
     }
 
