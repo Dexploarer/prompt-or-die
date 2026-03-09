@@ -91,6 +91,14 @@ interface LocalActionResult {
   progressionDirty: boolean;
 }
 
+interface LocalMovementResponseProfile {
+  maxSpeedScale: number;
+  acceleration: number;
+  deceleration: number;
+  steeringBoost: number;
+  turnLerp: number;
+}
+
 interface LocalQuestStageDefinition {
   stageId: string;
   title: string;
@@ -1024,25 +1032,37 @@ export class PodWebLocalWorld {
     for (const entity of this.state.entities) {
       entity.surfaceMode = surfaceModeAtPosition(entity, entity.position);
       const desired = entity.desiredMove;
-      const movementScale = movementSpeedScale(entity);
+      const movementProfile = movementResponseProfile(entity);
       const targetVelocity: Vec2Tuple = desired
         ? [
-            desired[0] * entity.movementSpeed * movementScale,
-            desired[1] * entity.movementSpeed * movementScale
+            desired[0] * entity.movementSpeed * movementProfile.maxSpeedScale,
+            desired[1] * entity.movementSpeed * movementProfile.maxSpeedScale
           ]
         : [0, 0];
+      const previousSpeed = Math.hypot(entity.velocity[0], entity.velocity[1]);
+      const previousDirection =
+        previousSpeed > 0.0001
+          ? ([entity.velocity[0] / previousSpeed, entity.velocity[1] / previousSpeed] as Vec2Tuple)
+          : desired;
+      const steeringAlignment =
+        desired && previousDirection
+          ? desired[0] * previousDirection[0] + desired[1] * previousDirection[1]
+          : 1;
+      const steeringBoost =
+        desired != null
+          ? entity.movementSpeed *
+            movementProfile.maxSpeedScale *
+            Math.max(0, 1 - steeringAlignment) *
+            movementProfile.steeringBoost
+          : 0;
       const acceleration =
-        entity.role === "player"
-          ? entity.movementSpeed * movementScale * 0.18
-          : entity.movementSpeed * movementScale * 0.14;
+        entity.movementSpeed * movementProfile.maxSpeedScale * movementProfile.acceleration;
       const deceleration =
-        entity.role === "player"
-          ? entity.movementSpeed * movementScale * 0.24
-          : entity.movementSpeed * movementScale * 0.18;
+        entity.movementSpeed * movementProfile.maxSpeedScale * movementProfile.deceleration;
       const velocityStep =
         desired != null
-          ? Math.max(0.08, acceleration)
-          : Math.max(0.08, deceleration);
+          ? Math.max(0.08, acceleration + steeringBoost)
+          : Math.max(0.05, deceleration);
 
       entity.velocity = [
         moveScalarToward(entity.velocity[0], targetVelocity[0], velocityStep),
@@ -1072,7 +1092,7 @@ export class PodWebLocalWorld {
         entity.rotation = rotateTowardAngle(
           entity.rotation,
           Math.atan2(entity.velocity[0], entity.velocity[1]),
-          0.24
+          movementProfile.turnLerp
         );
       }
     }
@@ -1132,7 +1152,7 @@ export class PodWebLocalWorld {
         this.state.tick,
         target.position,
         "Damage",
-        `E(${attacker.id}) hit E(${target.id}) for ${damage.toFixed(1)}`,
+        `${attacker.label} hit ${target.label} for ${damage.toFixed(1)}`,
         [attacker.id, target.id]
       )
     );
@@ -1146,7 +1166,7 @@ export class PodWebLocalWorld {
         this.state.tick,
         target.position,
         "Kill",
-        `E(${attacker.id}) defeated E(${target.id})`,
+        `${attacker.label} defeated ${target.label}`,
         [attacker.id, target.id]
       )
     );
@@ -1162,7 +1182,7 @@ export class PodWebLocalWorld {
           this.state.tick,
           target.position,
           "EntitySpawned",
-          `Player E(${target.id}) respawned`,
+          `${target.label} respawned at camp`,
           [target.id]
         )
       );
@@ -2872,6 +2892,48 @@ function movementSpeedScale(entity: LocalEntity): number {
   }
 }
 
+function movementResponseProfile(entity: LocalEntity): LocalMovementResponseProfile {
+  const swimScale = movementSpeedScale(entity);
+
+  if (entity.surfaceMode === "swim") {
+    if (entity.role === "player") {
+      return {
+        maxSpeedScale: swimScale,
+        acceleration: 0.16,
+        deceleration: 0.08,
+        steeringBoost: 0.28,
+        turnLerp: 0.16
+      };
+    }
+
+    return {
+      maxSpeedScale: swimScale,
+      acceleration: 0.13,
+      deceleration: 0.09,
+      steeringBoost: 0.2,
+      turnLerp: entity.role === "companion" ? 0.19 : 0.17
+    };
+  }
+
+  if (entity.role === "player") {
+    return {
+      maxSpeedScale: 1,
+      acceleration: 0.24,
+      deceleration: 0.32,
+      steeringBoost: 0.44,
+      turnLerp: 0.3
+    };
+  }
+
+  return {
+    maxSpeedScale: 1,
+    acceleration: 0.16,
+    deceleration: 0.2,
+    steeringBoost: 0.24,
+    turnLerp: entity.role === "companion" ? 0.24 : 0.2
+  };
+}
+
 function collisionRadius(entity: LocalEntity): number {
   const footprint = entity.metadata.actorPresentation?.footprintRadius ?? 1;
   if (
@@ -2880,7 +2942,8 @@ function collisionRadius(entity: LocalEntity): number {
     entity.role === "wild" ||
     entity.role === "companion"
   ) {
-    return Math.max(0.45, footprint * 0.48);
+    const baseRadius = Math.max(0.43, footprint * 0.46);
+    return entity.surfaceMode === "swim" ? baseRadius * 0.88 : baseRadius;
   }
 
   return Math.max(0.8, footprint * 0.72);
@@ -2954,10 +3017,28 @@ function resolveSolidOverlap(
         ny /= distance;
       }
 
-      resolved = [
+      const pushed: Vec2Tuple = [
         obstacle.position[0] + nx * radius,
         obstacle.position[1] + ny * radius
       ];
+
+      const tangent: Vec2Tuple = [-ny, nx];
+      const intendedDelta: Vec2Tuple = [
+        candidate[0] - start[0],
+        candidate[1] - start[1]
+      ];
+      const tangentDistance =
+        intendedDelta[0] * tangent[0] + intendedDelta[1] * tangent[1];
+      const slideCandidate: Vec2Tuple = [
+        obstacle.position[0] + nx * radius + tangent[0] * tangentDistance * 0.92,
+        obstacle.position[1] + ny * radius + tangent[1] * tangentDistance * 0.92
+      ];
+
+      resolved =
+        Math.abs(tangentDistance) > 0.02 &&
+        !positionOverlapsSolidObstacle(entity, slideCandidate, entities)
+          ? slideCandidate
+          : pushed;
     }
   }
 
@@ -3061,6 +3142,27 @@ function describeInteraction(target: LocalEntity): string {
     default:
       return `${target.label} can be inspected`;
   }
+}
+
+function positionOverlapsSolidObstacle(
+  entity: LocalEntity,
+  position: Vec2Tuple,
+  entities: LocalEntity[]
+): boolean {
+  const moverRadius = collisionRadius(entity);
+
+  for (const obstacle of entities) {
+    if (obstacle.id === entity.id || !isSolidObstacle(obstacle)) {
+      continue;
+    }
+
+    const radius = moverRadius + collisionRadius(obstacle);
+    if (distanceBetween(position, obstacle.position) < radius - 0.001) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function baseDamage(attacker: LocalEntity, tick: number, targetId: number): number {

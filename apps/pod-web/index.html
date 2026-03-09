@@ -47,10 +47,10 @@
       .hud {
         position: absolute;
         inset: 18px auto auto 18px;
-        width: min(292px, calc(100vw - 36px));
-        padding: 12px 12px 10px;
+        width: min(276px, calc(100vw - 36px));
+        padding: 10px 10px 9px;
         border: 1px solid var(--panel-border);
-        border-radius: 16px;
+        border-radius: 15px;
         background:
           linear-gradient(180deg, rgba(10, 16, 26, 0.76), rgba(7, 11, 18, 0.6)),
           var(--panel-bg);
@@ -60,7 +60,7 @@
 
       .hud--telemetry {
         inset: auto 20px 20px auto;
-        width: min(320px, calc(100vw - 40px));
+        width: min(296px, calc(100vw - 40px));
         max-height: min(52vh, 460px);
         overflow: auto;
       }
@@ -81,7 +81,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         color: var(--muted);
         font-size: 0.74rem;
         letter-spacing: 0.08em;
@@ -97,8 +97,8 @@
       .hud__badge-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 8px;
+        gap: 6px;
+        margin-top: 7px;
       }
 
       .hud__badge {
@@ -109,21 +109,21 @@
         border-radius: 999px;
         background: rgba(138, 245, 207, 0.08);
         color: var(--copy);
-        padding: 6px 10px;
-        font-size: 0.8rem;
+        padding: 5px 9px;
+        font-size: 0.76rem;
       }
 
       .hud__stack {
         display: grid;
-        gap: 7px;
-        margin-top: 8px;
+        gap: 6px;
+        margin-top: 7px;
       }
 
       .hud__card {
         border: 1px solid rgba(130, 170, 255, 0.16);
-        border-radius: 14px;
+        border-radius: 12px;
         background: rgba(3, 7, 12, 0.38);
-        padding: 8px 10px;
+        padding: 7px 9px;
       }
 
       .hud__card-label {
@@ -135,18 +135,18 @@
 
       .hud__card-value {
         display: block;
-        margin-top: 4px;
+        margin-top: 3px;
         color: var(--copy);
-        font-size: 0.94rem;
-        line-height: 1.28;
+        font-size: 0.91rem;
+        line-height: 1.24;
       }
 
       .hud__card-meta {
         display: block;
-        margin-top: 4px;
+        margin-top: 3px;
         color: var(--muted);
-        line-height: 1.28;
-        font-size: 0.83rem;
+        line-height: 1.24;
+        font-size: 0.8rem;
       }
 
       #event-feed-label {
@@ -179,7 +179,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        margin-top: 10px;
+        margin-top: 8px;
       }
 
       .hud__controls-group {
@@ -209,12 +209,12 @@
       .hud__chat {
         display: grid;
         grid-template-columns: 1fr auto;
-        gap: 8px;
-        margin-top: 10px;
+        gap: 7px;
+        margin-top: 8px;
       }
 
       .hud__heatmap {
-        margin-top: 12px;
+        margin-top: 10px;
       }
 
       .hud__heatmap-header {
@@ -237,9 +237,9 @@
       }
 
       .hud__details {
-        margin-top: 12px;
+        margin-top: 10px;
         border-top: 1px solid rgba(130, 170, 255, 0.14);
-        padding-top: 10px;
+        padding-top: 8px;
       }
 
       .hud__details summary {
@@ -260,7 +260,7 @@
         border-radius: 999px;
         background: rgba(5, 9, 15, 0.72);
         color: var(--copy);
-        padding: 9px 12px;
+        padding: 8px 11px;
         font: inherit;
       }
 
@@ -271,7 +271,7 @@
       #telemetry-panel[data-telemetry-enabled="false"] {
         width: auto;
         max-height: none;
-        padding: 12px 14px;
+        padding: 10px 12px;
       }
 
       #telemetry-panel[data-telemetry-enabled="false"] h1,
@@ -293,7 +293,7 @@
           <span id="backend-label">starting…</span>
         </div>
         <p class="hud__statusline" id="feedback-label">
-          Starting local browser shard
+          Verdant Hollow is coming online
         </p>
         <div class="hud__badge-row">
           <span class="hud__badge" id="connection-label">local sandbox booting</span>
@@ -308,7 +308,7 @@
           <div class="hud__card">
             <span class="hud__card-label">Target</span>
             <strong class="hud__card-value" id="target-label">No target selected</strong>
-            <span class="hud__card-meta" id="affordance-label">Tab to cycle targets</span>
+            <span class="hud__card-meta" id="affordance-label">Tab cycles targets</span>
           </div>
           <div class="hud__card">
             <span class="hud__card-label">Action</span>
@@ -321,7 +321,7 @@
           <button type="submit">Send</button>
         </form>
         <details class="hud__details">
-          <summary>Diagnostics</summary>
+          <summary>Ops + debug</summary>
           <div class="hud__heatmap">
             <div class="hud__heatmap-header">
               <span>Population heatmap</span>
@@ -335,7 +335,7 @@
             <dt>Stats</dt>
             <dd id="stats-label">warming up…</dd>
             <dt>Controls</dt>
-            <dd><code>Click</code> terrain to move · <code>WASD</code> steer · <code>Arrow keys</code> or <code>Right-drag</code> camera · <code>Tab</code> target · <code>Double-click</code> target action · <code>Enter</code> chat</dd>
+            <dd><code>Click</code> move · <code>WASD</code> travel · <code>Arrows</code>/<code>Right-drag</code> camera · <code>Tab</code> target · <code>Double-click</code> act</dd>
             <dt>Bridge</dt>
             <dd><code>window.podRender.renderThreeJsWebGpuFrame(...)</code> or <code>?server=127.0.0.1:7778&amp;debug=1</code></dd>
           </dl>

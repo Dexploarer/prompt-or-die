@@ -52,6 +52,38 @@ function moveTowardPoint(world: PodWebLocalWorld, target: [number, number], tick
   stepTicks(world, 1);
 }
 
+function moveWithinRange(
+  world: PodWebLocalWorld,
+  targetId: number,
+  range: number,
+  ticks: number
+): void {
+  let remaining = ticks;
+  while (remaining > 0) {
+    const snapshot = world.snapshotState();
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    const target = snapshot.entities.find((entity) => entity.id === targetId);
+    if (!player || !target) {
+      return;
+    }
+
+    const dx = target.position[0] - player.position[0];
+    const dy = target.position[1] - player.position[1];
+    const distance = Math.hypot(dx, dy);
+    if (distance <= range) {
+      break;
+    }
+
+    const slice = Math.min(remaining, 8);
+    world.submitActions([{ kind: "move", direction: [dx / distance, dy / distance] }]);
+    stepTicks(world, slice);
+    remaining -= slice;
+  }
+
+  world.submitActions([{ kind: "stop" }]);
+  stepTicks(world, 1);
+}
+
 describe("PodWebLocalWorld", () => {
   test("spawns a connected local sandbox with a controlled player and authored entities", () => {
     const world = new PodWebLocalWorld("Scout");
@@ -135,6 +167,8 @@ describe("PodWebLocalWorld", () => {
     const snapshot = world.snapshotState();
     const player = snapshot.entities.find((entity) => entity.id === 1);
     expect(player).not.toBeUndefined();
+    expect(player?.position[0]).toBeGreaterThan(4.5);
+    expect(player?.position[1]).toBeGreaterThan(2.4);
     expect(Math.hypot((player?.position[0] ?? 0) - 8.8, (player?.position[1] ?? 0) - 7.8)).toBeGreaterThan(
       1.55
     );
@@ -151,6 +185,7 @@ describe("PodWebLocalWorld", () => {
     expect(player).not.toBeUndefined();
     const surface = sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0);
     expect(surface.isSwimmable).toBe(true);
+    expect(Math.hypot((player?.position[0] ?? 0) - 18, (player?.position[1] ?? 0) + 14)).toBeLessThan(5.25);
     expect(player?.metadata.actorPresentation?.animationSetId).toBe("humanoid-swim");
   });
 
@@ -176,7 +211,7 @@ describe("PodWebLocalWorld", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
 
-    moveToward(world, 3, 160);
+    moveWithinRange(world, 3, 2.65, 120);
     world.submitActions([{ kind: "attackTarget", target: 3 }]);
     stepTicks(world, 2);
     world.submitActions([{ kind: "captureCreature", target: 3 }]);

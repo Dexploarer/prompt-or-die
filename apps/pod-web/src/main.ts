@@ -247,6 +247,8 @@ let latestFeedback = runtimeConfig
   : "Local sandbox ready: click terrain to move, right-drag or use arrow keys for camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
 let recentWorldEvents: NetworkGameEvent[] = [];
 let manualFrameOverride = false;
+let cameraImpact = 0;
+let swimCameraBlend = 0;
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
   ? {
       phase: "idle",
@@ -451,6 +453,10 @@ function stepScalarToward(current: number, target: number, sharpness: number, de
   return current + (target - current) * alpha;
 }
 
+function clampScalar(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function syncCameraRig(camera: CameraState | null): void {
   if (!camera) {
     return;
@@ -505,26 +511,57 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
   syncCameraRig(baseFrame.camera);
   const controlled = controlledEntity();
   const target = selectedTarget();
+  const nowSeconds =
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now() / 1000
+      : Date.now() / 1000;
   const speed = controlled
     ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
     : 0;
   const leadDistance = Math.min(1.4, speed * 0.16);
+  const healthRatio =
+    controlled && controlled.maxHealth != null && controlled.maxHealth > 0
+      ? Math.max(0, Math.min(1, (controlled.health ?? controlled.maxHealth) / controlled.maxHealth))
+      : 1;
+  const lowHealthPressure = healthRatio < 0.45 ? (0.45 - healthRatio) / 0.45 : 0;
+  const targetPressure = target?.metadata.interaction.canAttack ? 0.45 : 0;
+  const combatPressure = Math.max(targetPressure, lowHealthPressure * 0.9, cameraImpact * 0.75);
+  const leadScale = 1 + swimCameraBlend * 0.14 - combatPressure * 0.06;
   const leadX =
-    controlled && speed > 0.05 ? (controlled.velocity[0] / speed) * leadDistance : 0;
+    controlled && speed > 0.05
+      ? (controlled.velocity[0] / speed) * leadDistance * leadScale
+      : 0;
   const leadY =
-    controlled && speed > 0.05 ? (controlled.velocity[1] / speed) * leadDistance : 0;
+    controlled && speed > 0.05
+      ? (controlled.velocity[1] / speed) * leadDistance * leadScale
+      : 0;
+  const shakeYaw = Math.sin(nowSeconds * 33 + 0.8) * cameraImpact * 0.022;
+  const shakePitch = Math.sin(nowSeconds * 27 + 1.7) * cameraImpact * 0.014;
+  const baseFocusHeight = baseFrame.camera.focusHeight ?? 2.2;
+  const baseFollowDistance = baseFrame.camera.followDistance ?? 13.5;
+  const baseShoulderOffset = baseFrame.camera.shoulderOffset ?? 0.9;
+  const swimPitchOffset = swimCameraBlend * 0.068;
+  const swimZoomOffset = swimCameraBlend * 0.082;
+  const swimDistanceOffset = swimCameraBlend * 1.6;
+  const swimShoulderOffset = baseShoulderOffset - swimCameraBlend * 0.42;
+  const combatFovKick = combatPressure * 2.4 + cameraImpact * 3;
+  const swimFocusHeight = baseFocusHeight + swimCameraBlend * 0.12;
+  const swimFollowDistance = baseFollowDistance + swimDistanceOffset - combatPressure * 0.65;
+  const blendedShoulderOffset =
+    baseShoulderOffset + (swimShoulderOffset - baseShoulderOffset) * swimCameraBlend;
 
   const interactionFrame = withInteractionMarkers(
     {
       ...baseFrame,
       camera: {
         ...baseFrame.camera,
-        rotation: cameraRig.yaw,
-        pitch: cameraRig.pitch,
-        zoom: cameraRig.zoom,
-        focusHeight: baseFrame.camera.focusHeight ?? 2.2,
-        followDistance: baseFrame.camera.followDistance ?? 13.5,
-        shoulderOffset: baseFrame.camera.shoulderOffset ?? 0.9,
+        rotation: cameraRig.yaw + shakeYaw,
+        pitch: clampScalar(cameraRig.pitch + swimPitchOffset + shakePitch - combatPressure * 0.012, 0.18, 0.76),
+        zoom: clampScalar(cameraRig.zoom - swimZoomOffset - combatPressure * 0.035 + cameraImpact * 0.028, 0.72, 1.65),
+        fov: clampScalar((baseFrame.camera.fov ?? 52) + combatFovKick, 50, 62),
+        focusHeight: swimFocusHeight,
+        followDistance: swimFollowDistance,
+        shoulderOffset: blendedShoulderOffset,
         leadX,
         leadY
       }
@@ -577,6 +614,23 @@ function applyAuthoritativeEventBatch(batch: NetworkEventBatch): void {
   if (highlighted) {
     latestFeedback = highlightEventFeedback(highlighted);
   }
+
+  for (const event of batch.events) {
+    if (!eventTouchesEntity(event, controlledId) && !eventTouchesEntity(event, selectedTargetId)) {
+      continue;
+    }
+    const normalized = event.kind.toLowerCase();
+    if (normalized.includes("damage") || normalized.includes("kill") || normalized.includes("defeat")) {
+      cameraImpact = Math.min(1.2, cameraImpact + 0.48);
+    } else if (
+      normalized.includes("capture") ||
+      normalized.includes("summon") ||
+      normalized.includes("loot") ||
+      normalized.includes("gather")
+    ) {
+      cameraImpact = Math.min(1.2, cameraImpact + 0.22);
+    }
+  }
 }
 
 function formatRecentEventFeed(): string {
@@ -585,8 +639,9 @@ function formatRecentEventFeed(): string {
   }
 
   return recentWorldEvents
-    .map((event) => `[${event.tick}] ${event.summary}`)
-    .join("\n");
+    .slice(-2)
+    .map((event) => highlightEventFeedback(event))
+    .join(" · ");
 }
 
 function formatActionStatus(): string {
@@ -1140,6 +1195,12 @@ async function advanceInteractiveRuntime(deltaMs: number, timestamp: number): Pr
     localSandbox.step(deltaMs);
     refreshLocalSandboxFrame();
   }
+
+  const controlled = controlledEntity();
+  const isSwimming =
+    controlled?.metadata.actorPresentation?.animationSetId?.toLowerCase().includes("swim") ?? false;
+  swimCameraBlend = stepScalarToward(swimCameraBlend, isSwimming ? 1 : 0, 6.4, deltaMs);
+  cameraImpact = stepScalarToward(cameraImpact, 0, 9.2, deltaMs);
 
   await renderCurrentFrame(timestamp);
 }

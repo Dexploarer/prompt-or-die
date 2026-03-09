@@ -1075,5 +1075,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - Playwright local browser proof on `http://127.0.0.1:4178/` for arrow-key orbit plus click-to-swim movement
   - `git diff --check`
 
-**Last updated**: Iteration 107
-**Current focus**: Iteration 108 richer traversal/combat feedback, tighter collision/interaction feel, smoother worker-route gameplay parity, and further gameplay-first HUD reduction on top of the corrected browser control/grounding path
+### Iteration 108
+- [x] Tightened flagship traversal feel by adding stronger movement response profiles, steering-aware slide resolution, and more deterministic collision progress around solid world props instead of sticky stop/start motion.
+- [x] Added actual swim presentation feel on top of the existing surface correctness: swimmer animation now glides forward with buoyancy and the camera blends toward a lower, wider swim framing with impact kick preserved for combat-heavy moments.
+- [x] Reduced main HUD weight again while keeping stronger action readability through shorter on-screen control copy and upgraded combat/world feedback labels.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/local-world.test.ts ./src/frame-plan.test.ts ./src/hud.test.ts ./src/controls.test.ts ./src/contracts.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - Live Playwright MCP proof on `http://127.0.0.1:4179/` for camera orbit, click/WASD traversal, and swim-state transition
+  - `git diff --check`
+
+**Last updated**: Iteration 108
+**Current focus**: Iteration 109 worker-route gameplay-input parity proof, richer close-range combat response, and further reduction of debug chrome in the flagship browser client without losing creator inspection depth
