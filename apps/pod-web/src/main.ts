@@ -13,6 +13,7 @@ import {
   parseThreeJsWebGpuFrame,
   parseTickTelemetryEnvelope,
   summarizeReplayFile,
+  withCombatFocusMarkers,
   withInteractionMarkers,
   withWorldEventMarkers,
   type ThreeJsWebGpuFrame,
@@ -624,7 +625,12 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
     }
   );
 
-  return withWorldEventMarkers(interactionFrame, {
+  const combatFrame = withCombatFocusMarkers(interactionFrame, {
+    selectedTarget: target,
+    controlledSnapshot: controlled
+  });
+
+  return withWorldEventMarkers(combatFrame, {
     events: recentWorldEvents,
     worldSnapshot: latestSnapshot,
     currentTick: latestSnapshot?.tick ?? null

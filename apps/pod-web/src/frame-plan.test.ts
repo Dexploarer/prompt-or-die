@@ -555,6 +555,36 @@ describe("sampleAnimatedInstanceTransform", () => {
     expect(criticalRing.position[1]).toBeGreaterThan(destinationRing.position[1]);
   });
 
+  test("gives combat banners a lighter float than health bars", () => {
+    const banner = sampleAnimatedInstanceTransform(
+      {
+        position: [4, 2.2, -3],
+        rotation: [0, 0, 0, 1],
+        scale: [1.6, 0.22, 1],
+        sourceEntity: 12,
+        animationSetId: "combat-banner",
+        motionSpeed: 0
+      },
+      0.8
+    );
+    const healthBar = sampleAnimatedInstanceTransform(
+      {
+        position: [4, 2.2, -3],
+        rotation: [0, 0, 0, 1],
+        scale: [1.2, 0.14, 1],
+        sourceEntity: 12,
+        animationSetId: "health-bar",
+        motionSpeed: 0,
+        healthRatio: 0.4
+      },
+      0.8
+    );
+
+    expect(banner.position[1]).toBeGreaterThan(healthBar.position[1]);
+    expect(banner.scale[1]).toBeGreaterThan(0.22);
+    expect(healthBar.scale[1]).toBeGreaterThan(0.14);
+  });
+
   test("gives beasts a lower, heavier stance than humanoids", () => {
     const beast = sampleAnimatedInstanceTransform(
       {

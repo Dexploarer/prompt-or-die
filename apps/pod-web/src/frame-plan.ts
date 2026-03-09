@@ -419,7 +419,16 @@ export function sampleAnimatedInstanceTransform(
   let rollOffset = 0;
   let zOffset = 0;
 
-  if (animationSetId.includes("critical-ring")) {
+  if (animationSetId.includes("combat-banner")) {
+    const bannerPulse = Math.sin(elapsedSeconds * 3.1 + phase);
+    yOffset += 0.045 + Math.max(bannerPulse, -0.12) * 0.026;
+    scaleX *= 1 + Math.max(bannerPulse, 0) * 0.06;
+    scaleY *= 1 + Math.abs(bannerPulse) * 0.05;
+  } else if (animationSetId.includes("health-bar")) {
+    const healthPulse = Math.sin(elapsedSeconds * 3.8 + phase);
+    yOffset += 0.038 + Math.max(healthPulse, -0.16) * 0.018;
+    scaleY *= 1 + Math.max(healthPulse, 0) * 0.08;
+  } else if (animationSetId.includes("critical-ring")) {
     const ringPulse = Math.abs(Math.sin(elapsedSeconds * 5.1 + phase));
     const ringScale = 1.06 + ringPulse * 0.16;
     scaleX *= ringScale;

@@ -2192,6 +2192,7 @@ export function applyNetworkStateDelta(
 
 const WORLD_TO_RENDER_SCALE = 1;
 const GROUND_RING_ROTATION: Vec4Tuple = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+const IDENTITY_QUATERNION: Vec4Tuple = [0, 0, 0, 1];
 
 interface EntityRenderProfile {
   mesh: string;
@@ -2998,6 +2999,11 @@ export interface InteractionMarkerOptions {
   controlledSnapshot?: NetworkEntitySnapshot | null;
 }
 
+export interface CombatFocusMarkerOptions {
+  selectedTarget?: NetworkEntitySnapshot | null;
+  controlledSnapshot?: NetworkEntitySnapshot | null;
+}
+
 export interface WorldEventMarkerOptions {
   events: NetworkGameEvent[];
   worldSnapshot?: NetworkWorldSnapshot | null;
@@ -3154,6 +3160,94 @@ export function withInteractionMarkers(
 
   if (markers.length === 0) {
     return frame;
+  }
+
+  return {
+    ...frame,
+    spriteBatches: [...frame.spriteBatches, ...markers]
+  };
+}
+
+export function withCombatFocusMarkers(
+  frame: ThreeJsWebGpuFrame,
+  options: CombatFocusMarkerOptions
+): ThreeJsWebGpuFrame {
+  const target = options.selectedTarget;
+  const controlled = options.controlledSnapshot;
+  if (!target?.metadata.interaction.canAttack) {
+    return frame;
+  }
+
+  const markers = new Array<ThreeJsSpriteBatch>();
+  const pushBanner = (
+    entity: NetworkEntitySnapshot,
+    emphasis: "player" | "target"
+  ): void => {
+    const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
+    const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
+    const anchorHeight = entityAnchorHeight(entity);
+    const scaleMultiplier = entity.metadata.actorPresentation?.scaleMultiplier ?? 1;
+    const bannerY = anchorHeight + 2.05 + scaleMultiplier * 0.42;
+    const ratio = clamp01(healthRatio(entity) ?? 1);
+    const critical = 1 - ratio;
+    const backColor: RgbaTuple =
+      emphasis === "player" ? [0.08, 0.16, 0.2, 0.42] : [0.1, 0.08, 0.08, 0.42];
+    const fillColor: RgbaTuple =
+      emphasis === "player"
+        ? [0.42, 0.9, 1, 0.72]
+        : [0.38 + critical * 0.56, 0.9 - critical * 0.4, 0.34, 0.66 + critical * 0.14];
+    const bannerWidth = emphasis === "player" ? 1.52 : 1.74;
+
+    markers.push({
+      texture: "combat-banner",
+      frame: 0,
+      layer: 10,
+      billboard: true,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 26,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, bannerY, worldZ],
+          rotation: IDENTITY_QUATERNION,
+          scale: [bannerWidth, 0.22, 1],
+          color: backColor,
+          sourceEntity: entity.id,
+          animationSetId: "combat-banner"
+        }
+      ]
+    });
+    markers.push({
+      texture: "health-bar",
+      frame: 0,
+      layer: 11,
+      billboard: true,
+      phase: "transparent",
+      sortDepth: worldZ,
+      renderOrder: 27,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      instances: [
+        {
+          position: [worldX, bannerY, worldZ + 0.02],
+          rotation: IDENTITY_QUATERNION,
+          scale: [Math.max(0.42, bannerWidth * 0.86 * ratio), 0.14, 1],
+          color: fillColor,
+          sourceEntity: entity.id,
+          animationSetId: "health-bar",
+          healthRatio: ratio
+        }
+      ]
+    });
+  };
+
+  pushBanner(target, "target");
+  if (controlled) {
+    pushBanner(controlled, "player");
   }
 
   return {

@@ -63,3 +63,7 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Raised baked landscape surface fidelity by quality tier, so the flagship browser shard now uses sharper terrain, water, and sky textures on stronger hardware without changing the authoring contract.
 - Added a shared water visual state that drives color, emissive response, opacity, repeat, and scrolling offsets from the same daylight/time-lapse path, which makes the lagoon read more like a world surface and less like a flat debug sheet.
 - Revalidated the terrain/water pass with targeted Bun coverage, clean typecheck/build, and the existing Playwright smoke loop (`2 passed`) on both main-thread and worker routes.
+- Added procedural combat-readability sprite primitives (`combat-banner`, `health-bar`) so selected fights can render world-space focus state without depending on an external UI asset pack.
+- Wired those combat banners into the shared authoritative frame-decoration path in `contracts.ts`, which means selected hostile targets and the controlled player now get billboarded combat focus/health strips from the same snapshot data used by the rest of the browser client.
+- Added light motion treatment for combat banners/health bars in `frame-plan` instead of leaving them as dead static overlays.
+- Revalidated the combat-readability pass with targeted Bun coverage (`assets`, `contracts`, `frame-plan`), clean typecheck/build, and another clean Playwright smoke run (`2 passed`).

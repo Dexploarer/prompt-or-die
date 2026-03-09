@@ -71,6 +71,8 @@ describe("createProceduralSpriteTexture", () => {
     expect(shouldUseProceduralSpriteTexture("/assets/textures/selection-ring.svg")).toBe(true);
     expect(shouldUseProceduralSpriteTexture("/assets/textures/danger-ring.svg")).toBe(true);
     expect(shouldUseProceduralSpriteTexture("/assets/textures/mist-ring.svg")).toBe(true);
+    expect(shouldUseProceduralSpriteTexture("combat-banner")).toBe(true);
+    expect(shouldUseProceduralSpriteTexture("health-bar")).toBe(true);
     expect(shouldUseProceduralSpriteTexture("/assets/textures/canopy-tree.png")).toBe(false);
   });
 
@@ -83,6 +85,18 @@ describe("createProceduralSpriteTexture", () => {
     expect(texture.name).toContain("selection-ring");
     expect(image.data[centerIndex]).toBeLessThan(32);
     expect(image.data[ringIndex]).toBeGreaterThan(image.data[centerIndex]);
+  });
+
+  test("creates a worker-safe bar texture for combat readability sprites", () => {
+    const texture = createProceduralSpriteTexture("combat-banner");
+    const image = texture.image as { data: Uint8Array; width: number; height: number };
+    const centerIndex =
+      ((Math.floor(image.height / 2) * image.width) + Math.floor(image.width / 2)) * 4 + 3;
+    const cornerIndex = 3;
+
+    expect(texture.name).toContain("combat-banner");
+    expect(image.data[centerIndex]).toBeGreaterThan(200);
+    expect(image.data[cornerIndex]).toBeLessThan(80);
   });
 });
 

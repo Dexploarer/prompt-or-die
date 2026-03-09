@@ -9,6 +9,7 @@ import {
   encodeDirectConnectDebugFocusMessage,
   encodeDirectConnectDebugTelemetryMessage,
   encodeDirectConnectFullSnapshotRequest,
+  type NetworkEntitySnapshot,
   type NetworkEntityMetadataSnapshot,
   type NetworkWorldSnapshot,
   parseAgentTickRollup,
@@ -21,6 +22,7 @@ import {
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent,
   summarizeReplayFile,
+  withCombatFocusMarkers,
   withInteractionMarkers,
   withWorldEventMarkers
 } from "./contracts";
@@ -1056,6 +1058,131 @@ describe("TOON contract parsing", () => {
         batch.instances.every((instance) => instance.sourceEntity === 12)
     );
     expect(tetherBatch?.instances.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("adds world-space combat focus banners for selected hostile targets", () => {
+    const target: NetworkEntitySnapshot = {
+      id: 12,
+      position: [8, -5],
+      velocity: [0, 0],
+      rotation: 0,
+      health: 8,
+      maxHealth: 20,
+      movementSpeed: 3.8,
+      label: "Rift Beast",
+      metadata: typedEntityMetadata("WildCreature", {
+        actorPresentation: {
+          profileId: "rift-beast",
+          meshAssetId: "rift-beast",
+          materialPaletteId: "default",
+          scaleMultiplier: 1.1,
+          footprintRadius: 1.2,
+          selectionRingScale: 2.5,
+          auraColor: [0.12, 0.2, 0.28, 0.18],
+          animationSetId: "rift-beast"
+        },
+        interaction: {
+          canInspect: true,
+          canInteract: false,
+          canAttack: true,
+          canGather: false,
+          canLoot: false,
+          canCapture: false,
+          canCommandCompanion: false,
+          canChat: false
+        }
+      })
+    };
+    const controlled: NetworkEntitySnapshot = {
+      id: 1,
+      position: [0, 0],
+      velocity: [0, 0],
+      rotation: 0,
+      health: 24,
+      maxHealth: 24,
+      movementSpeed: 4,
+      label: "WebPlayer",
+      metadata: typedEntityMetadata("Player", {
+        actorPresentation: {
+          profileId: "hero-runescape",
+          meshAssetId: "adventurer-hero",
+          materialPaletteId: "default",
+          scaleMultiplier: 1,
+          footprintRadius: 0.9,
+          selectionRingScale: 2.3,
+          auraColor: [0.14, 0.22, 0.3, 0.2],
+          animationSetId: "hero-runescape"
+        }
+      })
+    };
+    const baseFrame = {
+      camera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        rotation: 0,
+        viewportWidth: 1280,
+        viewportHeight: 720
+      },
+      backgroundColor: [0, 0, 0, 1],
+      environment: {
+        biomeId: "verdant-hollow",
+        skyColor: [0.64, 0.8, 0.98, 1],
+        fogColor: [0.72, 0.84, 0.78, 1],
+        fogNear: 30,
+        fogFar: 196,
+        ambientColor: [0.82, 0.92, 0.88],
+        ambientIntensity: 1.4,
+        sunColor: [1, 0.96, 0.84],
+        sunIntensity: 2.95,
+        sunDirection: [30, 48, 18],
+        fillColor: [0.48, 0.76, 0.94],
+        fillIntensity: 0.88,
+        fillDirection: [-18, 14, -10],
+        rimColor: [0.4, 0.88, 0.78],
+        rimIntensity: 8.5,
+        groundColor: [0.19, 0.33, 0.21, 1],
+        starfieldIntensity: 0.08
+      },
+      overlayCommands: [],
+      meshBatches: [],
+      spriteBatches: [],
+      hints: {
+        renderer: "three/webgpu",
+        preferredBackend: "webgpu",
+        fallbackBackend: "webgl2",
+        useInstancing: true,
+        sortMetric: "world-z",
+        sortOpaqueFrontToBack: true,
+        preserveInstanceOrder: true,
+        sortTransparentBackToFront: true,
+        transparentInstancingStrategy: "shared-sort-depth",
+        opaqueDepthWrite: true,
+        transparentDepthWrite: false,
+        maxPixelRatio: 2
+      }
+    } satisfies Parameters<typeof withCombatFocusMarkers>[0];
+
+    const decorated = withCombatFocusMarkers(baseFrame, {
+      selectedTarget: target,
+      controlledSnapshot: controlled
+    });
+
+    expect(baseFrame.spriteBatches).toHaveLength(0);
+    expect(decorated.spriteBatches).toHaveLength(4);
+    expect(
+      decorated.spriteBatches.filter((batch) => batch.texture === "combat-banner")
+    ).toHaveLength(2);
+    const healthBars = decorated.spriteBatches.filter(
+      (batch) => batch.texture === "health-bar"
+    );
+    expect(healthBars).toHaveLength(2);
+    expect(healthBars.every((batch) => batch.billboard)).toBe(true);
+    const targetBar = healthBars.find((batch) => batch.instances[0]?.sourceEntity === 12);
+    const playerBar = healthBars.find((batch) => batch.instances[0]?.sourceEntity === 1);
+    expect(targetBar?.instances[0]?.scale[0]).toBeLessThan(
+      playerBar?.instances[0]?.scale[0] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   test("camera state responds to controlled traversal speed", () => {

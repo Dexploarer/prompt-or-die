@@ -1130,5 +1130,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run test:smoke`
   - `git diff --check`
 
-**Last updated**: Iteration 112
-**Current focus**: Iteration 113 closer-range combat readability in the flagship shard, richer water/shoreline response under live combat traversal, and further shard/runtime observability improvements beyond browser-only smoke
+### Iteration 113
+- [x] Added procedural combat-readability sprite primitives (`combat-banner`, `health-bar`) so selected hostile fights can render world-space focus state without relying on a separate authored HUD asset pack.
+- [x] Added `withCombatFocusMarkers(...)` to the shared authoritative browser frame-decoration path and wired it into `main.ts`, so selected attackable targets and the controlled player now get billboarded combat focus/health strips from real snapshot data instead of HUD-only summaries.
+- [x] Added lightweight motion treatment for combat banners and health bars in `frame-plan`, keeping the new combat cues readable without introducing another static overlay layer.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/assets.test.ts ./src/contracts.test.ts ./src/frame-plan.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+**Last updated**: Iteration 113
+**Current focus**: Iteration 114 richer water/shoreline response under live combat traversal, stronger close-range hit readability beyond banner state, and further shard/runtime observability improvements beyond browser-only smoke
