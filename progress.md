@@ -49,3 +49,7 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - arrow keys kept camera orbit active while the gameplay surface stayed focused
   - WASD/click movement advanced the player without terrain burial
   - lake traversal switched the controlled actor to `humanoid-swim` with `controlledSurfaceMode=swim`
+- Fixed a real render/runtime regression in `pod-web` where the default flagship view still enabled the debug ground grid, which made the player look like they were under the world instead of on it.
+- Added shared mesh-bounds calibration for shipped asset ids (`hero`, `rift-beast`, `canopy-tree`, `weathered-boulder`, etc.) and reused it across authoritative frame placement plus ambient chunk dressing, removing the worst terrain-intersection/floating cases caused by stale half-height guesses.
+- Added renderer-side transform smoothing for mesh and sprite batches so entities and markers stop snapping between authoritative updates, which materially reduces the flagship shard’s “jerky” feel even before deeper animation/combat polish lands.
+- Corrected `getGameplayState()` surface-mode reporting to query the same terrain/water sampler the movement/runtime path uses, keeping debug inspection aligned with real ground/swim behavior.

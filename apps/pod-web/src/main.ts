@@ -56,6 +56,7 @@ import {
   renderPopulationHeatmap
 } from "./population-heatmap";
 import { compactRuntimeStats, highlightEventFeedback } from "./hud";
+import { sampleLandscapeSurface } from "./landscape";
 import {
   createLiveDebugState,
   recordLiveDebugDocument,
@@ -210,13 +211,21 @@ const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
 const bootHudState = initialHudStateFromLocation(window.location);
 
+function shouldShowDebugGrid(search: string): boolean {
+  const params = new URLSearchParams(search);
+  const value = params.get("grid") ?? params.get("debugGrid");
+  return value === "1" || value === "true";
+}
+
 feedbackNode.textContent = bootHudState.feedback;
 connectionNode.textContent = bootHudState.connectionBadge;
 worldNode.textContent = bootHudState.worldLabel;
 populationNode.textContent = bootHudState.populationLabel;
 frameSourceNode.textContent = bootHudState.frameSourceLabel;
 
-const renderer = await createPodRenderRuntime(renderCanvas);
+const renderer = await createPodRenderRuntime(renderCanvas, {
+  showGrid: shouldShowDebugGrid(window.location.search)
+});
 backendLabel.textContent = renderer.backend;
 qualityLabel.textContent = renderer.qualityPreset;
 const runtimeStatsLabel = statsLabel;
@@ -1139,10 +1148,11 @@ window.podRender = {
         : null,
       controlledAnimationSetId:
         controlled?.metadata.actorPresentation?.animationSetId ?? null,
-      controlledSurfaceMode:
-        controlled?.metadata.actorPresentation?.animationSetId?.includes("swim")
+      controlledSurfaceMode: controlled
+        ? sampleLandscapeSurface(controlled.position[0], controlled.position[1]).isSwimmable
           ? "swim"
-          : "ground",
+          : "ground"
+        : "ground",
       selectedTargetId,
       clickMoveTarget,
       movementSignature: lastMovementSignature,
