@@ -56,3 +56,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added live direct-connect RTT/jitter sampling in the flagship browser client by finally using the existing ping/pong protocol, so developers can tell whether perceived roughness is coming from render/update presentation or actual shard network conditions.
 - Surfaced the network sample compactly in the main connection summary (`net Xms rtt / Yms jitter`) instead of bolting on another heavy HUD card.
 - Hardened the direct-connect timer path to use `globalThis` scheduling, which keeps the runtime portable across browser and test environments and makes the network client tests deterministic again.
+- Added a real close-range combat camera-pressure model in `pod-web`, so the camera now tightens framing from actual target proximity instead of relying only on generic event shake and low-health pressure.
+- Upgraded combat pulse animation so humanoids lunge forward and beasts drive heavier through impact moments instead of every pulse reading like the same neutral bounce.
+- Revalidated the browser smoke harness after the change, and both the main-thread and worker render routes still accept gameplay input cleanly.

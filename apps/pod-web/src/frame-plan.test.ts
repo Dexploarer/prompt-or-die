@@ -4,6 +4,7 @@ import type { ThreeJsWebGpuFrame } from "./contracts";
 import {
   buildCameraPose,
   buildFramePlan,
+  computeCombatCameraPressure,
   sampleAnimatedInstanceTransform,
   splitSpriteBatchesByTint
 } from "./frame-plan";
@@ -616,7 +617,38 @@ describe("sampleAnimatedInstanceTransform", () => {
     expect(neutral.position[1]).toBeGreaterThan(2);
     expect(neutral.scale[1]).toBeLessThan(2);
     expect(pulsed.position[1]).toBeGreaterThan(neutral.position[1]);
+    expect(pulsed.position[2]).toBeGreaterThan(neutral.position[2]);
     expect(pulsed.scale[0]).toBeGreaterThan(neutral.scale[0]);
+  });
+
+  test("gives pulsed beasts a heavier forward drive than pulsed humanoids", () => {
+    const beast = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 1.8, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1.4, 1.4, 1.8],
+        sourceEntity: 5,
+        animationSetId: "rift-beast",
+        motionSpeed: 0.9
+      },
+      1.4,
+      1
+    );
+    const humanoid = sampleAnimatedInstanceTransform(
+      {
+        position: [0, 1.8, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1.1, 1.9, 1.1],
+        sourceEntity: 5,
+        animationSetId: "hero-runescape",
+        motionSpeed: 0.9
+      },
+      1.4,
+      1
+    );
+
+    expect(beast.position[2]).toBeGreaterThan(humanoid.position[2]);
+    expect(beast.scale[2]).toBeGreaterThan(humanoid.scale[2]);
   });
 
   test("gives swimmers forward glide while keeping beasts heavier than humanoids", () => {
@@ -648,6 +680,54 @@ describe("sampleAnimatedInstanceTransform", () => {
     expect(humanoidSwim.position[1]).toBeGreaterThan(1.55);
     expect(beastSwim.scale[0]).toBeGreaterThan(humanoidSwim.scale[0]);
     expect(Math.abs(beastSwim.rotation[2])).toBeLessThan(Math.abs(humanoidSwim.rotation[2]));
+  });
+});
+
+describe("computeCombatCameraPressure", () => {
+  test("raises camera pressure for close attackable targets", () => {
+    const close = computeCombatCameraPressure(
+      {
+        position: [0, 0],
+        health: 82,
+        maxHealth: 100
+      },
+      {
+        position: [2.5, 0],
+        canAttack: true
+      },
+      0.1
+    );
+    const far = computeCombatCameraPressure(
+      {
+        position: [0, 0],
+        health: 82,
+        maxHealth: 100
+      },
+      {
+        position: [16, 0],
+        canAttack: true
+      },
+      0.1
+    );
+
+    expect(close.closeRangeBlend).toBeGreaterThan(far.closeRangeBlend);
+    expect(close.targetPressure).toBeGreaterThan(far.targetPressure);
+    expect(close.combatPressure).toBeGreaterThan(far.combatPressure);
+  });
+
+  test("still raises pressure from low health without an attackable target", () => {
+    const pressured = computeCombatCameraPressure(
+      {
+        position: [0, 0],
+        health: 12,
+        maxHealth: 100
+      },
+      null,
+      0
+    );
+
+    expect(pressured.lowHealthPressure).toBeGreaterThan(0.7);
+    expect(pressured.combatPressure).toBeGreaterThan(0.6);
   });
 });
 

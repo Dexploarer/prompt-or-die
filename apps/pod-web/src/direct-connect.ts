@@ -127,7 +127,7 @@ export function initialHudStateFromLocation(
 
 export class PodWebDirectConnectClient {
   private socket: WebSocket | null = null;
-  private reconnectTimer: number | null = null;
+  private reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private reconnectToken: string | null = null;
   private snapshot: NetworkWorldSnapshot | null = null;
   private controlledEntity: number | null = null;
@@ -137,7 +137,7 @@ export class PodWebDirectConnectClient {
   private closedExplicitly = false;
   private debugTelemetryEnabled: boolean;
   private debugFocusEntity: number | null = null;
-  private pingTimer: number | null = null;
+  private pingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private lastRoundTripSampleMs: number | null = null;
   private status: DirectConnectStatus;
   private actionState: DirectConnectActionState;
