@@ -68,6 +68,8 @@ struct ClientTransportCounters {
     last_seen_tick: u64,
     last_sent_tick: Option<u64>,
     session_resumes: u64,
+    recovery_snapshots_sent: u64,
+    recovery_delivery_failures: u64,
     inbound_messages: u64,
     outbound_messages: u64,
     inbound_bytes: u64,
@@ -171,6 +173,10 @@ pub struct GameServer {
     queue_pressure_events: u64,
     /// Total number of session resumes completed through reconnect tokens.
     resumed_sessions: u64,
+    /// Total number of recovery full snapshots successfully delivered.
+    recovery_snapshots_sent: u64,
+    /// Total number of recovery snapshot delivery failures.
+    recovery_delivery_failures: u64,
 }
 
 impl GameServer {
@@ -199,6 +205,8 @@ impl GameServer {
             timed_out_clients: 0,
             queue_pressure_events: 0,
             resumed_sessions: 0,
+            recovery_snapshots_sent: 0,
+            recovery_delivery_failures: 0,
         }
     }
 
@@ -275,10 +283,12 @@ impl GameServer {
             if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
                 let transport = self.transport_summary().await;
                 info!(
-                    "[NET] tick={} clients={} resumes={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
+                    "[NET] tick={} clients={} resumes={} recoveries={}/fail={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
                     transport.latest_tick,
                     transport.client_count,
                     transport.resumed_sessions,
+                    transport.recovery_snapshots_sent,
+                    transport.recovery_delivery_failures,
                     transport.total_inbound_messages,
                     transport.total_inbound_bytes,
                     transport.total_outbound_messages,
@@ -1143,6 +1153,8 @@ impl GameServer {
                     .agent_id
                     .and_then(|agent_id| self.controlled_entity_for_agent(agent_id)),
                 session_resumes: session.transport.session_resumes,
+                recovery_snapshots_sent: session.transport.recovery_snapshots_sent,
+                recovery_delivery_failures: session.transport.recovery_delivery_failures,
                 last_seen_tick: session.transport.last_seen_tick,
                 ticks_since_last_seen: self.tick.saturating_sub(session.transport.last_seen_tick),
                 last_sent_tick: session.transport.last_sent_tick,
@@ -1169,6 +1181,8 @@ impl GameServer {
             latest_tick: self.tick,
             client_count: client_summaries.len(),
             resumed_sessions: self.resumed_sessions,
+            recovery_snapshots_sent: self.recovery_snapshots_sent,
+            recovery_delivery_failures: self.recovery_delivery_failures,
             client_inactivity_timeout_ticks: self.config.client_inactivity_timeout_ticks,
             queue_pressure_warn_depth: self.queue_pressure_warn_depth(),
             total_pending_action_queue_depth: client_summaries
@@ -1440,8 +1454,21 @@ impl GameServer {
             )
             .await;
         if sent {
+            self.recovery_snapshots_sent = self.recovery_snapshots_sent.saturating_add(1);
             if let Some(session) = self.clients.write().await.get_mut(&client_id) {
                 session.last_sent_snapshot = Some(snapshot);
+                session.transport.recovery_snapshots_sent = session
+                    .transport
+                    .recovery_snapshots_sent
+                    .saturating_add(1);
+            }
+        } else {
+            self.recovery_delivery_failures = self.recovery_delivery_failures.saturating_add(1);
+            if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                session.transport.recovery_delivery_failures = session
+                    .transport
+                    .recovery_delivery_failures
+                    .saturating_add(1);
             }
         }
     }
@@ -1975,6 +2002,8 @@ mod tests {
         let world = World::new(42);
         let mut server = GameServer::new(config, world);
         server.resumed_sessions = 2;
+        server.recovery_snapshots_sent = 3;
+        server.recovery_delivery_failures = 1;
         let client_id = ClientId::new();
         let (tx, _rx) = mpsc::channel(8);
         server.client_tx.write().await.insert(client_id, tx);
@@ -1992,6 +2021,8 @@ mod tests {
                 last_sent_snapshot: None,
                 transport: ClientTransportCounters {
                     session_resumes: 2,
+                    recovery_snapshots_sent: 2,
+                    recovery_delivery_failures: 1,
                     ..ClientTransportCounters::default()
                 },
             },
@@ -1999,10 +2030,82 @@ mod tests {
 
         let summary = server.transport_summary().await;
         assert_eq!(summary.resumed_sessions, 2);
+        assert_eq!(summary.recovery_snapshots_sent, 3);
+        assert_eq!(summary.recovery_delivery_failures, 1);
         assert_eq!(summary.queue_pressure_client_count, 1);
         assert_eq!(summary.clients[0].session_resumes, 2);
+        assert_eq!(summary.clients[0].recovery_snapshots_sent, 2);
+        assert_eq!(summary.clients[0].recovery_delivery_failures, 1);
         assert_eq!(summary.clients[0].pending_action_queue_depth, 2);
         assert!(summary.clients[0].queue_pressure);
+    }
+
+    #[tokio::test]
+    async fn test_send_full_snapshot_tracks_recovery_delivery_success() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: Some(4),
+                debug_telemetry_enabled: false,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+
+        server.send_full_snapshot_to_client(client_id).await;
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.recovery_snapshots_sent, 1);
+        assert_eq!(summary.recovery_delivery_failures, 0);
+        assert_eq!(summary.clients[0].recovery_snapshots_sent, 1);
+
+        let message = rx.recv().await.expect("recovery snapshot delivered");
+        assert!(matches!(message, ServerMessage::StateDelta { is_full_snapshot: true, .. }));
+    }
+
+    #[tokio::test]
+    async fn test_send_full_snapshot_tracks_recovery_delivery_failure() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+
+        server.send_full_snapshot_to_client(client_id).await;
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.recovery_snapshots_sent, 0);
+        assert_eq!(summary.recovery_delivery_failures, 1);
+        assert_eq!(summary.clients[0].recovery_delivery_failures, 1);
     }
 
     #[tokio::test]

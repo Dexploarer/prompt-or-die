@@ -1217,5 +1217,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `git diff --check`
 
-**Last updated**: Iteration 120
-**Current focus**: Iteration 121 shard-side recovery observability hardening beyond resume counts, then native reconnect/session replay polish on top of the stabilized transport layer
+### Iteration 121
+- [x] Hardened shard-side recovery observability by extending `ClientTransportSummary` / `ShardTransportSummary` with explicit recovery delivery metrics (`recovery_snapshots_sent`, `recovery_delivery_failures`) instead of relying on generic full-snapshot counters alone.
+- [x] Updated `pod-net` direct-connect server recovery paths to increment those metrics when full recovery snapshots are successfully delivered or fail to reach the client, and added deterministic server coverage for both success and failure cases.
+- [x] Propagated the new recovery metrics through `pod-core`, `pod-editor`, and `pod-web`, so browser/editor transport summaries now expose real recovery churn alongside resumes, queue pressure, and timeouts.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib ops::`
+  - `cargo test -p pod-net --lib`
+  - `cargo test -p pod-net --features spacetimedb --lib`
+  - `cargo test -p pod-editor --lib`
+  - `cd apps/pod-web && bun test ./src/contracts.test.ts ./src/live-debug.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `git diff --check`
+
+**Last updated**: Iteration 121
+**Current focus**: Iteration 122 native reconnect/session replay polish on top of the stabilized transport layer, then deeper shard-side recovery diagnostics beyond transport counters alone

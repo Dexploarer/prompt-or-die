@@ -244,6 +244,8 @@ describe("TOON contract parsing", () => {
         latest_tick: 360,
         client_count: 2,
         resumed_sessions: 1,
+        recovery_snapshots_sent: 3,
+        recovery_delivery_failures: 1,
         client_inactivity_timeout_ticks: 600,
         queue_pressure_warn_depth: 192,
         total_pending_action_queue_depth: 1,
@@ -267,6 +269,8 @@ describe("TOON contract parsing", () => {
             player_name: "debug",
             controlled_entity: 44,
             session_resumes: 1,
+            recovery_snapshots_sent: 2,
+            recovery_delivery_failures: 1,
             last_seen_tick: 360,
             ticks_since_last_seen: 0,
             last_sent_tick: 360,
@@ -293,8 +297,12 @@ describe("TOON contract parsing", () => {
     expect(summary.shard_id).toBe("direct-connect");
     expect(summary.client_count).toBe(2);
     expect(summary.resumed_sessions).toBe(1);
+    expect(summary.recovery_snapshots_sent).toBe(3);
+    expect(summary.recovery_delivery_failures).toBe(1);
     expect(summary.queue_pressure_client_count).toBe(1);
     expect(summary.clients[0]?.session_resumes).toBe(1);
+    expect(summary.clients[0]?.recovery_snapshots_sent).toBe(2);
+    expect(summary.clients[0]?.recovery_delivery_failures).toBe(1);
     expect(summary.clients[0]?.client_id).toBe("client-a");
   });
 
@@ -420,6 +428,8 @@ describe("TOON contract parsing", () => {
           client_count: 1,
           client_inactivity_timeout_ticks: 600,
           resumed_sessions: 0,
+          recovery_snapshots_sent: 0,
+          recovery_delivery_failures: 0,
           queue_pressure_warn_depth: 192,
           total_pending_action_queue_depth: 0,
           queue_pressure_client_count: 0,

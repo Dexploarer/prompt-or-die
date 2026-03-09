@@ -68,6 +68,8 @@ pub struct ClientTransportSummary {
     pub player_name: Option<String>,
     pub controlled_entity: Option<u64>,
     pub session_resumes: u64,
+    pub recovery_snapshots_sent: u64,
+    pub recovery_delivery_failures: u64,
     pub last_seen_tick: u64,
     pub ticks_since_last_seen: u64,
     pub last_sent_tick: Option<u64>,
@@ -93,6 +95,8 @@ pub struct ShardTransportSummary {
     pub latest_tick: u64,
     pub client_count: usize,
     pub resumed_sessions: u64,
+    pub recovery_snapshots_sent: u64,
+    pub recovery_delivery_failures: u64,
     pub client_inactivity_timeout_ticks: u64,
     pub queue_pressure_warn_depth: usize,
     pub total_pending_action_queue_depth: usize,
@@ -339,6 +343,8 @@ mod tests {
             latest_tick: 1440,
             client_count: 2,
             resumed_sessions: 1,
+            recovery_snapshots_sent: 3,
+            recovery_delivery_failures: 1,
             client_inactivity_timeout_ticks: 600,
             queue_pressure_warn_depth: 192,
             total_pending_action_queue_depth: 3,
@@ -361,6 +367,8 @@ mod tests {
                 player_name: Some("debug".to_string()),
                 controlled_entity: Some(41),
                 session_resumes: 1,
+                recovery_snapshots_sent: 2,
+                recovery_delivery_failures: 1,
                 last_seen_tick: 1440,
                 ticks_since_last_seen: 0,
                 last_sent_tick: Some(1440),
@@ -386,10 +394,14 @@ mod tests {
         assert_eq!(value["document_type"], "shard_transport_summary");
         assert_eq!(value["payload"]["client_count"], 2);
         assert_eq!(value["payload"]["resumed_sessions"], 1);
+        assert_eq!(value["payload"]["recovery_snapshots_sent"], 3);
+        assert_eq!(value["payload"]["recovery_delivery_failures"], 1);
         assert_eq!(value["payload"]["queue_pressure_client_count"], 1);
         assert_eq!(value["payload"]["timed_out_clients"], 3);
         assert_eq!(value["payload"]["clients"][0]["client_id"], "client-a");
         assert_eq!(value["payload"]["clients"][0]["session_resumes"], 1);
+        assert_eq!(value["payload"]["clients"][0]["recovery_snapshots_sent"], 2);
+        assert_eq!(value["payload"]["clients"][0]["recovery_delivery_failures"], 1);
         assert_eq!(value["payload"]["clients"][0]["queue_pressure"], true);
         assert_eq!(value["payload"]["clients"][0]["debug_telemetry_enabled"], true);
     }

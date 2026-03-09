@@ -4598,6 +4598,8 @@ mod tests {
             latest_tick: 24,
             client_count: 2,
             resumed_sessions: 1,
+            recovery_snapshots_sent: 2,
+            recovery_delivery_failures: 1,
             client_inactivity_timeout_ticks: 600,
             queue_pressure_warn_depth: 192,
             total_pending_action_queue_depth: 1,
@@ -4620,6 +4622,8 @@ mod tests {
                 player_name: Some("debug".to_string()),
                 controlled_entity: Some(1001),
                 session_resumes: 1,
+                recovery_snapshots_sent: 1,
+                recovery_delivery_failures: 1,
                 last_seen_tick: 24,
                 ticks_since_last_seen: 0,
                 last_sent_tick: Some(24),
@@ -5381,6 +5385,8 @@ mod tests {
             .expect("transport stored");
         assert_eq!(transport.latest_tick, 24);
         assert_eq!(transport.client_count, 2);
+        assert_eq!(transport.recovery_snapshots_sent, 2);
+        assert_eq!(transport.recovery_delivery_failures, 1);
         assert_eq!(transport.clients[0].client_id, "client-a");
     }
 

@@ -350,6 +350,8 @@ export interface ClientTransportSummaryDocument {
   player_name?: string | null;
   controlled_entity?: number | null;
   session_resumes: number;
+  recovery_snapshots_sent: number;
+  recovery_delivery_failures: number;
   last_seen_tick: number;
   ticks_since_last_seen: number;
   last_sent_tick?: number | null;
@@ -374,6 +376,8 @@ export interface ShardTransportSummaryDocument {
   latest_tick: number;
   client_count: number;
   resumed_sessions: number;
+  recovery_snapshots_sent: number;
+  recovery_delivery_failures: number;
   client_inactivity_timeout_ticks: number;
   queue_pressure_warn_depth: number;
   total_pending_action_queue_depth: number;

@@ -152,6 +152,8 @@ describe("live debug state", () => {
         latest_tick: 22,
         client_count: 1,
         resumed_sessions: 0,
+        recovery_snapshots_sent: 0,
+        recovery_delivery_failures: 0,
         client_inactivity_timeout_ticks: 600,
         queue_pressure_warn_depth: 192,
         total_pending_action_queue_depth: 0,
