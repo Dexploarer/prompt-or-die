@@ -55,7 +55,7 @@ class MockWebSocket {
 describe("direct-connect runtime config", () => {
   test("builds a websocket config from server query params", () => {
     const config = runtimeConfigFromLocation({
-      search: "?server=127.0.0.1:7778&player=Scout&debug=1&reconnectMs=2500"
+      search: "?server=127.0.0.1:7778&player=Scout&debug=1&reconnectMs=2500&pingMs=900"
     } as Location);
 
     expect(config).not.toBeNull();
@@ -63,6 +63,7 @@ describe("direct-connect runtime config", () => {
     expect(config?.playerName).toBe("Scout");
     expect(config?.debugTelemetry).toBe(true);
     expect(config?.reconnectDelayMs).toBe(2500);
+    expect(config?.pingIntervalMs).toBe(900);
   });
 
   test("returns null when no direct-connect params are present", () => {
@@ -109,14 +110,24 @@ describe("direct-connect runtime config", () => {
       lastRejectedReason: string | null;
       lastActionSummary: string | null;
     }> = [];
+    const statuses: Array<{
+      phase: string;
+      roundTripMs: number | null;
+      jitterMs: number | null;
+      lastPongServerTick: number | null;
+    }> = [];
+    const originalDateNow = Date.now;
 
     try {
+      let now = 10_000;
+      Date.now = () => now;
       const client = new PodWebDirectConnectClient(
         {
           url: "ws://127.0.0.1:7778",
           playerName: "BrowserPilot",
           debugTelemetry: true,
-          reconnectDelayMs: 1000
+          reconnectDelayMs: 1000,
+          pingIntervalMs: 5000
         },
         {
           onFrame(snapshot) {
@@ -131,7 +142,14 @@ describe("direct-connect runtime config", () => {
           onActionState(state) {
             actionStates.push(state);
           },
-          onStatus() {}
+          onStatus(status) {
+            statuses.push({
+              phase: status.phase,
+              roundTripMs: status.roundTripMs,
+              jitterMs: status.jitterMs,
+              lastPongServerTick: status.lastPongServerTick
+            });
+          }
         }
       );
 
@@ -158,6 +176,11 @@ describe("direct-connect runtime config", () => {
           }
         })
       ]);
+      expect(JSON.parse(socket?.sent[3] ?? "null")).toEqual({
+        Ping: {
+          timestamp: 10_000
+        }
+      });
 
       socket?.emitMessage(
         JSON.stringify({
@@ -285,6 +308,22 @@ describe("direct-connect runtime config", () => {
       );
       expect(debugDocuments).toEqual(["debug-doc"]);
 
+      now = 10_064;
+      socket?.emitMessage(
+        JSON.stringify({
+          Pong: {
+            client_ts: 10_000,
+            server_ts: 19
+          }
+        })
+      );
+      expect(statuses.at(-1)).toEqual({
+        phase: "connected",
+        roundTripMs: 64,
+        jitterMs: 0,
+        lastPongServerTick: 19
+      });
+
       client.setDebugFocusEntity(12);
       expect(socket?.sent.at(-1)).toEqual(
         JSON.stringify({
@@ -294,6 +333,7 @@ describe("direct-connect runtime config", () => {
         })
       );
     } finally {
+      Date.now = originalDateNow;
       globalThis.WebSocket = originalWebSocket;
     }
   });

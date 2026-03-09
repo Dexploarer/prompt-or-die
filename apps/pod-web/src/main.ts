@@ -55,7 +55,11 @@ import {
   formatPopulationHeatmapLegend,
   renderPopulationHeatmap
 } from "./population-heatmap";
-import { compactRuntimeStats, highlightEventFeedback } from "./hud";
+import {
+  compactRuntimeStats,
+  formatConnectionSummary,
+  highlightEventFeedback
+} from "./hud";
 import { sampleLandscapeSurface } from "./landscape";
 import {
   createLiveDebugState,
@@ -266,7 +270,10 @@ let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
       tick: null,
       entityCount: 0,
       controlledEntity: null,
-      authoritativeDigest: null
+      authoritativeDigest: null,
+      roundTripMs: null,
+      jitterMs: null,
+      lastPongServerTick: null
     }
   : null;
 
@@ -1339,9 +1346,7 @@ function renderTelemetryHud(): void {
   const focusedToolEvent = selectedToolEventSummary(liveDebugState, debugFocusEntityId);
   const focusedRollup = selectedTickRollupSummary(liveDebugState, debugFocusEntityId);
   const populationHeatmap = currentPopulationHeatmap();
-  connectionNode.textContent = liveConnectionStatus
-    ? `${liveConnectionStatus.phase} · ${liveConnectionStatus.detail}`
-    : "offline demo / bridge mode";
+  connectionNode.textContent = formatConnectionSummary(liveConnectionStatus);
   worldNode.textContent = liveConnectionStatus
     ? liveConnectionStatus.tick == null
       ? `awaiting snapshot · ${liveConnectionStatus.url}`

@@ -2123,6 +2123,14 @@ export function encodeDirectConnectDebugFocusMessage(
   });
 }
 
+export function encodeDirectConnectPingMessage(timestamp: number): string {
+  return JSON.stringify({
+    Ping: {
+      timestamp
+    }
+  });
+}
+
 export function encodeDirectConnectFullSnapshotRequest(
   lastKnownTick?: number | null,
   lastKnownDigest?: number | null
