@@ -24,6 +24,7 @@ import {
   formatTargetSummary
 } from "./affordances";
 import {
+  cameraDirectionInput,
   cameraRelativeMovementDirection,
   focusGameplaySurface,
   isGameplayKeyCode,
@@ -179,6 +180,7 @@ if (
 
 const telemetryToggleButton = telemetryToggle;
 const renderCanvas = canvas;
+const LOCAL_SANDBOX_STEP_MS = 1000 / 60;
 focusGameplaySurface(renderCanvas);
 const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
@@ -242,7 +244,7 @@ let latestActionStatus: DirectConnectActionState = {
 };
 let latestFeedback = runtimeConfig
   ? "Awaiting authoritative outcomes"
-  : "Local sandbox ready: click terrain to move, right-drag the camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
+  : "Local sandbox ready: click terrain to move, right-drag or use arrow keys for camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
 let recentWorldEvents: NetworkGameEvent[] = [];
 let manualFrameOverride = false;
 let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
@@ -475,6 +477,24 @@ function updateCameraRig(deltaMs: number): void {
   cameraRig.zoom = stepScalarToward(cameraRig.zoom, cameraRig.desiredZoom, 12, deltaMs);
 }
 
+function applyKeyboardCameraRig(deltaMs: number): void {
+  if (!cameraRig.initialized) {
+    return;
+  }
+
+  const direction = cameraDirectionInput(pressedKeys);
+  if (direction.yaw === 0 && direction.pitch === 0) {
+    return;
+  }
+
+  const seconds = deltaMs / 1000;
+  cameraRig.desiredYaw += direction.yaw * seconds * 1.95;
+  cameraRig.desiredPitch = Math.max(
+    0.18,
+    Math.min(0.72, cameraRig.desiredPitch + direction.pitch * seconds * 1.15)
+  );
+}
+
 function currentCameraYaw(): number {
   return cameraRig.initialized
     ? cameraRig.yaw
@@ -642,6 +662,28 @@ function movementDirection(): [number, number] | null {
   return cameraRelativeMovementDirection(pressedKeys, currentCameraYaw());
 }
 
+function submitImmediateClickMovement(
+  targetPoint: [number, number],
+  timestamp: number
+): void {
+  const controlled = controlledEntity();
+  if (!controlled) {
+    return;
+  }
+
+  const dx = targetPoint[0] - controlled.position[0];
+  const dy = targetPoint[1] - controlled.position[1];
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 0.08) {
+    return;
+  }
+
+  const direction: [number, number] = [dx / distance, dy / distance];
+  submitActions([{ kind: "move", direction }]);
+  lastMovementSignature = `${direction[0].toFixed(3)}:${direction[1].toFixed(3)}`;
+  lastMovementSubmitAtMs = timestamp;
+}
+
 function maybeSubmitMovement(timestamp: number): void {
   const direction = movementDirection();
   const controlled = controlledEntity();
@@ -777,6 +819,9 @@ function handleGameplayKeyDown(event: KeyboardEvent): void {
   }
 
   if (event.code.startsWith("Key") || event.code.startsWith("Arrow")) {
+    if (event.code.startsWith("Arrow")) {
+      event.preventDefault();
+    }
     pressedKeys.add(event.code);
   }
 }
@@ -881,6 +926,7 @@ renderCanvas.addEventListener("pointerdown", (event) => {
   selectedTargetId = null;
   clickMoveTarget = worldPoint;
   lastMovementSignature = "stop";
+  submitImmediateClickMovement(worldPoint, performance.now());
   latestFeedback = `Move order · ${worldPoint[0].toFixed(1)}, ${worldPoint[1].toFixed(1)}`;
 });
 
@@ -1001,7 +1047,7 @@ window.podRender = {
       cameraRig.zoom = 1.08;
       cameraRig.desiredZoom = 1.08;
       latestFeedback =
-        "Local sandbox ready: click terrain to move, right-drag the camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
+        "Local sandbox ready: click terrain to move, right-drag or use arrow keys for camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
       clickMoveTarget = null;
       refreshLocalSandboxFrame();
       renderTelemetryHud();
@@ -1029,10 +1075,19 @@ window.podRender = {
       renderThread: renderer.getStats().renderThread,
       frameSource: liveFrameSource,
       focused: document.activeElement === renderCanvas,
+      cameraYaw: cameraRig.yaw,
+      cameraPitch: cameraRig.pitch,
+      cameraZoom: cameraRig.zoom,
       controlledEntityId: liveConnectionStatus?.controlledEntity ?? null,
       controlledPosition: controlled
         ? ([controlled.position[0], controlled.position[1]] as [number, number])
         : null,
+      controlledAnimationSetId:
+        controlled?.metadata.actorPresentation?.animationSetId ?? null,
+      controlledSurfaceMode:
+        controlled?.metadata.actorPresentation?.animationSetId?.includes("swim")
+          ? "swim"
+          : "ground",
       selectedTargetId,
       clickMoveTarget,
       movementSignature: lastMovementSignature,
@@ -1076,11 +1131,29 @@ window.render_game_to_text = () => {
   });
 };
 
+async function advanceInteractiveRuntime(deltaMs: number, timestamp: number): Promise<void> {
+  applyKeyboardCameraRig(deltaMs);
+  updateCameraRig(deltaMs);
+  maybeSubmitMovement(timestamp);
+
+  if (localSandbox && !manualFrameOverride) {
+    localSandbox.step(deltaMs);
+    refreshLocalSandboxFrame();
+  }
+
+  await renderCurrentFrame(timestamp);
+}
+
 window.advanceTime = async (ms: number) => {
   if (localSandbox && !manualFrameOverride) {
-    localSandbox.step(ms);
-    refreshLocalSandboxFrame();
-    await renderCurrentFrame(performance.now());
+    let remainingMs = Math.max(0, ms);
+    while (remainingMs > 0) {
+      const deltaMs = Math.min(remainingMs, LOCAL_SANDBOX_STEP_MS);
+      const timestamp = lastTickTimestamp + deltaMs;
+      lastTickTimestamp = timestamp;
+      await advanceInteractiveRuntime(deltaMs, timestamp);
+      remainingMs -= deltaMs;
+    }
     return;
   }
 
@@ -1140,15 +1213,7 @@ let lastTickTimestamp = performance.now();
 async function tick(timestamp: number): Promise<void> {
   const deltaMs = Math.min(Math.max(timestamp - lastTickTimestamp, 0), 250);
   lastTickTimestamp = timestamp;
-  updateCameraRig(deltaMs);
-  maybeSubmitMovement(timestamp);
-
-  if (localSandbox && !manualFrameOverride) {
-    localSandbox.step(deltaMs);
-    refreshLocalSandboxFrame();
-  }
-
-  await renderCurrentFrame(timestamp);
+  await advanceInteractiveRuntime(deltaMs, timestamp);
 
   requestAnimationFrame((nextTimestamp) => {
     void tick(nextTimestamp);

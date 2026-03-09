@@ -1,6 +1,6 @@
 import { decode as decodeToon } from "@toon-format/toon";
 
-import { sampleTerrainHeight } from "./landscape";
+import { sampleLandscapeSurface, sampleSurfaceHeight } from "./landscape";
 
 export type Vec3Tuple = [number, number, number];
 export type Vec4Tuple = [number, number, number, number];
@@ -12,6 +12,7 @@ export interface CameraState {
   y: number;
   zoom: number;
   rotation: number;
+  fov?: number;
   pitch?: number;
   focusHeight?: number;
   followDistance?: number;
@@ -2380,6 +2381,27 @@ function resolveAnimationSetId(entity: NetworkEntitySnapshot): string {
   }
 }
 
+function entityUsesWaterSurface(entity: NetworkEntitySnapshot): boolean {
+  return (
+    entity.metadata.kind === "Player" ||
+    entity.metadata.kind === "Npc" ||
+    entity.metadata.kind === "WildCreature" ||
+    entity.metadata.kind === "Companion"
+  );
+}
+
+function entityAnchorHeight(entity: NetworkEntitySnapshot): number {
+  const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
+  const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
+  const surface = sampleLandscapeSurface(worldX, worldZ);
+
+  if (entityUsesWaterSurface(entity) && surface.isSwimmable) {
+    return surface.surfaceHeight;
+  }
+
+  return surface.terrainHeight;
+}
+
 function entityKind(entity: NetworkEntitySnapshot): NetworkEntityKind {
   return entity.metadata.kind;
 }
@@ -2784,6 +2806,8 @@ export function buildAuthoritativeWorldFrame(
   const focusPosition = focus
     ? [focus.position[0] * WORLD_TO_RENDER_SCALE, focus.position[1] * WORLD_TO_RENDER_SCALE]
     : [0, 0];
+  const focusSpeed = focus ? Math.hypot(focus.velocity[0], focus.velocity[1]) : 0;
+  const focusSpeedFactor = clamp(focusSpeed / 5.2, 0, 1);
   const focusChunkKey = focus?.metadata.chunkKey ?? null;
   const focusRegionId = focus?.metadata.regionId ?? null;
   const cameraDistances = new Array<number>();
@@ -2812,7 +2836,11 @@ export function buildAuthoritativeWorldFrame(
       : cameraDistances[
           Math.min(cameraDistances.length - 1, Math.floor(cameraDistances.length * 0.75))
         ] ?? 8;
-  const cameraZoom = clamp(1.22 - cameraReferenceDistance * 0.016, 0.98, 1.18);
+  const cameraZoom = clamp(
+    1.22 - cameraReferenceDistance * 0.016 + focusSpeedFactor * 0.04,
+    0.98,
+    1.2
+  );
 
   const meshBatches = new Map<string, ThreeJsMeshBatch>();
   const spriteBatches = new Array<ThreeJsSpriteBatch>();
@@ -2821,7 +2849,7 @@ export function buildAuthoritativeWorldFrame(
     const profile = entityRenderProfile(entity, controlledEntity);
     const worldX = entity.position[0] * WORLD_TO_RENDER_SCALE;
     const worldZ = entity.position[1] * WORLD_TO_RENDER_SCALE;
-    const groundHeight = sampleTerrainHeight(worldX, worldZ);
+    const groundHeight = entityAnchorHeight(entity);
     const halfHeight = meshHalfHeight(profile.mesh) * profile.scale[1];
     const position: Vec3Tuple = [
       worldX,
@@ -2955,12 +2983,13 @@ export function buildAuthoritativeWorldFrame(
       y: focusPosition[1],
       zoom: cameraZoom,
       rotation: focus?.rotation ?? 0.48,
-      pitch: 0.34,
-      focusHeight: 2.2,
-      followDistance: 13.5,
+      fov: 52 + focusSpeedFactor * 4,
+      pitch: 0.34 - focusSpeedFactor * 0.02,
+      focusHeight: 2.2 + focusSpeedFactor * 0.18,
+      followDistance: 13.5 + focusSpeedFactor * 1.4,
       shoulderOffset: 0.9,
-      leadX: 0,
-      leadY: 0,
+      leadX: focus ? focus.velocity[0] * (0.34 + focusSpeedFactor * 0.12) : 0,
+      leadY: focus ? focus.velocity[1] * (0.34 + focusSpeedFactor * 0.12) : 0,
       viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
       viewportHeight: options.viewportHeight ?? defaultViewportHeight()
     },
@@ -3014,7 +3043,7 @@ export function withInteractionMarkers(
       depthTest: true,
       instances: [
         {
-          position: [worldX, sampleTerrainHeight(worldX, worldZ) + 0.05, worldZ],
+          position: [worldX, sampleSurfaceHeight(worldX, worldZ) + 0.05, worldZ],
           rotation: GROUND_RING_ROTATION,
           scale: [1.65, 1.65, 1],
           color: [0.86, 0.96, 1, 0.24],
@@ -3048,7 +3077,7 @@ export function withInteractionMarkers(
             const pathZ = (moveOrigin[1] + deltaY * t) * WORLD_TO_RENDER_SCALE;
             const scale = 0.74 + index * 0.08;
             return {
-              position: [pathX, sampleTerrainHeight(pathX, pathZ) + 0.04, pathZ],
+              position: [pathX, sampleSurfaceHeight(pathX, pathZ) + 0.04, pathZ],
               rotation: GROUND_RING_ROTATION,
               scale: [scale, scale, 1],
               color: [0.72, 0.92, 1, 0.12 + index * 0.03],
@@ -3089,7 +3118,7 @@ export function withInteractionMarkers(
       depthTest: true,
       instances: [
         {
-          position: [worldX, sampleTerrainHeight(worldX, worldZ) + 0.07, worldZ],
+          position: [worldX, sampleSurfaceHeight(worldX, worldZ) + 0.07, worldZ],
           rotation: GROUND_RING_ROTATION,
           scale: [scale * 1.08, scale * 1.08, 1],
           color,
@@ -3099,6 +3128,44 @@ export function withInteractionMarkers(
         }
       ]
     });
+
+    const moveOrigin = options.controlledSnapshot?.position ?? null;
+    if (moveOrigin && (interaction.canAttack || interaction.canCapture)) {
+      const deltaX = target.position[0] - moveOrigin[0];
+      const deltaY = target.position[1] - moveOrigin[1];
+      const distance = Math.hypot(deltaX, deltaY);
+      const tetherCount = Math.min(5, Math.max(2, Math.floor(distance / 3.6)));
+
+      markers.push({
+        texture: useDangerRing ? "danger-ring" : "selection-ring",
+        frame: 0,
+        layer: 7,
+        billboard: false,
+        phase: "transparent",
+        sortDepth: worldZ,
+        renderOrder: 21,
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        instances: Array.from({ length: tetherCount }, (_, index) => {
+          const t = (index + 1) / (tetherCount + 1);
+          const pathX = (moveOrigin[0] + deltaX * t) * WORLD_TO_RENDER_SCALE;
+          const pathZ = (moveOrigin[1] + deltaY * t) * WORLD_TO_RENDER_SCALE;
+          const scale = interaction.canAttack ? 0.72 + index * 0.08 : 0.64 + index * 0.06;
+
+          return {
+            position: [pathX, sampleSurfaceHeight(pathX, pathZ) + 0.05, pathZ],
+            rotation: GROUND_RING_ROTATION,
+            scale: [scale, scale, 1],
+            color: interaction.canAttack
+              ? [1, 0.38, 0.32, 0.12 + index * 0.03]
+              : [0.48, 0.96, 0.78, 0.1 + index * 0.025],
+            sourceEntity: target.id,
+            animationSetId: "target-ring"
+          };
+        })
+      });
+    }
   }
 
   if (markers.length === 0) {
@@ -3150,7 +3217,7 @@ export function withWorldEventMarkers(
         {
           position: [
             position[0],
-            sampleTerrainHeight(position[0], position[1]) + markerStyle.height,
+            sampleSurfaceHeight(position[0], position[1]) + markerStyle.height,
             position[1]
           ],
           rotation: GROUND_RING_ROTATION,

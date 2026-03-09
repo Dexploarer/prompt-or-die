@@ -1064,5 +1064,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --lib`
   - `git diff --check`
 
-**Last updated**: Iteration 106
-**Current focus**: Iteration 107 richer traversal/combat feedback, further gameplay-first HUD reduction, and more gameplay-facing browser/editor debug presentation on top of the stabilized shard-focused telemetry path
+### Iteration 107
+- [x] Fixed `pod-web` surface control and terrain/water grounding so arrow keys orbit the camera, WASD stays character-relative to the current camera yaw, and click-to-move starts immediately instead of waiting for the next resend loop.
+- [x] Unified the local browser test helper with the live gameplay loop by routing `window.advanceTime(...)` through the same camera, movement, and local-sandbox stepping path used by the normal runtime tick.
+- [x] Added shared landscape surface sampling and local-world movement collision/water-mode logic so the flagship sandbox now spawns the player on valid ground, blocks movement through solid props, and transitions onto swimmable water instead of walking the lake floor.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/controls.test.ts ./src/contracts.test.ts ./src/local-world.test.ts ./src/frame-plan.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - Playwright local browser proof on `http://127.0.0.1:4178/` for arrow-key orbit plus click-to-swim movement
+  - `git diff --check`
+
+**Last updated**: Iteration 107
+**Current focus**: Iteration 108 richer traversal/combat feedback, tighter collision/interaction feel, smoother worker-route gameplay parity, and further gameplay-first HUD reduction on top of the corrected browser control/grounding path

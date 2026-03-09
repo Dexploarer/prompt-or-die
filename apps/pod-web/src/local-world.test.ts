@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { sampleLandscapeSurface } from "./landscape";
 import { PodWebLocalWorld, renderGameToText } from "./local-world";
 
 const TICK_MS = 1000 / 60;
@@ -25,6 +26,32 @@ function moveToward(world: PodWebLocalWorld, targetId: number, ticks: number): v
   stepTicks(world, 1);
 }
 
+function moveTowardPoint(world: PodWebLocalWorld, target: [number, number], ticks: number): void {
+  let remaining = ticks;
+  while (remaining > 0) {
+    const snapshot = world.snapshotState();
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    if (!player) {
+      throw new Error("Missing player");
+    }
+
+    const dx = target[0] - player.position[0];
+    const dy = target[1] - player.position[1];
+    const length = Math.hypot(dx, dy);
+    if (length <= 0.35) {
+      break;
+    }
+
+    const slice = Math.min(remaining, 24);
+    world.submitActions([{ kind: "move", direction: [dx / length, dy / length] }]);
+    stepTicks(world, slice);
+    remaining -= slice;
+  }
+
+  world.submitActions([{ kind: "stop" }]);
+  stepTicks(world, 1);
+}
+
 describe("PodWebLocalWorld", () => {
   test("spawns a connected local sandbox with a controlled player and authored entities", () => {
     const world = new PodWebLocalWorld("Scout");
@@ -37,6 +64,10 @@ describe("PodWebLocalWorld", () => {
       detail: "Local sandbox shard ready"
     });
     expect(snapshot.entities.find((entity) => entity.id === 1)?.label).toBe("Scout");
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    expect(sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0).hasWaterSurface).toBe(
+      false
+    );
     expect(snapshot.entities.length).toBeGreaterThanOrEqual(16);
     expect(snapshot.entities.filter((entity) => entity.metadata.kind === "Npc")).toHaveLength(3);
     expect(snapshot.entities.some((entity) => entity.metadata.kind === "WildCreature")).toBe(true);
@@ -93,6 +124,34 @@ describe("PodWebLocalWorld", () => {
     expect(textState).toContain("\"coordinateSystem\":\"world x east-west, y north-south\"");
     expect(textState).toContain("\"streaming\"");
     expect(textState).toContain("\"progression\"");
+  });
+
+  test("blocks movement through solid world props", () => {
+    const world = new PodWebLocalWorld("Scout");
+    world.connect();
+
+    moveTowardPoint(world, [8.8, 7.8], 240);
+
+    const snapshot = world.snapshotState();
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    expect(player).not.toBeUndefined();
+    expect(Math.hypot((player?.position[0] ?? 0) - 8.8, (player?.position[1] ?? 0) - 7.8)).toBeGreaterThan(
+      1.55
+    );
+  });
+
+  test("transitions the player into swimming instead of walking the lake floor", () => {
+    const world = new PodWebLocalWorld("Scout");
+    world.connect();
+
+    moveTowardPoint(world, [18, -14], 360);
+
+    const snapshot = world.snapshotState();
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    expect(player).not.toBeUndefined();
+    const surface = sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0);
+    expect(surface.isSwimmable).toBe(true);
+    expect(player?.metadata.actorPresentation?.animationSetId).toBe("humanoid-swim");
   });
 
   test("supports gathering and looting loops", () => {

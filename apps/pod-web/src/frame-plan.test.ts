@@ -7,7 +7,7 @@ import {
   sampleAnimatedInstanceTransform,
   splitSpriteBatchesByTint
 } from "./frame-plan";
-import { sampleTerrainHeight } from "./landscape";
+import { sampleSurfaceHeight, sampleTerrainHeight } from "./landscape";
 import { resolveQualityProfile } from "./quality";
 
 function testEnvironment(): ThreeJsWebGpuFrame["environment"] {
@@ -47,7 +47,7 @@ describe("buildCameraPose", () => {
       viewportHeight: 720
     });
 
-    expect(pose.target).toEqual([24, sampleTerrainHeight(24, -10) + 2.2, -10]);
+    expect(pose.target).toEqual([24, sampleSurfaceHeight(24, -10) + 2.2, -10]);
     expect(pose.position[0]).toBeGreaterThan(24);
     expect(Math.abs(pose.position[2] + 10)).toBeLessThan(1.2);
     expect(pose.position[1]).toBeGreaterThan(pose.target[1]);

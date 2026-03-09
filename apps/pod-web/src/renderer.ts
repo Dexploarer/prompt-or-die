@@ -110,8 +110,7 @@ function createTerrainGeometry(
   for (let index = 0; index < positions.count; index += 1) {
     const x = positions.getX(index);
     const y = positions.getY(index);
-    const radialFalloff = clamp(1 - Math.hypot(x, y) / (size * 0.82), 0, 1);
-    const height = sampleTerrainHeight(x, y) * (0.84 + (1 - radialFalloff) * 0.22);
+    const height = sampleTerrainHeight(x, y);
     positions.setZ(index, height);
   }
 
