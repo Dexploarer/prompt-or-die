@@ -618,6 +618,37 @@ describe("sampleAnimatedInstanceTransform", () => {
     expect(pulsed.position[1]).toBeGreaterThan(neutral.position[1]);
     expect(pulsed.scale[0]).toBeGreaterThan(neutral.scale[0]);
   });
+
+  test("gives swimmers forward glide while keeping beasts heavier than humanoids", () => {
+    const humanoidSwim = sampleAnimatedInstanceTransform(
+      {
+        position: [3, 1.5, 4],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1.9, 1],
+        sourceEntity: 8,
+        animationSetId: "humanoid-swim",
+        motionSpeed: 0.9,
+        controlled: true
+      },
+      1.6
+    );
+    const beastSwim = sampleAnimatedInstanceTransform(
+      {
+        position: [3, 1.5, 4],
+        rotation: [0, 0, 0, 1],
+        scale: [1.3, 1.6, 1.9],
+        sourceEntity: 8,
+        animationSetId: "rift-beast-swim",
+        motionSpeed: 0.9
+      },
+      1.6
+    );
+
+    expect(humanoidSwim.position[2]).toBeGreaterThan(4.05);
+    expect(humanoidSwim.position[1]).toBeGreaterThan(1.55);
+    expect(beastSwim.scale[0]).toBeGreaterThan(humanoidSwim.scale[0]);
+    expect(Math.abs(beastSwim.rotation[2])).toBeLessThan(Math.abs(humanoidSwim.rotation[2]));
+  });
 });
 
 describe("resolveQualityProfile", () => {

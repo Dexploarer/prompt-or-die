@@ -356,9 +356,11 @@ export function sampleAnimatedInstanceTransform(
   let scaleX = instance.scale[0];
   let scaleY = instance.scale[1];
   let scaleZ = instance.scale[2];
+  let xOffset = 0;
   let pitchOffset = 0;
   let yawOffset = 0;
   let rollOffset = 0;
+  let zOffset = 0;
 
   if (animationSetId.includes("critical-ring")) {
     const ringPulse = Math.abs(Math.sin(elapsedSeconds * 5.1 + phase));
@@ -391,20 +393,27 @@ export function sampleAnimatedInstanceTransform(
   } else if (animationSetId.includes("swim")) {
     const stroke = Math.sin(elapsedSeconds * (1.6 + motion * 2.8) + phase);
     const glide = Math.cos(elapsedSeconds * (1.2 + motion * 1.8) + phase * 0.7);
-    yOffset += 0.06 + hoverWave * 0.05 + Math.max(motion, 0.18) * 0.04;
+    const surge = Math.max(0, Math.sin(elapsedSeconds * (1.3 + motion * 2.2) + phase * 0.9));
+    const lateralSway = Math.sin(elapsedSeconds * (1.8 + motion * 2.1) + phase * 1.2);
+    yOffset += 0.055 + hoverWave * 0.045 + Math.max(motion, 0.18) * 0.03;
+    xOffset += lateralSway * (0.04 + motion * 0.03);
+    zOffset += surge * (0.07 + motion * 0.06);
     scaleX *= 1 + Math.abs(stroke) * 0.02;
-    scaleY *= 0.93 - Math.max(motion, 0.2) * 0.03;
+    scaleY *= 0.95 - Math.max(motion, 0.2) * 0.028;
     scaleZ *= 1 + Math.abs(glide) * 0.025;
-    pitchOffset += 0.09 + Math.abs(stroke) * 0.04;
+    pitchOffset += 0.075 + Math.abs(stroke) * 0.035;
     yawOffset += glide * 0.025;
     rollOffset += stroke * 0.045;
     if (animationSetId.includes("companion")) {
-      yOffset += 0.05;
+      yOffset += 0.07;
+      zOffset += surge * 0.03;
       scaleY *= 0.97;
     } else if (animationSetId.includes("beast")) {
       scaleX *= 1.04;
       scaleZ *= 1.04;
-      pitchOffset += 0.02;
+      zOffset += surge * 0.06;
+      pitchOffset += 0.04;
+      rollOffset *= 0.72;
     }
   } else if (animationSetId.includes("companion") || animationSetId.includes("hover")) {
     const driftWave = Math.sin(elapsedSeconds * 1.15 + phase * 0.6);
@@ -485,12 +494,13 @@ export function sampleAnimatedInstanceTransform(
     new Euler(pitchOffset, yawOffset, rollOffset)
   );
   const finalRotation = baseRotation.multiply(animationRotation);
+  const animatedOffset = new Vector3(xOffset, yOffset, zOffset).applyQuaternion(baseRotation);
 
   return {
     position: [
-      instance.position[0],
-      instance.position[1] + yOffset,
-      instance.position[2]
+      instance.position[0] + animatedOffset.x,
+      instance.position[1] + animatedOffset.y,
+      instance.position[2] + animatedOffset.z
     ],
     rotation: [finalRotation.x, finalRotation.y, finalRotation.z, finalRotation.w],
     scale: [scaleX, scaleY, scaleZ]

@@ -40,3 +40,12 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Added shared landscape surface sampling for terrain vs water and pushed it through camera collision, ground picking, world-frame anchoring, and local-world movement so the player now spawns on dry ground and swims on the lake surface instead of walking below it.
 - Unified `window.advanceTime(...)` with the real gameplay tick path, which made Playwright/browser proof match actual runtime behavior instead of skipping camera and movement updates.
 - Revalidated live in Playwright that camera yaw changes under arrow-key input and that a terrain click advances the player into `humanoid-swim` / `surfaceMode=swim` rather than burying the actor below the water plane.
+- Tightened local traversal response by tuning per-surface acceleration/deceleration/turn profiles and improving solid-prop collision resolution so the player progresses around obstacles instead of sticking against them.
+- Added a more physical swim presentation path: swimmer animation now includes forward glide + buoyancy, the main camera blends to a wider/lower swim framing, and combat impact kick still reads while the actor is in water.
+- Reduced the main HUD chrome again with smaller cards, tighter copy, and lighter diagnostics labeling, while keeping world/combat feedback readable enough for live MMO testing.
+- Revalidated the branch with targeted Bun coverage (`local-world`, `frame-plan`, `hud`, `controls`, `contracts`), clean typecheck/build, and live Playwright MCP proof on `http://127.0.0.1:4179/`.
+- Live browser proof from this pass:
+  - booted cleanly into `webgpu` on the local shard with no errors and only the known upstream Three.js TSL warning
+  - arrow keys kept camera orbit active while the gameplay surface stayed focused
+  - WASD/click movement advanced the player without terrain burial
+  - lake traversal switched the controlled actor to `humanoid-swim` with `controlledSurfaceMode=swim`

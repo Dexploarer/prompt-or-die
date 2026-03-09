@@ -29,22 +29,31 @@ export function highlightEventFeedback(event: NetworkGameEvent | null): string {
 
   const kind = event.kind.toLowerCase();
   if (kind.includes("damage")) {
-    return `Combat hit · ${event.summary}`;
+    return `Hit confirmed · ${event.summary}`;
   }
   if (kind.includes("kill")) {
     return `Target down · ${event.summary}`;
   }
+  if (kind.includes("spawn")) {
+    return `Back in the fight · ${event.summary}`;
+  }
   if (kind.includes("capture")) {
-    return `Capture result · ${event.summary}`;
+    return `Capture secured · ${event.summary}`;
   }
   if (kind.includes("loot")) {
-    return `Loot secured · ${event.summary}`;
+    return `Loot claimed · ${event.summary}`;
   }
   if (kind.includes("gather")) {
-    return `Gather progress · ${event.summary}`;
+    return `Resource gathered · ${event.summary}`;
   }
   if (kind.includes("summon")) {
-    return `Companion active · ${event.summary}`;
+    return `Companion ready · ${event.summary}`;
+  }
+  if (kind.includes("command")) {
+    return `Companion order · ${event.summary}`;
+  }
+  if (kind.includes("quest")) {
+    return `Quest progress · ${event.summary}`;
   }
 
   return event.summary;

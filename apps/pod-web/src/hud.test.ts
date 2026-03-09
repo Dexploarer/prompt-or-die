@@ -47,13 +47,13 @@ describe("hud formatting", () => {
 
   test("maps combat and world events into stronger feedback labels", () => {
     expect(highlightEventFeedback(sampleEvent("Damage", "12 to Rift Beast"))).toBe(
-      "Combat hit · 12 to Rift Beast"
+      "Hit confirmed · 12 to Rift Beast"
     );
     expect(highlightEventFeedback(sampleEvent("Capture", "Spirit Cub captured"))).toBe(
-      "Capture result · Spirit Cub captured"
+      "Capture secured · Spirit Cub captured"
     );
     expect(highlightEventFeedback(sampleEvent("Summon", "Companion recalled"))).toBe(
-      "Companion active · Companion recalled"
+      "Companion ready · Companion recalled"
     );
     expect(highlightEventFeedback(sampleEvent("Dialogue", "Merchant greeted you"))).toBe(
       "Merchant greeted you"
