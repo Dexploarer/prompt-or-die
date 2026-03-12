@@ -127,6 +127,34 @@ The intended responsibilities are:
 - `pod-editor`: authoring UX
 - `pod-assets`: import and generation pipeline
 
+## Current extension seam map
+
+The repo already has a few extension seams that are stronger than the rest of
+the codebase. They are not a formal plugin SDK yet, but they are the safest
+integration targets available today:
+
+- `pod-scene` exports the authoring-to-runtime seam through `NativeComponentBinding`,
+  `Prefab`, `PrefabRegistry`, `Scene`, and `SceneManager`.
+- `pod-assets` exports the source-to-runtime asset seam through `import_asset`,
+  `build_runtime_bundle_manifest`, and `materialize_runtime_bundle_manifest`.
+- `pod-net` plus `pod-core` export the authoritative transport/debug seam through
+  `ClientMessage`, `ServerMessage`, and `ShardTransportSummary`.
+- `apps/pod-web` consumes those contracts, but its top-level bootstrap file
+  (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
+  extension API.
+
+If a new feature can land cleanly on one of those seams, that is preferred over
+teaching app bootstrap files new ad hoc registration rules.
+
+The remaining blockers are also concrete now:
+
+- `apps/pod-server/src/main.rs` still owns world bootstrap and transport policy composition.
+- `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
+- `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
+
+Those are the places where a future plugin/app lifecycle system still needs new
+hooks, not the exported crate seams listed above.
+
 New features should extend the nearest existing boundary instead of bypassing it. For example:
 
 - New authored gameplay content should land in scene/prefab bindings, not ad-hoc boot code.
@@ -144,3 +172,5 @@ This architecture is real, but not final. The following platform layers remain e
 - Public SDK stabilization
 
 Those roadmap items are tracked in `IMPLEMENTATION_PLAN.md`.
+See `docs/plugin-model.md` for the current stability tiers and the explicit
+contract-vs-internal split.

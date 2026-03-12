@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { BoxGeometry, NoColorSpace, SphereGeometry, Texture } from "three";
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, NoColorSpace, SphereGeometry, Texture } from "three";
 
 import {
   createProceduralSpriteTexture,
   createMeshMaterial,
   DefaultPodThreeAssetRegistry,
+  extractRenderableGeometry,
   ManifestBackedPodThreeAssetRegistry,
   parsePodThreeAssetManifest,
+  resolveMeshRuntimePath,
   resolveManifestMeshAsset,
   resolveManifestSpriteAsset,
+  resolveSpriteRuntimePath,
   shouldUseProceduralSpriteTexture
 } from "./assets";
 import type { ThreeJsMeshBatch } from "./contracts";
@@ -40,6 +43,26 @@ function meshBatch(
     instances: [],
     ...overrides
   };
+}
+
+async function withMockedPerformanceNow<T>(
+  now: () => number,
+  run: () => Promise<T> | T
+): Promise<T> {
+  const originalNow = performance.now;
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: now
+  });
+
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow
+    });
+  }
 }
 
 describe("createMeshMaterial", () => {
@@ -107,6 +130,38 @@ describe("parsePodThreeAssetManifest", () => {
       meshes: {
         "rift-beast": {
           path: "/assets/meshes/rift-beast.gltf",
+          lods: {
+            0: "/assets/meshes/rift-beast.gltf",
+            1: "/assets/meshes/rift-beast.lod1.gltf"
+          },
+          meshoptLods: {
+            0: "/assets/meshes/rift-beast.meshopt.glb",
+            1: "/assets/meshes/rift-beast.lod1.meshopt.glb"
+          },
+          runtime: {
+            selection: "explicit-lod",
+            preferredEncoding: "meshopt",
+            variants: {
+              0: {
+                sizeBytes: 12000,
+                triangleCount: 320
+              },
+              1: {
+                sizeBytes: 6000,
+                triangleCount: 160
+              }
+            },
+            compressedVariants: {
+              0: {
+                sizeBytes: 7000,
+                triangleCount: 320
+              },
+              1: {
+                sizeBytes: 3600,
+                triangleCount: 160
+              }
+            }
+          },
           aliases: ["monster", "wolf"],
           category: "creature",
           tags: ["wild", "beast"]
@@ -116,6 +171,19 @@ describe("parsePodThreeAssetManifest", () => {
         "selection-ring": {
           path: "/assets/textures/selection-ring.svg",
           ktx2Path: "/assets/textures/selection-ring.ktx2",
+          runtime: {
+            preferredEncoding: "source",
+            variants: {
+              source: {
+                sizeBytes: 592,
+                sizeBudgetBytes: 2048
+              },
+              ktx2: {
+                sizeBytes: 1248,
+                sizeBudgetBytes: 2048
+              }
+            }
+          },
           colorSpace: "none",
           repeat: [2, 1],
           offset: [0.25, 0]
@@ -124,8 +192,119 @@ describe("parsePodThreeAssetManifest", () => {
     });
 
     expect(manifest.meshes["rift-beast"]?.category).toBe("creature");
+    expect(manifest.meshes["rift-beast"]?.runtime?.selection).toBe("explicit-lod");
+    expect(manifest.meshes["rift-beast"]?.runtime?.preferredEncoding).toBe("meshopt");
+    expect(manifest.meshes["rift-beast"]?.runtime?.variants?.[1]?.triangleCount).toBe(160);
+    expect(manifest.meshes["rift-beast"]?.runtime?.compressedVariants?.[0]?.sizeBytes).toBe(7000);
+    expect(manifest.meshes["rift-beast"]?.meshoptLods?.[1]).toBe(
+      "/assets/meshes/rift-beast.lod1.meshopt.glb"
+    );
     expect(manifest.sprites["selection-ring"]?.colorSpace).toBe("none");
+    expect(manifest.sprites["selection-ring"]?.runtime?.preferredEncoding).toBe("source");
+    expect(manifest.sprites["selection-ring"]?.runtime?.variants?.source?.sizeBytes).toBe(592);
+    expect(manifest.sprites["selection-ring"]?.runtime?.variants?.ktx2?.sizeBytes).toBe(1248);
     expect(manifest.sprites["selection-ring"]?.repeat).toEqual([2, 1]);
+  });
+
+  test("accepts binary glb mesh paths for runtime-first asset delivery", () => {
+    const manifest = parsePodThreeAssetManifest({
+      version: 1,
+      meshes: {
+        "rift-beast": {
+          path: "/assets/meshes/rift-beast.glb",
+          aliases: ["monster"]
+        }
+      },
+      sprites: {}
+    });
+
+    expect(manifest.meshes["rift-beast"]?.path).toBe("/assets/meshes/rift-beast.glb");
+  });
+});
+
+describe("runtime asset path selection", () => {
+  test("uses explicit lod paths when runtime selection is explicit", () => {
+    const manifest = parsePodThreeAssetManifest({
+      version: 1,
+      meshes: {
+        "rift-beast": {
+          path: "/assets/meshes/rift-beast.glb",
+          lods: {
+            0: "/assets/meshes/rift-beast.glb",
+            1: "/assets/meshes/rift-beast.lod1.glb",
+            2: "/assets/meshes/rift-beast.lod2.glb"
+          },
+          meshoptLods: {
+            0: "/assets/meshes/rift-beast.meshopt.glb",
+            2: "/assets/meshes/rift-beast.lod2.meshopt.glb"
+          },
+          runtime: {
+            selection: "explicit-lod",
+            preferredEncoding: "meshopt"
+          }
+        }
+      },
+      sprites: {}
+    });
+
+    expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 0)).toBe(
+      "/assets/meshes/rift-beast.meshopt.glb"
+    );
+    expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 1)).toBe(
+      "/assets/meshes/rift-beast.lod1.glb"
+    );
+    expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 2)).toBe(
+      "/assets/meshes/rift-beast.lod2.meshopt.glb"
+    );
+  });
+
+  test("honors explicit sprite encoding preference before falling back", () => {
+    const manifest = parsePodThreeAssetManifest({
+      version: 1,
+      meshes: {},
+      sprites: {
+        "selection-ring": {
+          path: "/assets/textures/selection-ring.svg",
+          ktx2Path: "/assets/textures/selection-ring.ktx2",
+          runtime: {
+            preferredEncoding: "ktx2"
+          }
+        }
+      }
+    });
+
+    expect(resolveSpriteRuntimePath(manifest.sprites["selection-ring"], true)).toBe(
+      "/assets/textures/selection-ring.ktx2"
+    );
+    expect(
+      resolveSpriteRuntimePath(
+        {
+          ...manifest.sprites["selection-ring"],
+          runtime: { preferredEncoding: "source" }
+        },
+        false
+      )
+    ).toBe("/assets/textures/selection-ring.svg");
+  });
+});
+
+describe("extractRenderableGeometry", () => {
+  test("merges multi-mesh gltf/glb scenes into one renderable geometry", () => {
+    const root = new Group();
+    const base = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial());
+    const topper = new Mesh(new SphereGeometry(0.5, 8, 6), new MeshStandardMaterial());
+    topper.position.set(2.5, 0.5, 0);
+    root.add(base);
+    root.add(topper);
+    root.updateWorldMatrix(true, true);
+
+    const geometry = extractRenderableGeometry(root, "/assets/meshes/multipart.glb");
+    geometry.computeBoundingBox();
+
+    expect(geometry.getAttribute("position")?.count).toBeGreaterThan(
+      base.geometry.getAttribute("position")?.count ?? 0
+    );
+    expect(geometry.boundingBox?.max.x ?? 0).toBeGreaterThan(2.9);
   });
 });
 
@@ -214,6 +393,38 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
 
     const geometry = await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
     expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.gltf"]);
+    expect(geometry.type).toBe("SphereGeometry");
+  });
+
+  test("loads binary glb mesh assets through the manifest path", async () => {
+    const loadedPaths: string[] = [];
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest: parsePodThreeAssetManifest({
+        version: 1,
+        meshes: {
+          "rift-beast": {
+            path: "/assets/meshes/rift-beast.glb",
+            aliases: ["monster"]
+          }
+        },
+        sprites: {}
+      }),
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load(path: string) {
+          loadedPaths.push(path);
+          return new SphereGeometry(1.2, 6, 4);
+        }
+      },
+      textureLoader: {
+        async load() {
+          return new Texture();
+        }
+      }
+    });
+
+    const geometry = await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
+    expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.glb"]);
     expect(geometry.type).toBe("SphereGeometry");
   });
 
@@ -330,12 +541,19 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
       expect(first.texture).toBe(second.texture);
       expect(attempts).toBe(1);
       expect(warnings).toHaveLength(1);
-      expect(registry.getResidencyStats?.()).toEqual({
+      const stats = registry.getResidencyStats?.();
+      expect(stats).toMatchObject({
         residentGeometryAssets: 0,
         residentSpriteAssets: 1,
         pendingGeometryAssets: 0,
-        pendingSpriteAssets: 0
+        pendingSpriteAssets: 0,
+        geometryLoadsCompleted: 0,
+        spriteLoadsCompleted: 1
       });
+      expect(stats?.averageGeometryLoadMs).toBe(0);
+      expect(stats?.slowestGeometryLoadMs).toBe(0);
+      expect(stats?.averageSpriteLoadMs ?? -1).toBeGreaterThanOrEqual(0);
+      expect(stats?.slowestSpriteLoadMs ?? -1).toBeGreaterThanOrEqual(0);
     } finally {
       console.warn = originalWarn;
     }
@@ -365,11 +583,56 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
     ]);
 
     expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.gltf"]);
-    expect(registry.getResidencyStats?.()).toEqual({
+    const stats = registry.getResidencyStats?.();
+    expect(stats).toMatchObject({
       residentGeometryAssets: 1,
       residentSpriteAssets: 0,
       pendingGeometryAssets: 0,
-      pendingSpriteAssets: 0
+      pendingSpriteAssets: 0,
+      geometryLoadsCompleted: 1,
+      spriteLoadsCompleted: 0
+    });
+    expect(stats?.averageGeometryLoadMs ?? -1).toBeGreaterThanOrEqual(0);
+    expect(stats?.slowestGeometryLoadMs ?? -1).toBeGreaterThanOrEqual(0);
+    expect(stats?.averageSpriteLoadMs).toBe(0);
+    expect(stats?.slowestSpriteLoadMs).toBe(0);
+  });
+
+  test("tracks deterministic geometry and sprite load timing aggregates", async () => {
+    let nowMs = 100;
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load() {
+          nowMs += 7;
+          return new SphereGeometry(1.2, 6, 4);
+        }
+      },
+      textureLoader: {
+        async load() {
+          nowMs += 3;
+          return new Texture();
+        }
+      }
+    });
+
+    await withMockedPerformanceNow(() => nowMs, async () => {
+      await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
+      await registry.resolveSpriteTexture({ texture: "selection-ring", frame: 0 }, 2);
+    });
+
+    expect(registry.getResidencyStats?.()).toEqual({
+      residentGeometryAssets: 1,
+      residentSpriteAssets: 1,
+      pendingGeometryAssets: 0,
+      pendingSpriteAssets: 0,
+      geometryLoadsCompleted: 1,
+      spriteLoadsCompleted: 1,
+      averageGeometryLoadMs: 7,
+      averageSpriteLoadMs: 3,
+      slowestGeometryLoadMs: 7,
+      slowestSpriteLoadMs: 3
     });
   });
 });

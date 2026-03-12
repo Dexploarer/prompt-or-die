@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
+use crate::json::to_stable_json_string;
 
 /// Type-erased component data that can be serialized
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -348,7 +349,7 @@ impl Prefab {
 
     /// Serialize prefab to JSON
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
+        to_stable_json_string(self)
     }
 
     /// Deserialize prefab from JSON

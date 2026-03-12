@@ -1,0 +1,287 @@
+{
+  "output_roots": {
+    "source": "artifacts/source-assets",
+    "staged": "artifacts/staged-assets",
+    "runtime_public": "public/assets"
+  },
+  "meshes": {
+    "adventurer-avatar": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb",
+      "runtime_path": "/assets/meshes/adventurer-avatar.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.lod1.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.lod2.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod2.meshopt.glb"
+        }
+      }
+    },
+    "adventurer-hero": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.glb",
+      "runtime_path": "/assets/meshes/adventurer-hero.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.lod1.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.lod2.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/adventurer-hero.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod2.meshopt.glb"
+        }
+      }
+    },
+    "basalt-column": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.glb",
+      "runtime_path": "/assets/meshes/basalt-column.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.lod1.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.lod2.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.meshopt.glb",
+          "runtime_path": "/assets/meshes/basalt-column.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/basalt-column.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod2.meshopt.glb"
+        }
+      }
+    },
+    "canopy-tree": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.glb",
+      "runtime_path": "/assets/meshes/canopy-tree.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.lod1.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.lod2.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.meshopt.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/canopy-tree.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod2.meshopt.glb"
+        }
+      }
+    },
+    "glass-spire": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.glb",
+      "runtime_path": "/assets/meshes/glass-spire.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.lod1.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.lod2.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.meshopt.glb",
+          "runtime_path": "/assets/meshes/glass-spire.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/glass-spire.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod2.meshopt.glb"
+        }
+      }
+    },
+    "rift-beast": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.glb",
+      "runtime_path": "/assets/meshes/rift-beast.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.lod1.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.lod2.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.meshopt.glb",
+          "runtime_path": "/assets/meshes/rift-beast.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/rift-beast.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod2.meshopt.glb"
+        }
+      }
+    },
+    "spirit-companion": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.glb",
+      "runtime_path": "/assets/meshes/spirit-companion.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.lod1.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.lod2.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.meshopt.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/spirit-companion.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod2.meshopt.glb"
+        }
+      }
+    },
+    "supply-crate": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.glb",
+      "runtime_path": "/assets/meshes/supply-crate.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.lod1.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.lod2.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.meshopt.glb",
+          "runtime_path": "/assets/meshes/supply-crate.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/supply-crate.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod2.meshopt.glb"
+        }
+      }
+    },
+    "weathered-boulder": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.glb",
+      "runtime_path": "/assets/meshes/weathered-boulder.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.lod1.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod1.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.lod2.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.meshopt.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.meshopt.glb"
+        },
+        "1": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.lod1.meshopt.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/meshes/weathered-boulder.lod2.meshopt.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod2.meshopt.glb"
+        }
+      }
+    }
+  },
+  "sprites": {
+    "danger-ring": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/danger-ring.png",
+      "runtime_path": "/assets/textures/danger-ring.png",
+      "compressed_variant": {
+        "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/danger-ring.ktx2",
+        "runtime_path": "/assets/textures/danger-ring.ktx2"
+      }
+    },
+    "mist-ring": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/mist-ring.png",
+      "runtime_path": "/assets/textures/mist-ring.png",
+      "compressed_variant": {
+        "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/mist-ring.ktx2",
+        "runtime_path": "/assets/textures/mist-ring.ktx2"
+      }
+    },
+    "selection-ring": {
+      "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/selection-ring.png",
+      "runtime_path": "/assets/textures/selection-ring.png",
+      "compressed_variant": {
+        "source_path": "/Users/home/Desktop/prompt-or-die/apps/pod-web/artifacts/source-assets/textures/selection-ring.ktx2",
+        "runtime_path": "/assets/textures/selection-ring.ktx2"
+      }
+    }
+  }
+}

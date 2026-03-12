@@ -12,6 +12,38 @@ function formatKilo(value: number): string {
   return `${value}`;
 }
 
+function formatLoadStat(value: number): string {
+  return value < 10 ? value.toFixed(1) : value.toFixed(0);
+}
+
+function formatByteStat(value: number): string {
+  if (value >= 1000) {
+    return `${formatKilo(value)}B`;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)}B`;
+}
+
+function formatAverageByteStat(totalBytes: number, samples: number): string {
+  if (samples <= 0) {
+    return "0B";
+  }
+  return formatByteStat(totalBytes / samples);
+}
+
+function formatWarmupStat(value: number | null): string {
+  if (value == null) {
+    return "warming";
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}s`;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)}ms`;
+}
+
+function formatSubmissionStat(value: number): string {
+  return value < 10 ? value.toFixed(1) : value.toFixed(0);
+}
+
 export function compactRuntimeStats(stats: PodThreeRendererStats): string {
   return [
     `${stats.backend}/${stats.renderThread}`,
@@ -22,7 +54,12 @@ export function compactRuntimeStats(stats: PodThreeRendererStats): string {
     `${stats.residentGeometryAssets + stats.residentSpriteAssets}/${
       stats.pendingGeometryAssets + stats.pendingSpriteAssets
     } assets`,
-    `ambient ${stats.ambientInstances}`
+    `load ${formatLoadStat(stats.averageGeometryLoadMs)}/${formatLoadStat(
+      stats.averageSpriteLoadMs
+    )}ms`,
+    `submit ${formatSubmissionStat(stats.mainThreadPerf.averageSubmissionMs)}ms`,
+    `warm ${formatWarmupStat(stats.runtimePerf.warmupMs)}`,
+    `stable ${stats.runtimePerf.stableFramePercent.toFixed(0)}%`
   ].join(" · ");
 }
 
@@ -105,4 +142,31 @@ export function formatConnectionSummary(
   return [status.phase, status.detail, network, shardTransport]
     .filter(Boolean)
     .join(" · ");
+}
+
+export function formatTransportDebugSummary(
+  transport: ShardTransportSummaryDocument,
+  sampleCount: number
+): string {
+  return [
+    "transport",
+    `${transport.client_count} clients`,
+    `snap ${transport.full_snapshots_sent}x ${formatAverageByteStat(
+      transport.total_full_snapshot_bytes,
+      transport.full_snapshots_sent
+    )} avg / ${formatByteStat(transport.max_full_snapshot_bytes)} max`,
+    `delta ${transport.delta_messages_sent}x ${formatAverageByteStat(
+      transport.total_delta_bytes,
+      transport.delta_messages_sent
+    )} avg / +${formatKilo(transport.total_delta_entities_updated)}/-${formatKilo(
+      transport.total_delta_entities_destroyed
+    )}`,
+    `recover ${transport.recovery_snapshots_sent} / ${formatByteStat(
+      transport.total_recovery_snapshot_bytes
+    )}`,
+    `q${transport.total_pending_action_queue_depth} now / peak ${transport.peak_pending_action_queue_depth}`,
+    `pressure ${transport.queue_pressure_client_count} (${transport.queue_pressure_events})`,
+    `timeouts ${transport.timed_out_clients}`,
+    `${sampleCount} samples`
+  ].join(" · ");
 }

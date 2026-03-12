@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "sync:assets": "bun run scripts/sync-assets.mjs",
+    "measure:render-routes": "bun run scripts/measure-render-routes.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:smoke": "playwright test --config=playwright.config.ts"

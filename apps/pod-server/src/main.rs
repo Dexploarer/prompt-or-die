@@ -708,7 +708,7 @@ mod stats {
                 }
             }
 
-            if (tick_result.tick + 1) % ROLLUP_WINDOW_TICKS == 0 {
+            if (tick_result.tick + 1).is_multiple_of(ROLLUP_WINDOW_TICKS) {
                 for rollup in self.rollups_for_tick(tick_result.tick) {
                     self.pending_documents.push_back(rollup.to_toon_document());
                 }
@@ -716,7 +716,7 @@ mod stats {
 
             let incident = stats.incident_summary(self.shard_id.clone(), tick_result.tick);
             let emit_incident = !matches!(incident.severity, IncidentSeverity::Healthy)
-                || (tick_result.tick + 1) % INCIDENT_EMIT_INTERVAL_TICKS == 0;
+                || (tick_result.tick + 1).is_multiple_of(INCIDENT_EMIT_INTERVAL_TICKS);
             if emit_incident {
                 self.pending_documents
                     .push_back(incident.to_toon_document());

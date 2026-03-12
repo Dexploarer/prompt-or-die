@@ -535,17 +535,12 @@ impl Default for CombatPresentation {
 }
 
 /// Relationship of an entity to an authored faction or social group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactionDisposition {
     Friendly,
+    #[default]
     Neutral,
     Hostile,
-}
-
-impl Default for FactionDisposition {
-    fn default() -> Self {
-        Self::Neutral
-    }
 }
 
 /// Authored faction context used for NPCs, creatures, props, and quest hubs.
@@ -569,21 +564,11 @@ impl Default for FactionAffiliation {
 }
 
 /// World-authored quest hooks attached to NPCs, props, and landmarks.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct QuestAnchor {
     pub quest_ids: Vec<String>,
     pub primary_prompt: String,
     pub stage_tags: Vec<String>,
-}
-
-impl Default for QuestAnchor {
-    fn default() -> Self {
-        Self {
-            quest_ids: Vec::new(),
-            primary_prompt: String::new(),
-            stage_tags: Vec::new(),
-        }
-    }
 }
 
 /// Encounter-table identity and tuning for authored creatures and regions.
@@ -857,23 +842,12 @@ impl Default for ResourceNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LootContainer {
     pub coins: u64,
     pub items: Vec<ItemStack>,
     pub owner: Option<EntityId>,
     pub claimed: bool,
-}
-
-impl Default for LootContainer {
-    fn default() -> Self {
-        Self {
-            coins: 0,
-            items: Vec::new(),
-            owner: None,
-            claimed: false,
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

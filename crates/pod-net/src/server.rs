@@ -70,17 +70,28 @@ struct ClientTransportCounters {
     session_resumes: u64,
     recovery_snapshots_sent: u64,
     recovery_delivery_failures: u64,
+    recovery_snapshot_bytes_sent: u64,
     inbound_messages: u64,
     outbound_messages: u64,
     inbound_bytes: u64,
     outbound_bytes: u64,
     action_batches_received: u64,
+    full_snapshots_sent: u64,
+    full_snapshot_bytes: u64,
+    max_full_snapshot_bytes: u64,
     full_snapshot_requests: u64,
     ping_requests: u64,
     state_deltas_sent: u64,
+    delta_messages_sent: u64,
+    delta_bytes_sent: u64,
+    max_delta_bytes: u64,
+    delta_entities_updated: u64,
+    delta_entities_destroyed: u64,
     event_batches_sent: u64,
     debug_documents_sent: u64,
     rejected_messages_sent: u64,
+    peak_pending_action_queue_depth: usize,
+    queue_pressure_events: u64,
 }
 
 #[derive(Clone)]
@@ -283,7 +294,7 @@ impl GameServer {
             if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
                 let transport = self.transport_summary().await;
                 info!(
-                    "[NET] tick={} clients={} resumes={} recoveries={}/fail={} in={} msgs/{} B out={} msgs/{} B queue={} pressure={} batches={} full_resync={} debug_docs={} timeouts={}",
+                    "[NET] tick={} clients={} resumes={} recoveries={}/fail={} in={} msgs/{} B out={} msgs/{} B snaps={}/{}B/{}Bmax deltas={}/{}B/{}Bmax churn=+{}/-{} queue={}/{} pressure={} events={} batches={} full_resync={} debug_docs={} timeouts={}",
                     transport.latest_tick,
                     transport.client_count,
                     transport.resumed_sessions,
@@ -293,8 +304,18 @@ impl GameServer {
                     transport.total_inbound_bytes,
                     transport.total_outbound_messages,
                     transport.total_outbound_bytes,
+                    transport.full_snapshots_sent,
+                    transport.total_full_snapshot_bytes,
+                    transport.max_full_snapshot_bytes,
+                    transport.delta_messages_sent,
+                    transport.total_delta_bytes,
+                    transport.max_delta_bytes,
+                    transport.total_delta_entities_updated,
+                    transport.total_delta_entities_destroyed,
                     transport.total_pending_action_queue_depth,
+                    transport.peak_pending_action_queue_depth,
                     transport.queue_pressure_client_count,
+                    transport.queue_pressure_events,
                     transport.action_batches_received,
                     transport.full_snapshot_requests,
                     transport.debug_documents_sent,
@@ -373,7 +394,7 @@ impl GameServer {
             }
         }
 
-        if (tick_result.tick + 1) % 60 == 0 {
+        if (tick_result.tick + 1).is_multiple_of(60) {
             for rollup in self.debug_rollups_for_tick(tick_result.tick) {
                 self.pending_debug_documents
                     .push(PendingDebugDocument::AgentTickRollup(rollup));
@@ -393,8 +414,7 @@ impl GameServer {
     fn queue_pressure_warn_depth(&self) -> usize {
         self.config
             .queue_pressure_warn_depth
-            .min(ACTION_QUEUE_MAX_DEPTH)
-            .max(1)
+            .clamp(1, ACTION_QUEUE_MAX_DEPTH)
     }
 
     fn is_queue_pressure_depth(&self, depth: usize) -> bool {
@@ -578,7 +598,7 @@ impl GameServer {
                         }
                     };
 
-                    if let Err(err) = ws_write.send(Message::Text(payload.into())).await {
+                    if let Err(err) = ws_write.send(Message::Text(payload)).await {
                         error!("Failed to send websocket outbound message: {}", err);
                         break;
                     }
@@ -749,30 +769,38 @@ impl GameServer {
                                         .unwrap_or(false)
                                     {
                                         stale_tick = true;
-                                    } else {
-                                        let available = ACTION_QUEUE_MAX_DEPTH
-                                            .saturating_sub(session.pending_actions.len());
-                                        if actions.len() > available {
-                                            overflow = true;
-                                        }
-                                        for action in actions.into_iter().take(available) {
-                                            session.pending_actions.push((tick, action));
-                                        }
-                                        queue_depth = session.pending_actions.len();
-                                        queue_pressure = queue_depth >= queue_pressure_warn_depth;
-                                        session.last_action_tick = Some(tick);
-                                    }
-                                }
-                            }
+                    } else {
+                        let available = ACTION_QUEUE_MAX_DEPTH
+                            .saturating_sub(session.pending_actions.len());
+                        if actions.len() > available {
+                            overflow = true;
                         }
-                        if queue_pressure || overflow {
-                            self.queue_pressure_events =
-                                self.queue_pressure_events.saturating_add(1);
-                            warn!(
-                                "Client {} pending action queue reached pressure depth {} (threshold {})",
-                                client_id.0,
-                                queue_depth,
-                                queue_pressure_warn_depth
+                        for action in actions.into_iter().take(available) {
+                            session.pending_actions.push((tick, action));
+                        }
+                        queue_depth = session.pending_actions.len();
+                        session.transport.peak_pending_action_queue_depth = session
+                            .transport
+                            .peak_pending_action_queue_depth
+                            .max(queue_depth);
+                        queue_pressure = queue_depth >= queue_pressure_warn_depth;
+                        session.last_action_tick = Some(tick);
+                    }
+                }
+            }
+        }
+        if queue_pressure || overflow {
+            self.queue_pressure_events =
+                self.queue_pressure_events.saturating_add(1);
+            if let Some(session) = self.clients.write().await.get_mut(&client_id) {
+                session.transport.queue_pressure_events =
+                    session.transport.queue_pressure_events.saturating_add(1);
+            }
+            warn!(
+                "Client {} pending action queue reached pressure depth {} (threshold {})",
+                client_id.0,
+                queue_depth,
+                queue_pressure_warn_depth
                             );
                         }
                         if unregistered {
@@ -928,7 +956,7 @@ impl GameServer {
             .any(|target| target.last_sent_snapshot.is_none());
         let mut any_state_update = !has_authoritative_baseline;
 
-        if has_debug_subscribers && self.tick % TRANSPORT_SUMMARY_INTERVAL_TICKS == 0 {
+        if has_debug_subscribers && self.tick.is_multiple_of(TRANSPORT_SUMMARY_INTERVAL_TICKS) {
             self.pending_debug_documents
                 .push(PendingDebugDocument::ShardTransportSummary(
                     self.transport_summary().await,
@@ -1087,7 +1115,11 @@ impl GameServer {
 
     async fn send_to_client(&self, client_id: ClientId, message: ServerMessage) -> bool {
         enum OutboundKind {
-            StateDelta,
+            FullSnapshot { recovery: bool },
+            Delta {
+                updated_entities: usize,
+                destroyed_entities: usize,
+            },
             EventBatch,
             DebugDocument,
             Rejected,
@@ -1095,13 +1127,30 @@ impl GameServer {
         }
 
         let outbound_kind = match &message {
-            ServerMessage::StateDelta { .. } => OutboundKind::StateDelta,
+            ServerMessage::Welcome { .. } => OutboundKind::FullSnapshot { recovery: false },
+            ServerMessage::StateDelta {
+                is_full_snapshot,
+                delta: _,
+                ..
+            } => {
+                if *is_full_snapshot {
+                    OutboundKind::FullSnapshot { recovery: false }
+                } else {
+                    let ServerMessage::StateDelta { delta, .. } = &message else {
+                        unreachable!("matched state delta above");
+                    };
+                    OutboundKind::Delta {
+                        updated_entities: delta.updated.len(),
+                        destroyed_entities: delta.destroyed.len(),
+                    }
+                }
+            }
             ServerMessage::EventBatch { .. } => OutboundKind::EventBatch,
             ServerMessage::TickTelemetry { .. } | ServerMessage::DebugDocument { .. } => {
                 OutboundKind::DebugDocument
             }
             ServerMessage::Rejected { .. } => OutboundKind::Rejected,
-            ServerMessage::Welcome { .. } | ServerMessage::Pong { .. } => OutboundKind::Other,
+            ServerMessage::Pong { .. } => OutboundKind::Other,
         };
         let encoded_size = message.encode().map(|payload| payload.len()).unwrap_or_default() as u64;
 
@@ -1120,9 +1169,56 @@ impl GameServer {
                 .saturating_add(encoded_size);
             session.transport.last_sent_tick = Some(self.tick);
             match outbound_kind {
-                OutboundKind::StateDelta => {
+                OutboundKind::FullSnapshot { recovery } => {
+                    session.transport.full_snapshots_sent = session
+                        .transport
+                        .full_snapshots_sent
+                        .saturating_add(1);
+                    session.transport.full_snapshot_bytes = session
+                        .transport
+                        .full_snapshot_bytes
+                        .saturating_add(encoded_size);
+                    session.transport.max_full_snapshot_bytes = session
+                        .transport
+                        .max_full_snapshot_bytes
+                        .max(encoded_size);
                     session.transport.state_deltas_sent =
                         session.transport.state_deltas_sent.saturating_add(1);
+                    if recovery {
+                        session.transport.recovery_snapshot_bytes_sent = session
+                            .transport
+                            .recovery_snapshot_bytes_sent
+                            .saturating_add(encoded_size);
+                    }
+                }
+                OutboundKind::Delta {
+                    updated_entities,
+                    destroyed_entities,
+                } => {
+                    session.transport.state_deltas_sent = session
+                        .transport
+                        .state_deltas_sent
+                        .saturating_add(1);
+                    session.transport.delta_messages_sent = session
+                        .transport
+                        .delta_messages_sent
+                        .saturating_add(1);
+                    session.transport.delta_bytes_sent = session
+                        .transport
+                        .delta_bytes_sent
+                        .saturating_add(encoded_size);
+                    session.transport.max_delta_bytes = session
+                        .transport
+                        .max_delta_bytes
+                        .max(encoded_size);
+                    session.transport.delta_entities_updated = session
+                        .transport
+                        .delta_entities_updated
+                        .saturating_add(updated_entities as u64);
+                    session.transport.delta_entities_destroyed = session
+                        .transport
+                        .delta_entities_destroyed
+                        .saturating_add(destroyed_entities as u64);
                 }
                 OutboundKind::EventBatch => {
                     session.transport.event_batches_sent =
@@ -1159,15 +1255,29 @@ impl GameServer {
                 ticks_since_last_seen: self.tick.saturating_sub(session.transport.last_seen_tick),
                 last_sent_tick: session.transport.last_sent_tick,
                 pending_action_queue_depth: session.pending_actions.len(),
+                peak_pending_action_queue_depth: session
+                    .transport
+                    .peak_pending_action_queue_depth
+                    .max(session.pending_actions.len()),
                 queue_pressure: self.is_queue_pressure_depth(session.pending_actions.len()),
+                queue_pressure_events: session.transport.queue_pressure_events,
                 inbound_messages: session.transport.inbound_messages,
                 outbound_messages: session.transport.outbound_messages,
                 inbound_bytes: session.transport.inbound_bytes,
                 outbound_bytes: session.transport.outbound_bytes,
                 action_batches_received: session.transport.action_batches_received,
+                full_snapshots_sent: session.transport.full_snapshots_sent,
+                full_snapshot_bytes: session.transport.full_snapshot_bytes,
+                max_full_snapshot_bytes: session.transport.max_full_snapshot_bytes,
+                recovery_snapshot_bytes_sent: session.transport.recovery_snapshot_bytes_sent,
                 full_snapshot_requests: session.transport.full_snapshot_requests,
                 ping_requests: session.transport.ping_requests,
                 state_deltas_sent: session.transport.state_deltas_sent,
+                delta_messages_sent: session.transport.delta_messages_sent,
+                delta_bytes_sent: session.transport.delta_bytes_sent,
+                max_delta_bytes: session.transport.max_delta_bytes,
+                delta_entities_updated: session.transport.delta_entities_updated,
+                delta_entities_destroyed: session.transport.delta_entities_destroyed,
                 event_batches_sent: session.transport.event_batches_sent,
                 debug_documents_sent: session.transport.debug_documents_sent,
                 rejected_messages_sent: session.transport.rejected_messages_sent,
@@ -1189,6 +1299,11 @@ impl GameServer {
                 .iter()
                 .map(|client| client.pending_action_queue_depth)
                 .sum(),
+            peak_pending_action_queue_depth: client_summaries
+                .iter()
+                .map(|client| client.peak_pending_action_queue_depth)
+                .max()
+                .unwrap_or_default(),
             queue_pressure_client_count: client_summaries
                 .iter()
                 .filter(|client| client.queue_pressure)
@@ -1210,6 +1325,23 @@ impl GameServer {
                 .iter()
                 .map(|client| client.action_batches_received)
                 .sum(),
+            full_snapshots_sent: client_summaries
+                .iter()
+                .map(|client| client.full_snapshots_sent)
+                .sum(),
+            total_full_snapshot_bytes: client_summaries
+                .iter()
+                .map(|client| client.full_snapshot_bytes)
+                .sum(),
+            max_full_snapshot_bytes: client_summaries
+                .iter()
+                .map(|client| client.max_full_snapshot_bytes)
+                .max()
+                .unwrap_or_default(),
+            total_recovery_snapshot_bytes: client_summaries
+                .iter()
+                .map(|client| client.recovery_snapshot_bytes_sent)
+                .sum(),
             full_snapshot_requests: client_summaries
                 .iter()
                 .map(|client| client.full_snapshot_requests)
@@ -1218,6 +1350,27 @@ impl GameServer {
             state_deltas_sent: client_summaries
                 .iter()
                 .map(|client| client.state_deltas_sent)
+                .sum(),
+            delta_messages_sent: client_summaries
+                .iter()
+                .map(|client| client.delta_messages_sent)
+                .sum(),
+            total_delta_bytes: client_summaries
+                .iter()
+                .map(|client| client.delta_bytes_sent)
+                .sum(),
+            max_delta_bytes: client_summaries
+                .iter()
+                .map(|client| client.max_delta_bytes)
+                .max()
+                .unwrap_or_default(),
+            total_delta_entities_updated: client_summaries
+                .iter()
+                .map(|client| client.delta_entities_updated)
+                .sum(),
+            total_delta_entities_destroyed: client_summaries
+                .iter()
+                .map(|client| client.delta_entities_destroyed)
                 .sum(),
             event_batches_sent: client_summaries
                 .iter()
@@ -1447,11 +1600,10 @@ impl GameServer {
             .unwrap_or((None, None));
         let authoritative_snapshot = WorldSnapshot::capture(&self.world);
         let snapshot = self.snapshot_for_client(&authoritative_snapshot, agent_id);
+        let message = self.build_full_snapshot_message(snapshot.clone(), acknowledged_action_tick);
+        let encoded_size = message.encode().map(|payload| payload.len()).unwrap_or_default() as u64;
         let sent = self
-            .send_to_client(
-                client_id,
-                self.build_full_snapshot_message(snapshot.clone(), acknowledged_action_tick),
-            )
+            .send_to_client(client_id, message)
             .await;
         if sent {
             self.recovery_snapshots_sent = self.recovery_snapshots_sent.saturating_add(1);
@@ -1461,6 +1613,10 @@ impl GameServer {
                     .transport
                     .recovery_snapshots_sent
                     .saturating_add(1);
+                session.transport.recovery_snapshot_bytes_sent = session
+                    .transport
+                    .recovery_snapshot_bytes_sent
+                    .saturating_add(encoded_size);
             }
         } else {
             self.recovery_delivery_failures = self.recovery_delivery_failures.saturating_add(1);
@@ -1998,6 +2154,8 @@ mod tests {
         assert_eq!(summary.total_inbound_messages, 1);
         assert!(summary.total_outbound_messages >= 1);
         assert_eq!(summary.ping_requests, 1);
+        assert_eq!(summary.full_snapshots_sent, 0);
+        assert_eq!(summary.delta_messages_sent, 0);
         assert_eq!(summary.clients[0].client_id, client_id.0.to_string());
     }
 
@@ -2041,10 +2199,12 @@ mod tests {
         assert_eq!(summary.recovery_snapshots_sent, 3);
         assert_eq!(summary.recovery_delivery_failures, 1);
         assert_eq!(summary.queue_pressure_client_count, 1);
+        assert_eq!(summary.peak_pending_action_queue_depth, 2);
         assert_eq!(summary.clients[0].session_resumes, 2);
         assert_eq!(summary.clients[0].recovery_snapshots_sent, 2);
         assert_eq!(summary.clients[0].recovery_delivery_failures, 1);
         assert_eq!(summary.clients[0].pending_action_queue_depth, 2);
+        assert_eq!(summary.clients[0].peak_pending_action_queue_depth, 2);
         assert!(summary.clients[0].queue_pressure);
     }
 
@@ -2077,10 +2237,75 @@ mod tests {
         let summary = server.transport_summary().await;
         assert_eq!(summary.recovery_snapshots_sent, 1);
         assert_eq!(summary.recovery_delivery_failures, 0);
+        assert_eq!(summary.full_snapshots_sent, 1);
+        assert!(summary.total_full_snapshot_bytes > 0);
+        assert!(summary.total_recovery_snapshot_bytes > 0);
+        assert!(summary.max_full_snapshot_bytes > 0);
         assert_eq!(summary.clients[0].recovery_snapshots_sent, 1);
+        assert!(summary.clients[0].full_snapshot_bytes > 0);
+        assert!(summary.clients[0].recovery_snapshot_bytes_sent > 0);
 
         let message = rx.recv().await.expect("recovery snapshot delivered");
         assert!(matches!(message, ServerMessage::StateDelta { is_full_snapshot: true, .. }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_connections_request_full_snapshot_tracks_recovery_transport_counters() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let mut rx = server.register_pending_client(client_id).await;
+        {
+            let mut clients = server.clients.write().await;
+            let session = clients.get_mut(&client_id).expect("registered session");
+            session.player_name = Some("recovering".into());
+            session.last_processed_action_tick = Some(4);
+        }
+
+        let request = ClientMessage::RequestFullSnapshot {
+            last_known_tick: Some(3),
+            last_known_digest: Some(123),
+        };
+        let encoded_len = request.encode().unwrap().len();
+        server
+            .inbound_tx
+            .send(InboundPacket::Message {
+                client_id,
+                encoded_len,
+                message: request,
+            })
+            .await
+            .expect("queue full snapshot request");
+
+        server.handle_connections().await.unwrap();
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.full_snapshot_requests, 1);
+        assert_eq!(summary.recovery_snapshots_sent, 1);
+        assert_eq!(summary.recovery_delivery_failures, 0);
+        assert_eq!(summary.full_snapshots_sent, 1);
+        assert!(summary.total_full_snapshot_bytes > 0);
+        assert!(summary.total_recovery_snapshot_bytes > 0);
+        assert_eq!(summary.clients[0].full_snapshot_requests, 1);
+        assert_eq!(summary.clients[0].inbound_messages, 1);
+        assert_eq!(summary.clients[0].recovery_snapshots_sent, 1);
+        assert_eq!(summary.clients[0].recovery_delivery_failures, 0);
+        assert!(summary.clients[0].full_snapshot_bytes > 0);
+        assert!(summary.clients[0].recovery_snapshot_bytes_sent > 0);
+
+        let message = rx.recv().await.expect("recovery snapshot delivered");
+        match message {
+            ServerMessage::StateDelta {
+                acknowledged_action_tick,
+                is_full_snapshot,
+                ..
+            } => {
+                assert!(is_full_snapshot);
+                assert_eq!(acknowledged_action_tick, Some(4));
+            }
+            other => panic!("unexpected recovery message: {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -2114,6 +2339,178 @@ mod tests {
         assert_eq!(summary.recovery_snapshots_sent, 0);
         assert_eq!(summary.recovery_delivery_failures, 1);
         assert_eq!(summary.clients[0].recovery_delivery_failures, 1);
+        assert_eq!(summary.total_recovery_snapshot_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_handle_connections_resume_connect_preserves_transport_counters() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new(config, world);
+        let previous_client_id = ClientId::new();
+        let mut previous_rx = server.register_pending_client(previous_client_id).await;
+
+        server
+            .attach_remote_agent(previous_client_id, "resume-player".into(), None)
+            .await
+            .unwrap();
+
+        let (reconnect_token, controlled_entity) = match previous_rx
+            .recv()
+            .await
+            .expect("initial welcome")
+        {
+            ServerMessage::Welcome {
+                reconnect_token,
+                controlled_entity,
+                ..
+            } => (reconnect_token, controlled_entity),
+            other => panic!("unexpected initial welcome: {other:?}"),
+        };
+
+        {
+            let mut clients = server.clients.write().await;
+            let session = clients
+                .get_mut(&previous_client_id)
+                .expect("previous session");
+            session.last_action_tick = Some(9);
+            session.last_processed_action_tick = Some(7);
+            session.debug_telemetry_enabled = true;
+            session.debug_focus_entity = controlled_entity;
+            session.transport.session_resumes = 3;
+            session.transport.recovery_snapshots_sent = 2;
+            session.transport.recovery_snapshot_bytes_sent = 333;
+            session.transport.full_snapshot_requests = 2;
+            session.transport.delta_messages_sent = 5;
+            session.transport.delta_bytes_sent = 512;
+            session.transport.max_delta_bytes = 256;
+            session.transport.delta_entities_updated = 11;
+            session.transport.delta_entities_destroyed = 2;
+            session.transport.queue_pressure_events = 4;
+            session.transport.peak_pending_action_queue_depth = 9;
+        }
+
+        let resumed_client_id = ClientId::new();
+        let mut resumed_rx = server.register_pending_client(resumed_client_id).await;
+        let resume_connect = ClientMessage::Connect {
+            player_name: "resume-player".into(),
+            reconnect_token: Some(reconnect_token),
+        };
+        let encoded_len = resume_connect.encode().unwrap().len();
+        server
+            .inbound_tx
+            .send(InboundPacket::Message {
+                client_id: resumed_client_id,
+                encoded_len,
+                message: resume_connect,
+            })
+            .await
+            .expect("queue resume connect");
+
+        server.handle_connections().await.unwrap();
+
+        assert!(!server.clients.read().await.contains_key(&previous_client_id));
+        assert!(!server.client_tx.read().await.contains_key(&previous_client_id));
+        assert_eq!(server.client_count().await, 1);
+        assert_eq!(server.resumed_sessions, 1);
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.resumed_sessions, 1);
+        assert_eq!(summary.client_count, 1);
+        assert_eq!(summary.clients[0].client_id, resumed_client_id.0.to_string());
+        assert_eq!(summary.clients[0].session_resumes, 4);
+        assert_eq!(summary.clients[0].recovery_snapshots_sent, 2);
+        assert_eq!(summary.clients[0].full_snapshot_requests, 2);
+        assert_eq!(summary.clients[0].delta_messages_sent, 5);
+        assert_eq!(summary.clients[0].delta_bytes_sent, 512);
+        assert_eq!(summary.clients[0].max_delta_bytes, 256);
+        assert_eq!(summary.clients[0].delta_entities_updated, 11);
+        assert_eq!(summary.clients[0].delta_entities_destroyed, 2);
+        assert_eq!(summary.clients[0].queue_pressure_events, 4);
+        assert_eq!(summary.clients[0].peak_pending_action_queue_depth, 9);
+        assert!(summary.clients[0].debug_telemetry_enabled);
+
+        let message = resumed_rx.recv().await.expect("resume welcome");
+        match message {
+            ServerMessage::Welcome {
+                reconnect_token: resumed_token,
+                controlled_entity: resumed_entity,
+                acknowledged_action_tick,
+                ..
+            } => {
+                assert_eq!(resumed_token, reconnect_token);
+                assert_eq!(resumed_entity, controlled_entity);
+                assert_eq!(acknowledged_action_tick, Some(7));
+            }
+            other => panic!("unexpected resume welcome: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_send_to_client_tracks_delta_bytes_and_entity_churn() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let server = GameServer::new(config, world);
+        let client_id = ClientId::new();
+        let (tx, _rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+
+        let sent = server
+            .send_to_client(
+                client_id,
+                ServerMessage::StateDelta {
+                    tick: 7,
+                    acknowledged_action_tick: None,
+                    authoritative_digest: 44,
+                    is_full_snapshot: false,
+                    delta: StateDelta {
+                        tick: 7,
+                        updated: vec![crate::snapshot::EntitySnapshot {
+                            id: 9,
+                            position: [2.0, 3.0].into(),
+                            velocity: [0.0, 0.0].into(),
+                            rotation: 0.0,
+                            health: None,
+                            max_health: None,
+                            movement_speed: None,
+                            label: Some("Delta".into()),
+                            metadata: Default::default(),
+                        }],
+                        destroyed: vec![3, 4],
+                        population: Default::default(),
+                    },
+                },
+            )
+            .await;
+
+        assert!(sent);
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.state_deltas_sent, 1);
+        assert_eq!(summary.delta_messages_sent, 1);
+        assert!(summary.total_delta_bytes > 0);
+        assert!(summary.max_delta_bytes > 0);
+        assert_eq!(summary.total_delta_entities_updated, 1);
+        assert_eq!(summary.total_delta_entities_destroyed, 2);
+        assert_eq!(summary.clients[0].delta_messages_sent, 1);
+        assert!(summary.clients[0].delta_bytes_sent > 0);
+        assert_eq!(summary.clients[0].delta_entities_updated, 1);
+        assert_eq!(summary.clients[0].delta_entities_destroyed, 2);
     }
 
     #[tokio::test]

@@ -1242,5 +1242,365 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cd apps/pod-web && bun run typecheck`
   - `git diff --check`
 
-**Last updated**: Iteration 122
-**Current focus**: Iteration 123 deeper shard-side recovery diagnostics beyond transport counters alone, then further reconnect/session replay polish on top of the synchronized transport layer
+### Iteration 123
+- [x] Added a standing competitive-operating layer for POD with `docs/competitive-matrix.md`, covering Unity, Unreal, Godot, Bevy, Nakama, Inworld, and Convai plus a monthly-delta protocol.
+- [x] Converted competitor failures into repo-level merge and roadmap gates in `docs/moat-gates.md`, then wired the moat question into `.github/pull_request_template.md` so every feature must answer whether it strengthens or dilutes the agent-world moat.
+- [x] Added a moat benchmark suite: `crates/pod-core/examples/moat_benchmark_suite.rs` emits replay, tick-budget, action-transparency, and normalized cost metrics, while `scripts/run_moat_benchmarks.ts` combines that core report with native/browser parity checks and creator-time tracking.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core --lib acceptance::`
+  - `cargo run -p pod-core --example moat_benchmark_suite -- --profile ci-smoke`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci.json`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `git diff --check`
+
+### Iteration 124
+- [x] Added `scripts/bootstrap_reference_world.ts` as the canonical first-world bootstrap for POD, giving the repo an official one-command path to the flagship local sandbox instead of leaving creator bootstrap implied.
+- [x] Added `docs/reference-bootstrap.md` and updated `README.md` / `docs/benchmark-suite.md` so creator-time measurement now points at an official starter flow instead of a manual placeholder.
+- [x] Updated `scripts/run_moat_benchmarks.ts` so creator-time defaults to measuring the canonical bootstrap automatically, with manual or alternate scripted overrides still available.
+- [x] Revalidated touched targets:
+  - `bun ./scripts/bootstrap_reference_world.ts --measure`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci.json`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --output artifacts/moat-benchmarks.json`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 125
+- [x] Added `docs/bootstrap-showcase-research.md`, a primary-source brief grounded in official three.js docs/examples, Khronos glTF guidance, and camera/NPR research papers instead of subjective visual opinions.
+- [x] Mapped those external sources back onto the real `apps/pod-web` files (`assets.ts`, `renderer.ts`, `landscape.ts`, `main.ts`, `sync-assets.mjs`) so the showcase plan is constrained by actual repo capabilities.
+- [x] Locked the next bootstrap direction: split a dedicated `bootstrap-showcase` route from the generic systems sandbox, then build around one authored opening vista, a finite asset kit, PMREM-backed lighting, selective toon/outline treatment, and a showcase camera state machine.
+- [x] Revalidated touched targets:
+  - `git diff --check`
+
+### Iteration 126
+- [x] Added a real `bootstrap-showcase` local-world preset in `apps/pod-web`, separate from the generic `verdant-hollow` systems sandbox, with dedicated route parsing via `?world=bootstrap-showcase`.
+- [x] Reframed the opening showcase composition around a shoreline vista in `local-world.ts`, updated the canonical bootstrap script/docs to land on that route, and exposed showcase identity through HUD/text-state/runtime inspection surfaces.
+- [x] Added a short camera-directed intro blend in `main.ts` that stages the first frame toward the landmark vista until the player takes control, then validated the showcase route through unit tests, full Bun tests, typecheck, build, and browser smoke coverage.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/direct-connect.test.ts ./src/local-world.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 127
+- [x] Split browser smoke responsibilities so the generic `local-sandbox` route remains the systems/input validation path while `bootstrap-showcase` gets its own route-specific visual regression coverage.
+- [x] Added fixed-time renderer/runtime flags plus paused local-runtime boot support so the showcase intro can be captured deterministically enough for CI screenshot diffing.
+- [x] Added a Playwright screenshot baseline for the showcase intro frame, folded it into `bun run test:smoke`, and documented the new browser validation split in `docs/benchmark-suite.md`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/runtime-flags.test.ts ./src/direct-connect.test.ts ./src/local-world.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bunx playwright test tests/showcase-visual.e2e.ts --update-snapshots`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 128
+- [x] Replaced the bootstrap showcase’s generic sandbox prop labels with an authored shoreline kit (`tideglass monolith`, `resonant shrine`, `windward pine`, `shore cairn`, `attunement pylon`) so the first loaded chunk has its own landmark vocabulary instead of reusing `glass spire` / `weathered boulder` naming.
+- [x] Added route-specific shoreline render profiles and tideglass atmosphere/region metadata, then refreshed the showcase screenshot baseline so the visual gate now locks the authored material language and `Resonant Strand` world summary instead of leaking `Verdant Hollow` shell copy.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/local-world.test.ts ./src/contracts.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bunx playwright test tests/showcase-visual.e2e.ts --update-snapshots`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 129
+- [x] Hardened the browser asset runtime for real creator assets by changing scene extraction from "first mesh only" to merged multi-mesh geometry, with a richest-primitive fallback when merge attributes do not line up.
+- [x] Switched the shipped browser mesh pipeline to emit binary `.glb` assets alongside source `.gltf` files, and moved the runtime manifest onto `.glb` so the default path exercises the lower-overhead binary loader instead of the JSON export path.
+- [x] Added binary-asset and multi-mesh coverage in `apps/pod-web/src/assets.test.ts`, updated `vite.config.ts` chunking for the new geometry utility dependency, and documented the `.glb` fast path in `apps/pod-web/README.md`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 130
+- [x] Extended `apps/pod-web` asset telemetry from simple residency counts to real load budgets by recording geometry/sprite load counts plus average/slowest durations in `src/assets.ts`, threading those metrics through `src/renderer.ts`, and exposing the averages in the compact HUD runtime line.
+- [x] Added deterministic coverage for the new timing aggregates in `apps/pod-web/src/assets.test.ts`, updated `apps/pod-web/src/hud.test.ts`, and documented the new HUD/runtime perf signal in `apps/pod-web/README.md`.
+- [x] Turned the `pod-assets` import lane into a real staged-artifact boundary: supported non-scene imports now materialize content-addressed copied artifacts, `.gltf` / `.glb` / `.jpeg` staging preserves the authored source extension, and `crates/pod-assets/examples/stage_import.rs` provides a concrete repo-level CLI entrypoint.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test ./src/assets.test.ts ./src/hud.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun test`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `cargo test -p pod-assets`
+  - `cargo check --workspace`
+  - `cargo check -p pod-assets --example stage_import`
+  - `cargo run -q -p pod-assets --example stage_import -- <temp-source> <temp-output>`
+  - `git diff --check`
+
+### Iteration 131
+- [x] Extended `pod-assets` source staging to cover SVG sprite sources in addition to the existing mesh/image formats, keeping the current pod-web sample inputs inside one import boundary instead of leaving textures out-of-band.
+- [x] Upgraded `crates/pod-assets/examples/stage_import.rs` into a batch-capable, machine-readable CLI with `--json` and `--output-root`, so downstream tooling can stage one asset set in a single process instead of shelling out per file.
+- [x] Wired `apps/pod-web/scripts/sync-assets.mjs` into that staged-import boundary: the sample sync now emits generated source assets under `apps/pod-web/artifacts/source-assets`, stages them through `pod-assets`, and writes `apps/pod-web/artifacts/staged-assets/pod-staged-asset-manifest.json` that maps staged source artifacts to shipped runtime paths.
+- [x] Updated browser/root docs so the staged-source, staged-import, and runtime-public directories are explicit instead of implied.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets`
+  - `cargo check -p pod-assets --example stage_import`
+  - `cargo run -q -p pod-assets --example stage_import -- --json --output-root <temp-output> <temp-source> [<temp-source> ...]`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 132
+- [x] Added a reusable runtime bundle model in `crates/pod-assets/src/lib.rs` (`RuntimeBundleSpec`, `RuntimeBundleManifest`, and `build_runtime_bundle_manifest`) so staged-to-runtime manifest assembly is library code instead of ad hoc JS object construction.
+- [x] Extended the `stage_import` example with `--bundle-spec` and `--base-dir`, allowing one batch staging call to return both staged import records and a resolved runtime bundle manifest.
+- [x] Simplified `apps/pod-web/scripts/sync-assets.mjs` so it now writes a bundle spec and delegates staged-manifest assembly to `pod-assets`; the script still generates sample source/runtime assets, but it no longer owns the staged-to-runtime manifest contract.
+- [x] Added deterministic Rust coverage for runtime bundle manifest assembly and revalidated the updated bundle path through the pod-web asset sync, build, and browser smoke flow.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets`
+  - `cargo check -p pod-assets --example stage_import`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 133
+- [x] Added `materialize_runtime_bundle_manifest` to `crates/pod-assets/src/lib.rs` so the runtime-public asset tree can be copied from staged imports using the resolved bundle manifest instead of app-local copy logic.
+- [x] Extended `crates/pod-assets/examples/stage_import.rs` with `--materialize-runtime`, allowing one batch staging call to both emit the bundle manifest and materialize the runtime-public asset outputs.
+- [x] Updated `apps/pod-web/scripts/sync-assets.mjs` so sample meshes are staged from generated `.glb` source files, human-inspectable `.gltf` files remain as sidecars in `artifacts/source-assets`, and runtime asset writes are delegated back to `pod-assets`.
+- [x] Added deterministic Rust coverage for runtime bundle materialization and revalidated the sample source-to-staged-to-runtime path through `sync:assets`, workspace check, browser build, and browser smoke.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets`
+  - `cargo check -p pod-assets --example stage_import`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 134
+- [x] Extended `crates/pod-assets/src/lib.rs` so `.ktx2` is a first-class staged source format and sprite runtime bundle specs can declare an optional compressed texture sidecar in addition to the primary runtime texture output.
+- [x] Hardened the runtime bundle contract with explicit validation for duplicate runtime output paths and non-`ktx2` compressed sprite variants, turning malformed bundle specs into deterministic errors instead of silent drift.
+- [x] Added deterministic Rust coverage for staged `ktx2` imports, optional compressed sprite variant records, duplicate-path rejection, and compressed variant materialization into the runtime-public asset tree.
+- [x] Stabilized the `pod-web` Playwright smoke harness by waiting for the actual `threejs` frame source and using the explicit gameplay-focus API instead of flaky canvas clicks.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets runtime_bundle -- --nocapture`
+  - `cargo test -p pod-assets ktx2 -- --nocapture`
+  - `cargo test -p pod-assets`
+  - `cargo check -p pod-assets --example stage_import`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 135
+- [x] Refactored `apps/pod-web/scripts/sync-assets.mjs` into a callable entrypoint so the script can expose pure helpers without re-running asset generation during tests.
+- [x] Added a deterministic projection step that reads `pod-assets` staged bundle manifests and writes any sprite `compressed_variant.runtime_path` into the shipped `pod-asset-manifest.json` as `ktx2Path`, removing the remaining app-local compressed-texture duplication.
+- [x] Added Bun coverage for the projection helper and documented the exact malformed-bundle failure modes now enforced across the shared pipeline and `pod-web` sync surface.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 136
+- [x] Extended `apps/pod-web/scripts/sync-assets.mjs` so the sample lane auto-detects authored `artifacts/source-assets/textures/<asset-id>.ktx2` sidecars and emits them into the shared runtime bundle spec as `compressed_variant` entries.
+- [x] Added deterministic Bun coverage proving the bundle spec now expresses optional compressed sprite sidecars with the expected `.ktx2` runtime output path.
+- [x] Updated the repo docs and session tracker so Phase 3 closes on an explicit browser contract: shipped `.glb` meshes plus optional precompressed sprite sidecars, with Phase 4 now owning the real compression/LOD rollout.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 137
+- [x] Extended `crates/pod-assets/src/lib.rs` so runtime bundle specs and manifests can express explicit mesh LOD variants alongside optional compressed sprite sidecars, and materialization now copies those LOD outputs into the runtime-public asset tree.
+- [x] Reworked `apps/pod-web/scripts/sync-assets.mjs` to generate real sample mesh LOD variants, project them into the shared bundle spec, emit a shipped manifest with `lods` plus runtime variant metadata, and write a deterministic `pod-runtime-budget-report.json`.
+- [x] Updated `apps/pod-web/src/assets.ts` so manifest-backed runtime loading selects explicit LOD or compressed sprite paths deterministically from the new metadata instead of relying on ad hoc path logic.
+- [x] Added deterministic Rust and Bun coverage for the new runtime-variant contract, including LOD bundle assembly/materialization, manifest parsing/path selection, and budget-report enforcement.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets runtime_bundle -- --nocapture`
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 138
+- [x] Extended `apps/pod-web/scripts/sync-assets.mjs` with a real KTX2 fixture generator using Three.js `KTX2Exporter`, so the sample lane now emits valid `.ktx2` ring sidecars from the same authored ring definitions as the SVG source assets.
+- [x] Updated the shipped sprite manifest/runtime budget projection so real `.ktx2` fixtures are surfaced as `ktx2Path` plus runtime variant metadata, while `preferredEncoding` follows the budget report instead of blindly preferring the KTX2 container.
+- [x] Added deterministic Bun coverage for KTX2 fixture generation and for the budget-driven sprite encoding choice, then regenerated the shipped asset bundle with real `.ktx2` outputs under `artifacts/source-assets/textures` and `public/assets/textures`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 139
+- [x] Replaced the transient KTX2-exported ring path in `apps/pod-web/scripts/sync-assets.mjs` with generated PNG sprite sources plus checked-in BasisU-authored `.ktx2` fixtures under `apps/pod-web/fixtures/textures`, so the sample lane no longer depends on runtime exporter output to exercise real supercompressed texture delivery.
+- [x] Updated the shipped sprite manifest and runtime budget report so `danger-ring`, `mist-ring`, and `selection-ring` now prefer `ktx2` by budget (`8068→1972`, `8892→1969`, `8211→1821`) instead of only exposing compressed variants structurally.
+- [x] Hardened the `pod-web` Playwright smoke harness by advancing local-sandbox movement deterministically through `window.advanceTime(...)` and by switching the showcase visual gate to a clipped paused-canvas snapshot, then refreshed the showcase baseline for the stable capture path.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 140
+- [x] Extended `crates/pod-assets/src/lib.rs` so the shared runtime bundle contract now carries optional meshopt-compressed mesh variants alongside base and LOD `.glb` outputs, validates them as staged glTF/GLB imports, and materializes them into the runtime-public asset tree.
+- [x] Added checked-in `.meshopt.glb` fixtures under `apps/pod-web/fixtures/meshes`, updated `apps/pod-web/scripts/sync-assets.mjs` to stage and project them, and taught the shipped manifest/runtime budget report to expose `meshoptLods`, `runtime.preferredEncoding`, and `runtime.compressedVariants` for meshes.
+- [x] Revalidated the shared mesh-compression fast path so shipped sample geometry now prefers meshopt where it wins by budget, including representative reductions like `adventurer-avatar 25612→4796`, `rift-beast 24264→4828`, and `glass-spire 7040→2672`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-assets runtime_bundle -- --nocapture`
+  - `cargo test -p pod-assets`
+  - `cd apps/pod-web && bun test scripts/sync-assets.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run sync:assets`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 141
+- [x] Started Phase 5 by extending `apps/pod-web/src/renderer.ts` with explicit runtime warmup and frame-stability counters, so both main-thread and worker routes now report `runtimePerf.warmupMs`, frame-budget metadata, stable/slow frame counts, stable-frame percentage, and slowest frame time through `window.podRender.getStats()`.
+- [x] Surfaced the new counters in the compact runtime HUD via `apps/pod-web/src/hud.ts`, then added deterministic coverage in `apps/pod-web/src/render-runtime.test.ts` and updated HUD expectations in `apps/pod-web/src/hud.test.ts`.
+- [x] Hardened `apps/pod-web/tests/worker-input.e2e.ts` so the browser smoke no longer just proves movement input; it now also asserts that both main-thread and worker routes publish non-empty warmup/frame-stability counters after the shipped meshopt + KTX2 manifest has warmed.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 142
+- [x] Extended `apps/pod-web/src/render-runtime.ts` with explicit main-thread submission counters, so both render routes now report `mainThreadPerf.warmupMs`, submission count, average submission time, and slowest submission time in addition to render-thread `runtimePerf`.
+- [x] Added explicit requested-vs-actual render-thread metadata plus concrete fallback reasons (`missing-worker-constructor`, `missing-offscreen-canvas`, `missing-canvas-transfer-control`) so worker fallback behavior is inspectable instead of only logged vaguely.
+- [x] Surfaced average main-thread submission cost in `apps/pod-web/src/hud.ts`, added deterministic coverage in `apps/pod-web/src/render-runtime.test.ts`, and hardened `apps/pod-web/tests/worker-input.e2e.ts` so smoke now asserts both `runtimePerf` and `mainThreadPerf` consistency on main-thread and worker routes.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 143
+- [x] Reworked the worker render runtime so the main thread only posts the newest pending frame while a worker render is in flight, instead of serializing and `postMessage()`-ing every intermediate frame.
+- [x] Added explicit `renderComplete` worker acknowledgements in `apps/pod-web/src/render-worker.ts`, which lets the main thread flush coalesced frame submissions only after the worker finishes the prior render.
+- [x] Removed the duplicate post-init `resize` sync on worker routes by carrying the initial surface metrics through worker initialization and suppressing unchanged surface re-posts.
+- [x] Added deterministic worker-runtime tests covering both hot-path fixes in `apps/pod-web/src/render-runtime.test.ts`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 144
+- [x] Extended `mainThreadPerf` with per-kind worker submission buckets (`frame`, `control`, `resize`) so the remaining hot-path cost is attributable instead of blended into one average.
+- [x] Recorded those buckets in `apps/pod-web/src/render-runtime.ts` for worker routes, while keeping main-thread routes on the same aggregate contract.
+- [x] Tightened `apps/pod-web/tests/worker-input.e2e.ts` so browser smoke now verifies that the per-kind counts reconcile with the aggregate submission count.
+- [x] Fixed the paused showcase visual gate by explicitly advancing `window.advanceTime(...)` until the route is ready, which removes the prior flake where the screenshot could capture either a staging frame or a partially booted vista.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 145
+- [x] Batched worker-route control traffic in `apps/pod-web/src/render-runtime.ts` so multiple world-event and telemetry updates collapse into a single `applyControlState` post per microtask instead of multiple standalone control messages.
+- [x] Preserved frame ordering by flushing any queued control state immediately before posting the next worker render frame, so telemetry/event state still lands ahead of the next rendered frame.
+- [x] Added worker-side support for the combined control message in `apps/pod-web/src/render-worker.ts` and deterministic coverage in `apps/pod-web/src/render-runtime.test.ts`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 146
+- [x] Turned the worker-route per-kind submission buckets into deterministic browser regression ceilings in `apps/pod-web/tests/worker-input.e2e.ts`.
+- [x] Locked the local-sandbox worker smoke route so `mainThreadPerf.byKind.control.submissionsCompleted` and `resize.submissionsCompleted` must remain `0`, while preserving the aggregate/bucket reconciliation assertions already in the suite.
+- [x] Revalidated the worker-route ceilings with targeted Playwright sampling plus the full serialized browser smoke suite.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 147
+- [x] Added explicit `runtimePerf` quality gates to `apps/pod-web/tests/worker-input.e2e.ts`, requiring the main-thread local-sandbox route to hold at least `90%` stable frames and the worker route to hold at least `50%` stable frames with more stable than slow frames.
+- [x] Kept the new browser gate deterministic by avoiding absolute warmup ceilings, which were too environment-sensitive for the serialized Playwright harness.
+- [x] Revalidated the stability gates with targeted worker-input Playwright coverage plus the focused Bun test set.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bunx playwright test tests/worker-input.e2e.ts --config=playwright.config.ts`
+  - `cd apps/pod-web && bun test src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+
+### Iteration 148
+- [x] Added `apps/pod-web/scripts/measure-render-routes.ts`, a reusable browser sampler that measures the main-thread and worker `local-sandbox` routes, emits `artifacts/render-route-measurements.json`, and records the same runtime/submission gates used by browser smoke.
+- [x] Added deterministic Bun coverage in `apps/pod-web/scripts/measure-render-routes.test.ts` for route projection, worker-relief comparison, and report assembly.
+- [x] Threaded the new browser report into `scripts/run_moat_benchmarks.ts` so the combined moat artifact now includes `browserRouteMeasurements` alongside the existing browser parity checks.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/measure-render-routes.test.ts src/render-runtime.test.ts src/hud.test.ts src/assets.test.ts`
+  - `cd apps/pod-web && bun run measure:render-routes`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `bun scripts/run_moat_benchmarks.ts --skip-creator`
+  - `git diff --check`
+
+### Iteration 149
+- [x] Extended the shard transport contract in `crates/pod-core/src/ops.rs` and `crates/pod-net/src/server.rs` with bounded snapshot/delta/recovery/queue metrics, including full-snapshot bytes, recovery snapshot bytes, delta bytes, delta entity churn, peak pending queue depth, and per-client queue-pressure incident counts.
+- [x] Threaded those metrics through the browser transport contract in `apps/pod-web/src/contracts.ts`, surfaced them in the debug-side transport summary via `apps/pod-web/src/hud.ts` and `apps/pod-web/src/main.ts`, and kept the gameplay HUD compact by leaving `formatConnectionSummary()` on the shorter route.
+- [x] Added deterministic coverage in `crates/pod-core/src/ops.rs`, `crates/pod-net/src/server.rs`, `apps/pod-web/src/contracts.test.ts`, `apps/pod-web/src/live-debug.test.ts`, and `apps/pod-web/src/hud.test.ts`, then revalidated the browser build and smoke path.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core shard_transport_summary_exports_to_toon -- --nocapture`
+  - `cargo test -p pod-net transport -- --nocapture`
+  - `cargo test -p pod-net test_send_to_client_tracks_delta_bytes_and_entity_churn -- --nocapture`
+  - `cargo test -p pod-net test_send_full_snapshot_tracks_recovery_delivery_success -- --nocapture`
+  - `cd apps/pod-web && bun test src/contracts.test.ts src/hud.test.ts src/live-debug.test.ts`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 150
+- [x] Added degraded-network regression coverage in `apps/pod-web/src/direct-connect.test.ts`, proving stale-authority backlog saturation forces reconnect instead of requesting local recovery when the heartbeat watchdog already considers the authority stale.
+- [x] Added deterministic `pod-net` server tests in `crates/pod-net/src/server.rs` that exercise `ClientMessage::RequestFullSnapshot` through `handle_connections()` and reconnect-token session resume, so recovery and resume paths now prove the new transport counters instead of only exposing them in steady-state summaries.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test src/direct-connect.test.ts`
+  - `cargo test -p pod-net handle_connections -- --nocapture`
+  - `cargo test -p pod-net transport -- --nocapture`
+  - `cargo check --workspace`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `git diff --check`
+
+### Iteration 151
+- [x] Expanded `docs/plugin-model.md` so the current plugin model names the actual contract surfaces integrators should depend on today (`pod-scene`, `pod-assets`, direct-connect transport, and browser debug consumers) instead of only listing broad subsystem categories.
+- [x] Clarified `docs/architecture.md` with a current extension seam map, explicitly separating exported crate boundaries from app composition roots like `apps/pod-web/src/main.ts`.
+- [x] Recorded the seam-level validation rule directly in the plugin docs so Phase 7 now requires crate-boundary proof before app-level smoke.
+- [x] Identified the concrete missing lifecycle hooks still forcing integrators into composition roots: server world/bootstrap, browser runtime bootstrap, editor panel registration, and transport policy injection.
+- [x] Defined near-term conventions for imports, runtime registration, and extension testing so extension authors have a stable discipline before a formal plugin SDK exists.
+- [x] Revalidated current extension paths against the clarified contract:
+  - `cargo test -p pod-scene test_scene_instantiation_tracks_component_provenance_across_prefab_and_scene_layers -- --nocapture`
+  - `cargo test -p pod-assets build_runtime_bundle_manifest_maps_staged_imports_to_runtime_paths -- --nocapture`
+  - `cargo test -p pod-net handle_connections -- --nocapture`
+  - `cd apps/pod-web && bun test src/direct-connect.test.ts src/contracts.test.ts src/hud.test.ts`
+
+**Last updated**: Iteration 151
+**Current focus**: Iteration 152 start Phase 8 by wiring asset and benchmark validation into routine local/CI command surfaces

@@ -17,6 +17,22 @@ The practical extension surfaces are:
 - New editor panels or authoring flows in `pod-editor`
 - New transport or persistence adapters in `pod-net` / `pod-stdb`
 
+## Current contract map
+
+The table below names the extension seams that are treated as the practical
+contract today. If a seam is not in this table, assume it is still internal.
+
+| Seam | Public surface to depend on | What you own | Validation path today |
+| --- | --- | --- | --- |
+| Authoring to runtime translation | `pod_scene::NativeComponentBinding`, `pod_scene::Prefab`, `pod_scene::PrefabRegistry`, `pod_scene::Scene`, `pod_scene::SceneManager` | New authored component schemas, prefab composition, scene instantiation rules | `cargo test -p pod-scene test_scene_instantiation_tracks_component_provenance_across_prefab_and_scene_layers -- --nocapture` |
+| Asset import to shipped runtime bundle | `pod_assets::import_asset`, `pod_assets::build_runtime_bundle_manifest`, `pod_assets::materialize_runtime_bundle_manifest` | New source imports, bundle specs, staged-to-runtime materialization rules | `cargo test -p pod-assets build_runtime_bundle_manifest_maps_staged_imports_to_runtime_paths -- --nocapture` |
+| Direct-connect debug transport | `pod_core::ShardTransportSummary`, `pod_net::protocol::{ClientMessage, ServerMessage}` | New typed debug documents, transport counters, recovery/resume behavior | `cargo test -p pod-net handle_connections -- --nocapture` |
+| Browser debug/runtime consumer | `apps/pod-web/src/contracts.ts`, `apps/pod-web/src/direct-connect.ts`, `apps/pod-web/src/hud.ts` | Runtime HUD/debug summaries and browser-side degraded-path handling | `cd apps/pod-web && bun test src/direct-connect.test.ts src/contracts.test.ts src/hud.test.ts` |
+
+These are the seams to extend if you need something now. They already have
+public types plus deterministic tests, which is the closest thing to a plugin
+SDK the repo currently ships.
+
 ## Stability tiers
 
 | Tier | Surface | Guidance |
@@ -70,6 +86,74 @@ Use this path when adding a new agent runtime or control surface:
 
 This is the most important plugin rule in the repo: no agent type gets special gameplay privileges.
 
+## Bootstrap ownership and non-contract surfaces
+
+The current repo has several important boot modules, but they should still be
+treated as composition roots rather than extension APIs.
+
+| Surface | Status | Guidance |
+| --- | --- | --- |
+| `apps/pod-web/src/main.ts` | Internal composition root | Do not add feature-specific hooks here if the behavior belongs in `pod-scene`, `pod-assets`, `pod-net`, or shared browser contracts. |
+| `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
+| `apps/pod-server/src/main.rs` | Internal composition root | Use it to wire modes together, not as the primary place to author gameplay or extension rules. |
+| Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
+
+This is the near-term rule: extend exported crate boundaries first, and only
+touch app bootstrap when you are composing existing subsystems together.
+
+## Missing lifecycle hooks that still block integrators
+
+The current seams are usable, but several hooks are still missing and force
+integrators back into app composition roots:
+
+- World/bootstrap hook:
+  `apps/pod-server/src/main.rs` still hardcodes map loading, initial NPC spawn,
+  and runtime-mode branching before the server starts. There is no typed
+  startup hook for “prepare world before authority begins.”
+- Browser mode/bootstrap hook:
+  `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
+  direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
+  one file. There is no formal registration phase for runtime features before
+  or after renderer startup.
+- Editor panel registry hook:
+  `crates/pod-editor/src/lib.rs` still uses a closed `EditorPanel` enum plus
+  hardcoded `render_*panel` dispatch, so new panels require editing the editor
+  shell instead of registering themselves.
+- Transport policy hook:
+  `apps/pod-server/src/main.rs` still hardcodes direct-connect snapshot
+  interval, inactivity timeout, and queue-pressure thresholds when composing
+  `pod_net::GameServer`. There is no reusable policy object or registration
+  hook for transport tuning.
+
+These are the next seams to formalize if POD wants real plugin/app lifecycle
+parity instead of “extend the crate, then patch the app root.”
+
+## Near-term conventions before a formal plugin SDK
+
+Until the lifecycle work lands, use these conventions consistently:
+
+### Imports
+
+- Depend on crate `lib.rs` re-exports when they exist.
+- Avoid deep module path coupling from app roots into crate internals unless the
+  crate does not export the seam yet.
+
+### Runtime registration
+
+- Put feature-specific setup in the owning crate, exposed as typed constructors,
+  config structs, or helper functions.
+- Keep app roots responsible only for composing already-exported subsystems
+  together.
+- If a feature still requires app-root edits, document that as a missing hook
+  instead of silently treating the app root as part of the stable API.
+
+### Extension testing
+
+- Prove the seam at the owning crate boundary first.
+- Add app-level/browser smoke only when the seam crosses a runtime boundary.
+- Keep validation commands next to the roadmap/session updates so future
+  integrators can reuse them verbatim.
+
 ## Recommended crate pattern
 
 For new platform subsystems, prefer a dedicated crate that depends on the existing runtime boundaries rather than modifying many crates at once.
@@ -114,5 +198,15 @@ Those items are already tracked in:
 - Keep new behavior deterministic unless the boundary explicitly allows otherwise.
 - Do not create agent-specific gameplay bypasses.
 - Prefer additive crate-level integrations over large cross-cutting edits.
+- Validate the seam you extend at the owning crate boundary before relying on app-level smoke.
+
+## Current extension testing rule
+
+Until a formal plugin SDK exists, every extension should prove itself in the
+crate that owns the seam:
+
+1. Add or update deterministic tests in the boundary crate first.
+2. Only use app-level/browser smoke to prove composition, not basic seam correctness.
+3. Record the validated seam in `SESSION.md` / `IMPLEMENTATION_PLAN.md` when it becomes part of the expected extension path.
 
 Following those rules now will make the eventual formal plugin API easier to adopt when it lands.

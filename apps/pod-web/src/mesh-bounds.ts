@@ -12,49 +12,49 @@ const DEFAULT_MESH_BOUNDS: PodThreeMeshBounds = {
 
 const SHIPPED_MESH_BOUNDS: Record<string, PodThreeMeshBounds> = {
   "adventurer-avatar": {
-    minY: -1.1,
-    maxY: 1.1,
-    footprintRadius: 0.45
+    minY: -0.44,
+    maxY: 0.5,
+    footprintRadius: 0.28
   },
   "adventurer-hero": {
-    minY: -1.205,
-    maxY: 1.205,
-    footprintRadius: 0.48
+    minY: -0.48,
+    maxY: 0.57,
+    footprintRadius: 0.32
   },
   "basalt-column": {
-    minY: -1.6,
-    maxY: 1.6,
-    footprintRadius: 0.9
+    minY: -0.85,
+    maxY: 0.82,
+    footprintRadius: 0.46
   },
   "canopy-tree": {
-    minY: -1.2,
-    maxY: 1.2,
-    footprintRadius: 1.1
+    minY: -0.88,
+    maxY: 0.86,
+    footprintRadius: 0.62
   },
   "glass-spire": {
-    minY: -1.5,
-    maxY: 1.5,
-    footprintRadius: 0.85
+    minY: -0.72,
+    maxY: 0.62,
+    footprintRadius: 0.45
   },
   "rift-beast": {
-    minY: -1.1,
-    maxY: 1.1,
-    footprintRadius: 1.1
+    minY: -0.52,
+    maxY: 0.34,
+    footprintRadius: 0.72
   },
   "spirit-companion": {
-    minY: -0.8081182837486267,
-    maxY: 0.8081182837486267,
-    footprintRadius: 0.81
+    minY: -0.2,
+    maxY: 0.34,
+    footprintRadius: 0.4
   },
   "supply-crate": {
-    minY: -0.55,
-    maxY: 0.55,
-    footprintRadius: 0.7
+    minY: -0.24,
+    maxY: 0.23,
+    footprintRadius: 0.39
   },
   "weathered-boulder": {
-    minY: -0.9341723322868347,
-    maxY: 0.9341723322868347,
-    footprintRadius: 0.94
+    minY: -0.44,
+    maxY: 0.4,
+    footprintRadius: 0.62
   }
 };
 

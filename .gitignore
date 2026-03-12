@@ -1,2 +1,4 @@
 /.cargo-target/
 /target/
+/artifacts/
+/apps/pod-web/test-results/

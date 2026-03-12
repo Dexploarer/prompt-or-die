@@ -13,13 +13,12 @@ use eframe::{App, Frame};
 use egui::{CentralPanel, Context, ProgressBar, SidePanel, TopBottomPanel, Ui};
 use pod_core::{
     decode_toon_document, decode_toon_value, encode_toon_document, Action, ActionLifecycleStage,
-    AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, ChunkPopulationState,
-    CreatureIdentity, CreatureTemperament, EncounterSpawnEntry, FactionReputationTier,
-    FactionReputationTrack, FocusedEntityDebugSummary, PopulationBreakdown, QuestStageDefinition,
-    QuestStateGraph, RegionEncounterTable, RegionPopulationState, ReplayFile,
-    ShardIncidentSummary, ShardTransportSummary, TelemetryConfig, TickTelemetryFrame,
-    ToolCallStatus, TrajectorySample, VersionedTickTelemetry, WorldChunkDefinition,
-    WorldPopulationState, WorldRegionDefinition,
+    AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, CreatureIdentity,
+    CreatureTemperament, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
+    FocusedEntityDebugSummary, PopulationBreakdown, QuestStageDefinition, QuestStateGraph,
+    RegionEncounterTable, ReplayFile, ShardIncidentSummary, ShardTransportSummary,
+    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    VersionedTickTelemetry, WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -4456,8 +4455,9 @@ mod tests {
     use pod_core::{
         decode_toon_value, Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId,
         AgentRole, AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace,
-        CreatureTemperament, EntityId, FocusedEntityDebugSummary, ReplayFile, ReplayHeader,
-        ShardIncidentSummary, TickTelemetryFrame, ToolCallStatus,
+        ChunkPopulationState, CreatureTemperament, EntityId, FocusedEntityDebugSummary,
+        RegionPopulationState, ReplayFile, ReplayHeader, ShardIncidentSummary,
+        TickTelemetryFrame, ToolCallStatus,
     };
 
     fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {

@@ -926,7 +926,6 @@ mod tests {
     use super::*;
     use glam::Vec2;
     use pod_core::observation::{Observation, SelfState, VisibleEntity};
-    use std::time::Duration;
 
     fn make_obs_with_hostile(health_pct: f32, hostile_distance: Option<f32>) -> Observation {
         let mut obs = Observation::default();
@@ -951,6 +950,23 @@ mod tests {
             });
         }
         obs
+    }
+
+    fn wait_for_strategy_completion(agent: &mut HybridAgent) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if let Ok(result) = agent.strategy_rx.try_recv() {
+                agent.strategy_in_flight = false;
+                agent.recent_tool_calls.extend(result.tool_calls);
+                let directive = result.directive.clone();
+                agent.apply_directive_to_blackboard(&directive);
+                agent.current_directive = result.directive;
+                return;
+            }
+            std::thread::yield_now();
+        }
+
+        panic!("timed out waiting for strategy request to complete");
     }
 
     #[test]
@@ -1143,8 +1159,7 @@ mod tests {
             ..Default::default()
         });
         agent.observe(make_obs_with_hostile(1.0, Some(80.0)));
-        std::thread::sleep(Duration::from_millis(50));
-        agent.observe(make_obs_with_hostile(1.0, Some(80.0)));
+        wait_for_strategy_completion(&mut agent);
 
         let tool_calls = agent.drain_tool_calls();
         assert_eq!(tool_calls.len(), 1);

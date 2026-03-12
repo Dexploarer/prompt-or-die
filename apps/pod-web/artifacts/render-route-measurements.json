@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "generatedAtUnixMs": 1773296405203,
+  "baseUrl": "http://127.0.0.1:4178",
+  "routes": [
+    {
+      "label": "main",
+      "url": "http://127.0.0.1:4178/?world=local-sandbox&backend=webgl2",
+      "renderThread": "main",
+      "requestedRenderThread": "auto",
+      "renderThreadFallbackReason": null,
+      "loadsCompleted": 15,
+      "pendingAssets": 0,
+      "mainThreadPerf": {
+        "warmupMs": 5397.6,
+        "submissionsCompleted": 78,
+        "averageSubmissionMs": 70.11,
+        "slowestSubmissionMs": 5373.1,
+        "byKind": {
+          "frame": {
+            "submissionsCompleted": 78,
+            "averageSubmissionMs": 70.11,
+            "slowestSubmissionMs": 5373.1
+          },
+          "control": {
+            "submissionsCompleted": 0,
+            "averageSubmissionMs": 0,
+            "slowestSubmissionMs": 0
+          },
+          "resize": {
+            "submissionsCompleted": 0,
+            "averageSubmissionMs": 0,
+            "slowestSubmissionMs": 0
+          }
+        }
+      },
+      "runtimePerf": {
+        "warmupMs": 11383.7,
+        "frameBudgetMs": 16.67,
+        "framesRendered": 78,
+        "stableFrames": 77,
+        "slowFrames": 1,
+        "stableFramePercent": 98.7,
+        "slowestFrameMs": 1806.3
+      },
+      "gates": {
+        "stableFramePercentFloor": 90,
+        "stableFramePercentFloorPassed": true,
+        "controlSubmissionCeiling": null,
+        "controlSubmissionCeilingPassed": null,
+        "resizeSubmissionCeiling": null,
+        "resizeSubmissionCeilingPassed": null
+      }
+    },
+    {
+      "label": "worker",
+      "url": "http://127.0.0.1:4178/?world=local-sandbox&renderThread=worker&backend=webgl2",
+      "renderThread": "worker",
+      "requestedRenderThread": "worker",
+      "renderThreadFallbackReason": null,
+      "loadsCompleted": 14,
+      "pendingAssets": 0,
+      "mainThreadPerf": {
+        "warmupMs": 23.1,
+        "submissionsCompleted": 6,
+        "averageSubmissionMs": 0.03,
+        "slowestSubmissionMs": 0.1,
+        "byKind": {
+          "frame": {
+            "submissionsCompleted": 6,
+            "averageSubmissionMs": 0.03,
+            "slowestSubmissionMs": 0.1
+          },
+          "control": {
+            "submissionsCompleted": 0,
+            "averageSubmissionMs": 0,
+            "slowestSubmissionMs": 0
+          },
+          "resize": {
+            "submissionsCompleted": 0,
+            "averageSubmissionMs": 0,
+            "slowestSubmissionMs": 0
+          }
+        }
+      },
+      "runtimePerf": {
+        "warmupMs": 21265.6,
+        "frameBudgetMs": 16.67,
+        "framesRendered": 5,
+        "stableFrames": 4,
+        "slowFrames": 1,
+        "stableFramePercent": 80,
+        "slowestFrameMs": 8745.9
+      },
+      "gates": {
+        "stableFramePercentFloor": 50,
+        "stableFramePercentFloorPassed": true,
+        "controlSubmissionCeiling": 0,
+        "controlSubmissionCeilingPassed": true,
+        "resizeSubmissionCeiling": 0,
+        "resizeSubmissionCeilingPassed": true
+      }
+    }
+  ],
+  "comparison": {
+    "mainFrameSubmissions": 78,
+    "workerFrameSubmissions": 6,
+    "frameSubmissionReductionPercent": 92.3,
+    "mainStableFramePercent": 98.7,
+    "workerStableFramePercent": 80,
+    "stableFramePercentDelta": -18.7,
+    "mainSlowFrames": 1,
+    "workerSlowFrames": 1,
+    "slowFrameDelta": 0,
+    "workerGatesPassed": true
+  }
+}

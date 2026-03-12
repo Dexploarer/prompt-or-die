@@ -10,7 +10,7 @@ import type {
 import {
   summarizeAgentTickRollup,
   summarizeAgentToolCallEvent
-} from "./contracts";
+} from "./live-debug-summary";
 
 export interface LiveDebugState {
   latestToolEventSummary: ToolCallEventSummary | null;

@@ -2,7 +2,6 @@
 //!
 //! These tests intentionally use only the crate's exported API so the
 //! integration suite stays aligned with downstream usage.
-#![cfg(feature = "agent_sdk_integration_tests")]
 
 use glam::Vec2;
 use pod_agents::{

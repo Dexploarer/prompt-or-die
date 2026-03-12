@@ -656,6 +656,19 @@ mod tests {
         obs
     }
 
+    fn wait_for_request_completion(agent: &mut LlmAgent) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            agent.drain_results();
+            if !agent.request_in_flight {
+                return;
+            }
+            std::thread::yield_now();
+        }
+
+        panic!("timed out waiting for LLM request to complete");
+    }
+
     struct CapturingProvider {
         captured: Arc<Mutex<Option<CompletionRequest>>>,
         response: String,
@@ -720,7 +733,7 @@ reasoning: Default smoke test"#
 
         let obs = make_obs(1, false);
         agent.observe(obs);
-        std::thread::sleep(Duration::from_millis(50));
+        wait_for_request_completion(&mut agent);
 
         let request = captured
             .lock()
@@ -794,9 +807,7 @@ reasoning: Default smoke test"#
 
         let obs = make_obs(1, false);
         agent.observe(obs);
-
-        // Give the background thread a moment to complete
-        std::thread::sleep(Duration::from_millis(50));
+        wait_for_request_completion(&mut agent);
 
         let actions = agent.decide();
         // Should have received the mock response
@@ -897,7 +908,7 @@ reasoning: Default smoke test"#
         });
         let obs = make_obs(5, true);
         agent.observe(obs);
-        std::thread::sleep(Duration::from_millis(50));
+        wait_for_request_completion(&mut agent);
         let _ = agent.decide();
 
         let tool_calls = agent.drain_tool_calls();
@@ -923,7 +934,7 @@ reasoning: Default smoke test"#
         );
 
         agent.observe(make_obs(6, false));
-        std::thread::sleep(Duration::from_millis(50));
+        wait_for_request_completion(&mut agent);
         let _ = agent.decide();
 
         let tool_calls = agent.drain_tool_calls();

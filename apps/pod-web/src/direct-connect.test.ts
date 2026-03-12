@@ -87,6 +87,17 @@ describe("direct-connect runtime config", () => {
     expect(state.frameSourceLabel).toBe("bootstrapping local sandbox");
   });
 
+  test("describes bootstrap showcase boot state from local world query params", () => {
+    const state = initialHudStateFromLocation({
+      search: "?world=bootstrap-showcase"
+    } as Location);
+
+    expect(state.feedback).toBe("Staging bootstrap showcase");
+    expect(state.connectionBadge).toBe("showcase route booting");
+    expect(state.worldLabel).toBe("booting Resonant Shore");
+    expect(state.frameSourceLabel).toBe("bootstrapping showcase shard");
+  });
+
   test("describes direct-connect boot state from query params", () => {
     const state = initialHudStateFromLocation({
       search: "?server=127.0.0.1:7778"
@@ -429,12 +440,22 @@ describe("direct-connect runtime config", () => {
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
     MockWebSocket.instances = [];
     const originalDateNow = Date.now;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
 
     const statuses: string[] = [];
+    const scheduledReconnects: Array<() => void> = [];
 
     try {
       let now = 20_000;
       Date.now = () => now;
+      globalThis.setTimeout = ((handler: TimerHandler) => {
+        if (typeof handler === "function") {
+          scheduledReconnects.push(handler as () => void);
+        }
+        return scheduledReconnects.length as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
       const client = new PodWebDirectConnectClient(
         {
           url: "ws://127.0.0.1:7778",
@@ -491,7 +512,114 @@ describe("direct-connect runtime config", () => {
         true
       );
       expect(socket?.readyState).toBe(MockWebSocket.CLOSED);
+      expect(scheduledReconnects).toHaveLength(1);
+
+      scheduledReconnects[0]?.();
+      const resumedSocket = MockWebSocket.instances[1];
+      resumedSocket?.open();
+
+      expect(JSON.parse(resumedSocket?.sent[0] ?? "null")).toEqual({
+        Connect: {
+          player_name: "BrowserPilot",
+          reconnect_token: "resume-1"
+        }
+      });
     } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      Date.now = originalDateNow;
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test("forces reconnect instead of requesting recovery when backlog saturates under stale authority", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    MockWebSocket.instances = [];
+    const originalDateNow = Date.now;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+
+    const statuses: string[] = [];
+    const scheduledReconnects: Array<() => void> = [];
+
+    try {
+      let now = 30_000;
+      Date.now = () => now;
+      globalThis.setTimeout = ((handler: TimerHandler) => {
+        if (typeof handler === "function") {
+          scheduledReconnects.push(handler as () => void);
+        }
+        return scheduledReconnects.length as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
+
+      const client = new PodWebDirectConnectClient(
+        {
+          url: "ws://127.0.0.1:7778",
+          playerName: "BrowserPilot",
+          debugTelemetry: false,
+          reconnectDelayMs: 1000,
+          pingIntervalMs: 5000,
+          heartbeatTimeoutMs: 4000,
+          maxPendingActionBatches: 1
+        },
+        {
+          onFrame() {},
+          onEventBatch() {},
+          onDebugDocument() {},
+          onActionState() {},
+          onStatus(status) {
+            statuses.push(`${status.phase}:${status.detail}`);
+          }
+        }
+      );
+
+      client.connect();
+      const socket = MockWebSocket.instances[0];
+      socket?.open();
+      socket?.emitMessage(
+        JSON.stringify({
+          Welcome: {
+            client_id: "client-1",
+            reconnect_token: "resume-1",
+            tick: 18,
+            controlled_entity: 12,
+            authoritative_digest: 999,
+            snapshot: {
+              tick: 18,
+              entities: [
+                {
+                  id: 12,
+                  position: [10, 10],
+                  velocity: [0, 0],
+                  rotation: 0,
+                  label: "Hero"
+                }
+              ]
+            }
+          }
+        })
+      );
+
+      expect(client.submitActions([{ kind: "move", direction: [1, 0] }])).toBe(true);
+      now = 32_100;
+      expect(client.submitActions([{ kind: "move", direction: [0, 1] }])).toBe(false);
+
+      expect(client.currentStatus().phase).toBe("reconnecting");
+      expect(
+        statuses.some((status) =>
+          status.includes("Action backlog saturated (1) under stale authority")
+        )
+      ).toBe(true);
+      expect(socket?.readyState).toBe(MockWebSocket.CLOSED);
+      expect(
+        socket?.sent.some((payload) => payload.includes("RequestFullSnapshot"))
+      ).toBe(false);
+      expect(scheduledReconnects).toHaveLength(1);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
       Date.now = originalDateNow;
       globalThis.WebSocket = originalWebSocket;
     }

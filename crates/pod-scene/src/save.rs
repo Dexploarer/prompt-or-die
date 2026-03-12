@@ -1,3 +1,4 @@
+use crate::json::{stabilize_json_value, to_stable_json_string};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -71,7 +72,7 @@ impl SaveData {
 
     /// Serialize to JSON
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
+        to_stable_json_string(self)
     }
 
     /// Deserialize from JSON
@@ -81,6 +82,8 @@ impl SaveData {
 
     /// Serialize to binary
     pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
+        let mut world_state_json = self.world_state.clone();
+        stabilize_json_value(&mut world_state_json);
         let binary = SaveDataBinary {
             id: self.id,
             name: self.name.clone(),
@@ -89,7 +92,7 @@ impl SaveData {
             version: self.version,
             playtime_seconds: self.playtime_seconds,
             metadata: self.metadata.clone(),
-            world_state_json: self.world_state.to_string(),
+            world_state_json: world_state_json.to_string(),
             scene_name: self.scene_name.clone(),
         };
         bincode::serialize(&binary)
@@ -118,7 +121,7 @@ impl SaveData {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default();
-        format!("{:?}", time)
+        format!("{:020}.{:09}", time.as_secs(), time.subsec_nanos())
     }
 }
 
@@ -169,7 +172,12 @@ impl SaveManager {
 
     /// Save game state to file
     pub fn save(&self, save_data: &SaveData) -> Result<PathBuf, String> {
-        let filename = format!("{}_{}.{}", save_data.name.replace(' ', "_"), save_data.id, self.save_extension);
+        let filename = format!(
+            "{}_{}.{}",
+            sanitize_save_stem(&save_data.name),
+            save_data.id,
+            self.save_extension
+        );
         let path = self.save_directory.join(&filename);
 
         let content = if self.use_binary {
@@ -192,6 +200,7 @@ impl SaveManager {
 
     /// Load a save file by filename
     pub fn load(&self, filename: &str) -> Result<SaveData, String> {
+        let filename = self.validate_filename(filename)?;
         let path = self.save_directory.join(filename);
 
         let content =
@@ -257,6 +266,7 @@ impl SaveManager {
 
     /// Delete a save file
     pub fn delete(&self, filename: &str) -> Result<(), String> {
+        let filename = self.validate_filename(filename)?;
         let path = self.save_directory.join(filename);
         std::fs::remove_file(&path)
             .map_err(|e| format!("Failed to delete save file: {}", e))?;
@@ -266,7 +276,9 @@ impl SaveManager {
 
     /// Check if a save file exists
     pub fn exists(&self, filename: &str) -> bool {
-        self.save_directory.join(filename).exists()
+        self.validate_filename(filename)
+            .map(|filename| self.save_directory.join(filename).exists())
+            .unwrap_or(false)
     }
 
     /// Get the save directory
@@ -299,6 +311,43 @@ impl SaveManager {
             oldest_save: saves.last().map(|s| s.timestamp.clone()),
             newest_save: saves.first().map(|s| s.timestamp.clone()),
         })
+    }
+
+    fn validate_filename<'a>(&self, filename: &'a str) -> Result<&'a str, String> {
+        let path = Path::new(filename);
+        let mut components = path.components();
+        match (components.next(), components.next()) {
+            (Some(std::path::Component::Normal(_)), None) => {}
+            _ => {
+                return Err("Save filename must not contain path separators or traversal segments"
+                    .to_string())
+            }
+        }
+
+        if path.extension().and_then(|ext| ext.to_str()) != Some(self.save_extension.as_str()) {
+            return Err(format!(
+                "Save filename must use .{} extension",
+                self.save_extension
+            ));
+        }
+
+        Ok(filename)
+    }
+}
+
+fn sanitize_save_stem(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+            _ => '_',
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches('_');
+    if trimmed.is_empty() {
+        "save".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -364,8 +413,10 @@ mod tests {
         let path = manager.save(&save).unwrap();
         assert!(path.exists());
 
-        let _loaded = manager.load("TestSave_*.json").ok();
-        // Note: filename format includes UUID, so we'd need to list to get exact name
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        let loaded = manager.load(filename).unwrap();
+        assert_eq!(loaded.name, "TestSave");
+        assert_eq!(loaded.scene_name, "TestScene");
     }
 
     #[test]
@@ -405,5 +456,48 @@ mod tests {
         assert_eq!(metadata.name, "Save");
         assert_eq!(metadata.playtime_seconds, 1000);
         assert_eq!(metadata.filename, "save.json");
+    }
+
+    #[test]
+    fn test_save_manager_sanitizes_save_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveManager::new(temp_dir.path(), false);
+
+        let save = SaveData::new("../unsafe name", "Scene");
+        let path = manager.save(&save).unwrap();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+
+        assert_eq!(path.parent(), Some(temp_dir.path()));
+        assert!(!filename.contains(".."));
+        assert!(!filename.contains('/'));
+        assert!(filename.starts_with("unsafe_name_"));
+    }
+
+    #[test]
+    fn test_save_manager_rejects_path_traversal_filenames() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveManager::new(temp_dir.path(), false);
+
+        assert!(manager.load("../escape.json").is_err());
+        assert!(manager.delete("../escape.json").is_err());
+        assert!(!manager.exists("../escape.json"));
+    }
+
+    #[test]
+    fn test_save_manager_lists_newest_timestamp_first() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveManager::new(temp_dir.path(), false);
+
+        let mut older = SaveData::new("Older", "Scene");
+        older.timestamp = "00000000000000000009.000000000".to_string();
+        let mut newer = SaveData::new("Newer", "Scene");
+        newer.timestamp = "00000000000000000010.000000000".to_string();
+
+        manager.save(&older).unwrap();
+        manager.save(&newer).unwrap();
+
+        let saves = manager.list_saves().unwrap();
+        assert_eq!(saves[0].name, "Newer");
+        assert_eq!(saves[1].name, "Older");
     }
 }

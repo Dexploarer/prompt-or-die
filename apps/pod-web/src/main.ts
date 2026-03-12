@@ -1,76 +1,198 @@
 import {
+  type AuthoritativeWorldFrameOptions,
   type BrowserAction,
-  buildAuthoritativeWorldFrame,
   type CameraState,
   type NetworkEventBatch,
   type NetworkGameEvent,
   type NetworkEntitySnapshot,
   type NetworkWorldSnapshot,
-  parseLiveDebugDocument,
-  parseRenderFrame,
-  parseReplayFile,
-  parseShardIncidentSummary,
-  parseThreeJsWebGpuFrame,
-  parseTickTelemetryEnvelope,
-  summarizeReplayFile,
-  withCombatFocusMarkers,
-  withInteractionMarkers,
-  withWorldEventMarkers,
   type ThreeJsWebGpuFrame,
   type ReplaySummary,
   type ShardIncidentSummary
 } from "./contracts";
 import {
-  describeTargetAffordances,
-  formatTargetSummary
-} from "./affordances";
-import {
   cameraDirectionInput,
   cameraRelativeMovementDirection,
   focusGameplaySurface,
-  isGameplayKeyCode,
-  pickWorldGroundPoint,
-  resolvePointerTarget
-} from "./controls";
+  isGameplayKeyCode
+} from "./controls-core";
+import {
+  type DirectConnectActionState,
+  type DirectConnectStatus,
+  type PodWebDirectConnectClient
+} from "./direct-connect";
+import type { PodThreeRenderRuntime } from "./render-runtime";
+import type { PodWebLocalWorld } from "./local-world";
+import { renderGameToText } from "./render-game-text";
 import {
   initialHudStateFromLocation,
-  PodWebDirectConnectClient,
-  type DirectConnectActionState,
-  runtimeConfigFromLocation,
-  type DirectConnectStatus
-} from "./direct-connect";
-import { PodWebLocalWorld, renderGameToText } from "./local-world";
-import { createDemoFrame } from "./sample-frame";
-import { createPodRenderRuntime, type PodThreeRenderRuntime } from "./render-runtime";
+  localWorldPresentationFromLocation,
+  runtimeConfigFromLocation
+} from "./runtime-config";
 import {
-  applyTickTelemetry,
-  createTelemetryOverlayState,
-  cycleTelemetrySelection,
-  resetTelemetry,
-  selectedTrajectorySamples,
-  setTelemetryEnabled,
-  telemetryStats
+  resolveFixedTimeMs,
+  shouldPauseInteractiveRuntime
+} from "./runtime-flags";
+import { entityUsesSwimSurface, surfaceModeFromEntity } from "./surface-mode";
+import type { LiveDebugState } from "./live-debug";
+import type {
+  PodTelemetryOverlayState,
+  PodTelemetryStats
 } from "./telemetry";
-import {
-  buildPopulationHeatmapModel,
-  formatPopulationHeatmapLegend,
-  renderPopulationHeatmap
-} from "./population-heatmap";
-import { computeCombatCameraPressure } from "./frame-plan";
-import {
-  compactRuntimeStats,
-  formatConnectionSummary,
-  highlightEventFeedback
-} from "./hud";
-import { sampleLandscapeSurface } from "./landscape";
-import {
-  createLiveDebugState,
-  recordLiveDebugDocument,
-  resetLiveDebugState,
-  selectedFocusedDebugSummary,
-  selectedTickRollupSummary,
-  selectedToolEventSummary
-} from "./live-debug";
+
+type ContractsModule = typeof import("./contracts");
+type FramePlanModule = typeof import("./frame-plan");
+type DemoFrameFactory = typeof import("./sample-frame")["createDemoFrame"];
+type GroundPickingModule = typeof import("./ground-picking");
+type HudRuntimeModule = typeof import("./hud-runtime");
+type DebugRuntimeModule = typeof import("./debug-runtime");
+
+let contractsModulePromise: Promise<ContractsModule> | null = null;
+let framePlanModulePromise: Promise<FramePlanModule> | null = null;
+let demoFrameFactoryPromise: Promise<DemoFrameFactory> | null = null;
+let groundPickingModulePromise: Promise<GroundPickingModule> | null = null;
+let hudRuntimeModulePromise: Promise<HudRuntimeModule> | null = null;
+let hudRuntimeModule: HudRuntimeModule | null = null;
+let debugRuntimeModulePromise: Promise<DebugRuntimeModule> | null = null;
+let debugRuntimeModule: DebugRuntimeModule | null = null;
+
+function loadContractsModule(): Promise<ContractsModule> {
+  if (!contractsModulePromise) {
+    contractsModulePromise = import("./contracts");
+  }
+  return contractsModulePromise;
+}
+
+function loadFramePlanModule(): Promise<FramePlanModule> {
+  if (!framePlanModulePromise) {
+    framePlanModulePromise = import("./frame-plan");
+  }
+  return framePlanModulePromise;
+}
+
+async function loadDemoFrameFactory(): Promise<DemoFrameFactory> {
+  if (!demoFrameFactoryPromise) {
+    demoFrameFactoryPromise = import("./sample-frame").then(
+      (module) => module.createDemoFrame
+    );
+  }
+  return demoFrameFactoryPromise;
+}
+
+async function loadGroundPickingModule(): Promise<GroundPickingModule> {
+  if (!groundPickingModulePromise) {
+    groundPickingModulePromise = import("./ground-picking");
+  }
+  return groundPickingModulePromise;
+}
+
+async function loadHudRuntimeModule(): Promise<HudRuntimeModule> {
+  if (!hudRuntimeModulePromise) {
+    hudRuntimeModulePromise = import("./hud-runtime").then((module) => {
+      hudRuntimeModule = module;
+      return module;
+    });
+  }
+  return hudRuntimeModulePromise;
+}
+
+function loadedHudRuntimeModule(): HudRuntimeModule | null {
+  if (hudRuntimeModule) {
+    return hudRuntimeModule;
+  }
+  void loadHudRuntimeModule();
+  return null;
+}
+
+async function loadDebugRuntimeModule(): Promise<DebugRuntimeModule> {
+  if (!debugRuntimeModulePromise) {
+    debugRuntimeModulePromise = import("./debug-runtime").then((module) => {
+      debugRuntimeModule = module;
+      return module;
+    });
+  }
+  return debugRuntimeModulePromise;
+}
+
+function loadedDebugRuntimeModule(): DebugRuntimeModule | null {
+  return debugRuntimeModule;
+}
+
+function createInitialTelemetryState(maxSamples: number): PodTelemetryOverlayState {
+  return {
+    enabled: false,
+    maxSamples: Math.max(maxSamples, 1),
+    revision: 0,
+    history: [],
+    selectedAgentId: null,
+    selectedEntityId: null
+  };
+}
+
+function createInitialLiveDebugState(): LiveDebugState {
+  return {
+    latestToolEventSummary: null,
+    latestRollupSummary: null,
+    latestFocusedSummary: null,
+    latestTransportSummary: null,
+    liveReplayDocuments: 0,
+    liveIncidentDocuments: 0,
+    liveTransportDocuments: 0,
+    toolEventsByEntity: new Map(),
+    rollupsByEntity: new Map(),
+    focusedSummariesByEntity: new Map()
+  };
+}
+
+function setTelemetryEnabledFallback(
+  state: PodTelemetryOverlayState,
+  enabled: boolean
+): void {
+  if (state.enabled === enabled) {
+    return;
+  }
+  state.enabled = enabled;
+  state.revision += 1;
+}
+
+function resetTelemetryFallback(state: PodTelemetryOverlayState): void {
+  state.history = [];
+  state.selectedAgentId = null;
+  state.selectedEntityId = null;
+  state.revision += 1;
+}
+
+function telemetryStatsFallback(
+  state: PodTelemetryOverlayState
+): PodTelemetryStats {
+  const latest = state.history.at(-1) ?? null;
+
+  return {
+    enabled: state.enabled,
+    retainedTicks: state.history.length,
+    tick: latest?.tickTelemetry.tick ?? null,
+    selectedAgentId: state.selectedAgentId,
+    selectedEntityId: state.selectedEntityId,
+    selectedLabel: latest ? "Loading telemetry overlay" : "Telemetry idle",
+    trajectorySamples: 0,
+    trajectoryDistance: 0,
+    submittedActions: 0,
+    executedActions: 0,
+    rejectedActions: 0,
+    toolCalls: 0,
+    toolErrors: 0,
+    toolErrorRate: 0,
+    lastToolStatus: null,
+    lastToolLatencyMs: null,
+    lastToolError: null,
+    visibleEntities: 0,
+    audibleEvents: 0,
+    messages: 0,
+    recoverySummary: latest ? "Telemetry warming" : "No telemetry",
+    recoveryAttempts: 0,
+    nextRetryTick: null
+  };
+}
 
 declare global {
   interface Window {
@@ -90,10 +212,12 @@ declare global {
       requestGameplayFocus: () => boolean;
       getBackend: () => string;
       getStats: () => ReturnType<PodThreeRenderRuntime["getStats"]>;
-      getTelemetryStats: () => ReturnType<typeof telemetryStats>;
+      getTelemetryStats: () => PodTelemetryStats;
       getGameplayState: () => {
         renderThread: string;
         frameSource: string;
+        worldMode: string | null;
+        worldName: string | null;
         focused: boolean;
         controlledEntityId: number | null;
         controlledPosition: [number, number] | null;
@@ -189,6 +313,8 @@ const telemetryToggleButton = telemetryToggle;
 const renderCanvas = canvas;
 const LOCAL_SANDBOX_STEP_MS = 1000 / 60;
 focusGameplaySurface(renderCanvas);
+const initialFixedTimeMs = resolveFixedTimeMs(window.location.search);
+const interactiveRuntimePaused = shouldPauseInteractiveRuntime(window.location.search);
 const frameSourceNode = frameSourceLabel;
 const connectionNode = connectionLabel;
 const worldNode = worldLabel;
@@ -228,25 +354,35 @@ connectionNode.textContent = bootHudState.connectionBadge;
 worldNode.textContent = bootHudState.worldLabel;
 populationNode.textContent = bootHudState.populationLabel;
 frameSourceNode.textContent = bootHudState.frameSourceLabel;
+void loadHudRuntimeModule();
+
+const { createPodRenderRuntime } = await import("./render-runtime");
 
 const renderer = await createPodRenderRuntime(renderCanvas, {
-  showGrid: shouldShowDebugGrid(window.location.search)
+  showGrid: shouldShowDebugGrid(window.location.search),
+  fixedTimeMs: initialFixedTimeMs ?? undefined
 });
 backendLabel.textContent = renderer.backend;
 qualityLabel.textContent = renderer.qualityPreset;
 const runtimeStatsLabel = statsLabel;
-const telemetryState = createTelemetryOverlayState(300);
+const telemetryState = createInitialTelemetryState(300);
 const runtimeConfig = runtimeConfigFromLocation(window.location);
+const localWorldPresentation = localWorldPresentationFromLocation(window.location);
 const offlinePlayerName =
   new URLSearchParams(window.location.search).get("player")?.trim() || "WebPlayer";
-const localSandbox = runtimeConfig ? null : new PodWebLocalWorld(offlinePlayerName);
+let localSandbox: PodWebLocalWorld | null = null;
+if (!runtimeConfig) {
+  const { PodWebLocalWorld } = await import("./local-world");
+  localSandbox = new PodWebLocalWorld(offlinePlayerName, localWorldPresentation.presetId);
+}
 
 let liveFrameSource: "demo" | "legacy" | "threejs" = "demo";
-let latestFrame: string | ReturnType<typeof buildAuthoritativeWorldFrame> | null = null;
+let latestFrame: string | ThreeJsWebGpuFrame | null = null;
+let currentRenderedCamera: CameraState | null = null;
 let lastTelemetryRevision = -1;
 let latestReplaySummary: ReplaySummary | null = null;
 let latestIncidentSummary: ShardIncidentSummary | null = null;
-const liveDebugState = createLiveDebugState();
+const liveDebugState = createInitialLiveDebugState();
 let lastPublishedDebugFocusEntityId: number | null | undefined = undefined;
 let latestSnapshot: NetworkWorldSnapshot | null = null;
 let latestActionStatus: DirectConnectActionState = {
@@ -259,7 +395,7 @@ let latestActionStatus: DirectConnectActionState = {
 };
 let latestFeedback = runtimeConfig
   ? "Awaiting authoritative outcomes"
-  : "Local sandbox ready: click terrain to move, right-drag or use arrow keys for camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
+  : localWorldPresentation.readyFeedback;
 let recentWorldEvents: NetworkGameEvent[] = [];
 let manualFrameOverride = false;
 let cameraImpact = 0;
@@ -282,37 +418,58 @@ let liveConnectionStatus: DirectConnectStatus | null = runtimeConfig
   : null;
 
 if (runtimeConfig?.debugTelemetry) {
-  setTelemetryEnabled(telemetryState, true);
+  setTelemetryEnabledFallback(telemetryState, true);
+  void loadDebugRuntimeModule();
 }
 
-const liveClient = runtimeConfig
-  ? new PodWebDirectConnectClient(runtimeConfig, {
-      onFrame(snapshot, frameOptions, status) {
-        latestSnapshot = snapshot;
-        syncSelectedTarget();
-        latestFrame = buildAuthoritativeWorldFrame(snapshot, {
+async function applyAuthoritativeSnapshot(
+  snapshot: NetworkWorldSnapshot,
+  frameOptions: AuthoritativeWorldFrameOptions,
+  status: DirectConnectStatus | null,
+  frameSource: string
+): Promise<void> {
+  latestSnapshot = snapshot;
+  liveConnectionStatus = status;
+  syncSelectedTarget();
+  const { buildAuthoritativeWorldFrame } = await loadContractsModule();
+  if (latestSnapshot !== snapshot) {
+    return;
+  }
+  latestFrame = buildAuthoritativeWorldFrame(snapshot, frameOptions);
+  liveFrameSource = "threejs";
+  frameSourceNode.textContent = frameSource;
+}
+
+let liveClient: PodWebDirectConnectClient | null = null;
+if (runtimeConfig) {
+  const { PodWebDirectConnectClient } = await import("./direct-connect");
+  liveClient = new PodWebDirectConnectClient(runtimeConfig, {
+    onFrame(snapshot, frameOptions, status) {
+      void applyAuthoritativeSnapshot(
+        snapshot,
+        {
           ...frameOptions,
           viewportWidth: renderCanvas.clientWidth || window.innerWidth,
           viewportHeight: renderCanvas.clientHeight || window.innerHeight
-        });
-        liveFrameSource = "threejs";
-        frameSourceNode.textContent = "authoritative websocket";
-        liveConnectionStatus = status;
-      },
-      onEventBatch(batch) {
-        applyAuthoritativeEventBatch(batch);
-      },
-      onDebugDocument(document) {
-        applyLiveDebugDocument(document);
-      },
-      onActionState(state) {
-        latestActionStatus = state;
-      },
-      onStatus(status) {
-        liveConnectionStatus = status;
-      }
-    })
-  : null;
+        },
+        status,
+        "authoritative websocket"
+      );
+    },
+    onEventBatch(batch) {
+      applyAuthoritativeEventBatch(batch);
+    },
+    onDebugDocument(document) {
+      void applyLiveDebugDocument(document);
+    },
+    onActionState(state) {
+      latestActionStatus = state;
+    },
+    onStatus(status) {
+      liveConnectionStatus = status;
+    }
+  });
+}
 const pressedKeys = new Set<string>();
 let selectedTargetId: number | null = null;
 let autoRetaliateEnabled = true;
@@ -321,6 +478,8 @@ let lastMovementSignature = "stop";
 let lastMovementSubmitAtMs = 0;
 let orbitPointerId: number | null = null;
 let orbitPointer: [number, number] | null = null;
+let showcaseIntroDismissed = false;
+let runtimeNowOverrideMs = initialFixedTimeMs;
 
 const cameraRig = {
   initialized: false,
@@ -335,6 +494,20 @@ const cameraRig = {
 function clearPressedKeys(): void {
   pressedKeys.clear();
   lastMovementSignature = "stop";
+}
+
+function dismissShowcaseIntro(): void {
+  showcaseIntroDismissed = true;
+}
+
+function systemNowMs(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+function currentRuntimeNowMs(): number {
+  return runtimeNowOverrideMs ?? systemNowMs();
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -384,13 +557,13 @@ function currentPopulationSummary(): string {
   return `${regionSummary} · ${chunkSummary}`;
 }
 
-function currentPopulationHeatmap() {
+function currentPopulationHeatmap(hudRuntime: HudRuntimeModule) {
   if (!latestSnapshot) {
     return null;
   }
 
   const controlled = controlledEntity();
-  return buildPopulationHeatmapModel(latestSnapshot.population, {
+  return hudRuntime.buildPopulationHeatmapModel(latestSnapshot.population, {
     chunkKey: controlled?.metadata.chunkKey ?? null,
     regionId: controlled?.metadata.regionId ?? null
   });
@@ -436,20 +609,7 @@ function targetableEntities(): NetworkEntitySnapshot[] {
 }
 
 function currentFrameCameraState() {
-  if (!latestFrame) {
-    return null;
-  }
-
-  if (typeof latestFrame === "string") {
-    if (liveFrameSource === "threejs") {
-      return renderableThreeFrame(parseThreeJsWebGpuFrame(latestFrame)).camera;
-    }
-    return parseRenderFrame(latestFrame).camera;
-  }
-
-  return liveFrameSource === "threejs"
-    ? renderableThreeFrame(latestFrame).camera
-    : latestFrame.camera;
+  return currentRenderedCamera;
 }
 
 function shortestAngleDelta(current: number, target: number): number {
@@ -475,6 +635,10 @@ function stepScalarToward(current: number, target: number, sharpness: number, de
 
 function clampScalar(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function blendAngle(current: number, target: number, alpha: number): number {
+  return current + shortestAngleDelta(current, target) * alpha;
 }
 
 function syncCameraRig(camera: CameraState | null): void {
@@ -527,14 +691,14 @@ function currentCameraYaw(): number {
     : currentFrameCameraState()?.rotation ?? 0;
 }
 
-function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame {
+async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<ThreeJsWebGpuFrame> {
+  const [{ withCombatFocusMarkers, withInteractionMarkers, withWorldEventMarkers }, { computeCombatCameraPressure }] =
+    await Promise.all([loadContractsModule(), loadFramePlanModule()]);
   syncCameraRig(baseFrame.camera);
+  const localPresentation = localSandbox?.presentation() ?? null;
   const controlled = controlledEntity();
   const target = selectedTarget();
-  const nowSeconds =
-    typeof performance !== "undefined" && typeof performance.now === "function"
-      ? performance.now() / 1000
-      : Date.now() / 1000;
+  const nowSeconds = currentRuntimeNowMs() / 1000;
   const speed = controlled
     ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
     : 0;
@@ -586,37 +750,62 @@ function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): ThreeJsWebGpuFrame
     baseShoulderOffset +
     (swimShoulderOffset - baseShoulderOffset) * swimCameraBlend +
     closeRangeBlend * 0.14;
+  const showcaseIntroBlend =
+    localPresentation?.presetId === "bootstrap-showcase" &&
+    !showcaseIntroDismissed &&
+    latestSnapshot != null &&
+    latestSnapshot.tick < 210
+      ? 1 - latestSnapshot.tick / 210
+      : 0;
+  const quietShake = 1 - showcaseIntroBlend * 0.85;
+  const introLeadX = leadX + 1.6;
+  const introLeadY = leadY + 0.65;
+  const baseRotation = cameraRig.yaw + shakeYaw * quietShake;
+  const basePitch = clampScalar(
+    cameraRig.pitch +
+      swimPitchOffset +
+      shakePitch * quietShake -
+      combatPressure * 0.012 -
+      closeRangeBlend * 0.018,
+    0.18,
+    0.76
+  );
+  const baseZoom = clampScalar(
+    cameraRig.zoom -
+      swimZoomOffset -
+      combatPressure * 0.035 -
+      closeRangeBlend * 0.045 +
+      cameraImpact * 0.028,
+    0.72,
+    1.65
+  );
 
   const interactionFrame = withInteractionMarkers(
     {
       ...baseFrame,
       camera: {
         ...baseFrame.camera,
-        rotation: cameraRig.yaw + shakeYaw,
+        rotation: blendAngle(baseRotation, 0.24, showcaseIntroBlend),
         pitch: clampScalar(
-          cameraRig.pitch +
-            swimPitchOffset +
-            shakePitch -
-            combatPressure * 0.012 -
-            closeRangeBlend * 0.018,
+          basePitch * (1 - showcaseIntroBlend) + 0.44 * showcaseIntroBlend,
           0.18,
           0.76
         ),
         zoom: clampScalar(
-          cameraRig.zoom -
-            swimZoomOffset -
-            combatPressure * 0.035 -
-            closeRangeBlend * 0.045 +
-            cameraImpact * 0.028,
+          baseZoom * (1 - showcaseIntroBlend) + 0.9 * showcaseIntroBlend,
           0.72,
           1.65
         ),
-        fov: clampScalar((baseFrame.camera.fov ?? 52) + combatFovKick, 50, 62),
-        focusHeight: swimFocusHeight,
-        followDistance: swimFollowDistance,
-        shoulderOffset: blendedShoulderOffset,
-        leadX,
-        leadY
+        fov: clampScalar(
+          (baseFrame.camera.fov ?? 52) + combatFovKick * (1 - showcaseIntroBlend) + 1.8 * showcaseIntroBlend,
+          50,
+          62
+        ),
+        focusHeight: swimFocusHeight * (1 - showcaseIntroBlend) + 2.72 * showcaseIntroBlend,
+        followDistance: swimFollowDistance * (1 - showcaseIntroBlend) + 10.8 * showcaseIntroBlend,
+        shoulderOffset: blendedShoulderOffset * (1 - showcaseIntroBlend) + 0.34 * showcaseIntroBlend,
+        leadX: leadX * (1 - showcaseIntroBlend) + introLeadX * showcaseIntroBlend,
+        leadY: leadY * (1 - showcaseIntroBlend) + introLeadY * showcaseIntroBlend
       }
     },
     {
@@ -670,7 +859,10 @@ function applyAuthoritativeEventBatch(batch: NetworkEventBatch): void {
       ) ?? batch.events.at(-1);
 
   if (highlighted) {
-    latestFeedback = highlightEventFeedback(highlighted);
+    const hudRuntime = loadedHudRuntimeModule();
+    latestFeedback = hudRuntime
+      ? hudRuntime.highlightEventFeedback(highlighted)
+      : highlighted.summary;
   }
 
   for (const event of batch.events) {
@@ -698,7 +890,10 @@ function formatRecentEventFeed(): string {
 
   return recentWorldEvents
     .slice(-2)
-    .map((event) => highlightEventFeedback(event))
+    .map((event) => {
+      const hudRuntime = loadedHudRuntimeModule();
+      return hudRuntime ? hudRuntime.highlightEventFeedback(event) : event.summary;
+    })
     .join(" · ");
 }
 
@@ -881,6 +1076,10 @@ function handleGameplayKeyDown(event: KeyboardEvent): void {
     return;
   }
 
+  if (isGameplayKeyCode(event.code)) {
+    dismissShowcaseIntro();
+  }
+
   switch (event.code) {
     case "Tab":
       event.preventDefault();
@@ -994,8 +1193,9 @@ chatFormNode.addEventListener("submit", (event) => {
   chatInputNode.value = "";
 });
 
-renderCanvas.addEventListener("pointerdown", (event) => {
+renderCanvas.addEventListener("pointerdown", async (event) => {
   focusGameplaySurface(renderCanvas);
+  dismissShowcaseIntro();
   if (event.button === 2) {
     orbitPointerId = event.pointerId;
     orbitPointer = [event.clientX, event.clientY];
@@ -1012,6 +1212,8 @@ renderCanvas.addEventListener("pointerdown", (event) => {
   if (!camera) {
     return;
   }
+
+  const { pickWorldGroundPoint, resolvePointerTarget } = await loadGroundPickingModule();
 
   const rect = renderCanvas.getBoundingClientRect();
   const worldPoint = pickWorldGroundPoint(
@@ -1039,7 +1241,7 @@ renderCanvas.addEventListener("pointerdown", (event) => {
   selectedTargetId = null;
   clickMoveTarget = worldPoint;
   lastMovementSignature = "stop";
-  submitImmediateClickMovement(worldPoint, performance.now());
+  submitImmediateClickMovement(worldPoint, currentRuntimeNowMs());
   latestFeedback = `Move order · ${worldPoint[0].toFixed(1)}, ${worldPoint[1].toFixed(1)}`;
 });
 
@@ -1048,6 +1250,7 @@ renderCanvas.addEventListener("pointermove", (event) => {
     return;
   }
 
+  dismissShowcaseIntro();
   const deltaX = event.clientX - orbitPointer[0];
   const deltaY = event.clientY - orbitPointer[1];
   orbitPointer = [event.clientX, event.clientY];
@@ -1076,6 +1279,7 @@ renderCanvas.addEventListener("pointercancel", (event) => {
 
 renderCanvas.addEventListener("wheel", (event) => {
   focusGameplaySurface(renderCanvas);
+  dismissShowcaseIntro();
   cameraRig.desiredZoom = Math.max(
     0.72,
     Math.min(1.65, cameraRig.desiredZoom - event.deltaY * 0.0009)
@@ -1098,49 +1302,74 @@ document.addEventListener("visibilitychange", () => {
 });
 
 telemetryToggleButton.addEventListener("click", () => {
-  setTelemetryEnabled(telemetryState, !telemetryState.enabled);
+  const debugRuntime = loadedDebugRuntimeModule();
+  if (debugRuntime) {
+    debugRuntime.setTelemetryEnabled(telemetryState, !telemetryState.enabled);
+  } else {
+    setTelemetryEnabledFallback(telemetryState, !telemetryState.enabled);
+    if (telemetryState.enabled) {
+      void loadDebugRuntimeModule();
+    }
+  }
   liveClient?.setDebugTelemetry(telemetryState.enabled);
 });
 telemetryPrevButton.addEventListener("click", () => {
-  cycleTelemetrySelection(telemetryState, -1);
+  const debugRuntime = loadedDebugRuntimeModule();
+  if (debugRuntime) {
+    debugRuntime.cycleTelemetrySelection(telemetryState, -1);
+    return;
+  }
+  void loadDebugRuntimeModule();
 });
 telemetryNextButton.addEventListener("click", () => {
-  cycleTelemetrySelection(telemetryState, 1);
+  const debugRuntime = loadedDebugRuntimeModule();
+  if (debugRuntime) {
+    debugRuntime.cycleTelemetrySelection(telemetryState, 1);
+    return;
+  }
+  void loadDebugRuntimeModule();
 });
 
 window.podRender = {
   render(frame: string) {
     manualFrameOverride = true;
     latestFrame = frame;
+    currentRenderedCamera = null;
     liveFrameSource = "legacy";
     frameSourceNode.textContent = "legacy pod-render frame";
   },
   renderThreeJsWebGpuFrame(frame: string) {
     manualFrameOverride = true;
     latestFrame = frame;
+    currentRenderedCamera = null;
     liveFrameSource = "threejs";
     frameSourceNode.textContent = "Three.js WebGPU frame";
   },
   renderTickTelemetry(frame: string) {
-    applyTickTelemetry(telemetryState, parseTickTelemetryEnvelope(frame));
+    void applyTickTelemetryFrame(frame);
   },
   renderDebugDocument(document: string) {
-    applyLiveDebugDocument(document);
+    void applyLiveDebugDocument(document);
   },
   renderReplayDocument(document: string) {
-    latestReplaySummary = summarizeReplayFile(parseReplayFile(document));
+    void applyReplayDocument(document);
   },
   renderShardIncidentSummary(document: string) {
-    latestIncidentSummary = parseShardIncidentSummary(document);
+    void applyShardIncidentSummaryDocument(document);
   },
   streamReplayDocument(document: string) {
-    applyLiveDebugDocument(document);
+    void applyLiveDebugDocument(document);
   },
   streamShardIncidentSummary(document: string) {
-    applyLiveDebugDocument(document);
+    void applyLiveDebugDocument(document);
   },
   resetTelemetry() {
-    resetTelemetry(telemetryState);
+    const debugRuntime = loadedDebugRuntimeModule();
+    if (debugRuntime) {
+      debugRuntime.resetTelemetry(telemetryState);
+    } else {
+      resetTelemetryFallback(telemetryState);
+    }
     renderer.clearTelemetryTrail();
   },
   resetDemo() {
@@ -1149,9 +1378,25 @@ window.podRender = {
     latestReplaySummary = null;
     latestIncidentSummary = null;
     lastPublishedDebugFocusEntityId = undefined;
-    resetLiveDebugState(liveDebugState);
+    const debugRuntime = loadedDebugRuntimeModule();
+    if (debugRuntime) {
+      debugRuntime.resetLiveDebugState(liveDebugState);
+    } else {
+      liveDebugState.latestToolEventSummary = null;
+      liveDebugState.latestRollupSummary = null;
+      liveDebugState.latestFocusedSummary = null;
+      liveDebugState.latestTransportSummary = null;
+      liveDebugState.liveReplayDocuments = 0;
+      liveDebugState.liveIncidentDocuments = 0;
+      liveDebugState.liveTransportDocuments = 0;
+      liveDebugState.toolEventsByEntity.clear();
+      liveDebugState.rollupsByEntity.clear();
+      liveDebugState.focusedSummariesByEntity.clear();
+    }
     if (localSandbox) {
       localSandbox.reset();
+      showcaseIntroDismissed = false;
+      runtimeNowOverrideMs = initialFixedTimeMs;
       cameraRig.initialized = false;
       cameraRig.yaw = 0;
       cameraRig.desiredYaw = 0;
@@ -1159,14 +1404,16 @@ window.podRender = {
       cameraRig.desiredPitch = 0.34;
       cameraRig.zoom = 1.08;
       cameraRig.desiredZoom = 1.08;
-      latestFeedback =
-        "Local sandbox ready: click terrain to move, right-drag or use arrow keys for camera, wheel to zoom, WASD steer, Tab target, and double-click targets for default actions";
+      latestFeedback = localSandbox.presentation().readyFeedback;
       clickMoveTarget = null;
-      refreshLocalSandboxFrame();
+      currentRenderedCamera = null;
+      lastTickTimestamp = currentRuntimeNowMs();
+      void refreshLocalSandboxFrame();
       renderTelemetryHud();
       return;
     }
     latestFrame = null;
+    currentRenderedCamera = null;
     liveFrameSource = "demo";
     frameSourceNode.textContent = "demo frame";
   },
@@ -1180,13 +1427,18 @@ window.podRender = {
     return renderer.getStats();
   },
   getTelemetryStats() {
-    return telemetryStats(telemetryState);
+    const debugRuntime = loadedDebugRuntimeModule();
+    return debugRuntime
+      ? debugRuntime.telemetryStats(telemetryState)
+      : telemetryStatsFallback(telemetryState);
   },
   getGameplayState() {
     const controlled = controlledEntity();
     return {
       renderThread: renderer.getStats().renderThread,
       frameSource: liveFrameSource,
+      worldMode: runtimeConfig ? "authoritative-shard" : localSandbox?.presentation().mode ?? null,
+      worldName: runtimeConfig ? null : localSandbox?.presentation().worldName ?? null,
       focused: document.activeElement === renderCanvas,
       cameraYaw: cameraRig.yaw,
       cameraPitch: cameraRig.pitch,
@@ -1197,11 +1449,7 @@ window.podRender = {
         : null,
       controlledAnimationSetId:
         controlled?.metadata.actorPresentation?.animationSetId ?? null,
-      controlledSurfaceMode: controlled
-        ? sampleLandscapeSurface(controlled.position[0], controlled.position[1]).isSwimmable
-          ? "swim"
-          : "ground"
-        : "ground",
+      controlledSurfaceMode: surfaceModeFromEntity(controlled),
       selectedTargetId,
       clickMoveTarget,
       movementSignature: lastMovementSignature,
@@ -1233,7 +1481,8 @@ window.render_game_to_text = () => {
         questGraphs: [],
         factionReputation: [],
         encounterTables: []
-      }
+      },
+      localSandbox?.presentation() ?? null
     );
   }
 
@@ -1245,6 +1494,25 @@ window.render_game_to_text = () => {
   });
 };
 
+async function applyTickTelemetryFrame(frame: string): Promise<void> {
+  const { parseTickTelemetryEnvelope } = await loadContractsModule();
+  const debugRuntime = await loadDebugRuntimeModule();
+  debugRuntime.applyTickTelemetry(
+    telemetryState,
+    parseTickTelemetryEnvelope(frame)
+  );
+}
+
+async function applyReplayDocument(document: string): Promise<void> {
+  const { parseReplayFile, summarizeReplayFile } = await loadContractsModule();
+  latestReplaySummary = summarizeReplayFile(parseReplayFile(document));
+}
+
+async function applyShardIncidentSummaryDocument(document: string): Promise<void> {
+  const { parseShardIncidentSummary } = await loadContractsModule();
+  latestIncidentSummary = parseShardIncidentSummary(document);
+}
+
 async function advanceInteractiveRuntime(deltaMs: number, timestamp: number): Promise<void> {
   applyKeyboardCameraRig(deltaMs);
   updateCameraRig(deltaMs);
@@ -1252,12 +1520,11 @@ async function advanceInteractiveRuntime(deltaMs: number, timestamp: number): Pr
 
   if (localSandbox && !manualFrameOverride) {
     localSandbox.step(deltaMs);
-    refreshLocalSandboxFrame();
+    await refreshLocalSandboxFrame();
   }
 
   const controlled = controlledEntity();
-  const isSwimming =
-    controlled?.metadata.actorPresentation?.animationSetId?.toLowerCase().includes("swim") ?? false;
+  const isSwimming = entityUsesSwimSurface(controlled);
   swimCameraBlend = stepScalarToward(swimCameraBlend, isSwimming ? 1 : 0, 6.4, deltaMs);
   cameraImpact = stepScalarToward(cameraImpact, 0, 9.2, deltaMs);
 
@@ -1270,6 +1537,9 @@ window.advanceTime = async (ms: number) => {
     while (remainingMs > 0) {
       const deltaMs = Math.min(remainingMs, LOCAL_SANDBOX_STEP_MS);
       const timestamp = lastTickTimestamp + deltaMs;
+      if (runtimeNowOverrideMs != null) {
+        runtimeNowOverrideMs = timestamp;
+      }
       lastTickTimestamp = timestamp;
       await advanceInteractiveRuntime(deltaMs, timestamp);
       remainingMs -= deltaMs;
@@ -1282,13 +1552,15 @@ window.advanceTime = async (ms: number) => {
   });
 };
 
-function applyLiveDebugDocument(document: string): void {
+async function applyLiveDebugDocument(document: string): Promise<void> {
+  const { parseLiveDebugDocument, summarizeReplayFile } = await loadContractsModule();
+  const debugRuntime = await loadDebugRuntimeModule();
   const parsed = parseLiveDebugDocument(document);
-  recordLiveDebugDocument(liveDebugState, parsed);
+  debugRuntime.recordLiveDebugDocument(liveDebugState, parsed);
 
   switch (parsed.kind) {
     case "tickTelemetry":
-      applyTickTelemetry(telemetryState, parsed.payload);
+      debugRuntime.applyTickTelemetry(telemetryState, parsed.payload);
       break;
     case "toolCallEvent":
       break;
@@ -1307,7 +1579,7 @@ function applyLiveDebugDocument(document: string): void {
   }
 }
 
-function refreshLocalSandboxFrame(): void {
+async function refreshLocalSandboxFrame(): Promise<void> {
   if (!localSandbox) {
     return;
   }
@@ -1319,63 +1591,89 @@ function refreshLocalSandboxFrame(): void {
 
   latestSnapshot = localSandbox.snapshotState();
   latestActionStatus = localSandbox.currentActionState();
-  liveConnectionStatus = localSandbox.currentStatus();
-  syncSelectedTarget();
-  latestFrame = buildAuthoritativeWorldFrame(latestSnapshot, {
-    controlledEntity: localSandbox.controlledEntityId(),
-    viewportWidth: renderCanvas.clientWidth || window.innerWidth,
-    viewportHeight: renderCanvas.clientHeight || window.innerHeight
-  });
-  liveFrameSource = "threejs";
-  frameSourceNode.textContent = "local sandbox shard";
+  await applyAuthoritativeSnapshot(
+    latestSnapshot,
+    {
+      controlledEntity: localSandbox.controlledEntityId(),
+      viewportWidth: renderCanvas.clientWidth || window.innerWidth,
+      viewportHeight: renderCanvas.clientHeight || window.innerHeight
+    },
+    localSandbox.currentStatus(),
+    localSandbox.presentation().frameSourceLabel
+  );
 }
 
-let lastTickTimestamp = performance.now();
+let lastTickTimestamp = currentRuntimeNowMs();
 
 async function tick(timestamp: number): Promise<void> {
-  const deltaMs = Math.min(Math.max(timestamp - lastTickTimestamp, 0), 250);
-  lastTickTimestamp = timestamp;
-  await advanceInteractiveRuntime(deltaMs, timestamp);
+  const effectiveTimestamp = runtimeNowOverrideMs ?? timestamp;
+  const deltaMs = Math.min(Math.max(effectiveTimestamp - lastTickTimestamp, 0), 250);
+  lastTickTimestamp = effectiveTimestamp;
+  await advanceInteractiveRuntime(deltaMs, effectiveTimestamp);
 
-  requestAnimationFrame((nextTimestamp) => {
-    void tick(nextTimestamp);
-  });
+  if (!interactiveRuntimePaused) {
+    requestAnimationFrame((nextTimestamp) => {
+      void tick(nextTimestamp);
+    });
+  }
 }
 
 async function renderCurrentFrame(timestamp: number): Promise<void> {
   if (lastTelemetryRevision !== telemetryState.revision) {
-    const samples = telemetryState.enabled
-      ? selectedTrajectorySamples(telemetryState)
-      : [];
-    if (samples.length > 1) {
-      renderer.setTelemetryTrail(samples);
-    } else {
-      renderer.clearTelemetryTrail();
+    const debugRuntime = loadedDebugRuntimeModule();
+    if (debugRuntime) {
+      const samples = telemetryState.enabled
+        ? debugRuntime.selectedTrajectorySamples(telemetryState)
+        : [];
+      if (samples.length > 1) {
+        renderer.setTelemetryTrail(samples);
+      } else {
+        renderer.clearTelemetryTrail();
+      }
+      lastTelemetryRevision = telemetryState.revision;
+    } else if (telemetryState.enabled && telemetryState.history.length > 0) {
+      void loadDebugRuntimeModule();
     }
-    lastTelemetryRevision = telemetryState.revision;
   }
 
   if (latestFrame) {
     if (liveFrameSource === "threejs") {
       const frame =
-        typeof latestFrame === "string" ? parseThreeJsWebGpuFrame(latestFrame) : latestFrame;
-      await renderer.applyFrame(renderableThreeFrame(frame));
+        typeof latestFrame === "string"
+          ? (await loadContractsModule()).parseThreeJsWebGpuFrame(latestFrame)
+          : latestFrame;
+      const renderFrame = await renderableThreeFrame(frame);
+      currentRenderedCamera = renderFrame.camera;
+      await renderer.applyFrame(renderFrame);
     } else if (typeof latestFrame === "string") {
-      await renderer.applyLegacyFrame(parseRenderFrame(latestFrame));
+      const parsedFrame = (await loadContractsModule()).parseRenderFrame(latestFrame);
+      currentRenderedCamera = parsedFrame.camera;
+      await renderer.applyLegacyFrame(parsedFrame);
     } else {
-      await renderer.applyFrame(renderableThreeFrame(latestFrame));
+      const renderFrame = await renderableThreeFrame(latestFrame);
+      currentRenderedCamera = renderFrame.camera;
+      await renderer.applyFrame(renderFrame);
     }
   } else {
-    await renderer.applyFrame(createDemoFrame(timestamp / 1000));
+    const createDemoFrame = await loadDemoFrameFactory();
+    const demoFrame = createDemoFrame(timestamp / 1000);
+    currentRenderedCamera = demoFrame.camera;
+    await renderer.applyFrame(demoFrame);
   }
 
   const stats = renderer.getStats();
-  runtimeStatsLabel.textContent = compactRuntimeStats(stats);
+  const hudRuntime = loadedHudRuntimeModule();
+  runtimeStatsLabel.textContent = hudRuntime
+    ? hudRuntime.compactRuntimeStats(stats)
+    : `${stats.renderThread} · ${stats.triangles} tris · ${stats.drawCalls} draws`;
   renderTelemetryHud();
 }
 
 function renderTelemetryHud(): void {
-  const stats = telemetryStats(telemetryState);
+  const debugRuntime = loadedDebugRuntimeModule();
+  const stats = debugRuntime
+    ? debugRuntime.telemetryStats(telemetryState)
+    : telemetryStatsFallback(telemetryState);
   const target = selectedTarget();
   const controlled = controlledEntity();
   const debugFocusEntityId = target?.id ?? controlled?.id ?? null;
@@ -1383,18 +1681,49 @@ function renderTelemetryHud(): void {
     liveClient.setDebugFocusEntity(debugFocusEntityId);
     lastPublishedDebugFocusEntityId = debugFocusEntityId;
   }
-  const focusedDebugSummary = selectedFocusedDebugSummary(
-    liveDebugState,
-    debugFocusEntityId
-  );
+  const focusedDebugSummary = debugRuntime
+    ? debugRuntime.selectedFocusedDebugSummary(liveDebugState, debugFocusEntityId)
+    : liveDebugState.latestFocusedSummary;
   const latestTransportSummary = liveDebugState.latestTransportSummary;
-  const focusedToolEvent = selectedToolEventSummary(liveDebugState, debugFocusEntityId);
-  const focusedRollup = selectedTickRollupSummary(liveDebugState, debugFocusEntityId);
-  const populationHeatmap = currentPopulationHeatmap();
-  connectionNode.textContent = formatConnectionSummary(
-    liveConnectionStatus,
-    latestTransportSummary
-  );
+  const focusedToolEvent = debugRuntime
+    ? debugRuntime.selectedToolEventSummary(liveDebugState, debugFocusEntityId)
+    : liveDebugState.latestToolEventSummary;
+  const focusedRollup = debugRuntime
+    ? debugRuntime.selectedTickRollupSummary(liveDebugState, debugFocusEntityId)
+    : liveDebugState.latestRollupSummary;
+  const hudRuntime = loadedHudRuntimeModule();
+
+  if (!hudRuntime) {
+    connectionNode.textContent = liveConnectionStatus?.detail ?? "demo scene";
+    worldNode.textContent = liveConnectionStatus
+      ? liveConnectionStatus.tick == null
+        ? `awaiting snapshot · ${liveConnectionStatus.url}`
+        : `tick ${liveConnectionStatus.tick} · ${liveConnectionStatus.entityCount} entities`
+      : "demo scene";
+    populationNode.textContent = currentPopulationSummary();
+    populationHeatmapLegendNode.textContent = "loading tactical hud";
+    const populationHeatmapContext = populationHeatmapCanvasNode.getContext("2d");
+    populationHeatmapContext?.clearRect(
+      0,
+      0,
+      populationHeatmapCanvasNode.width,
+      populationHeatmapCanvasNode.height
+    );
+    targetNode.textContent = target?.label ?? "No target";
+    affordanceNode.textContent = target?.metadata.kind ?? "No interactable target";
+  } else {
+    const populationHeatmap = currentPopulationHeatmap(hudRuntime);
+    connectionNode.textContent = hudRuntime.formatConnectionSummary(
+      liveConnectionStatus,
+      latestTransportSummary
+    );
+    populationHeatmapLegendNode.textContent =
+      hudRuntime.formatPopulationHeatmapLegend(populationHeatmap);
+    hudRuntime.renderPopulationHeatmap(populationHeatmapCanvasNode, populationHeatmap);
+    targetNode.textContent = hudRuntime.formatTargetSummary(target, controlled);
+    affordanceNode.textContent = hudRuntime.describeTargetAffordances(target);
+  }
+
   worldNode.textContent = liveConnectionStatus
     ? liveConnectionStatus.tick == null
       ? `awaiting snapshot · ${liveConnectionStatus.url}`
@@ -1405,11 +1734,6 @@ function renderTelemetryHud(): void {
         }`
     : "demo scene";
   populationNode.textContent = currentPopulationSummary();
-  populationHeatmapLegendNode.textContent =
-    formatPopulationHeatmapLegend(populationHeatmap);
-  renderPopulationHeatmap(populationHeatmapCanvasNode, populationHeatmap);
-  targetNode.textContent = formatTargetSummary(target, controlled);
-  affordanceNode.textContent = describeTargetAffordances(target);
   actionStatusNode.textContent = formatActionStatus();
   feedbackNode.textContent = latestFeedback;
   eventFeedNode.textContent = formatRecentEventFeed();
@@ -1442,7 +1766,12 @@ function renderTelemetryHud(): void {
   incidentSummaryNode.textContent = latestIncidentSummary
     ? `${latestIncidentSummary.severity} · ${latestIncidentSummary.summary} · stream ${liveDebugState.liveIncidentDocuments}`
     : latestTransportSummary
-      ? `transport · ${latestTransportSummary.client_count} clients · ${latestTransportSummary.total_pending_action_queue_depth} queued · ${latestTransportSummary.queue_pressure_client_count} pressured · ${latestTransportSummary.timed_out_clients} timed out · ${liveDebugState.liveTransportDocuments} samples`
+      ? hudRuntime
+        ? hudRuntime.formatTransportDebugSummary(
+            latestTransportSummary,
+            liveDebugState.liveTransportDocuments
+          )
+        : `transport · ${latestTransportSummary.client_count} clients · ${latestTransportSummary.total_pending_action_queue_depth} queued · ${latestTransportSummary.queue_pressure_client_count} pressured · ${latestTransportSummary.timed_out_clients} timed out · ${liveDebugState.liveTransportDocuments} samples`
       : "No shard incident summary loaded";
   toolEventSummaryNode.textContent = focusedToolEvent
     ? `E(${focusedToolEvent.agentEntityId}) · ${focusedToolEvent.toolName} · ${focusedToolEvent.status} · ${focusedToolEvent.latencyMs}ms${
@@ -1474,7 +1803,8 @@ function renderTelemetryHud(): void {
 liveClient?.connect();
 if (localSandbox) {
   localSandbox.connect();
-  refreshLocalSandboxFrame();
+  void refreshLocalSandboxFrame();
   renderTelemetryHud();
 }
-void tick(performance.now());
+lastTickTimestamp = currentRuntimeNowMs();
+void tick(currentRuntimeNowMs());

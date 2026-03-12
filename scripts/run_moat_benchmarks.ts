@@ -1,0 +1,339 @@
+#!/usr/bin/env bun
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+type Options = {
+  profile: "ci-smoke" | "shard-target";
+  output: string;
+  monthlyHostCostUsd?: number;
+  skipBrowser: boolean;
+  skipCreator: boolean;
+  creatorSeconds?: number;
+  creatorCommand?: string;
+};
+
+type CommandSummary = {
+  name: string;
+  cwd: string;
+  command: string;
+  ok: boolean;
+  exitCode: number;
+  durationMs: number;
+  stderrSnippet?: string;
+};
+
+type BrowserParityReport = {
+  totalChecks: number;
+  passedChecks: number;
+  parityScore: number;
+  checks: CommandSummary[];
+};
+
+type BrowserRouteMeasurementsReport = {
+  schemaVersion: number;
+  generatedAtUnixMs: number;
+  baseUrl: string;
+  routes: unknown[];
+  comparison: unknown;
+};
+
+type CreatorTimeReport =
+  | {
+      status: "manual_pending";
+      benchmarkSeconds: null;
+      notes: string[];
+    }
+  | {
+      status: "reported" | "scripted";
+      benchmarkSeconds: number;
+      notes: string[];
+    };
+
+type CombinedReport = {
+  schemaVersion: number;
+  generatedAtUnixMs: number;
+  profile: Options["profile"];
+  core: unknown;
+  browserNativeParity: BrowserParityReport | null;
+  browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
+  creatorTimeToFirstAgentWorld: CreatorTimeReport;
+};
+
+function parseArgs(argv: string[]): Options {
+  const options: Options = {
+    profile: "ci-smoke",
+    output: "artifacts/moat-benchmarks.json",
+    skipBrowser: false,
+    skipCreator: false,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const current = argv[index];
+    switch (current) {
+      case "--profile": {
+        const value = argv[index + 1];
+        if (value !== "ci-smoke" && value !== "shard-target") {
+          throw new Error("expected --profile ci-smoke|shard-target");
+        }
+        options.profile = value;
+        index += 1;
+        break;
+      }
+      case "--output": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("missing value for --output");
+        }
+        options.output = value;
+        index += 1;
+        break;
+      }
+      case "--monthly-host-cost-usd": {
+        const value = Number(argv[index + 1]);
+        if (!Number.isFinite(value)) {
+          throw new Error("missing numeric value for --monthly-host-cost-usd");
+        }
+        options.monthlyHostCostUsd = value;
+        index += 1;
+        break;
+      }
+      case "--skip-browser":
+        options.skipBrowser = true;
+        break;
+      case "--skip-creator":
+        options.skipCreator = true;
+        break;
+      case "--creator-seconds": {
+        const value = Number(argv[index + 1]);
+        if (!Number.isFinite(value)) {
+          throw new Error("missing numeric value for --creator-seconds");
+        }
+        options.creatorSeconds = value;
+        index += 1;
+        break;
+      }
+      case "--creator-command": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("missing value for --creator-command");
+        }
+        options.creatorCommand = value;
+        index += 1;
+        break;
+      }
+      case "--help":
+      case "-h":
+        printHelp();
+        process.exit(0);
+      default:
+        throw new Error(`unknown argument: ${current}`);
+    }
+  }
+
+  return options;
+}
+
+function printHelp() {
+  console.error(
+    "Usage: bun ./scripts/run_moat_benchmarks.ts [--profile ci-smoke|shard-target] [--output PATH] [--monthly-host-cost-usd VALUE] [--skip-browser] [--skip-creator] [--creator-seconds VALUE] [--creator-command \"...\"]",
+  );
+}
+
+function runCommand(
+  name: string,
+  argv: string[],
+  cwd: string,
+): { summary: CommandSummary; stdout: string } {
+  const started = performance.now();
+  const processResult = Bun.spawnSync(argv, {
+    cwd,
+    env: process.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const durationMs = performance.now() - started;
+  const stdout = Buffer.from(processResult.stdout).toString("utf8");
+  const stderr = Buffer.from(processResult.stderr).toString("utf8");
+
+  return {
+    summary: {
+      name,
+      cwd,
+      command: argv.join(" "),
+      ok: processResult.exitCode === 0,
+      exitCode: processResult.exitCode ?? 1,
+      durationMs,
+      stderrSnippet: processResult.exitCode === 0 ? undefined : stderr.slice(0, 1200),
+    },
+    stdout,
+  };
+}
+
+function buildCreatorReport(repoRoot: string, options: Options): CreatorTimeReport {
+  if (options.skipCreator) {
+    return {
+      status: "manual_pending",
+      benchmarkSeconds: null,
+      notes: [
+        "Creator benchmark explicitly skipped for this run.",
+        "Omit --skip-creator to measure the canonical bootstrap automatically.",
+      ],
+    };
+  }
+
+  if (typeof options.creatorSeconds === "number") {
+    return {
+      status: "reported",
+      benchmarkSeconds: options.creatorSeconds,
+      notes: [
+        "Manual creator benchmark supplied at invocation time.",
+        "Use the protocol in docs/benchmark-suite.md for consistent monthly measurements.",
+      ],
+    };
+  }
+
+  if (options.creatorCommand) {
+    const result = runCommand(
+      "creator-command",
+      ["zsh", "-lc", options.creatorCommand],
+      repoRoot,
+    );
+    if (!result.summary.ok) {
+      throw new Error(
+        `creator benchmark command failed:\n${result.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+    return {
+      status: "scripted",
+      benchmarkSeconds: result.summary.durationMs / 1000,
+      notes: [
+        "Scripted creator benchmark executed from --creator-command.",
+        "Keep the scripted flow aligned with the reference bootstrap path in docs/benchmark-suite.md.",
+      ],
+    };
+  }
+
+  const defaultBootstrap = runCommand(
+    "reference-bootstrap",
+    [
+      "bun",
+      "./scripts/bootstrap_reference_world.ts",
+      "--measure",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "4178",
+    ],
+    repoRoot,
+  );
+  if (!defaultBootstrap.summary.ok) {
+    throw new Error(
+      `reference bootstrap benchmark failed:\n${defaultBootstrap.summary.stderrSnippet ?? "no stderr captured"}`,
+    );
+  }
+
+  const bootstrap = JSON.parse(defaultBootstrap.stdout) as {
+    startupTimeMs: number;
+    url: string;
+  };
+  return {
+    status: "scripted",
+    benchmarkSeconds: bootstrap.startupTimeMs / 1000,
+    notes: [
+      `Measured from the canonical bootstrap at ${bootstrap.url}.`,
+      "Override with --creator-command if a different official starter flow replaces the local sandbox bootstrap.",
+    ],
+  };
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const repoRoot = resolve(import.meta.dir, "..");
+
+  const coreArgs = [
+    "cargo",
+    "run",
+    "-p",
+    "pod-core",
+    "--example",
+    "moat_benchmark_suite",
+    "--release",
+    "--",
+    "--profile",
+    options.profile,
+  ];
+  if (typeof options.monthlyHostCostUsd === "number") {
+    coreArgs.push("--monthly-host-cost-usd", String(options.monthlyHostCostUsd));
+  }
+
+  const coreCommand = runCommand("core-moat-benchmark", coreArgs, repoRoot);
+  if (!coreCommand.summary.ok) {
+    throw new Error(
+      `core benchmark failed:\n${coreCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+    );
+  }
+
+  const core = JSON.parse(coreCommand.stdout);
+  let browserNativeParity: BrowserParityReport | null = null;
+  let browserRouteMeasurements: BrowserRouteMeasurementsReport | null = null;
+  if (!options.skipBrowser) {
+    const routeMeasurementCommand = runCommand(
+      "pod-web-render-route-measurements",
+      ["bun", "run", "measure:render-routes"],
+      `${repoRoot}/apps/pod-web`,
+    );
+    const checks = [
+      runCommand("native-render-tests", ["cargo", "test", "-p", "pod-render", "--lib"], repoRoot)
+        .summary,
+      runCommand(
+        "pod-web-typecheck",
+        ["bun", "run", "typecheck"],
+        `${repoRoot}/apps/pod-web`,
+      ).summary,
+      runCommand(
+        "pod-web-unit-tests",
+        ["bun", "test"],
+        `${repoRoot}/apps/pod-web`,
+      ).summary,
+      runCommand(
+        "pod-web-smoke-tests",
+        ["bun", "run", "test:smoke"],
+        `${repoRoot}/apps/pod-web`,
+      ).summary,
+      routeMeasurementCommand.summary,
+    ];
+    const passedChecks = checks.filter((check) => check.ok).length;
+    browserNativeParity = {
+      totalChecks: checks.length,
+      passedChecks,
+      parityScore: checks.length === 0 ? 0 : passedChecks / checks.length,
+      checks,
+    };
+    if (routeMeasurementCommand.summary.ok) {
+      browserRouteMeasurements = JSON.parse(
+        routeMeasurementCommand.stdout,
+      ) as BrowserRouteMeasurementsReport;
+    }
+  }
+
+  const report: CombinedReport = {
+    schemaVersion: 1,
+    generatedAtUnixMs: Date.now(),
+    profile: options.profile,
+    core,
+    browserNativeParity,
+    browserRouteMeasurements,
+    creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),
+  };
+
+  const outputPath = resolve(repoRoot, options.output);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

@@ -52,3 +52,63 @@ jobs:
 
       - name: Pod Render wasm compatibility check
         run: cargo check -p pod-render --target wasm32-unknown-unknown
+
+  pod-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/pod-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install pod-web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: pod-web typecheck
+        run: bun run typecheck
+
+      - name: pod-web unit tests
+        run: bun test
+
+      - name: pod-web build
+        run: bun run build
+
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: pod-web smoke tests
+        run: bun run test:smoke
+
+  moat-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install pod-web dependencies
+        working-directory: apps/pod-web
+        run: bun install --frozen-lockfile
+
+      - name: Run moat benchmark smoke suite
+        run: bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci.json
+
+      - name: Upload moat benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moat-benchmarks-ci
+          path: artifacts/moat-benchmarks-ci.json

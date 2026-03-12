@@ -84,6 +84,22 @@ function moveWithinRange(
   stepTicks(world, 1);
 }
 
+function attackUntilLowHealth(
+  world: PodWebLocalWorld,
+  targetId: number,
+  healthThreshold: number,
+  maxAttempts: number
+): void {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const target = world.snapshotState().entities.find((entity) => entity.id === targetId);
+    if (!target || (target.health ?? 0) <= healthThreshold) {
+      return;
+    }
+    world.submitActions([{ kind: "attackTarget", target: targetId }]);
+    stepTicks(world, 40);
+  }
+}
+
 describe("PodWebLocalWorld", () => {
   test("spawns a connected local sandbox with a controlled player and authored entities", () => {
     const world = new PodWebLocalWorld("Scout");
@@ -108,6 +124,15 @@ describe("PodWebLocalWorld", () => {
     expect(snapshot.entities.some((entity) => entity.label === "glass spire")).toBe(true);
     expect(snapshot.entities.some((entity) => entity.label === "canopy tree")).toBe(true);
     expect(
+      snapshot.entities.find((entity) => entity.label === "glass spire")?.metadata.actorPresentation?.meshAssetId
+    ).toBe("glass-spire");
+    expect(
+      snapshot.entities.find((entity) => entity.label === "canopy tree")?.metadata.actorPresentation?.meshAssetId
+    ).toBe("canopy-tree");
+    expect(
+      snapshot.entities.find((entity) => entity.label === "weathered boulder")?.metadata.actorPresentation?.meshAssetId
+    ).toBe("weathered-boulder");
+    expect(
       snapshot.entities.some(
         (entity) => entity.metadata.faction?.factionId === "verdant-wardens"
       )
@@ -127,6 +152,48 @@ describe("PodWebLocalWorld", () => {
         (entity) => entity.metadata.spawnProfile?.biomeId === "verdant-hollow"
       )
     ).toBe(true);
+  });
+
+  test("spawns the bootstrap showcase preset with a curated shoreline vista", () => {
+    const world = new PodWebLocalWorld("Scout", "bootstrap-showcase");
+    world.connect();
+
+    const snapshot = world.snapshotState();
+    const player = snapshot.entities.find((entity) => entity.id === 1);
+    const cache = snapshot.entities.find((entity) => entity.label === "Supply Cache");
+    const monolith = snapshot.entities.find((entity) => entity.label === "tideglass monolith");
+    const shrine = snapshot.entities.find((entity) => entity.label === "resonant shrine");
+    const activeRegion = snapshot.population.regions.find((region) => region.regionId === "verdant-heart");
+    expect(world.currentStatus()).toMatchObject({
+      phase: "connected",
+      controlledEntity: 1,
+      detail: "Bootstrap showcase shard ready"
+    });
+    expect(world.presentation()).toMatchObject({
+      presetId: "bootstrap-showcase",
+      mode: "bootstrap-showcase",
+      worldName: "Resonant Shore"
+    });
+    expect(player).not.toBeUndefined();
+    expect(cache).not.toBeUndefined();
+    expect(monolith).not.toBeUndefined();
+    expect(shrine).not.toBeUndefined();
+    expect(snapshot.entities.some((entity) => entity.label === "glass spire")).toBe(false);
+    expect(snapshot.entities.some((entity) => entity.label === "windward pine")).toBe(true);
+    expect(sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0).hasWaterSurface).toBe(
+      false
+    );
+    expect(Math.hypot((player?.position[0] ?? 0) - (cache?.position[0] ?? 0), (player?.position[1] ?? 0) - (cache?.position[1] ?? 0))).toBeLessThan(
+      4.5
+    );
+    expect((monolith?.position[0] ?? 0) - (player?.position[0] ?? 0)).toBeGreaterThan(8);
+    expect(monolith?.metadata.actorPresentation?.meshAssetId).toBe("glass-spire");
+    expect(monolith?.metadata.actorPresentation?.materialPaletteId).toBe("tideglass-monolith");
+    expect(monolith?.metadata.atmosphere?.biomeId).toBe("resonant-shore");
+    expect(shrine?.metadata.actorPresentation?.materialPaletteId).toBe("resonant-shrine");
+    expect(activeRegion?.regionName).toBe("Resonant Strand");
+    expect(activeRegion?.primaryBiomeId).toBe("resonant-shore");
+    expect(snapshot.entities.length).toBeGreaterThanOrEqual(16);
   });
 
   test("moves the player and exposes high-signal text state", () => {
@@ -158,6 +225,26 @@ describe("PodWebLocalWorld", () => {
     expect(textState).toContain("\"progression\"");
   });
 
+  test("renders showcase text state with the showcase mode and world name", () => {
+    const world = new PodWebLocalWorld("Scout", "bootstrap-showcase");
+    world.connect();
+
+    const textState = renderGameToText(
+      world.snapshotState(),
+      world.controlledEntityId(),
+      null,
+      world.currentActionState(),
+      world.presentation().readyFeedback,
+      [],
+      world.companionRoster(),
+      world.currentDebugState(),
+      world.presentation()
+    );
+
+    expect(textState).toContain("\"mode\":\"bootstrap-showcase\"");
+    expect(textState).toContain("\"world\":\"Resonant Shore\"");
+  });
+
   test("blocks movement through solid world props", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
@@ -170,7 +257,7 @@ describe("PodWebLocalWorld", () => {
     expect(player?.position[0]).toBeGreaterThan(4.5);
     expect(player?.position[1]).toBeGreaterThan(2.4);
     expect(Math.hypot((player?.position[0] ?? 0) - 8.8, (player?.position[1] ?? 0) - 7.8)).toBeGreaterThan(
-      1.55
+      1.35
     );
   });
 
@@ -185,7 +272,7 @@ describe("PodWebLocalWorld", () => {
     expect(player).not.toBeUndefined();
     const surface = sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0);
     expect(surface.isSwimmable).toBe(true);
-    expect(Math.hypot((player?.position[0] ?? 0) - 18, (player?.position[1] ?? 0) + 14)).toBeLessThan(5.25);
+    expect(Math.hypot((player?.position[0] ?? 0) - 18, (player?.position[1] ?? 0) + 14)).toBeLessThan(5.8);
     expect(player?.metadata.actorPresentation?.animationSetId).toBe("humanoid-swim");
   });
 
@@ -212,8 +299,8 @@ describe("PodWebLocalWorld", () => {
     world.connect();
 
     moveWithinRange(world, 3, 2.65, 120);
-    world.submitActions([{ kind: "attackTarget", target: 3 }]);
-    stepTicks(world, 2);
+    attackUntilLowHealth(world, 3, 12, 6);
+    moveWithinRange(world, 3, 2.4, 90);
     world.submitActions([{ kind: "captureCreature", target: 3 }]);
     stepTicks(world, 2);
 

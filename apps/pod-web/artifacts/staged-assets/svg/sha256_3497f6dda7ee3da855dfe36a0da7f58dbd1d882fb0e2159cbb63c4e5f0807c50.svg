@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="pod-ring" cx="50%" cy="50%" r="50%">
+      <stop offset="55%" stop-color="#5eeec8" stop-opacity="0"/>
+      <stop offset="72%" stop-color="#5eeec8" stop-opacity="0.92"/>
+      <stop offset="88%" stop-color="#d7fff2" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#d7fff2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" fill="transparent"/>
+  <circle cx="128" cy="128" r="112" fill="url(#pod-ring)"/>
+</svg>

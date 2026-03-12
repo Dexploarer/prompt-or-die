@@ -1,7 +1,7 @@
 //! # pod-assets — content-addressed asset pipeline primitives
 //!
-//! Provides shared types and a content-addressed cache for upcoming asset import
-//! workflows (glTF, textures, and generated runtime assets).
+//! Provides shared types and a content-addressed cache for asset import
+//! workflows (glTF, textures, scene sources, and generated runtime assets).
 
 #![allow(clippy::bool_comparison)]
 #![allow(clippy::derivable_impls)]
@@ -14,7 +14,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use pod_core::{ColorRect, Sprite, Transform};
 use pod_scene::{EntityInstance, Scene};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,6 +93,8 @@ pub enum AssetFormat {
     Obj,
     Png,
     Jpeg,
+    Ktx2,
+    Svg,
     GodotScene,
     TiledMap,
     UnityScene,
@@ -105,6 +107,8 @@ impl fmt::Display for AssetFormat {
             Self::Obj => write!(f, "obj"),
             Self::Png => write!(f, "png"),
             Self::Jpeg => write!(f, "jpeg"),
+            Self::Ktx2 => write!(f, "ktx2"),
+            Self::Svg => write!(f, "svg"),
             Self::GodotScene => write!(f, "godot_scene"),
             Self::TiledMap => write!(f, "tiled_map"),
             Self::UnityScene => write!(f, "unity_scene"),
@@ -120,6 +124,8 @@ impl AssetFormat {
             "obj" => Some(Self::Obj),
             "png" => Some(Self::Png),
             "jpg" | "jpeg" => Some(Self::Jpeg),
+            "ktx2" => Some(Self::Ktx2),
+            "svg" => Some(Self::Svg),
             "tscn" => Some(Self::GodotScene),
             "tmj" => Some(Self::TiledMap),
             "unity" | "prefab" => Some(Self::UnityScene),
@@ -127,15 +133,24 @@ impl AssetFormat {
         }
     }
 
-    pub fn asset_extension(&self) -> &'static str {
+    pub fn imported_extension(&self, source_path: &Path) -> String {
         match self {
-            Self::Gltf => "glb",
-            Self::Obj => "obj",
-            Self::Png => "png",
-            Self::Jpeg => "jpeg",
-            Self::GodotScene => "scene.json",
-            Self::TiledMap => "scene.json",
-            Self::UnityScene => "scene.json",
+            Self::Gltf | Self::Jpeg => source_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_lowercase())
+                .unwrap_or_else(|| match self {
+                    Self::Gltf => "gltf".to_string(),
+                    Self::Jpeg => "jpeg".to_string(),
+                    _ => unreachable!("handled by explicit match arm"),
+                }),
+            Self::Obj => "obj".to_string(),
+            Self::Png => "png".to_string(),
+            Self::Ktx2 => "ktx2".to_string(),
+            Self::Svg => "svg".to_string(),
+            Self::GodotScene => "scene.json".to_string(),
+            Self::TiledMap => "scene.json".to_string(),
+            Self::UnityScene => "scene.json".to_string(),
         }
     }
 
@@ -145,6 +160,8 @@ impl AssetFormat {
             Self::Obj => "obj",
             Self::Png => "png",
             Self::Jpeg => "jpeg",
+            Self::Ktx2 => "ktx2",
+            Self::Svg => "svg",
             Self::GodotScene => "scene",
             Self::TiledMap => "scene",
             Self::UnityScene => "scene",
@@ -332,6 +349,67 @@ impl From<AssetCacheError> for AssetImportError {
 impl From<std::io::Error> for AssetImportError {
     fn from(err: std::io::Error) -> Self {
         Self::Cache(AssetCacheError::Io(err))
+    }
+}
+
+#[derive(Debug)]
+pub enum RuntimeBundleError {
+    InvalidSourcePath(PathBuf),
+    MissingImport { asset_id: String, source_path: PathBuf },
+    InvalidRuntimePath(String),
+    UnsupportedCompressedTextureFormat { asset_id: String, format: AssetFormat },
+    UnsupportedCompressedMeshFormat { asset_id: String, format: AssetFormat },
+    DuplicateRuntimePath {
+        runtime_path: String,
+        first_asset_id: String,
+        second_asset_id: String,
+    },
+    Io(std::io::Error),
+}
+
+impl fmt::Display for RuntimeBundleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSourcePath(path) => {
+                write!(f, "runtime bundle source path could not be canonicalized: {path:?}")
+            }
+            Self::MissingImport {
+                asset_id,
+                source_path,
+            } => write!(
+                f,
+                "runtime bundle spec references `{asset_id}` at {:?}, but no staged import matched it",
+                source_path
+            ),
+            Self::InvalidRuntimePath(path) => {
+                write!(f, "runtime bundle path is invalid or unsafe: {path}")
+            }
+            Self::UnsupportedCompressedTextureFormat { asset_id, format } => write!(
+                f,
+                "runtime bundle compressed texture variant for `{asset_id}` must stage a ktx2 source, got {format}"
+            ),
+            Self::UnsupportedCompressedMeshFormat { asset_id, format } => write!(
+                f,
+                "runtime bundle compressed mesh variant for `{asset_id}` must stage a gltf/glb source, got {format}"
+            ),
+            Self::DuplicateRuntimePath {
+                runtime_path,
+                first_asset_id,
+                second_asset_id,
+            } => write!(
+                f,
+                "runtime bundle output path `{runtime_path}` is declared by both `{first_asset_id}` and `{second_asset_id}`"
+            ),
+            Self::Io(err) => write!(f, "runtime bundle io error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeBundleError {}
+
+impl From<std::io::Error> for RuntimeBundleError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
@@ -1727,6 +1805,91 @@ pub struct AssetImport {
     pub byte_len: u64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleOutputRoots {
+    pub source: String,
+    pub staged: String,
+    pub runtime_public: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleMeshLodVariantSpec {
+    pub source_path: PathBuf,
+    pub runtime_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleAssetSpec {
+    pub source_path: PathBuf,
+    pub runtime_path: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lod_variants: BTreeMap<String, RuntimeBundleMeshLodVariantSpec>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub compressed_lod_variants: BTreeMap<String, RuntimeBundleMeshLodVariantSpec>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleCompressedTextureVariantSpec {
+    pub source_path: PathBuf,
+    pub runtime_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleSpriteSpec {
+    pub source_path: PathBuf,
+    pub runtime_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressed_variant: Option<RuntimeBundleCompressedTextureVariantSpec>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleSpec {
+    pub output_roots: RuntimeBundleOutputRoots,
+    pub meshes: BTreeMap<String, RuntimeBundleAssetSpec>,
+    pub sprites: BTreeMap<String, RuntimeBundleSpriteSpec>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleCompressedTextureVariantRecord {
+    pub source_path: String,
+    pub staged_id: String,
+    pub staged_format: String,
+    pub staged_path: String,
+    pub runtime_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleVariantRecord {
+    pub source_path: String,
+    pub staged_id: String,
+    pub staged_format: String,
+    pub staged_path: String,
+    pub runtime_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleAssetRecord {
+    pub source_path: String,
+    pub staged_id: String,
+    pub staged_format: String,
+    pub staged_path: String,
+    pub runtime_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressed_variant: Option<RuntimeBundleCompressedTextureVariantRecord>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lod_variants: BTreeMap<String, RuntimeBundleVariantRecord>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub compressed_lod_variants: BTreeMap<String, RuntimeBundleVariantRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct RuntimeBundleManifest {
+    pub version: u32,
+    pub output_roots: RuntimeBundleOutputRoots,
+    pub meshes: BTreeMap<String, RuntimeBundleAssetRecord>,
+    pub sprites: BTreeMap<String, RuntimeBundleAssetRecord>,
+}
+
 /// Content-addressed in-memory cache for current-session asset metadata.
 #[derive(Default, Debug)]
 pub struct AssetCache {
@@ -2402,6 +2565,30 @@ fn write_imported_scene_artifact(
     Ok(())
 }
 
+fn write_imported_asset_artifact(
+    source_path: &Path,
+    imported_path: &Path,
+    format: &AssetFormat,
+) -> Result<(), AssetImportError> {
+    match format {
+        AssetFormat::GodotScene | AssetFormat::TiledMap | AssetFormat::UnityScene => {
+            write_imported_scene_artifact(source_path, imported_path, format)
+        }
+        AssetFormat::Gltf
+        | AssetFormat::Obj
+        | AssetFormat::Png
+        | AssetFormat::Jpeg
+        | AssetFormat::Ktx2
+        | AssetFormat::Svg => {
+            if let Some(parent) = imported_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(source_path, imported_path)?;
+            Ok(())
+        }
+    }
+}
+
 fn scene_import_error(source_path: &Path, message: impl Into<String>) -> AssetImportError {
     AssetImportError::SceneImport {
         path: source_path.to_path_buf(),
@@ -2673,15 +2860,10 @@ pub fn import_asset(
         .join(format!(
             "{}.{}",
             file_id.as_filename(),
-            format.asset_extension()
+            format.imported_extension(&source_path)
         ));
 
-    if matches!(
-        format,
-        AssetFormat::GodotScene | AssetFormat::TiledMap | AssetFormat::UnityScene
-    ) {
-        write_imported_scene_artifact(&source_path, &imported_path, &format)?;
-    }
+    write_imported_asset_artifact(&source_path, &imported_path, &format)?;
 
     cache.index_or_refresh(&source_path, imported_path.clone())?;
     let record = cache.get(&file_id).cloned().unwrap_or_else(|| {
@@ -2702,6 +2884,372 @@ pub fn import_asset(
         checksum: record.checksum,
         byte_len: record.byte_len,
     })
+}
+
+pub fn build_runtime_bundle_manifest(
+    spec: &RuntimeBundleSpec,
+    imports: &[AssetImport],
+    base_dir: impl AsRef<Path>,
+) -> Result<RuntimeBundleManifest, RuntimeBundleError> {
+    let imports_by_source: HashMap<PathBuf, &AssetImport> = imports
+        .iter()
+        .map(|import| (import.source_path.clone(), import))
+        .collect();
+    let base_dir = base_dir.as_ref();
+
+    let manifest = RuntimeBundleManifest {
+        version: 1,
+        output_roots: spec.output_roots.clone(),
+        meshes: build_runtime_bundle_records(&spec.meshes, &imports_by_source, base_dir)?,
+        sprites: build_runtime_bundle_sprite_records(&spec.sprites, &imports_by_source, base_dir)?,
+    };
+    ensure_unique_runtime_bundle_paths(&manifest, base_dir)?;
+
+    Ok(manifest)
+}
+
+fn build_runtime_bundle_records(
+    spec_entries: &BTreeMap<String, RuntimeBundleAssetSpec>,
+    imports_by_source: &HashMap<PathBuf, &AssetImport>,
+    base_dir: &Path,
+) -> Result<BTreeMap<String, RuntimeBundleAssetRecord>, RuntimeBundleError> {
+    spec_entries
+        .iter()
+        .map(|(asset_id, asset_spec)| {
+            let mut record = build_runtime_bundle_record(
+                asset_id,
+                &asset_spec.source_path,
+                &asset_spec.runtime_path,
+                imports_by_source,
+                base_dir,
+            )?;
+            for (level, variant_spec) in &asset_spec.lod_variants {
+                let variant_record = build_runtime_bundle_variant_record(
+                    asset_id,
+                    &variant_spec.source_path,
+                    &variant_spec.runtime_path,
+                    imports_by_source,
+                    base_dir,
+                )?;
+                record.lod_variants.insert(level.clone(), variant_record);
+            }
+            for (level, variant_spec) in &asset_spec.compressed_lod_variants {
+                let variant_import = resolve_runtime_bundle_import(
+                    asset_id,
+                    &variant_spec.source_path,
+                    imports_by_source,
+                )?;
+                if variant_import.format != AssetFormat::Gltf {
+                    return Err(RuntimeBundleError::UnsupportedCompressedMeshFormat {
+                        asset_id: asset_id.clone(),
+                        format: variant_import.format.clone(),
+                    });
+                }
+                let variant_record = build_runtime_bundle_variant_record(
+                    asset_id,
+                    &variant_spec.source_path,
+                    &variant_spec.runtime_path,
+                    imports_by_source,
+                    base_dir,
+                )?;
+                record
+                    .compressed_lod_variants
+                    .insert(level.clone(), variant_record);
+            }
+            Ok((asset_id.clone(), record))
+        })
+        .collect()
+}
+
+fn build_runtime_bundle_sprite_records(
+    spec_entries: &BTreeMap<String, RuntimeBundleSpriteSpec>,
+    imports_by_source: &HashMap<PathBuf, &AssetImport>,
+    base_dir: &Path,
+) -> Result<BTreeMap<String, RuntimeBundleAssetRecord>, RuntimeBundleError> {
+    spec_entries
+        .iter()
+        .map(|(asset_id, asset_spec)| {
+            let mut record = build_runtime_bundle_record(
+                asset_id,
+                &asset_spec.source_path,
+                &asset_spec.runtime_path,
+                imports_by_source,
+                base_dir,
+            )?;
+            if let Some(compressed_variant) = asset_spec.compressed_variant.as_ref() {
+                let compressed_import = resolve_runtime_bundle_import(
+                    asset_id,
+                    &compressed_variant.source_path,
+                    imports_by_source,
+                )?;
+                if compressed_import.format != AssetFormat::Ktx2 {
+                    return Err(RuntimeBundleError::UnsupportedCompressedTextureFormat {
+                        asset_id: asset_id.clone(),
+                        format: compressed_import.format.clone(),
+                    });
+                }
+                record.compressed_variant = Some(RuntimeBundleCompressedTextureVariantRecord {
+                    source_path: display_path_relative_to(base_dir, &compressed_import.source_path),
+                    staged_id: compressed_import.id.to_string(),
+                    staged_format: compressed_import.format.to_string(),
+                    staged_path: display_path_relative_to(base_dir, &compressed_import.imported_path),
+                    runtime_path: compressed_variant.runtime_path.clone(),
+                });
+            }
+            Ok((asset_id.clone(), record))
+        })
+        .collect()
+}
+
+fn build_runtime_bundle_record(
+    asset_id: &str,
+    source_path: &Path,
+    runtime_path: &str,
+    imports_by_source: &HashMap<PathBuf, &AssetImport>,
+    base_dir: &Path,
+) -> Result<RuntimeBundleAssetRecord, RuntimeBundleError> {
+    let variant =
+        build_runtime_bundle_variant_record(asset_id, source_path, runtime_path, imports_by_source, base_dir)?;
+    Ok(RuntimeBundleAssetRecord {
+        source_path: variant.source_path,
+        staged_id: variant.staged_id,
+        staged_format: variant.staged_format,
+        staged_path: variant.staged_path,
+        runtime_path: variant.runtime_path,
+        compressed_variant: None,
+        lod_variants: BTreeMap::new(),
+        compressed_lod_variants: BTreeMap::new(),
+    })
+}
+
+fn build_runtime_bundle_variant_record(
+    asset_id: &str,
+    source_path: &Path,
+    runtime_path: &str,
+    imports_by_source: &HashMap<PathBuf, &AssetImport>,
+    base_dir: &Path,
+) -> Result<RuntimeBundleVariantRecord, RuntimeBundleError> {
+    let import = resolve_runtime_bundle_import(asset_id, source_path, imports_by_source)?;
+    Ok(RuntimeBundleVariantRecord {
+        source_path: display_path_relative_to(base_dir, &import.source_path),
+        staged_id: import.id.to_string(),
+        staged_format: import.format.to_string(),
+        staged_path: display_path_relative_to(base_dir, &import.imported_path),
+        runtime_path: runtime_path.to_string(),
+    })
+}
+
+fn resolve_runtime_bundle_import<'a>(
+    asset_id: &str,
+    source_path: &Path,
+    imports_by_source: &'a HashMap<PathBuf, &'a AssetImport>,
+) -> Result<&'a AssetImport, RuntimeBundleError> {
+    let canonical_source = canonical_source_path(source_path)
+        .map_err(|_| RuntimeBundleError::InvalidSourcePath(source_path.to_path_buf()))?;
+    imports_by_source
+        .get(&canonical_source)
+        .copied()
+        .ok_or_else(|| RuntimeBundleError::MissingImport {
+            asset_id: asset_id.to_string(),
+            source_path: source_path.to_path_buf(),
+        })
+}
+
+fn ensure_unique_runtime_bundle_paths(
+    manifest: &RuntimeBundleManifest,
+    base_dir: &Path,
+) -> Result<(), RuntimeBundleError> {
+    let mut seen_paths = HashMap::<PathBuf, String>::new();
+
+    for (asset_id, record) in &manifest.meshes {
+        register_runtime_bundle_path(
+            &mut seen_paths,
+            base_dir,
+            &manifest.output_roots.runtime_public,
+            &record.runtime_path,
+            asset_id,
+        )?;
+        for variant_record in record.lod_variants.values() {
+            register_runtime_bundle_path(
+                &mut seen_paths,
+                base_dir,
+                &manifest.output_roots.runtime_public,
+                &variant_record.runtime_path,
+                asset_id,
+            )?;
+        }
+        for variant_record in record.compressed_lod_variants.values() {
+            register_runtime_bundle_path(
+                &mut seen_paths,
+                base_dir,
+                &manifest.output_roots.runtime_public,
+                &variant_record.runtime_path,
+                asset_id,
+            )?;
+        }
+    }
+
+    for (asset_id, record) in &manifest.sprites {
+        register_runtime_bundle_path(
+            &mut seen_paths,
+            base_dir,
+            &manifest.output_roots.runtime_public,
+            &record.runtime_path,
+            asset_id,
+        )?;
+        if let Some(compressed_variant) = record.compressed_variant.as_ref() {
+            register_runtime_bundle_path(
+                &mut seen_paths,
+                base_dir,
+                &manifest.output_roots.runtime_public,
+                &compressed_variant.runtime_path,
+                asset_id,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn register_runtime_bundle_path(
+    seen_paths: &mut HashMap<PathBuf, String>,
+    base_dir: &Path,
+    runtime_public_root: &str,
+    runtime_path: &str,
+    asset_id: &str,
+) -> Result<(), RuntimeBundleError> {
+    let normalized_path = runtime_bundle_output_path(base_dir, runtime_public_root, runtime_path)?;
+    if let Some(existing_asset_id) = seen_paths.get(&normalized_path) {
+        return Err(RuntimeBundleError::DuplicateRuntimePath {
+            runtime_path: runtime_path.to_string(),
+            first_asset_id: existing_asset_id.clone(),
+            second_asset_id: asset_id.to_string(),
+        });
+    }
+    seen_paths.insert(normalized_path, asset_id.to_string());
+    Ok(())
+}
+
+pub fn materialize_runtime_bundle_manifest(
+    manifest: &RuntimeBundleManifest,
+    base_dir: impl AsRef<Path>,
+) -> Result<(), RuntimeBundleError> {
+    let base_dir = base_dir.as_ref();
+
+    materialize_runtime_bundle_records(&manifest.output_roots, &manifest.meshes, base_dir)?;
+    materialize_runtime_bundle_records(&manifest.output_roots, &manifest.sprites, base_dir)?;
+
+    Ok(())
+}
+
+fn materialize_runtime_bundle_records(
+    output_roots: &RuntimeBundleOutputRoots,
+    records: &BTreeMap<String, RuntimeBundleAssetRecord>,
+    base_dir: &Path,
+) -> Result<(), RuntimeBundleError> {
+    for record in records.values() {
+        let staged_path = base_dir.join(&record.staged_path);
+        let runtime_path =
+            runtime_bundle_output_path(base_dir, &output_roots.runtime_public, &record.runtime_path)?;
+        if let Some(parent) = runtime_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(staged_path, runtime_path)?;
+        for variant_record in record.lod_variants.values() {
+            let variant_staged_path = base_dir.join(&variant_record.staged_path);
+            let variant_runtime_path = runtime_bundle_output_path(
+                base_dir,
+                &output_roots.runtime_public,
+                &variant_record.runtime_path,
+            )?;
+            if let Some(parent) = variant_runtime_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(variant_staged_path, variant_runtime_path)?;
+        }
+        for variant_record in record.compressed_lod_variants.values() {
+            let variant_staged_path = base_dir.join(&variant_record.staged_path);
+            let variant_runtime_path = runtime_bundle_output_path(
+                base_dir,
+                &output_roots.runtime_public,
+                &variant_record.runtime_path,
+            )?;
+            if let Some(parent) = variant_runtime_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(variant_staged_path, variant_runtime_path)?;
+        }
+        if let Some(compressed_variant) = record.compressed_variant.as_ref() {
+            let compressed_staged_path = base_dir.join(&compressed_variant.staged_path);
+            let compressed_runtime_path = runtime_bundle_output_path(
+                base_dir,
+                &output_roots.runtime_public,
+                &compressed_variant.runtime_path,
+            )?;
+            if let Some(parent) = compressed_runtime_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(compressed_staged_path, compressed_runtime_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn runtime_bundle_output_path(
+    base_dir: &Path,
+    runtime_public_root: &str,
+    runtime_path: &str,
+) -> Result<PathBuf, RuntimeBundleError> {
+    let runtime_public_root = base_dir.join(runtime_public_root);
+    let runtime_public_prefix = runtime_public_root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()))?;
+    let runtime_path = runtime_path.trim();
+    if runtime_path.is_empty() {
+        return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()));
+    }
+
+    let mut relative_path = PathBuf::new();
+    let mut skipped_public_prefix = false;
+    for component in Path::new(runtime_path).components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(value) => {
+                if !skipped_public_prefix && value == runtime_public_prefix {
+                    skipped_public_prefix = true;
+                    continue;
+                }
+                skipped_public_prefix = true;
+                relative_path.push(value);
+            }
+            _ => return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string())),
+        }
+    }
+
+    if relative_path.as_os_str().is_empty() {
+        return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()));
+    }
+
+    Ok(runtime_public_root.join(relative_path))
+}
+
+fn display_path_relative_to(base_dir: &Path, path: &Path) -> String {
+    match path.strip_prefix(base_dir) {
+        Ok(relative) => relative.to_string_lossy().to_string(),
+        Err(_) => {
+            let canonical_base = canonical_source_path(base_dir).ok();
+            let canonical_path = canonical_source_path(path).ok();
+            match (canonical_base.as_deref(), canonical_path.as_deref()) {
+                (Some(base), Some(value)) => value
+                    .strip_prefix(base)
+                    .map(|relative| relative.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| path.display().to_string()),
+                _ => path.display().to_string(),
+            }
+        }
+    }
 }
 
 /// Single vertex record for procedural mesh processing.
@@ -3206,6 +3754,487 @@ mod tests {
         assert_eq!(first.source_path, canonical_source);
         assert_eq!(cache.total(), 1);
         assert_eq!(second.source_path, canonical_source);
+        assert!(first.imported_path.exists());
+        assert!(first.imported_path.to_string_lossy().contains("/obj/"));
+        assert!(first.imported_path.to_string_lossy().ends_with(".obj"));
+        assert_eq!(fs::read(&first.imported_path).unwrap(), b"obj-bytes");
+    }
+
+    #[test]
+    fn import_asset_preserves_gltf_family_extensions_when_staging_sources() {
+        let output_root = temp_file_path("import-root-gltf-family");
+
+        for extension in ["gltf", "glb"] {
+            let mut cache = AssetCache::new();
+            let source = temp_file_path(&format!("mesh.{extension}"));
+            let source_bytes = format!("{extension}-bytes").into_bytes();
+            fs::write(&source, &source_bytes).unwrap();
+
+            let import =
+                import_asset(&mut cache, &source, &output_root).expect("gltf import should work");
+
+            assert_eq!(import.format, AssetFormat::Gltf);
+            assert!(import.imported_path.exists());
+            assert!(import
+                .imported_path
+                .to_string_lossy()
+                .contains("/gltf/"));
+            assert!(import
+                .imported_path
+                .to_string_lossy()
+                .ends_with(&format!(".{extension}")));
+            assert_eq!(fs::read(&import.imported_path).unwrap(), source_bytes);
+        }
+    }
+
+    #[test]
+    fn import_asset_preserves_ktx2_extension_when_staging_sources() {
+        let mut cache = AssetCache::new();
+        let source = temp_file_path("selection-ring.ktx2");
+        let output_root = temp_file_path("import-root-ktx2");
+        let source_bytes = b"ktx2-bytes";
+        fs::write(&source, source_bytes).unwrap();
+
+        let import =
+            import_asset(&mut cache, &source, &output_root).expect("ktx2 import should succeed");
+
+        assert_eq!(import.format, AssetFormat::Ktx2);
+        assert!(import.imported_path.exists());
+        assert!(import.imported_path.to_string_lossy().contains("/ktx2/"));
+        assert!(import.imported_path.to_string_lossy().ends_with(".ktx2"));
+        assert_eq!(fs::read(&import.imported_path).unwrap(), source_bytes);
+    }
+
+    #[test]
+    fn import_asset_stages_svg_sources_as_content_addressed_artifacts() {
+        let mut cache = AssetCache::new();
+        let source = temp_file_path("selection-ring.svg");
+        let output_root = temp_file_path("import-root-svg");
+        let source_bytes = br#"<svg viewBox="0 0 1 1"></svg>"#;
+        fs::write(&source, source_bytes).unwrap();
+
+        let import =
+            import_asset(&mut cache, &source, &output_root).expect("svg import should succeed");
+
+        assert_eq!(import.format, AssetFormat::Svg);
+        assert!(import.imported_path.exists());
+        assert!(import.imported_path.to_string_lossy().contains("/svg/"));
+        assert!(import.imported_path.to_string_lossy().ends_with(".svg"));
+        assert_eq!(fs::read(&import.imported_path).unwrap(), source_bytes);
+    }
+
+    #[test]
+    fn build_runtime_bundle_manifest_maps_staged_imports_to_runtime_paths() {
+        let mut cache = AssetCache::new();
+        let app_root = temp_file_path("bundle-app-root");
+        let source_root = app_root.join("artifacts/source-assets");
+        let output_root = app_root.join("artifacts/staged-assets");
+        fs::create_dir_all(source_root.join("meshes")).unwrap();
+        fs::create_dir_all(source_root.join("textures")).unwrap();
+
+        let mesh_source = source_root.join("meshes/hero.glb");
+        let mesh_lod1_source = source_root.join("meshes/hero.lod1.glb");
+        let mesh_compressed_source = source_root.join("meshes/hero.meshopt.glb");
+        let sprite_source = source_root.join("textures/focus-ring.svg");
+        let sprite_ktx2_source = source_root.join("textures/focus-ring.ktx2");
+        fs::write(&mesh_source, b"glb-bytes").unwrap();
+        fs::write(&mesh_lod1_source, b"glb-lod1-bytes").unwrap();
+        fs::write(&mesh_compressed_source, b"glb-meshopt-bytes").unwrap();
+        fs::write(&sprite_source, br#"<svg></svg>"#).unwrap();
+        fs::write(&sprite_ktx2_source, b"ktx2-bytes").unwrap();
+
+        let mesh_import = import_asset(&mut cache, &mesh_source, &output_root).unwrap();
+        let mesh_lod1_import = import_asset(&mut cache, &mesh_lod1_source, &output_root).unwrap();
+        let mesh_compressed_import =
+            import_asset(&mut cache, &mesh_compressed_source, &output_root).unwrap();
+        let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
+        let sprite_ktx2_import = import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
+
+        let manifest = build_runtime_bundle_manifest(
+            &RuntimeBundleSpec {
+                output_roots: RuntimeBundleOutputRoots {
+                    source: "artifacts/source-assets".to_string(),
+                    staged: "artifacts/staged-assets".to_string(),
+                    runtime_public: "public/assets".to_string(),
+                },
+                meshes: BTreeMap::from([(
+                    "hero".to_string(),
+                    RuntimeBundleAssetSpec {
+                        source_path: mesh_source.clone(),
+                        runtime_path: "/assets/meshes/hero.glb".to_string(),
+                        lod_variants: BTreeMap::from([(
+                            "1".to_string(),
+                            RuntimeBundleMeshLodVariantSpec {
+                                source_path: mesh_lod1_source.clone(),
+                                runtime_path: "/assets/meshes/hero.lod1.glb".to_string(),
+                            },
+                        )]),
+                        compressed_lod_variants: BTreeMap::from([(
+                            "0".to_string(),
+                            RuntimeBundleMeshLodVariantSpec {
+                                source_path: mesh_compressed_source.clone(),
+                                runtime_path: "/assets/meshes/hero.meshopt.glb".to_string(),
+                            },
+                        )]),
+                    },
+                )]),
+                sprites: BTreeMap::from([(
+                    "focus-ring".to_string(),
+                    RuntimeBundleSpriteSpec {
+                        source_path: sprite_source.clone(),
+                        runtime_path: "/assets/textures/focus-ring.svg".to_string(),
+                        compressed_variant: Some(RuntimeBundleCompressedTextureVariantSpec {
+                            source_path: sprite_ktx2_source.clone(),
+                            runtime_path: "/assets/textures/focus-ring.ktx2".to_string(),
+                        }),
+                    },
+                )]),
+            },
+            &[
+                mesh_import.clone(),
+                mesh_lod1_import.clone(),
+                mesh_compressed_import.clone(),
+                sprite_import.clone(),
+                sprite_ktx2_import.clone(),
+            ],
+            &app_root,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.version, 1);
+        assert_eq!(
+            manifest.meshes["hero"],
+            RuntimeBundleAssetRecord {
+                source_path: "artifacts/source-assets/meshes/hero.glb".to_string(),
+                staged_id: mesh_import.id.to_string(),
+                staged_format: "gltf".to_string(),
+                staged_path: format!(
+                    "artifacts/staged-assets/gltf/{}.glb",
+                    mesh_import.id.as_filename()
+                ),
+                runtime_path: "/assets/meshes/hero.glb".to_string(),
+                compressed_variant: None,
+                lod_variants: BTreeMap::from([(
+                    "1".to_string(),
+                    RuntimeBundleVariantRecord {
+                        source_path: "artifacts/source-assets/meshes/hero.lod1.glb".to_string(),
+                        staged_id: mesh_lod1_import.id.to_string(),
+                        staged_format: "gltf".to_string(),
+                        staged_path: format!(
+                            "artifacts/staged-assets/gltf/{}.glb",
+                            mesh_lod1_import.id.as_filename()
+                        ),
+                        runtime_path: "/assets/meshes/hero.lod1.glb".to_string(),
+                    },
+                )]),
+                compressed_lod_variants: BTreeMap::from([(
+                    "0".to_string(),
+                    RuntimeBundleVariantRecord {
+                        source_path: "artifacts/source-assets/meshes/hero.meshopt.glb".to_string(),
+                        staged_id: mesh_compressed_import.id.to_string(),
+                        staged_format: "gltf".to_string(),
+                        staged_path: format!(
+                            "artifacts/staged-assets/gltf/{}.glb",
+                            mesh_compressed_import.id.as_filename()
+                        ),
+                        runtime_path: "/assets/meshes/hero.meshopt.glb".to_string(),
+                    },
+                )]),
+            }
+        );
+        assert_eq!(
+            manifest.sprites["focus-ring"],
+            RuntimeBundleAssetRecord {
+                source_path: "artifacts/source-assets/textures/focus-ring.svg".to_string(),
+                staged_id: sprite_import.id.to_string(),
+                staged_format: "svg".to_string(),
+                staged_path: format!(
+                    "artifacts/staged-assets/svg/{}.svg",
+                    sprite_import.id.as_filename()
+                ),
+                runtime_path: "/assets/textures/focus-ring.svg".to_string(),
+                compressed_variant: Some(RuntimeBundleCompressedTextureVariantRecord {
+                    source_path: "artifacts/source-assets/textures/focus-ring.ktx2".to_string(),
+                    staged_id: sprite_ktx2_import.id.to_string(),
+                    staged_format: "ktx2".to_string(),
+                    staged_path: format!(
+                        "artifacts/staged-assets/ktx2/{}.ktx2",
+                        sprite_ktx2_import.id.as_filename()
+                    ),
+                    runtime_path: "/assets/textures/focus-ring.ktx2".to_string(),
+                }),
+                lod_variants: BTreeMap::new(),
+                compressed_lod_variants: BTreeMap::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn build_runtime_bundle_manifest_rejects_duplicate_runtime_paths() {
+        let mut cache = AssetCache::new();
+        let app_root = temp_file_path("duplicate-runtime-path-app-root");
+        let source_root = app_root.join("artifacts/source-assets");
+        let output_root = app_root.join("artifacts/staged-assets");
+        fs::create_dir_all(source_root.join("meshes")).unwrap();
+        fs::create_dir_all(source_root.join("textures")).unwrap();
+
+        let mesh_source = source_root.join("meshes/hero.glb");
+        let sprite_source = source_root.join("textures/focus-ring.svg");
+        fs::write(&mesh_source, b"glb-bytes").unwrap();
+        fs::write(&sprite_source, br#"<svg></svg>"#).unwrap();
+
+        let mesh_import = import_asset(&mut cache, &mesh_source, &output_root).unwrap();
+        let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
+
+        let error = build_runtime_bundle_manifest(
+            &RuntimeBundleSpec {
+                output_roots: RuntimeBundleOutputRoots {
+                    source: "artifacts/source-assets".to_string(),
+                    staged: "artifacts/staged-assets".to_string(),
+                    runtime_public: "public/assets".to_string(),
+                },
+                meshes: BTreeMap::from([(
+                    "hero".to_string(),
+                    RuntimeBundleAssetSpec {
+                        source_path: mesh_source.clone(),
+                        runtime_path: "/assets/shared/asset.bin".to_string(),
+                        lod_variants: BTreeMap::new(),
+                        compressed_lod_variants: BTreeMap::new(),
+                    },
+                )]),
+                sprites: BTreeMap::from([(
+                    "focus-ring".to_string(),
+                    RuntimeBundleSpriteSpec {
+                        source_path: sprite_source.clone(),
+                        runtime_path: "/assets/shared/asset.bin".to_string(),
+                        compressed_variant: None,
+                    },
+                )]),
+            },
+            &[mesh_import, sprite_import],
+            &app_root,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RuntimeBundleError::DuplicateRuntimePath {
+                runtime_path,
+                first_asset_id,
+                second_asset_id
+            } if runtime_path == "/assets/shared/asset.bin"
+                && first_asset_id == "hero"
+                && second_asset_id == "focus-ring"
+        ));
+    }
+
+    #[test]
+    fn build_runtime_bundle_manifest_rejects_non_ktx2_compressed_texture_variant() {
+        let mut cache = AssetCache::new();
+        let app_root = temp_file_path("invalid-compressed-runtime-app-root");
+        let source_root = app_root.join("artifacts/source-assets");
+        let output_root = app_root.join("artifacts/staged-assets");
+        fs::create_dir_all(source_root.join("textures")).unwrap();
+
+        let sprite_source = source_root.join("textures/focus-ring.svg");
+        let invalid_compressed_source = source_root.join("textures/focus-ring.png");
+        fs::write(&sprite_source, br#"<svg></svg>"#).unwrap();
+        fs::write(&invalid_compressed_source, b"png-bytes").unwrap();
+
+        let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
+        let invalid_compressed_import =
+            import_asset(&mut cache, &invalid_compressed_source, &output_root).unwrap();
+
+        let error = build_runtime_bundle_manifest(
+            &RuntimeBundleSpec {
+                output_roots: RuntimeBundleOutputRoots {
+                    source: "artifacts/source-assets".to_string(),
+                    staged: "artifacts/staged-assets".to_string(),
+                    runtime_public: "public/assets".to_string(),
+                },
+                meshes: BTreeMap::new(),
+                sprites: BTreeMap::from([(
+                    "focus-ring".to_string(),
+                    RuntimeBundleSpriteSpec {
+                        source_path: sprite_source.clone(),
+                        runtime_path: "/assets/textures/focus-ring.svg".to_string(),
+                        compressed_variant: Some(RuntimeBundleCompressedTextureVariantSpec {
+                            source_path: invalid_compressed_source.clone(),
+                            runtime_path: "/assets/textures/focus-ring.ktx2".to_string(),
+                        }),
+                    },
+                )]),
+            },
+            &[sprite_import, invalid_compressed_import],
+            &app_root,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RuntimeBundleError::UnsupportedCompressedTextureFormat { asset_id, format }
+                if asset_id == "focus-ring" && format == AssetFormat::Png
+        ));
+    }
+
+    #[test]
+    fn build_runtime_bundle_manifest_rejects_non_gltf_compressed_mesh_variant() {
+        let mut cache = AssetCache::new();
+        let app_root = temp_file_path("invalid-compressed-mesh-runtime-app-root");
+        let source_root = app_root.join("artifacts/source-assets");
+        let output_root = app_root.join("artifacts/staged-assets");
+        fs::create_dir_all(source_root.join("meshes")).unwrap();
+
+        let mesh_source = source_root.join("meshes/hero.glb");
+        let invalid_compressed_source = source_root.join("meshes/hero.meshopt.ktx2");
+        fs::write(&mesh_source, b"glb-bytes").unwrap();
+        fs::write(&invalid_compressed_source, b"ktx2-bytes").unwrap();
+
+        let mesh_import = import_asset(&mut cache, &mesh_source, &output_root).unwrap();
+        let invalid_compressed_import =
+            import_asset(&mut cache, &invalid_compressed_source, &output_root).unwrap();
+
+        let error = build_runtime_bundle_manifest(
+            &RuntimeBundleSpec {
+                output_roots: RuntimeBundleOutputRoots {
+                    source: "artifacts/source-assets".to_string(),
+                    staged: "artifacts/staged-assets".to_string(),
+                    runtime_public: "public/assets".to_string(),
+                },
+                meshes: BTreeMap::from([(
+                    "hero".to_string(),
+                    RuntimeBundleAssetSpec {
+                        source_path: mesh_source.clone(),
+                        runtime_path: "/assets/meshes/hero.glb".to_string(),
+                        lod_variants: BTreeMap::new(),
+                        compressed_lod_variants: BTreeMap::from([(
+                            "0".to_string(),
+                            RuntimeBundleMeshLodVariantSpec {
+                                source_path: invalid_compressed_source.clone(),
+                                runtime_path: "/assets/meshes/hero.meshopt.glb".to_string(),
+                            },
+                        )]),
+                    },
+                )]),
+                sprites: BTreeMap::new(),
+            },
+            &[mesh_import, invalid_compressed_import],
+            &app_root,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RuntimeBundleError::UnsupportedCompressedMeshFormat { asset_id, format }
+                if asset_id == "hero" && format == AssetFormat::Ktx2
+        ));
+    }
+
+    #[test]
+    fn materialize_runtime_bundle_manifest_copies_staged_assets_into_runtime_public_root() {
+        let mut cache = AssetCache::new();
+        let app_root = temp_file_path("materialized-bundle-app-root");
+        let source_root = app_root.join("artifacts/source-assets");
+        let output_root = app_root.join("artifacts/staged-assets");
+        fs::create_dir_all(source_root.join("meshes")).unwrap();
+        fs::create_dir_all(source_root.join("textures")).unwrap();
+
+        let mesh_source = source_root.join("meshes/hero.glb");
+        let mesh_lod2_source = source_root.join("meshes/hero.lod2.glb");
+        let mesh_compressed_source = source_root.join("meshes/hero.meshopt.glb");
+        let sprite_source = source_root.join("textures/focus-ring.svg");
+        let sprite_ktx2_source = source_root.join("textures/focus-ring.ktx2");
+        let mesh_bytes = b"glb-runtime-bytes";
+        let mesh_lod2_bytes = b"glb-runtime-lod2-bytes";
+        let mesh_compressed_bytes = b"glb-runtime-meshopt-bytes";
+        let sprite_bytes = br#"<svg viewBox="0 0 1 1"></svg>"#;
+        let sprite_ktx2_bytes = b"ktx2-runtime-bytes";
+        fs::write(&mesh_source, mesh_bytes).unwrap();
+        fs::write(&mesh_lod2_source, mesh_lod2_bytes).unwrap();
+        fs::write(&mesh_compressed_source, mesh_compressed_bytes).unwrap();
+        fs::write(&sprite_source, sprite_bytes).unwrap();
+        fs::write(&sprite_ktx2_source, sprite_ktx2_bytes).unwrap();
+
+        let mesh_import = import_asset(&mut cache, &mesh_source, &output_root).unwrap();
+        let mesh_lod2_import = import_asset(&mut cache, &mesh_lod2_source, &output_root).unwrap();
+        let mesh_compressed_import =
+            import_asset(&mut cache, &mesh_compressed_source, &output_root).unwrap();
+        let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
+        let sprite_ktx2_import = import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
+
+        let manifest = build_runtime_bundle_manifest(
+            &RuntimeBundleSpec {
+                output_roots: RuntimeBundleOutputRoots {
+                    source: "artifacts/source-assets".to_string(),
+                    staged: "artifacts/staged-assets".to_string(),
+                    runtime_public: "public/assets".to_string(),
+                },
+                meshes: BTreeMap::from([(
+                    "hero".to_string(),
+                    RuntimeBundleAssetSpec {
+                        source_path: mesh_source.clone(),
+                        runtime_path: "/assets/meshes/hero.glb".to_string(),
+                        lod_variants: BTreeMap::from([(
+                            "2".to_string(),
+                            RuntimeBundleMeshLodVariantSpec {
+                                source_path: mesh_lod2_source.clone(),
+                                runtime_path: "/assets/meshes/hero.lod2.glb".to_string(),
+                            },
+                        )]),
+                        compressed_lod_variants: BTreeMap::from([(
+                            "0".to_string(),
+                            RuntimeBundleMeshLodVariantSpec {
+                                source_path: mesh_compressed_source.clone(),
+                                runtime_path: "/assets/meshes/hero.meshopt.glb".to_string(),
+                            },
+                        )]),
+                    },
+                )]),
+                sprites: BTreeMap::from([(
+                    "focus-ring".to_string(),
+                    RuntimeBundleSpriteSpec {
+                        source_path: sprite_source.clone(),
+                        runtime_path: "/assets/textures/focus-ring.svg".to_string(),
+                        compressed_variant: Some(RuntimeBundleCompressedTextureVariantSpec {
+                            source_path: sprite_ktx2_source.clone(),
+                            runtime_path: "/assets/textures/focus-ring.ktx2".to_string(),
+                        }),
+                    },
+                )]),
+            },
+            &[
+                mesh_import,
+                mesh_lod2_import,
+                mesh_compressed_import,
+                sprite_import,
+                sprite_ktx2_import,
+            ],
+            &app_root,
+        )
+        .unwrap();
+
+        materialize_runtime_bundle_manifest(&manifest, &app_root).unwrap();
+
+        assert_eq!(
+            fs::read(app_root.join("public/assets/meshes/hero.glb")).unwrap(),
+            mesh_bytes
+        );
+        assert_eq!(
+            fs::read(app_root.join("public/assets/meshes/hero.lod2.glb")).unwrap(),
+            mesh_lod2_bytes
+        );
+        assert_eq!(
+            fs::read(app_root.join("public/assets/meshes/hero.meshopt.glb")).unwrap(),
+            mesh_compressed_bytes
+        );
+        assert_eq!(
+            fs::read_to_string(app_root.join("public/assets/textures/focus-ring.svg")).unwrap(),
+            String::from_utf8(sprite_bytes.to_vec()).unwrap()
+        );
+        assert_eq!(
+            fs::read(app_root.join("public/assets/textures/focus-ring.ktx2")).unwrap(),
+            sprite_ktx2_bytes
+        );
     }
 
     #[test]

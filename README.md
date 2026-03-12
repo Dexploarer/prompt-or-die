@@ -10,7 +10,7 @@ Prompt or Die is an open-source game platform for building games where autonomou
 - Scene, prefab, save/load, and state-stack authoring in `pod-scene`
 - Dedicated editor shell in `pod-editor`
 - Direct-connect networking plus SpacetimeDB integration in `pod-net` and `pod-stdb`
-- Asset processing, animation, scripting, spatial queries, and physics support across the workspace
+- Asset processing, content-addressed source staging, animation, scripting, spatial queries, and physics support across the workspace
 
 ## Quick start
 
@@ -25,6 +25,36 @@ cd apps/pod-web
 bun install
 bun run dev
 ```
+
+## Stage an asset
+
+`pod-assets` now exposes a concrete staged-import entrypoint for supported authoring files:
+
+```bash
+cargo run -p pod-assets --example stage_import -- --output-root artifacts/staged-assets path/to/asset.glb
+```
+
+The command prints the content-addressed asset id, detected format, canonical source path, and staged output path. It preserves source extensions for staged `gltf/glb/jpeg/ktx2/svg` artifacts and serializes supported scene formats to `.scene.json`. Use `--json` to emit a machine-readable import list.
+
+To assemble and materialize a runtime handoff from staged imports, pass a bundle spec and `--materialize-runtime`:
+
+```bash
+cargo run -p pod-assets --example stage_import -- --json --materialize-runtime --output-root artifacts/staged-assets --base-dir apps/pod-web --bundle-spec apps/pod-web/artifacts/staged-assets/pod-runtime-bundle-spec.json apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb
+```
+
+That keeps runtime bundle assembly and runtime-public asset materialization in `pod-assets` instead of duplicating the contract and filesystem copies inside app-specific scripts. The current `pod-web` sample lane keeps human-inspectable `.gltf` sidecars in `artifacts/source-assets` while staging `.glb` mesh sources for the shipped browser path. The runtime bundle spec can now also reference optional staged `.ktx2` texture sidecars for compressed browser texture variants, explicit mesh LOD variants, and checked-in meshopt-compressed `.meshopt.glb` mesh variants; bundle validation rejects conflicting output paths, non-`ktx2` compressed texture declarations, and malformed compressed mesh records. In `pod-web`, any matching `artifacts/source-assets/textures/<asset-id>.ktx2` sidecar is folded into that shared bundle spec automatically, and the sample sync emits LOD `.glb` mesh variants, checked-in ring `.ktx2` fixtures, and checked-in `.meshopt.glb` mesh fixtures through the same contract, so `.glb` meshes plus optional KTX2 sprite sidecars and meshopt mesh variants are the explicit browser-facing contract instead of app-local conventions.
+When a consumer like `apps/pod-web` reads the emitted bundle manifest, it can now project staged `compressed_variant.runtime_path` values directly into app-level `ktx2Path` loader metadata and staged compressed mesh variants into `meshoptLods` / `runtime.compressedVariants` instead of hand-maintaining parallel asset maps. The sample runtime budget report also makes the selection truth explicit: runtime prefers whichever variant wins the budget report, the shipped ring sprites default to `.ktx2`, and the shipped sample meshes default to `meshopt` when the checked-in compressed fixtures beat the source `.glb` outputs.
+
+Malformed bundle specs fail deterministically in the shared pipeline:
+- duplicate runtime output paths are rejected before materialization
+- compressed sprite sidecars must stage a real `.ktx2` source
+- compressed mesh variants must resolve to staged glTF/GLB scene imports
+- app-side sync scripts fail fast if `stage_import --json` does not return a valid bundle manifest payload
+
+On the browser side, `window.podRender.getStats()` now exposes both `runtimePerf` and `mainThreadPerf` counters. `runtimePerf` tracks render-thread warmup time, stable-vs-slow frame counts, stable-frame percentage, and slowest frame time; `mainThreadPerf` tracks time-to-first-submission plus average/slowest main-thread frame-submission cost. Stats also report the requested render-thread mode and any explicit worker fallback reason (`missing-worker-constructor`, `missing-offscreen-canvas`, `missing-canvas-transfer-control`) so Phase 5 comparisons stay honest when worker prerequisites are not available. Worker routes now also coalesce outbound frame submissions until the render worker replies, skip the duplicate post-init surface sync that previously re-sent unchanged canvas metrics immediately after initialization, attribute submission traffic by `frame`, `control`, and `resize` under `mainThreadPerf.byKind`, batch same-turn telemetry/world-event control updates into one worker post before the next frame, enforce zero `control`/`resize` worker-route chatter on the local-sandbox smoke gate, and require explicit frame-stability floors on both local-sandbox routes. For artifact-grade sampling outside the smoke suite, `apps/pod-web/scripts/measure-render-routes.ts` now emits `apps/pod-web/artifacts/render-route-measurements.json`, and `scripts/run_moat_benchmarks.ts` includes that report under `browserRouteMeasurements`.
+
+Phase 6 transport visibility is now started too. Direct-connect shard transport summaries now carry bounded snapshot and delta metrics in addition to the existing queue/recovery counters: full snapshot count and bytes, recovery snapshot bytes, delta message count and bytes, delta entity churn (`updated` / `destroyed`), peak pending queue depth, and per-client queue-pressure incident counts. The compact gameplay connection line intentionally stays short, while the richer transport rollup is available in the browser debug panel so networking regressions can be inspected without polluting the main HUD.
+That transport slice is now regression-backed as well: browser direct-connect tests force reconnect when backlog saturation happens under stale authority, and `pod-net` server tests cover both explicit full-snapshot recovery requests and reconnect-token session resume so the new transport counters are exercised on degraded paths instead of only being inspectable in steady state.
 
 ## Workspace map
 
@@ -57,6 +87,11 @@ docs/
 - [Architecture Overview](docs/architecture.md)
 - [Plugin Model](docs/plugin-model.md)
 - [Agent Integration Contract](docs/agent-integration-contract.md)
+- [Competitive Matrix](docs/competitive-matrix.md)
+- [Moat Gates](docs/moat-gates.md)
+- [Benchmark Suite](docs/benchmark-suite.md)
+- [Reference Bootstrap](docs/reference-bootstrap.md)
+- [Bootstrap Showcase Research](docs/bootstrap-showcase-research.md)
 
 ## Current status
 

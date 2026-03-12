@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -144,6 +145,7 @@ pub struct FlagshipMmoAcceptanceResult {
     pub summary: FlagshipMmoAcceptanceSummary,
     pub parity_reports: Vec<AcceptanceParityReport>,
     pub tick_results: Vec<TickResult>,
+    pub tick_durations_ms: Vec<f64>,
     pub replay: ReplayFile,
     pub training_samples: Vec<ReplayTrainingSample>,
 }
@@ -155,6 +157,10 @@ impl FlagshipMmoAcceptanceResult {
 
     pub fn telemetry_windows(&self) -> &[TickTelemetryFrame] {
         &self.replay.telemetry_windows
+    }
+
+    pub fn tick_durations_ms(&self) -> &[f64] {
+        &self.tick_durations_ms
     }
 
     pub fn parity_passed(&self) -> bool {
@@ -237,8 +243,10 @@ impl ScriptedAcceptanceAgent {
     ) -> (Self, Arc<Mutex<AcceptanceAgentAudit>>) {
         let _ = label.into();
         let audit = Arc::new(Mutex::new(AcceptanceAgentAudit::new()));
-        let mut constraints = AgentConstraints::default();
-        constraints.attack_cooldown = attack_cooldown.max(1);
+        let constraints = AgentConstraints {
+            attack_cooldown: attack_cooldown.max(1),
+            ..Default::default()
+        };
         (
             Self {
                 id,
@@ -324,8 +332,11 @@ pub fn run_flagship_mmo_acceptance(
     let actors = build_flagship_scenario(app.world_mut(), &config);
 
     let mut tick_results = Vec::with_capacity(config.total_ticks as usize);
+    let mut tick_durations_ms = Vec::with_capacity(config.total_ticks as usize);
     for _ in 0..config.total_ticks {
+        let tick_started = Instant::now();
         tick_results.push(app.update());
+        tick_durations_ms.push(tick_started.elapsed().as_secs_f64() * 1000.0);
     }
 
     let telemetry_windows: Vec<TickTelemetryFrame> = tick_results
@@ -359,6 +370,7 @@ pub fn run_flagship_mmo_acceptance(
         summary,
         parity_reports,
         tick_results,
+        tick_durations_ms,
         replay,
         training_samples,
     })
@@ -1082,8 +1094,8 @@ fn tamer_script(wild_id: EntityId, dummy_id: EntityId) -> BTreeMap<u64, Vec<Acti
 
 fn filler_script(index: usize) -> BTreeMap<u64, Vec<Action>> {
     let start = (index % 4) as u64;
-    let x = if index % 2 == 0 { 1.0 } else { -1.0 };
-    let y = if index % 3 == 0 { 0.5 } else { 0.0 };
+    let x = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let y = if index.is_multiple_of(3) { 0.5 } else { 0.0 };
     schedule(vec![
         (
             start,
@@ -1138,6 +1150,10 @@ mod tests {
         assert_eq!(result.summary.autonomous_agents, 4);
         assert_eq!(
             result.summary.telemetry_frames,
+            result.config.total_ticks as usize
+        );
+        assert_eq!(
+            result.tick_durations_ms().len(),
             result.config.total_ticks as usize
         );
         assert!(result.summary.chat_messages >= 4);

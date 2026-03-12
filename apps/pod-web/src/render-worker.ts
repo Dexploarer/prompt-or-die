@@ -44,6 +44,16 @@ async function handleMessage(message: RenderWorkerRequest): Promise<void> {
       case "clearTelemetryTrail":
         renderer?.clearTelemetryTrail();
         return;
+      case "applyControlState":
+        if (message.telemetry?.mode === "set") {
+          renderer?.setTelemetryTrail(message.telemetry.samples);
+        } else if (message.telemetry?.mode === "clear") {
+          renderer?.clearTelemetryTrail();
+        }
+        if (message.events.length > 0) {
+          renderer?.notifyWorldEvents(message.events);
+        }
+        return;
       case "resize":
         renderer?.setSurfaceMetrics(message.surfaceMetrics);
         if (renderer) {
@@ -88,7 +98,7 @@ async function drainRenderQueue(): Promise<void> {
       }
 
       scope.postMessage({
-        type: "stats",
+        type: "renderComplete",
         stats: {
           ...renderer.getStats(),
           renderThread: "worker"

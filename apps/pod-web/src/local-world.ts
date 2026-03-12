@@ -23,9 +23,12 @@ import type {
   DirectConnectStatus
 } from "./direct-connect";
 import { sampleLandscapeSurface } from "./landscape";
+import {
+  resolveLocalWorldPresentation,
+  type LocalWorldPresentation,
+  type LocalWorldPresetId
+} from "./runtime-config";
 
-const LOCAL_WORLD_URL = "local://verdant-hollow";
-const LOCAL_WORLD_NAME = "Verdant Hollow";
 const LOCAL_TICK_MS = 1000 / 60;
 const PLAYER_ID = 1;
 const MELEE_RANGE = 3.1;
@@ -75,7 +78,7 @@ interface LocalEntity {
   surfaceMode: LocalSurfaceMode;
 }
 
-interface CompanionRosterEntry {
+export interface CompanionRosterEntry {
   speciesId: string;
   speciesName: string;
 }
@@ -217,10 +220,15 @@ export class PodWebLocalWorld {
   private pendingEvents: NetworkGameEvent[] = [];
   private status: DirectConnectStatus;
   private actionState: DirectConnectActionState;
+  private readonly presentationConfig: LocalWorldPresentation;
 
-  constructor(private readonly playerName = "WebPlayer") {
-    this.state = createInitialState(playerName);
-    this.status = createStatus(this.state);
+  constructor(
+    private readonly playerName = "WebPlayer",
+    private readonly presetId: LocalWorldPresetId = "verdant-hollow"
+  ) {
+    this.presentationConfig = resolveLocalWorldPresentation(presetId);
+    this.state = createInitialState(playerName, presetId);
+    this.status = createStatus(this.state, this.presentationConfig);
     this.actionState = createActionState();
   }
 
@@ -229,7 +237,7 @@ export class PodWebLocalWorld {
     this.status = {
       ...this.status,
       phase: "connected",
-      detail: "Local sandbox shard ready",
+      detail: this.presentationConfig.statusDetail,
       tick: this.state.tick,
       entityCount: this.state.entities.length,
       controlledEntity: PLAYER_ID
@@ -237,12 +245,12 @@ export class PodWebLocalWorld {
   }
 
   reset(): void {
-    this.state = createInitialState(this.playerName);
+    this.state = createInitialState(this.playerName, this.presetId);
     this.accumulatorMs = 0;
     this.pendingActions = [];
     this.pendingEvents = [];
     this.actionState = createActionState();
-    this.status = createStatus(this.state);
+    this.status = createStatus(this.state, this.presentationConfig);
     if (this.connected) {
       this.connect();
     }
@@ -301,6 +309,10 @@ export class PodWebLocalWorld {
 
   currentActionState(): DirectConnectActionState {
     return { ...this.actionState };
+  }
+
+  presentation(): LocalWorldPresentation {
+    return { ...this.presentationConfig };
   }
 
   controlledEntityId(): number {
@@ -1258,96 +1270,15 @@ export class PodWebLocalWorld {
   }
 }
 
-export function renderGameToText(
-  snapshot: NetworkWorldSnapshot,
-  controlledEntity: number | null,
-  selectedTargetId: number | null,
-  actionState: DirectConnectActionState,
-  feedback: string,
-  recentEvents: NetworkGameEvent[],
-  companionRoster: CompanionRosterEntry[],
-  debugState: LocalWorldDebugState
-): string {
-  const player = snapshot.entities.find((entity) => entity.id === controlledEntity) ?? null;
-  const target = snapshot.entities.find((entity) => entity.id === selectedTargetId) ?? null;
+export { renderGameToText } from "./render-game-text";
 
-  return JSON.stringify({
-    mode: "local-sandbox",
-    world: LOCAL_WORLD_NAME,
-    coordinateSystem: "world x east-west, y north-south",
-    tick: snapshot.tick,
-    player: player
-        ? {
-          id: player.id,
-          label: player.label,
-          position: player.position,
-          velocity: player.velocity,
-          surfaceMode: player.metadata.actorPresentation?.animationSetId?.includes("swim")
-            ? "swim"
-            : "ground",
-          animationSetId: player.metadata.actorPresentation?.animationSetId ?? null,
-          health: player.health,
-          maxHealth: player.maxHealth
-        }
-      : null,
-    target: target
-      ? {
-          id: target.id,
-          label: target.label,
-          kind: target.metadata.kind,
-          position: target.position,
-          health: target.health,
-          maxHealth: target.maxHealth
-        }
-      : null,
-    companions: companionRoster,
-    streaming: {
-      chunkSize: LOCAL_WORLD_CHUNK_SIZE,
-      activeChunks: debugState.activeChunkKeys,
-      currentRegionId: debugState.currentRegionId,
-      currentRegionName: debugState.currentRegionName,
-      regionPopulation:
-        player?.metadata.regionId == null
-          ? null
-          : snapshot.population.regions.find(
-              (region) => region.regionId === player.metadata.regionId
-            ) ?? null
-    },
-    progression: {
-      questGraphs: debugState.questGraphs,
-      factionReputation: debugState.factionReputation,
-      encounterTables: debugState.encounterTables
-    },
-    actionState,
-    feedback,
-    events: recentEvents.slice(-4).map((event) => event.summary),
-    nearby: snapshot.entities
-      .filter((entity) => entity.id !== controlledEntity && entity.metadata.kind !== "Scenery")
-      .sort((left, right) => {
-        if (!player) {
-          return left.id - right.id;
-        }
-        return distanceBetween(left.position, player.position) - distanceBetween(right.position, player.position);
-      })
-      .slice(0, 8)
-      .map((entity) => ({
-        id: entity.id,
-        label: entity.label,
-        kind: entity.metadata.kind,
-        position: entity.position,
-        health: entity.health,
-        maxHealth: entity.maxHealth
-      }))
-  });
-}
-
-function createInitialState(playerName: string): LocalWorldState {
-  const player = createPlayerEntity(playerName);
-  const regions = createRegionCatalog();
+function createInitialState(playerName: string, presetId: LocalWorldPresetId): LocalWorldState {
+  const player = createPlayerEntity(playerName, playerSpawnPosition(presetId));
+  const regions = createRegionCatalog(presetId);
   const questGraphs = createQuestGraphCatalog();
   const factionTracks = createFactionTrackCatalog();
   const encounterTables = createEncounterTableCatalog();
-  const templates = authoredTemplateEntities();
+  const templates = authoredTemplateEntities(presetId);
   const templateEntities = new Map<number, LocalEntity>();
   const templateChunkEntityIds = new Map<string, number[]>();
 
@@ -1404,11 +1335,18 @@ function createInitialState(playerName: string): LocalWorldState {
   return draftState;
 }
 
-function authoredTemplateEntities(): LocalEntity[] {
+function authoredTemplateEntities(presetId: LocalWorldPresetId): LocalEntity[] {
+  if (presetId === "bootstrap-showcase") {
+    return bootstrapShowcaseTemplateEntities();
+  }
+  return defaultSandboxTemplateEntities();
+}
+
+function defaultSandboxTemplateEntities(): LocalEntity[] {
   return [
-    createNpcEntity(2, "Archivist Mara", [-5.4, -5.2]),
-    createNpcEntity(8, "Forgekeeper Ivo", [7.8, -5.4]),
-    createNpcEntity(9, "Warden Selene", [5.4, 5.8]),
+    createNpcEntity(2, "Archivist Mara", [-3.6, -2.8]),
+    createNpcEntity(8, "Forgekeeper Ivo", [3.8, -3.2]),
+    createNpcEntity(9, "Warden Selene", [4.6, 2.9]),
     createWildCreatureEntity(3, "Verdant Lynx", [13.6, 4.2], 18, 32),
     createWildCreatureEntity(4, "Cinder Hare", [13.8, -9.4], 22, 30),
     createWildCreatureEntity(10, "Rift Stag", [-6.8, 15.8], 26, 36),
@@ -1416,7 +1354,7 @@ function authoredTemplateEntities(): LocalEntity[] {
     createResourceEntity(6, "Ancient Pine", [-12.4, 8.6], "Woodcutting", "pine-log"),
     createResourceEntity(11, "Moonstone Outcrop", [7.4, 14.8], "Mining", "moonstone-shard"),
     createResourceEntity(12, "Silver Birch", [-13.6, 2.8], "Woodcutting", "birch-log"),
-    createLootEntity(7, "Supply Cache", [1.2, -7.8], 48, "travel-ration"),
+    createLootEntity(7, "Supply Cache", [2.8, -3.8], 48, "travel-ration"),
     createLootEntity(13, "Expedition Chest", [8.8, 16.0], 96, "ember-charm"),
     createSceneryEntity(20, "wall north", [0, -16.4], [0, 0]),
     createSceneryEntity(21, "wall south", [0, 16.4], [0, 0]),
@@ -1424,7 +1362,7 @@ function authoredTemplateEntities(): LocalEntity[] {
     createSceneryEntity(23, "wall east", [16.8, 0], [0, 0]),
     createSceneryEntity(24, "weathered boulder", [8.8, 7.8], [0, 0]),
     createSceneryEntity(25, "weathered boulder", [-7.8, -9.0], [0, 0]),
-    createSceneryEntity(26, "glass spire", [0.8, 13.8], [0, 0]),
+    createSceneryEntity(26, "glass spire", [10.8, 11.4], [0, 0]),
     createSceneryEntity(27, "canopy tree", [-6.2, 9.4], [0, 0]),
     createSceneryEntity(28, "canopy tree", [-10.8, 5.4], [0, 0]),
     createSceneryEntity(29, "basalt pillar", [7.8, -12.4], [0, 0]),
@@ -1437,18 +1375,74 @@ function authoredTemplateEntities(): LocalEntity[] {
     createSceneryEntity(36, "basalt pillar", [2.8, 15.0], [0, 0]),
     createSceneryEntity(37, "weathered boulder", [-13.2, -1.2], [0, 0]),
     createSceneryEntity(38, "canopy tree", [-13.6, -5.2], [0, 0]),
-    createSceneryEntity(39, "wall shrine", [0, -13.2], [0, 0])
+    createSceneryEntity(39, "wall shrine", [0, -13.2], [0, 0]),
+    createSceneryEntity(40, "canopy tree", [-4.9, 1.2], [0, 0]),
+    createSceneryEntity(41, "weathered boulder", [4.8, 2.4], [0, 0]),
+    createSceneryEntity(42, "basalt pillar", [-1.8, -5.0], [0, 0]),
+    createSceneryEntity(43, "basalt pillar", [1.4, -5.2], [0, 0]),
+    createSceneryEntity(44, "weathered boulder", [6.4, -1.6], [0, 0])
   ];
 }
 
-function createRegionCatalog(): Map<string, LocalRegionState> {
+function bootstrapShowcaseTemplateEntities(): LocalEntity[] {
+  return [
+    createNpcEntity(2, "Archivist Mara", [-2.6, 0.6]),
+    createNpcEntity(8, "Forgekeeper Ivo", [1.8, -0.2]),
+    createNpcEntity(9, "Warden Selene", [2.8, 4.4]),
+    createWildCreatureEntity(3, "Verdant Lynx", [11.2, 6.2], 18, 32),
+    createWildCreatureEntity(4, "Cinder Hare", [15.2, 0.8], 22, 30),
+    createWildCreatureEntity(10, "Rift Stag", [18.0, 10.6], 26, 36),
+    createResourceEntity(5, "Copper Vein", [6.6, 4.8], "Mining", "copper-ore"),
+    createResourceEntity(6, "Ancient Pine", [-7.8, 7.6], "Woodcutting", "pine-log"),
+    createResourceEntity(11, "Moonstone Outcrop", [15.4, 10.8], "Mining", "moonstone-shard"),
+    createResourceEntity(12, "Silver Birch", [-10.6, 1.2], "Woodcutting", "birch-log"),
+    createLootEntity(7, "Supply Cache", [1.0, -1.8], 48, "travel-ration"),
+    createLootEntity(13, "Expedition Chest", [15.6, 11.8], 96, "ember-charm"),
+    createSceneryEntity(20, "wall north", [0, -16.4], [0, 0]),
+    createSceneryEntity(21, "wall south", [0, 16.4], [0, 0]),
+    createSceneryEntity(22, "wall west", [-16.8, 0], [0, 0]),
+    createSceneryEntity(23, "wall east", [16.8, 0], [0, 0]),
+    createSceneryEntity(24, "shore cairn", [4.2, 1.8], [0, 0]),
+    createSceneryEntity(25, "shore cairn", [6.8, 3.4], [0, 0]),
+    createSceneryEntity(26, "tideglass monolith", [7.2, 2.8], [0, 0]),
+    createSceneryEntity(27, "windward pine", [-5.8, 6.8], [0, 0]),
+    createSceneryEntity(28, "windward pine", [-9.2, 4.2], [0, 0]),
+    createSceneryEntity(29, "attunement pylon", [5.9, 0.4], [0, 0]),
+    createSceneryEntity(30, "attunement pylon", [7.8, -0.6], [0, 0]),
+    createSceneryEntity(31, "breaker cairn", [11.2, 8.4], [0, 0]),
+    createSceneryEntity(32, "breaker cairn", [14.4, 7.6], [0, 0]),
+    createSceneryEntity(33, "windward pine", [12.8, -2.6], [0, 0]),
+    createSceneryEntity(34, "tideglass beacon", [16.8, 8.6], [0, 0]),
+    createSceneryEntity(35, "watcher pylon", [13.4, 5.2], [0, 0]),
+    createSceneryEntity(36, "watcher pylon", [15.6, 4.6], [0, 0]),
+    createSceneryEntity(37, "shore cairn", [-3.4, -2.4], [0, 0]),
+    createSceneryEntity(38, "windward pine", [-11.4, -0.8], [0, 0]),
+    createSceneryEntity(39, "resonant shrine", [0.8, -5.2], [0, 0]),
+    createSceneryEntity(40, "windward pine", [3.6, 7.8], [0, 0]),
+    createSceneryEntity(41, "shore cairn", [6.4, 2.2], [0, 0]),
+    createSceneryEntity(42, "shrine pylon", [2.8, -4.2], [0, 0]),
+    createSceneryEntity(43, "shrine pylon", [5.2, -4.6], [0, 0]),
+    createSceneryEntity(44, "breaker cairn", [9.4, 5.0], [0, 0])
+  ];
+}
+
+function playerSpawnPosition(presetId: LocalWorldPresetId): Vec2Tuple {
+  if (presetId === "bootstrap-showcase") {
+    return [-1.6, -1.2];
+  }
+  return [0, 0];
+}
+
+function createRegionCatalog(presetId: LocalWorldPresetId): Map<string, LocalRegionState> {
+  const isBootstrapShowcase = presetId === "bootstrap-showcase";
+
   return new Map<string, LocalRegionState>([
     [
       "verdant-heart",
       {
         regionId: "verdant-heart",
-        displayName: "Verdant Heart",
-        primaryBiomeId: "verdant-hollow",
+        displayName: isBootstrapShowcase ? "Resonant Strand" : "Verdant Heart",
+        primaryBiomeId: isBootstrapShowcase ? "resonant-shore" : "verdant-hollow",
         chunkKeys: ["-1:-1", "-1:0", "0:-1", "0:0"],
         activeQuestGraphIds: ["verdant-intro", "tempered-trail"],
         dominantFactionTrackId: "verdant-wardens",
@@ -1459,8 +1453,8 @@ function createRegionCatalog(): Map<string, LocalRegionState> {
       "spirewatch",
       {
         regionId: "spirewatch",
-        displayName: "Spirewatch Rise",
-        primaryBiomeId: "verdant-hollow",
+        displayName: isBootstrapShowcase ? "Monolith Reach" : "Spirewatch Rise",
+        primaryBiomeId: isBootstrapShowcase ? "resonant-shore" : "verdant-hollow",
         chunkKeys: ["-1:1", "0:1"],
         activeQuestGraphIds: ["spire-attunement", "ember-charm-recovery"],
         dominantFactionTrackId: "ancient-spirekeepers",
@@ -1471,8 +1465,8 @@ function createRegionCatalog(): Map<string, LocalRegionState> {
       "ashen-steppe",
       {
         regionId: "ashen-steppe",
-        displayName: "Ashen Steppe",
-        primaryBiomeId: "ashen-steppe",
+        displayName: isBootstrapShowcase ? "Breaker Shelf" : "Ashen Steppe",
+        primaryBiomeId: isBootstrapShowcase ? "breaker-shelf" : "ashen-steppe",
         chunkKeys: ["0:-2", "1:-1", "1:0"],
         activeQuestGraphIds: ["lynx-patrol"],
         dominantFactionTrackId: "verdant-wilds",
@@ -1483,8 +1477,8 @@ function createRegionCatalog(): Map<string, LocalRegionState> {
       "gloamwood-edge",
       {
         regionId: "gloamwood-edge",
-        displayName: "Gloamwood Edge",
-        primaryBiomeId: "gloamwood",
+        displayName: isBootstrapShowcase ? "Windward Shelf" : "Gloamwood Edge",
+        primaryBiomeId: isBootstrapShowcase ? "windward-shelf" : "gloamwood",
         chunkKeys: ["-2:-1", "-2:0"],
         activeQuestGraphIds: ["lynx-patrol"],
         dominantFactionTrackId: "verdant-wilds",
@@ -1825,14 +1819,14 @@ function createEncounterTableCatalog(): Map<string, LocalEncounterTableState> {
   ]);
 }
 
-function createPlayerEntity(playerName: string): LocalEntity {
+function createPlayerEntity(playerName: string, spawn: Vec2Tuple): LocalEntity {
   return {
     id: PLAYER_ID,
     role: "player",
     label: playerName,
-    position: [0, 0],
+    position: [...spawn],
     velocity: [0, 0],
-    rotation: 0.4,
+    rotation: spawn[0] < 0 ? 0.34 : 2.52,
     movementSpeed: 4.8,
     health: 42,
     maxHealth: 42,
@@ -1865,7 +1859,7 @@ function createPlayerEntity(playerName: string): LocalEntity {
         canChat: true
       })
     }),
-    spawn: [0, 0],
+    spawn: [...spawn],
     desiredMove: null,
     combatTargetId: null,
     attackCooldownTicks: 0,
@@ -2188,6 +2182,21 @@ function createSceneryEntity(
   position: Vec2Tuple,
   velocity: Vec2Tuple
 ): LocalEntity {
+  const normalizedLabel = label.trim().toLowerCase();
+  const presentation = sceneryPresentationForLabel(label);
+  const isVerdantSpire = normalizedLabel.includes("glass spire");
+  const isTideglassLandmark = normalizedLabel.includes("tideglass");
+  const landmarkAtmosphere = isTideglassLandmark
+    ? resonantShoreAtmosphereProfile()
+    : isVerdantSpire
+      ? verdantAtmosphereProfile()
+      : null;
+  const landmarkPrompt = isTideglassLandmark
+    ? `Inspect the ${label} to attune with Resonant Shore`
+    : isVerdantSpire
+      ? "Inspect the glass spire to attune with Verdant Hollow"
+      : null;
+
   return {
     id,
     role: "scenery",
@@ -2200,35 +2209,33 @@ function createSceneryEntity(
     maxHealth: null,
     metadata: metadata("Scenery", {
       faction:
-        label === "glass spire"
+        isVerdantSpire || isTideglassLandmark
           ? factionAffiliation("ancient-spirekeepers", "relic", "Neutral", 30)
           : null,
       questAnchor:
-        label === "glass spire"
+        landmarkPrompt
           ? questAnchor(
               ["spire-attunement"],
-              "Inspect the glass spire to attune with Verdant Hollow",
+              landmarkPrompt,
               ["exploration", "attunement"]
             )
           : null,
       actorPresentation: {
         profileId: slug(label),
-        meshAssetId: null,
-        materialPaletteId: "world-prop",
+        meshAssetId: presentation.meshAssetId,
+        materialPaletteId: presentation.materialPaletteId,
         animationSetId: "static-prop",
-        scaleMultiplier: 1,
-        footprintRadius: 1.6,
-        selectionRingScale: 2.4,
-        auraColor: [0, 0, 0, 0]
+        scaleMultiplier: presentation.scaleMultiplier,
+        footprintRadius: presentation.footprintRadius,
+        selectionRingScale: presentation.selectionRingScale,
+        auraColor: presentation.auraColor
       },
       atmosphere:
-        label === "glass spire"
-          ? verdantAtmosphereProfile()
-          : null,
+        landmarkAtmosphere,
       atmosphereVolume:
-        label === "glass spire"
+        landmarkAtmosphere
           ? {
-              radius: 9.5,
+              radius: isTideglassLandmark ? 10.8 : 9.5,
               priority: 3
             }
           : null,
@@ -2248,6 +2255,191 @@ function createSceneryEntity(
     companionMode: null,
     anchor: [...position],
     surfaceMode: "ground"
+  };
+}
+
+function sceneryPresentationForLabel(label: string): {
+  meshAssetId: string | null;
+  materialPaletteId: string;
+  scaleMultiplier: number;
+  footprintRadius: number;
+  selectionRingScale: number;
+  auraColor: [number, number, number, number];
+} {
+  const normalized = label.trim().toLowerCase();
+
+  if (normalized.includes("tideglass monolith")) {
+    return {
+      meshAssetId: "glass-spire",
+      materialPaletteId: "tideglass-monolith",
+      scaleMultiplier: 0.56,
+      footprintRadius: 1.8,
+      selectionRingScale: 3.7,
+      auraColor: [0.4, 0.82, 0.96, 0.18]
+    };
+  }
+
+  if (normalized.includes("tideglass")) {
+    return {
+      meshAssetId: "glass-spire",
+      materialPaletteId: "tideglass-shard",
+      scaleMultiplier: 0.5,
+      footprintRadius: 1.55,
+      selectionRingScale: 3.3,
+      auraColor: [0.36, 0.76, 0.94, 0.16]
+    };
+  }
+
+  if (normalized.includes("windward pine")) {
+    return {
+      meshAssetId: "canopy-tree",
+      materialPaletteId: "windward-pine",
+      scaleMultiplier: 0.74,
+      footprintRadius: 1.5,
+      selectionRingScale: 2.7,
+      auraColor: [0.1, 0.18, 0.14, 0.06]
+    };
+  }
+
+  if (normalized.includes("breaker cairn")) {
+    return {
+      meshAssetId: "weathered-boulder",
+      materialPaletteId: "breaker-cairn",
+      scaleMultiplier: 0.98,
+      footprintRadius: 1.34,
+      selectionRingScale: 2.7,
+      auraColor: [0, 0, 0, 0]
+    };
+  }
+
+  if (normalized.includes("shore cairn")) {
+    return {
+      meshAssetId: "weathered-boulder",
+      materialPaletteId: "shore-cairn",
+      scaleMultiplier: 0.92,
+      footprintRadius: 1.28,
+      selectionRingScale: 2.55,
+      auraColor: [0, 0, 0, 0]
+    };
+  }
+
+  if (normalized.includes("attunement pylon")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "attunement-pylon",
+      scaleMultiplier: 0.44,
+      footprintRadius: 1.22,
+      selectionRingScale: 2.7,
+      auraColor: [0.14, 0.28, 0.34, 0.06]
+    };
+  }
+
+  if (normalized.includes("watcher pylon")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "watcher-pylon",
+      scaleMultiplier: 0.48,
+      footprintRadius: 1.28,
+      selectionRingScale: 2.8,
+      auraColor: [0.16, 0.24, 0.3, 0.07]
+    };
+  }
+
+  if (normalized.includes("shrine pylon")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "shrine-pylon",
+      scaleMultiplier: 0.42,
+      footprintRadius: 1.18,
+      selectionRingScale: 2.7,
+      auraColor: [0.16, 0.22, 0.3, 0.08]
+    };
+  }
+
+  if (normalized.includes("resonant shrine")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "resonant-shrine",
+      scaleMultiplier: 0.5,
+      footprintRadius: 1.58,
+      selectionRingScale: 3,
+      auraColor: [0.2, 0.32, 0.4, 0.1]
+    };
+  }
+
+  if (normalized.includes("glass spire")) {
+    return {
+      meshAssetId: "glass-spire",
+      materialPaletteId: "spire-glass",
+      scaleMultiplier: 0.48,
+      footprintRadius: 1.5,
+      selectionRingScale: 3.2,
+      auraColor: [0.34, 0.72, 0.92, 0.14]
+    };
+  }
+
+  if (normalized.includes("canopy tree")) {
+    return {
+      meshAssetId: "canopy-tree",
+      materialPaletteId: "verdant-canopy",
+      scaleMultiplier: 0.72,
+      footprintRadius: 1.45,
+      selectionRingScale: 2.6,
+      auraColor: [0.12, 0.22, 0.12, 0.06]
+    };
+  }
+
+  if (normalized.includes("weathered boulder")) {
+    return {
+      meshAssetId: "weathered-boulder",
+      materialPaletteId: "lichen-stone",
+      scaleMultiplier: 0.9,
+      footprintRadius: 1.25,
+      selectionRingScale: 2.5,
+      auraColor: [0, 0, 0, 0]
+    };
+  }
+
+  if (normalized.includes("basalt pillar")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "rift-basalt",
+      scaleMultiplier: 0.42,
+      footprintRadius: 1.2,
+      selectionRingScale: 2.6,
+      auraColor: [0, 0, 0, 0]
+    };
+  }
+
+  if (normalized.includes("wall shrine")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "wardens-shrine",
+      scaleMultiplier: 0.46,
+      footprintRadius: 1.5,
+      selectionRingScale: 2.8,
+      auraColor: [0.18, 0.26, 0.34, 0.1]
+    };
+  }
+
+  if (normalized.includes("wall")) {
+    return {
+      meshAssetId: "basalt-column",
+      materialPaletteId: "fortified-wall",
+      scaleMultiplier: 0.48,
+      footprintRadius: 1.8,
+      selectionRingScale: 2.9,
+      auraColor: [0, 0, 0, 0]
+    };
+  }
+
+  return {
+    meshAssetId: null,
+    materialPaletteId: "world-prop",
+    scaleMultiplier: 1,
+    footprintRadius: 1.6,
+    selectionRingScale: 2.4,
+    auraColor: [0, 0, 0, 0]
   };
 }
 
@@ -2302,6 +2494,28 @@ function verdantAtmosphereProfile(): NetworkAtmosphereProfile {
     rimIntensity: 8.5,
     groundColor: [0.19, 0.33, 0.21, 1],
     starfieldIntensity: 0.08
+  };
+}
+
+function resonantShoreAtmosphereProfile(): NetworkAtmosphereProfile {
+  return {
+    biomeId: "resonant-shore",
+    skyColor: [0.58, 0.76, 0.95, 1],
+    fogColor: [0.68, 0.8, 0.86, 1],
+    fogNear: 24,
+    fogFar: 182,
+    ambientColor: [0.78, 0.88, 0.92],
+    ambientIntensity: 1.48,
+    sunColor: [1, 0.93, 0.8],
+    sunIntensity: 3.08,
+    sunDirection: [26, 42, 22],
+    fillColor: [0.38, 0.78, 0.98],
+    fillIntensity: 1.02,
+    fillDirection: [-16, 12, -12],
+    rimColor: [0.46, 0.92, 0.98],
+    rimIntensity: 10.2,
+    groundColor: [0.18, 0.26, 0.24, 1],
+    starfieldIntensity: 0.05
   };
 }
 
@@ -2377,11 +2591,14 @@ function interactionHints(
   };
 }
 
-function createStatus(state: LocalWorldState): DirectConnectStatus {
+function createStatus(
+  state: LocalWorldState,
+  presentation: LocalWorldPresentation
+): DirectConnectStatus {
   return {
     phase: "idle",
-    detail: "Local sandbox shard idle",
-    url: LOCAL_WORLD_URL,
+    detail: `${presentation.worldName} shard idle`,
+    url: presentation.url,
     tick: state.tick,
     entityCount: state.entities.length,
     controlledEntity: PLAYER_ID,

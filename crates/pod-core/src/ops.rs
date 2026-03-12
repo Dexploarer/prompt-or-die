@@ -74,15 +74,26 @@ pub struct ClientTransportSummary {
     pub ticks_since_last_seen: u64,
     pub last_sent_tick: Option<u64>,
     pub pending_action_queue_depth: usize,
+    pub peak_pending_action_queue_depth: usize,
     pub queue_pressure: bool,
+    pub queue_pressure_events: u64,
     pub inbound_messages: u64,
     pub outbound_messages: u64,
     pub inbound_bytes: u64,
     pub outbound_bytes: u64,
     pub action_batches_received: u64,
+    pub full_snapshots_sent: u64,
+    pub full_snapshot_bytes: u64,
+    pub max_full_snapshot_bytes: u64,
+    pub recovery_snapshot_bytes_sent: u64,
     pub full_snapshot_requests: u64,
     pub ping_requests: u64,
     pub state_deltas_sent: u64,
+    pub delta_messages_sent: u64,
+    pub delta_bytes_sent: u64,
+    pub max_delta_bytes: u64,
+    pub delta_entities_updated: u64,
+    pub delta_entities_destroyed: u64,
     pub event_batches_sent: u64,
     pub debug_documents_sent: u64,
     pub rejected_messages_sent: u64,
@@ -100,15 +111,25 @@ pub struct ShardTransportSummary {
     pub client_inactivity_timeout_ticks: u64,
     pub queue_pressure_warn_depth: usize,
     pub total_pending_action_queue_depth: usize,
+    pub peak_pending_action_queue_depth: usize,
     pub queue_pressure_client_count: usize,
     pub total_inbound_messages: u64,
     pub total_outbound_messages: u64,
     pub total_inbound_bytes: u64,
     pub total_outbound_bytes: u64,
     pub action_batches_received: u64,
+    pub full_snapshots_sent: u64,
+    pub total_full_snapshot_bytes: u64,
+    pub max_full_snapshot_bytes: u64,
+    pub total_recovery_snapshot_bytes: u64,
     pub full_snapshot_requests: u64,
     pub ping_requests: u64,
     pub state_deltas_sent: u64,
+    pub delta_messages_sent: u64,
+    pub total_delta_bytes: u64,
+    pub max_delta_bytes: u64,
+    pub total_delta_entities_updated: u64,
+    pub total_delta_entities_destroyed: u64,
     pub event_batches_sent: u64,
     pub debug_documents_sent: u64,
     pub rejected_messages_sent: u64,
@@ -348,15 +369,25 @@ mod tests {
             client_inactivity_timeout_ticks: 600,
             queue_pressure_warn_depth: 192,
             total_pending_action_queue_depth: 3,
+            peak_pending_action_queue_depth: 5,
             queue_pressure_client_count: 1,
             total_inbound_messages: 21,
             total_outbound_messages: 44,
             total_inbound_bytes: 1024,
             total_outbound_bytes: 4096,
             action_batches_received: 8,
+            full_snapshots_sent: 4,
+            total_full_snapshot_bytes: 8192,
+            max_full_snapshot_bytes: 3072,
+            total_recovery_snapshot_bytes: 4096,
             full_snapshot_requests: 1,
             ping_requests: 5,
             state_deltas_sent: 19,
+            delta_messages_sent: 15,
+            total_delta_bytes: 2048,
+            max_delta_bytes: 512,
+            total_delta_entities_updated: 32,
+            total_delta_entities_destroyed: 6,
             event_batches_sent: 7,
             debug_documents_sent: 11,
             rejected_messages_sent: 2,
@@ -373,15 +404,26 @@ mod tests {
                 ticks_since_last_seen: 0,
                 last_sent_tick: Some(1440),
                 pending_action_queue_depth: 1,
+                peak_pending_action_queue_depth: 4,
                 queue_pressure: true,
+                queue_pressure_events: 2,
                 inbound_messages: 10,
                 outbound_messages: 20,
                 inbound_bytes: 512,
                 outbound_bytes: 2048,
                 action_batches_received: 4,
+                full_snapshots_sent: 2,
+                full_snapshot_bytes: 4096,
+                max_full_snapshot_bytes: 3072,
+                recovery_snapshot_bytes_sent: 2048,
                 full_snapshot_requests: 1,
                 ping_requests: 3,
                 state_deltas_sent: 9,
+                delta_messages_sent: 7,
+                delta_bytes_sent: 1024,
+                max_delta_bytes: 320,
+                delta_entities_updated: 18,
+                delta_entities_destroyed: 3,
                 event_batches_sent: 4,
                 debug_documents_sent: 6,
                 rejected_messages_sent: 1,
@@ -396,12 +438,31 @@ mod tests {
         assert_eq!(value["payload"]["resumed_sessions"], 1);
         assert_eq!(value["payload"]["recovery_snapshots_sent"], 3);
         assert_eq!(value["payload"]["recovery_delivery_failures"], 1);
+        assert_eq!(value["payload"]["peak_pending_action_queue_depth"], 5);
+        assert_eq!(value["payload"]["full_snapshots_sent"], 4);
+        assert_eq!(value["payload"]["total_full_snapshot_bytes"], 8192);
+        assert_eq!(value["payload"]["max_full_snapshot_bytes"], 3072);
+        assert_eq!(value["payload"]["total_recovery_snapshot_bytes"], 4096);
+        assert_eq!(value["payload"]["delta_messages_sent"], 15);
+        assert_eq!(value["payload"]["total_delta_bytes"], 2048);
+        assert_eq!(value["payload"]["max_delta_bytes"], 512);
+        assert_eq!(value["payload"]["total_delta_entities_updated"], 32);
+        assert_eq!(value["payload"]["total_delta_entities_destroyed"], 6);
         assert_eq!(value["payload"]["queue_pressure_client_count"], 1);
         assert_eq!(value["payload"]["timed_out_clients"], 3);
         assert_eq!(value["payload"]["clients"][0]["client_id"], "client-a");
         assert_eq!(value["payload"]["clients"][0]["session_resumes"], 1);
         assert_eq!(value["payload"]["clients"][0]["recovery_snapshots_sent"], 2);
         assert_eq!(value["payload"]["clients"][0]["recovery_delivery_failures"], 1);
+        assert_eq!(value["payload"]["clients"][0]["peak_pending_action_queue_depth"], 4);
+        assert_eq!(value["payload"]["clients"][0]["queue_pressure_events"], 2);
+        assert_eq!(value["payload"]["clients"][0]["full_snapshots_sent"], 2);
+        assert_eq!(value["payload"]["clients"][0]["full_snapshot_bytes"], 4096);
+        assert_eq!(value["payload"]["clients"][0]["recovery_snapshot_bytes_sent"], 2048);
+        assert_eq!(value["payload"]["clients"][0]["delta_messages_sent"], 7);
+        assert_eq!(value["payload"]["clients"][0]["delta_bytes_sent"], 1024);
+        assert_eq!(value["payload"]["clients"][0]["delta_entities_updated"], 18);
+        assert_eq!(value["payload"]["clients"][0]["delta_entities_destroyed"], 3);
         assert_eq!(value["payload"]["clients"][0]["queue_pressure"], true);
         assert_eq!(value["payload"]["clients"][0]["debug_telemetry_enabled"], true);
     }

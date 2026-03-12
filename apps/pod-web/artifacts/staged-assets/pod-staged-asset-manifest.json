@@ -1,0 +1,468 @@
+{
+  "version": 1,
+  "output_roots": {
+    "source": "artifacts/source-assets",
+    "staged": "artifacts/staged-assets",
+    "runtime_public": "public/assets"
+  },
+  "meshes": {
+    "adventurer-avatar": {
+      "source_path": "artifacts/source-assets/meshes/adventurer-avatar.glb",
+      "staged_id": "sha256:33bbf901e95b4c452e402cdbea7c66c913d09cc6ceb5b0c36ba0c2ed19ca3d29",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_33bbf901e95b4c452e402cdbea7c66c913d09cc6ceb5b0c36ba0c2ed19ca3d29.glb",
+      "runtime_path": "/assets/meshes/adventurer-avatar.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod1.glb",
+          "staged_id": "sha256:f1df15939b1ff8945bce7df9d1b7d73a61aec1dd81d696d144a96b96016f159e",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_f1df15939b1ff8945bce7df9d1b7d73a61aec1dd81d696d144a96b96016f159e.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod2.glb",
+          "staged_id": "sha256:2dbd5a3e6bd8433191727119caa78def49430c41872cb4bed95d30a1022f6f20",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_2dbd5a3e6bd8433191727119caa78def49430c41872cb4bed95d30a1022f6f20.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.meshopt.glb",
+          "staged_id": "sha256:3a050b8fcdaa589bb3b4d779cb8e72b92d7ad4aa6b3c6b74870ecde9800be7bd",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_3a050b8fcdaa589bb3b4d779cb8e72b92d7ad4aa6b3c6b74870ecde9800be7bd.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod1.meshopt.glb",
+          "staged_id": "sha256:3bfd19ee2775ca3a459aa3b32374468fd5bea4b9ac7b37af7557d8ec908402be",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_3bfd19ee2775ca3a459aa3b32374468fd5bea4b9ac7b37af7557d8ec908402be.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod2.meshopt.glb",
+          "staged_id": "sha256:630257c75c15767c6f1a304db706cb600818fc6b647956967a4672940845d7f0",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_630257c75c15767c6f1a304db706cb600818fc6b647956967a4672940845d7f0.glb",
+          "runtime_path": "/assets/meshes/adventurer-avatar.lod2.meshopt.glb"
+        }
+      }
+    },
+    "adventurer-hero": {
+      "source_path": "artifacts/source-assets/meshes/adventurer-hero.glb",
+      "staged_id": "sha256:33059e71eeaef989c9f580e360e69a7c8013d40bad630b6ec223412f9deaf31b",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_33059e71eeaef989c9f580e360e69a7c8013d40bad630b6ec223412f9deaf31b.glb",
+      "runtime_path": "/assets/meshes/adventurer-hero.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod1.glb",
+          "staged_id": "sha256:37d1116538fccfc73c714d34d007648f7411bf5a4a8215b82cee718a801daea5",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_37d1116538fccfc73c714d34d007648f7411bf5a4a8215b82cee718a801daea5.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod2.glb",
+          "staged_id": "sha256:3d4d5d4caf51db7e8f9f5eeabcd2ab76a88f1eeec39a54eafe10377b3862a50c",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_3d4d5d4caf51db7e8f9f5eeabcd2ab76a88f1eeec39a54eafe10377b3862a50c.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-hero.meshopt.glb",
+          "staged_id": "sha256:86a012067f3d4b33087edac701f29582f12786c021bd1eed3d70b08029043afa",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_86a012067f3d4b33087edac701f29582f12786c021bd1eed3d70b08029043afa.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod1.meshopt.glb",
+          "staged_id": "sha256:a777bf6fd19ae0d038b9c730d69c33c4249a72081948e761192782babcdde469",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_a777bf6fd19ae0d038b9c730d69c33c4249a72081948e761192782babcdde469.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod2.meshopt.glb",
+          "staged_id": "sha256:41f04524e66453c512e0587454d9286e0c453e6a07ac53674634dc2ef1125596",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_41f04524e66453c512e0587454d9286e0c453e6a07ac53674634dc2ef1125596.glb",
+          "runtime_path": "/assets/meshes/adventurer-hero.lod2.meshopt.glb"
+        }
+      }
+    },
+    "basalt-column": {
+      "source_path": "artifacts/source-assets/meshes/basalt-column.glb",
+      "staged_id": "sha256:c5f39deebeb3022714f36a603732618c87c070846a33c06abd424fb5c887e373",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_c5f39deebeb3022714f36a603732618c87c070846a33c06abd424fb5c887e373.glb",
+      "runtime_path": "/assets/meshes/basalt-column.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/basalt-column.lod1.glb",
+          "staged_id": "sha256:45c168d085ff8da79cbcf1c70dbc5ee44b7cde669f9d3a05cffbb6887f690baa",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_45c168d085ff8da79cbcf1c70dbc5ee44b7cde669f9d3a05cffbb6887f690baa.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/basalt-column.lod2.glb",
+          "staged_id": "sha256:81474e2bc66c80633646cce2343d270a67d31745864c377576dc8336e96f0d05",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_81474e2bc66c80633646cce2343d270a67d31745864c377576dc8336e96f0d05.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/basalt-column.meshopt.glb",
+          "staged_id": "sha256:b0aebfaf31502cf66c699385543ffd7b81e82a31629b586136751bf9b4d7db8b",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_b0aebfaf31502cf66c699385543ffd7b81e82a31629b586136751bf9b4d7db8b.glb",
+          "runtime_path": "/assets/meshes/basalt-column.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/basalt-column.lod1.meshopt.glb",
+          "staged_id": "sha256:4de2e585e02f548d09f072b43f59c05ef2856d34899ac1b4347311a91285d1e9",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_4de2e585e02f548d09f072b43f59c05ef2856d34899ac1b4347311a91285d1e9.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/basalt-column.lod2.meshopt.glb",
+          "staged_id": "sha256:5ba2e3a53a211f76f42f4a362da71b9fdf2ccf0eeaf1da990c29034dd1bd47d2",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_5ba2e3a53a211f76f42f4a362da71b9fdf2ccf0eeaf1da990c29034dd1bd47d2.glb",
+          "runtime_path": "/assets/meshes/basalt-column.lod2.meshopt.glb"
+        }
+      }
+    },
+    "canopy-tree": {
+      "source_path": "artifacts/source-assets/meshes/canopy-tree.glb",
+      "staged_id": "sha256:c16dbcbdc841adda776a00a06edb76d6ccfc1fc33d04397526a07520c86df460",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_c16dbcbdc841adda776a00a06edb76d6ccfc1fc33d04397526a07520c86df460.glb",
+      "runtime_path": "/assets/meshes/canopy-tree.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod1.glb",
+          "staged_id": "sha256:922ff1c77a23848650831e831e4609e3a74c5e63b1e441fc1da4b1bf8baf1fdd",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_922ff1c77a23848650831e831e4609e3a74c5e63b1e441fc1da4b1bf8baf1fdd.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod2.glb",
+          "staged_id": "sha256:432926eebd2a9bacc881c71d792b7cc15cecf132dccead1257c84b8869d2cc6d",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_432926eebd2a9bacc881c71d792b7cc15cecf132dccead1257c84b8869d2cc6d.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/canopy-tree.meshopt.glb",
+          "staged_id": "sha256:4ea7453a75f6a2e9290920282618c4be2cc738175e2327efbeedaab0f9eaa088",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_4ea7453a75f6a2e9290920282618c4be2cc738175e2327efbeedaab0f9eaa088.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod1.meshopt.glb",
+          "staged_id": "sha256:c332df56ff1a9329a3bcb9ab0dfc4e35016e22d7c4881bc578a828d818247d7c",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_c332df56ff1a9329a3bcb9ab0dfc4e35016e22d7c4881bc578a828d818247d7c.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod2.meshopt.glb",
+          "staged_id": "sha256:7d52ffffc611e4088b46a022f0e6c526a2c24ab0e0fcc286ccde5ab596a1196f",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_7d52ffffc611e4088b46a022f0e6c526a2c24ab0e0fcc286ccde5ab596a1196f.glb",
+          "runtime_path": "/assets/meshes/canopy-tree.lod2.meshopt.glb"
+        }
+      }
+    },
+    "glass-spire": {
+      "source_path": "artifacts/source-assets/meshes/glass-spire.glb",
+      "staged_id": "sha256:2b9262ac2f6124e1e91c0456bffa33cda8e5d700df8abd66d2337b3e3438e290",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_2b9262ac2f6124e1e91c0456bffa33cda8e5d700df8abd66d2337b3e3438e290.glb",
+      "runtime_path": "/assets/meshes/glass-spire.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/glass-spire.lod1.glb",
+          "staged_id": "sha256:154648e569952b40bf6e8acd708ea442b2181d2cc756bf7f49f7a4d99f711239",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_154648e569952b40bf6e8acd708ea442b2181d2cc756bf7f49f7a4d99f711239.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/glass-spire.lod2.glb",
+          "staged_id": "sha256:ff41f19ab1788924942e0be08bb92275a513dd0ab4a940bcf1b41a9478b60027",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_ff41f19ab1788924942e0be08bb92275a513dd0ab4a940bcf1b41a9478b60027.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/glass-spire.meshopt.glb",
+          "staged_id": "sha256:6b32f2f208f4dd36917e7b014c06fed73a1185494be17f845407cc1cd05f8b20",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_6b32f2f208f4dd36917e7b014c06fed73a1185494be17f845407cc1cd05f8b20.glb",
+          "runtime_path": "/assets/meshes/glass-spire.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/glass-spire.lod1.meshopt.glb",
+          "staged_id": "sha256:8ad26b289036e32bcb0e946715fbe5dfc9582c4da0ec823784373fcce77e0f84",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_8ad26b289036e32bcb0e946715fbe5dfc9582c4da0ec823784373fcce77e0f84.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/glass-spire.lod2.meshopt.glb",
+          "staged_id": "sha256:43654d540725d2e80e31408347e43cb396c0860639eae56706551522f80944a1",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_43654d540725d2e80e31408347e43cb396c0860639eae56706551522f80944a1.glb",
+          "runtime_path": "/assets/meshes/glass-spire.lod2.meshopt.glb"
+        }
+      }
+    },
+    "rift-beast": {
+      "source_path": "artifacts/source-assets/meshes/rift-beast.glb",
+      "staged_id": "sha256:23c970b1c76f4bf7ea4c3b3ab3dec10968732b943f0f90d612ed11483dce3bab",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_23c970b1c76f4bf7ea4c3b3ab3dec10968732b943f0f90d612ed11483dce3bab.glb",
+      "runtime_path": "/assets/meshes/rift-beast.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/rift-beast.lod1.glb",
+          "staged_id": "sha256:10df0e4e155de0af09935a6887b43068fabcc8460be4d7a40ac779e85143eab5",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_10df0e4e155de0af09935a6887b43068fabcc8460be4d7a40ac779e85143eab5.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/rift-beast.lod2.glb",
+          "staged_id": "sha256:28cdd4b095c59052194ab384ad13c090a6b5f169160285689e2de3724a2b4451",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_28cdd4b095c59052194ab384ad13c090a6b5f169160285689e2de3724a2b4451.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/rift-beast.meshopt.glb",
+          "staged_id": "sha256:0031cf42555c21c0207219c43c43a61afa3c91860fd4f5820741a9b5e7c25d64",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_0031cf42555c21c0207219c43c43a61afa3c91860fd4f5820741a9b5e7c25d64.glb",
+          "runtime_path": "/assets/meshes/rift-beast.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/rift-beast.lod1.meshopt.glb",
+          "staged_id": "sha256:e26bc2d3de064648a538f5a0ea36a5708569481c5350265f489b7d3cb35011fb",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_e26bc2d3de064648a538f5a0ea36a5708569481c5350265f489b7d3cb35011fb.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/rift-beast.lod2.meshopt.glb",
+          "staged_id": "sha256:ff9c4f119b32561040ec96cde3c0a6ae027937068a43f78d16c2312c343ed6b0",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_ff9c4f119b32561040ec96cde3c0a6ae027937068a43f78d16c2312c343ed6b0.glb",
+          "runtime_path": "/assets/meshes/rift-beast.lod2.meshopt.glb"
+        }
+      }
+    },
+    "spirit-companion": {
+      "source_path": "artifacts/source-assets/meshes/spirit-companion.glb",
+      "staged_id": "sha256:c61da2f7f77bf931c786011bcfe97e279e7132df45a46592ecf4ad2d81a8819a",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_c61da2f7f77bf931c786011bcfe97e279e7132df45a46592ecf4ad2d81a8819a.glb",
+      "runtime_path": "/assets/meshes/spirit-companion.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/spirit-companion.lod1.glb",
+          "staged_id": "sha256:887840b06087f24972a3186c5214e8050691aa52684c7d88894f645080c06a9e",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_887840b06087f24972a3186c5214e8050691aa52684c7d88894f645080c06a9e.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/spirit-companion.lod2.glb",
+          "staged_id": "sha256:21c58632654d70b6ff29831aa3e7f65a3a376c5bad5cbdfd5308e20946ae66b5",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_21c58632654d70b6ff29831aa3e7f65a3a376c5bad5cbdfd5308e20946ae66b5.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/spirit-companion.meshopt.glb",
+          "staged_id": "sha256:ea61529449980593d9ab4044954c2c68467225134a55a8f9fe09f0e9ca7b77b8",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_ea61529449980593d9ab4044954c2c68467225134a55a8f9fe09f0e9ca7b77b8.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/spirit-companion.lod1.meshopt.glb",
+          "staged_id": "sha256:df7ed98ab12fdb308179517ce768148023be69b2c834a5150ad3404b6a5cea66",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_df7ed98ab12fdb308179517ce768148023be69b2c834a5150ad3404b6a5cea66.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/spirit-companion.lod2.meshopt.glb",
+          "staged_id": "sha256:d8fbd61a17682be3bc3735afbd891bc2d2c29d895028272ded9b8d158e42270d",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_d8fbd61a17682be3bc3735afbd891bc2d2c29d895028272ded9b8d158e42270d.glb",
+          "runtime_path": "/assets/meshes/spirit-companion.lod2.meshopt.glb"
+        }
+      }
+    },
+    "supply-crate": {
+      "source_path": "artifacts/source-assets/meshes/supply-crate.glb",
+      "staged_id": "sha256:586746acd4c1286314a40a1fd7978b7075579a374a89e4d55f2e0416f83c9b7b",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_586746acd4c1286314a40a1fd7978b7075579a374a89e4d55f2e0416f83c9b7b.glb",
+      "runtime_path": "/assets/meshes/supply-crate.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/supply-crate.lod1.glb",
+          "staged_id": "sha256:b732251e876820d85b3bf97606fbb633850daff3a56c90f5e1694fcfd6b3c48c",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_b732251e876820d85b3bf97606fbb633850daff3a56c90f5e1694fcfd6b3c48c.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/supply-crate.lod2.glb",
+          "staged_id": "sha256:7f16f827884abfd5e387eb9aac5680c550945a3163a12968d29851f70063da01",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_7f16f827884abfd5e387eb9aac5680c550945a3163a12968d29851f70063da01.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/supply-crate.meshopt.glb",
+          "staged_id": "sha256:bdd0b4b4f7f9d58b20b57526593d6bd836b19eeb26077142746a682471045aee",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_bdd0b4b4f7f9d58b20b57526593d6bd836b19eeb26077142746a682471045aee.glb",
+          "runtime_path": "/assets/meshes/supply-crate.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/supply-crate.lod1.meshopt.glb",
+          "staged_id": "sha256:bfc0400b702fb01e6cdccd17d319baaae2bfa283977e959024b1f3d78d02aa13",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_bfc0400b702fb01e6cdccd17d319baaae2bfa283977e959024b1f3d78d02aa13.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/supply-crate.lod2.meshopt.glb",
+          "staged_id": "sha256:7602af7ff945e2826c62f473d1831ba96702e9fbefce6b77090412485aaf3c92",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_7602af7ff945e2826c62f473d1831ba96702e9fbefce6b77090412485aaf3c92.glb",
+          "runtime_path": "/assets/meshes/supply-crate.lod2.meshopt.glb"
+        }
+      }
+    },
+    "weathered-boulder": {
+      "source_path": "artifacts/source-assets/meshes/weathered-boulder.glb",
+      "staged_id": "sha256:3f38dd6fb2f65a72d039757539b36fba352c470a6a56bc17d31e662308b9d9b6",
+      "staged_format": "gltf",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_3f38dd6fb2f65a72d039757539b36fba352c470a6a56bc17d31e662308b9d9b6.glb",
+      "runtime_path": "/assets/meshes/weathered-boulder.glb",
+      "lod_variants": {
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod1.glb",
+          "staged_id": "sha256:bb83406c35fc45638a75d8cdc7f3e381d3b8ff1069ec434722a86b8e3a71ba13",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_bb83406c35fc45638a75d8cdc7f3e381d3b8ff1069ec434722a86b8e3a71ba13.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod1.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod2.glb",
+          "staged_id": "sha256:21f39ddf5ab12e8efffdf7d313e78cd4130c33e14900a8d55fc655147473ed0b",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_21f39ddf5ab12e8efffdf7d313e78cd4130c33e14900a8d55fc655147473ed0b.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod2.glb"
+        }
+      },
+      "compressed_lod_variants": {
+        "0": {
+          "source_path": "artifacts/source-assets/meshes/weathered-boulder.meshopt.glb",
+          "staged_id": "sha256:a80422e42377726660d13a9981cd15e743159513ffbf8e2225cddf6abf969caf",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_a80422e42377726660d13a9981cd15e743159513ffbf8e2225cddf6abf969caf.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.meshopt.glb"
+        },
+        "1": {
+          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod1.meshopt.glb",
+          "staged_id": "sha256:0e9e442cd1891266df661dc1fd56dce7f7b1e4d03672a8d24874431c5771e657",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_0e9e442cd1891266df661dc1fd56dce7f7b1e4d03672a8d24874431c5771e657.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod1.meshopt.glb"
+        },
+        "2": {
+          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod2.meshopt.glb",
+          "staged_id": "sha256:5b5fb346b0a1f6e2fedba3befa94d08818b1a8310b7b3787de9993bd0c5a71b7",
+          "staged_format": "gltf",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_5b5fb346b0a1f6e2fedba3befa94d08818b1a8310b7b3787de9993bd0c5a71b7.glb",
+          "runtime_path": "/assets/meshes/weathered-boulder.lod2.meshopt.glb"
+        }
+      }
+    }
+  },
+  "sprites": {
+    "danger-ring": {
+      "source_path": "artifacts/source-assets/textures/danger-ring.png",
+      "staged_id": "sha256:caa593b521bc669c520a1e9b5bfadd9ecbd9c615d9728f3cb1ac85e1620cfbb4",
+      "staged_format": "png",
+      "staged_path": "artifacts/staged-assets/png/sha256_caa593b521bc669c520a1e9b5bfadd9ecbd9c615d9728f3cb1ac85e1620cfbb4.png",
+      "runtime_path": "/assets/textures/danger-ring.png",
+      "compressed_variant": {
+        "source_path": "artifacts/source-assets/textures/danger-ring.ktx2",
+        "staged_id": "sha256:0cd077b2004571e45bcc7bf6e54c38131149e1bb4e779312569c8abb30e8991d",
+        "staged_format": "ktx2",
+        "staged_path": "artifacts/staged-assets/ktx2/sha256_0cd077b2004571e45bcc7bf6e54c38131149e1bb4e779312569c8abb30e8991d.ktx2",
+        "runtime_path": "/assets/textures/danger-ring.ktx2"
+      }
+    },
+    "mist-ring": {
+      "source_path": "artifacts/source-assets/textures/mist-ring.png",
+      "staged_id": "sha256:e71ee2bed6495600df83aa2457fc9ef972a5e5cc21e22796dda879aecbd799f7",
+      "staged_format": "png",
+      "staged_path": "artifacts/staged-assets/png/sha256_e71ee2bed6495600df83aa2457fc9ef972a5e5cc21e22796dda879aecbd799f7.png",
+      "runtime_path": "/assets/textures/mist-ring.png",
+      "compressed_variant": {
+        "source_path": "artifacts/source-assets/textures/mist-ring.ktx2",
+        "staged_id": "sha256:976bf500662bc480bea7ef5eda52957a323796b4729fd7ab89f02c7dbb1367d1",
+        "staged_format": "ktx2",
+        "staged_path": "artifacts/staged-assets/ktx2/sha256_976bf500662bc480bea7ef5eda52957a323796b4729fd7ab89f02c7dbb1367d1.ktx2",
+        "runtime_path": "/assets/textures/mist-ring.ktx2"
+      }
+    },
+    "selection-ring": {
+      "source_path": "artifacts/source-assets/textures/selection-ring.png",
+      "staged_id": "sha256:32ff674d2b3afd6417b350ad7385944ddb941493fdec284afa86ea6674c42149",
+      "staged_format": "png",
+      "staged_path": "artifacts/staged-assets/png/sha256_32ff674d2b3afd6417b350ad7385944ddb941493fdec284afa86ea6674c42149.png",
+      "runtime_path": "/assets/textures/selection-ring.png",
+      "compressed_variant": {
+        "source_path": "artifacts/source-assets/textures/selection-ring.ktx2",
+        "staged_id": "sha256:d55c0b94480049a4e4c101416e8e5667232448ef56c67ac45f0ec5dcb30e222a",
+        "staged_format": "ktx2",
+        "staged_path": "artifacts/staged-assets/ktx2/sha256_d55c0b94480049a4e4c101416e8e5667232448ef56c67ac45f0ec5dcb30e222a.ktx2",
+        "runtime_path": "/assets/textures/selection-ring.ktx2"
+      }
+    }
+  }
+}

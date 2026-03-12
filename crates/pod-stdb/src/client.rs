@@ -693,7 +693,7 @@ impl Subscriptions {
     pub fn debug_telemetry_for_entities(entity_ids: &[u64]) -> Vec<String> {
         let mut queries = Vec::new();
 
-        for entity_id in entity_ids.iter().copied() {
+        for &entity_id in entity_ids {
             queries.push(format!(
                 "SELECT * FROM agent_telemetry_tick WHERE agent_entity_id = {entity_id}"
             ));

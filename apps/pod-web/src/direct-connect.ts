@@ -14,16 +14,12 @@ import {
   type NetworkEventBatch,
   type NetworkWorldSnapshot
 } from "./contracts";
-
-export interface DirectConnectRuntimeConfig {
-  url: string;
-  playerName: string;
-  debugTelemetry: boolean;
-  reconnectDelayMs: number;
-  pingIntervalMs: number;
-  heartbeatTimeoutMs: number;
-  maxPendingActionBatches: number;
-}
+import type { DirectConnectRuntimeConfig } from "./runtime-config";
+export {
+  initialHudStateFromLocation,
+  runtimeConfigFromLocation
+} from "./runtime-config";
+export type { InitialHudState } from "./runtime-config";
 
 export interface DirectConnectStatus {
   phase:
@@ -56,14 +52,6 @@ export interface DirectConnectActionState {
   lastActionSummary: string | null;
 }
 
-export interface InitialHudState {
-  feedback: string;
-  connectionBadge: string;
-  worldLabel: string;
-  populationLabel: string;
-  frameSourceLabel: string;
-}
-
 interface DirectConnectHandlers {
   onFrame: (
     snapshot: NetworkWorldSnapshot,
@@ -76,63 +64,9 @@ interface DirectConnectHandlers {
   onStatus: (status: DirectConnectStatus) => void;
 }
 
-const DEFAULT_PLAYER_NAME = "WebPlayer";
-const DEFAULT_RECONNECT_DELAY_MS = 1500;
-const DEFAULT_PING_INTERVAL_MS = 2000;
-const DEFAULT_HEARTBEAT_TIMEOUT_MS = 6500;
-const DEFAULT_MAX_PENDING_ACTION_BATCHES = 6;
-
 interface PendingActionBatch {
   tick: number;
   summary: string;
-}
-
-export function runtimeConfigFromLocation(
-  location: Pick<Location, "search">
-): DirectConnectRuntimeConfig | null {
-  const params = new URLSearchParams(location.search);
-  const explicitUrl = params.get("ws");
-  const server = params.get("server");
-
-  if (!explicitUrl && !server) {
-    return null;
-  }
-
-  const url = explicitUrl ?? normalizeServerToWebSocket(server ?? "");
-  return {
-    url,
-    playerName: params.get("player")?.trim() || DEFAULT_PLAYER_NAME,
-    debugTelemetry: parseBooleanParam(params.get("debug")),
-    reconnectDelayMs: parsePositiveInt(params.get("reconnectMs")) ?? DEFAULT_RECONNECT_DELAY_MS,
-    pingIntervalMs: parsePositiveInt(params.get("pingMs")) ?? DEFAULT_PING_INTERVAL_MS,
-    heartbeatTimeoutMs:
-      parsePositiveInt(params.get("heartbeatMs")) ?? DEFAULT_HEARTBEAT_TIMEOUT_MS,
-    maxPendingActionBatches:
-      parsePositiveInt(params.get("pendingBatches")) ?? DEFAULT_MAX_PENDING_ACTION_BATCHES
-  };
-}
-
-export function initialHudStateFromLocation(
-  location: Pick<Location, "search">
-): InitialHudState {
-  const runtimeConfig = runtimeConfigFromLocation(location);
-  if (runtimeConfig) {
-    return {
-      feedback: `Connecting to ${runtimeConfig.url}`,
-      connectionBadge: "connecting to shard",
-      worldLabel: "waiting for shard snapshot",
-      populationLabel: "Awaiting authoritative population state",
-      frameSourceLabel: "bootstrapping direct-connect shard"
-    };
-  }
-
-  return {
-    feedback: "Starting local browser shard",
-    connectionBadge: "local sandbox booting",
-    worldLabel: "booting Verdant Hollow",
-    populationLabel: "Seeding local region population",
-    frameSourceLabel: "bootstrapping local sandbox"
-  };
 }
 
 export class PodWebDirectConnectClient {
@@ -585,47 +519,6 @@ export function frameFromAuthoritativeSnapshot(
   options: AuthoritativeWorldFrameOptions = {}
 ) {
   return buildAuthoritativeWorldFrame(snapshot, options);
-}
-
-function normalizeServerToWebSocket(server: string): string {
-  if (server.startsWith("ws://") || server.startsWith("wss://")) {
-    return server;
-  }
-
-  if (server.startsWith("http://")) {
-    return `ws://${server.slice("http://".length)}`;
-  }
-
-  if (server.startsWith("https://")) {
-    return `wss://${server.slice("https://".length)}`;
-  }
-
-  return `ws://${server}`;
-}
-
-function parseBooleanParam(value: string | null): boolean {
-  if (value == null) {
-    return false;
-  }
-
-  switch (value.toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "on":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function parsePositiveInt(value: string | null): number | null {
-  if (value == null) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function summarizeActions(actions: BrowserAction[]): string {

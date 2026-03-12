@@ -110,6 +110,12 @@ function getPaintContext(surface: PaintSurface): OffscreenCanvasRenderingContext
   return context;
 }
 
+function monotonicPerfNowMs(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
 function resolveLandscapeSurfaceSize(
   quality: PodThreeQualityProfile,
   kind: "terrain" | "water" | "sky"
@@ -382,6 +388,12 @@ function environmentSignature(environment: ThreeJsEnvironment): string {
 export interface PodThreeRendererStats {
   backend: "webgpu" | "webgl2";
   renderThread: "main" | "worker";
+  requestedRenderThread: "auto" | "main" | "worker";
+  renderThreadFallbackReason:
+    | "missing-worker-constructor"
+    | "missing-offscreen-canvas"
+    | "missing-canvas-transfer-control"
+    | null;
   qualityPreset: PodThreeQualityPreset;
   environmentPreset: "daylight" | "twilight" | "night";
   landscapeMode: typeof LANDSCAPE_PROFILE_ID;
@@ -396,9 +408,211 @@ export interface PodThreeRendererStats {
   residentSpriteAssets: number;
   pendingGeometryAssets: number;
   pendingSpriteAssets: number;
+  geometryLoadsCompleted: number;
+  spriteLoadsCompleted: number;
+  averageGeometryLoadMs: number;
+  averageSpriteLoadMs: number;
+  slowestGeometryLoadMs: number;
+  slowestSpriteLoadMs: number;
+  mainThreadPerf: PodThreeMainThreadPerfStats;
+  runtimePerf: PodThreeRuntimePerfStats;
   ambientInstances: number;
   visibleWorldChunks: number;
   preloadedWorldChunks: number;
+}
+
+export interface PodThreeMainThreadPerfStats {
+  warmupMs: number | null;
+  submissionsCompleted: number;
+  averageSubmissionMs: number;
+  slowestSubmissionMs: number;
+  byKind: Record<PodThreeMainThreadSubmissionKind, PodThreeMainThreadPerfBucketStats>;
+}
+
+export type PodThreeMainThreadSubmissionKind = "frame" | "control" | "resize";
+
+export interface PodThreeMainThreadPerfBucketStats {
+  submissionsCompleted: number;
+  averageSubmissionMs: number;
+  slowestSubmissionMs: number;
+}
+
+export interface PodThreeMainThreadPerfBucketTracker {
+  submissionsCompleted: number;
+  totalSubmissionMs: number;
+  slowestSubmissionMs: number;
+}
+
+export interface PodThreeMainThreadPerfTracker {
+  startedAtMs: number;
+  warmupMs: number | null;
+  submissionsCompleted: number;
+  totalSubmissionMs: number;
+  slowestSubmissionMs: number;
+  byKind: Record<PodThreeMainThreadSubmissionKind, PodThreeMainThreadPerfBucketTracker>;
+}
+
+export function createPodThreeMainThreadPerfTracker(
+  startedAtMs = 0
+): PodThreeMainThreadPerfTracker {
+  return {
+    startedAtMs: Math.max(startedAtMs, 0),
+    warmupMs: null,
+    submissionsCompleted: 0,
+    totalSubmissionMs: 0,
+    slowestSubmissionMs: 0,
+    byKind: {
+      frame: createPodThreeMainThreadPerfBucketTracker(),
+      control: createPodThreeMainThreadPerfBucketTracker(),
+      resize: createPodThreeMainThreadPerfBucketTracker()
+    }
+  };
+}
+
+export function recordPodThreeMainThreadSubmission(
+  tracker: PodThreeMainThreadPerfTracker,
+  submissionMs: number,
+  nowMs: number,
+  kind: PodThreeMainThreadSubmissionKind = "frame"
+): void {
+  const normalizedSubmissionMs = Math.max(submissionMs, 0);
+  const normalizedNowMs = Math.max(nowMs, tracker.startedAtMs);
+  const bucket = tracker.byKind[kind];
+
+  tracker.submissionsCompleted += 1;
+  tracker.totalSubmissionMs += normalizedSubmissionMs;
+  tracker.slowestSubmissionMs = Math.max(
+    tracker.slowestSubmissionMs,
+    normalizedSubmissionMs
+  );
+  bucket.submissionsCompleted += 1;
+  bucket.totalSubmissionMs += normalizedSubmissionMs;
+  bucket.slowestSubmissionMs = Math.max(
+    bucket.slowestSubmissionMs,
+    normalizedSubmissionMs
+  );
+  if (tracker.warmupMs == null) {
+    tracker.warmupMs = Math.max(normalizedNowMs - tracker.startedAtMs, 0);
+  }
+}
+
+export function snapshotPodThreeMainThreadPerfStats(
+  tracker: PodThreeMainThreadPerfTracker
+): PodThreeMainThreadPerfStats {
+  return {
+    warmupMs:
+      tracker.warmupMs == null ? null : Number(tracker.warmupMs.toFixed(2)),
+    submissionsCompleted: tracker.submissionsCompleted,
+    averageSubmissionMs:
+      tracker.submissionsCompleted === 0
+        ? 0
+        : Number(
+            (tracker.totalSubmissionMs / tracker.submissionsCompleted).toFixed(2)
+          ),
+    slowestSubmissionMs: Number(tracker.slowestSubmissionMs.toFixed(2)),
+    byKind: {
+      frame: snapshotPodThreeMainThreadPerfBucketStats(tracker.byKind.frame),
+      control: snapshotPodThreeMainThreadPerfBucketStats(tracker.byKind.control),
+      resize: snapshotPodThreeMainThreadPerfBucketStats(tracker.byKind.resize)
+    }
+  };
+}
+
+function createPodThreeMainThreadPerfBucketTracker(): PodThreeMainThreadPerfBucketTracker {
+  return {
+    submissionsCompleted: 0,
+    totalSubmissionMs: 0,
+    slowestSubmissionMs: 0
+  };
+}
+
+function snapshotPodThreeMainThreadPerfBucketStats(
+  tracker: PodThreeMainThreadPerfBucketTracker
+): PodThreeMainThreadPerfBucketStats {
+  return {
+    submissionsCompleted: tracker.submissionsCompleted,
+    averageSubmissionMs:
+      tracker.submissionsCompleted === 0
+        ? 0
+        : Number((tracker.totalSubmissionMs / tracker.submissionsCompleted).toFixed(2)),
+    slowestSubmissionMs: Number(tracker.slowestSubmissionMs.toFixed(2))
+  };
+}
+
+export interface PodThreeRuntimePerfStats {
+  warmupMs: number | null;
+  frameBudgetMs: number;
+  framesRendered: number;
+  stableFrames: number;
+  slowFrames: number;
+  stableFramePercent: number;
+  slowestFrameMs: number;
+}
+
+export interface PodThreeRuntimePerfTracker {
+  startedAtMs: number;
+  warmupMs: number | null;
+  framesRendered: number;
+  stableFrames: number;
+  slowFrames: number;
+  slowestFrameMs: number;
+}
+
+export const POD_THREE_FRAME_STABILITY_BUDGET_MS = 1000 / 60;
+
+export function createPodThreeRuntimePerfTracker(
+  startedAtMs = 0
+): PodThreeRuntimePerfTracker {
+  return {
+    startedAtMs: Math.max(startedAtMs, 0),
+    warmupMs: null,
+    framesRendered: 0,
+    stableFrames: 0,
+    slowFrames: 0,
+    slowestFrameMs: 0
+  };
+}
+
+export function recordPodThreeRuntimePerfFrame(
+  tracker: PodThreeRuntimePerfTracker,
+  frameMs: number,
+  nowMs: number,
+  frameBudgetMs = POD_THREE_FRAME_STABILITY_BUDGET_MS
+): void {
+  const normalizedFrameMs = Math.max(frameMs, 0);
+  const normalizedNowMs = Math.max(nowMs, tracker.startedAtMs);
+
+  tracker.framesRendered += 1;
+  tracker.slowestFrameMs = Math.max(tracker.slowestFrameMs, normalizedFrameMs);
+  if (normalizedFrameMs <= frameBudgetMs) {
+    tracker.stableFrames += 1;
+  } else {
+    tracker.slowFrames += 1;
+  }
+  if (tracker.warmupMs == null) {
+    tracker.warmupMs = Math.max(normalizedNowMs - tracker.startedAtMs, 0);
+  }
+}
+
+export function snapshotPodThreeRuntimePerfStats(
+  tracker: PodThreeRuntimePerfTracker,
+  frameBudgetMs = POD_THREE_FRAME_STABILITY_BUDGET_MS
+): PodThreeRuntimePerfStats {
+  const stableFramePercent =
+    tracker.framesRendered === 0
+      ? 0
+      : (tracker.stableFrames / tracker.framesRendered) * 100;
+
+  return {
+    warmupMs:
+      tracker.warmupMs == null ? null : Number(tracker.warmupMs.toFixed(2)),
+    frameBudgetMs: Number(frameBudgetMs.toFixed(2)),
+    framesRendered: tracker.framesRendered,
+    stableFrames: tracker.stableFrames,
+    slowFrames: tracker.slowFrames,
+    stableFramePercent: Number(stableFramePercent.toFixed(1)),
+    slowestFrameMs: Number(tracker.slowestFrameMs.toFixed(2))
+  };
 }
 
 export interface RenderSurfaceMetrics {
@@ -413,6 +627,7 @@ export interface PodThreeWorldRendererOptions {
   cameraRig?: PodThreeCameraRigOptions;
   qualityPreset?: PodThreeQualityPreset;
   qualityProfile?: Partial<PodThreeQualityProfile>;
+  fixedTimeMs?: number;
   clearColor?: number;
   enableShadows?: boolean;
   showGrid?: boolean;
@@ -497,6 +712,7 @@ export class PodThreeWorldRenderer {
   private readonly smoothedCameraTarget = new THREE.Vector3();
   private cameraPoseInitialized = false;
   private lastCameraUpdateAt = 0;
+  private readonly runtimePerf = createPodThreeRuntimePerfTracker(monotonicPerfNowMs());
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
   private readonly entityPulseUntilMs = new Map<number, number>();
@@ -548,6 +764,16 @@ export class PodThreeWorldRenderer {
     this.resize();
   }
 
+  private sceneTimeMs(): number {
+    if (typeof this.options.fixedTimeMs === "number") {
+      return this.options.fixedTimeMs;
+    }
+
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  }
+
   async applyFrame(frame: ThreeJsWebGpuFrame): Promise<void> {
     this.applyEnvironment(frame.environment);
 
@@ -585,10 +811,7 @@ export class PodThreeWorldRenderer {
       return;
     }
 
-    const now =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
+    const now = this.sceneTimeMs();
 
     for (const event of events) {
       const durationMs = pulseDurationForEvent(event);
@@ -839,7 +1062,7 @@ export class PodThreeWorldRenderer {
     const signature = environmentSignature(environment);
     if (signature !== this.lastEnvironmentSignature) {
       const elapsedSeconds =
-        (performance.now() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
+        (this.sceneTimeMs() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
       if (this.skyTextureSurface && this.skyTexture) {
         paintSkyTexture(this.skyTextureSurface, environment);
         this.skyTexture.needsUpdate = true;
@@ -856,7 +1079,7 @@ export class PodThreeWorldRenderer {
     }
 
     const elapsedSeconds =
-      (performance.now() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
+      (this.sceneTimeMs() / 1000 + DAYLIGHT_START_OFFSET_SECONDS) % 100000;
     this.applyDynamicEnvironment(
       sampleTimeLapseEnvironment(environment, elapsedSeconds).environment,
       elapsedSeconds
@@ -992,10 +1215,7 @@ export class PodThreeWorldRenderer {
   ): void {
     const targetPosition = new THREE.Vector3(...pose.position);
     const targetLookAt = new THREE.Vector3(...pose.target);
-    const now =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
+    const now = this.sceneTimeMs();
     const deltaSeconds =
       this.lastCameraUpdateAt === 0
         ? 1 / 60
@@ -1034,10 +1254,7 @@ export class PodThreeWorldRenderer {
   private async syncMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
     const activeTransformKeys = new Set<string>();
-    const now =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
+    const now = this.sceneTimeMs();
     const elapsedSeconds = now / 1000;
     pruneExpiredPulses(this.entityPulseUntilMs, now);
 
@@ -1106,10 +1323,7 @@ export class PodThreeWorldRenderer {
   private async syncSpriteBatches(batches: PlannedSpriteBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
     const activeTransformKeys = new Set<string>();
-    const now =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
+    const now = this.sceneTimeMs();
     const elapsedSeconds = now / 1000;
 
     for (const planned of batches) {
@@ -1320,16 +1534,18 @@ export class PodThreeWorldRenderer {
   }
 
   private async renderFrame(): Promise<void> {
-    const frameStart = performance.now();
+    const frameStart = monotonicPerfNowMs();
+    const sceneTimeSeconds =
+      this.sceneTimeMs() / 1000 + DAYLIGHT_START_OFFSET_SECONDS;
     if (this.baseEnvironment) {
       const timeLapse = sampleTimeLapseEnvironment(
         this.baseEnvironment,
-        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+        sceneTimeSeconds
       );
       this.timeOfDayHours = timeLapse.timeOfDayHours;
       this.applyDynamicEnvironment(
         timeLapse.environment,
-        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+        sceneTimeSeconds
       );
     }
     if (this.waterTexture) {
@@ -1354,7 +1570,7 @@ export class PodThreeWorldRenderer {
             groundColor: [0.19, 0.33, 0.21, 1],
             starfieldIntensity: 0.08
           } satisfies ThreeJsEnvironment),
-        frameStart / 1000 + DAYLIGHT_START_OFFSET_SECONDS
+        sceneTimeSeconds
       );
       this.waterTexture.offset.set(
         waterStyle.textureOffset[0],
@@ -1372,7 +1588,10 @@ export class PodThreeWorldRenderer {
     this.renderer.clearDepth();
     await renderWithFallback(this.renderer, this.overlayScene, this.overlayCamera);
     this.renderer.autoClear = previousAutoClear;
-    this.updateAdaptiveResolution(performance.now() - frameStart);
+    const frameEnd = monotonicPerfNowMs();
+    const frameMs = frameEnd - frameStart;
+    this.updateAdaptiveResolution(frameMs);
+    recordPodThreeRuntimePerfFrame(this.runtimePerf, frameMs, frameEnd);
   }
 
   private resize(): void {
@@ -1409,7 +1628,13 @@ export class PodThreeWorldRenderer {
       residentGeometryAssets: 0,
       residentSpriteAssets: 0,
       pendingGeometryAssets: 0,
-      pendingSpriteAssets: 0
+      pendingSpriteAssets: 0,
+      geometryLoadsCompleted: 0,
+      spriteLoadsCompleted: 0,
+      averageGeometryLoadMs: 0,
+      averageSpriteLoadMs: 0,
+      slowestGeometryLoadMs: 0,
+      slowestSpriteLoadMs: 0
     };
     const landscapeMode =
       this.terrainMesh && this.skyDome
@@ -1419,6 +1644,8 @@ export class PodThreeWorldRenderer {
     return {
       backend: this.backend,
       renderThread: "main",
+      requestedRenderThread: "auto",
+      renderThreadFallbackReason: null,
       qualityPreset: this.quality.preset,
       environmentPreset: this.environmentPreset,
       landscapeMode,
@@ -1433,6 +1660,16 @@ export class PodThreeWorldRenderer {
       residentSpriteAssets: residency.residentSpriteAssets,
       pendingGeometryAssets: residency.pendingGeometryAssets,
       pendingSpriteAssets: residency.pendingSpriteAssets,
+      geometryLoadsCompleted: residency.geometryLoadsCompleted,
+      spriteLoadsCompleted: residency.spriteLoadsCompleted,
+      averageGeometryLoadMs: Number(residency.averageGeometryLoadMs.toFixed(2)),
+      averageSpriteLoadMs: Number(residency.averageSpriteLoadMs.toFixed(2)),
+      slowestGeometryLoadMs: Number(residency.slowestGeometryLoadMs.toFixed(2)),
+      slowestSpriteLoadMs: Number(residency.slowestSpriteLoadMs.toFixed(2)),
+      mainThreadPerf: snapshotPodThreeMainThreadPerfStats(
+        createPodThreeMainThreadPerfTracker()
+      ),
+      runtimePerf: snapshotPodThreeRuntimePerfStats(this.runtimePerf),
       ambientInstances: this.ambientInstances,
       visibleWorldChunks: this.visibleWorldChunks,
       preloadedWorldChunks: this.preloadedWorldChunks

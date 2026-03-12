@@ -28,6 +28,7 @@ import {
   withWorldEventMarkers
 } from "./contracts";
 import { sampleLandscapeSurface, sampleTerrainHeight } from "./landscape";
+import { PodWebLocalWorld } from "./local-world";
 import { meshGroundAnchorHeight } from "./mesh-bounds";
 
 function entityMetadata(kind: string, overrides: Record<string, unknown> = {}) {
@@ -249,15 +250,25 @@ describe("TOON contract parsing", () => {
         client_inactivity_timeout_ticks: 600,
         queue_pressure_warn_depth: 192,
         total_pending_action_queue_depth: 1,
+        peak_pending_action_queue_depth: 4,
         queue_pressure_client_count: 1,
         total_inbound_messages: 21,
         total_outbound_messages: 44,
         total_inbound_bytes: 1024,
         total_outbound_bytes: 4096,
         action_batches_received: 8,
+        full_snapshots_sent: 4,
+        total_full_snapshot_bytes: 8192,
+        max_full_snapshot_bytes: 3072,
+        total_recovery_snapshot_bytes: 4096,
         full_snapshot_requests: 1,
         ping_requests: 5,
         state_deltas_sent: 19,
+        delta_messages_sent: 15,
+        total_delta_bytes: 2048,
+        max_delta_bytes: 512,
+        total_delta_entities_updated: 32,
+        total_delta_entities_destroyed: 6,
         event_batches_sent: 7,
         debug_documents_sent: 11,
         rejected_messages_sent: 2,
@@ -275,15 +286,26 @@ describe("TOON contract parsing", () => {
             ticks_since_last_seen: 0,
             last_sent_tick: 360,
             pending_action_queue_depth: 1,
+            peak_pending_action_queue_depth: 4,
             queue_pressure: true,
+            queue_pressure_events: 2,
             inbound_messages: 10,
             outbound_messages: 20,
             inbound_bytes: 512,
             outbound_bytes: 2048,
             action_batches_received: 4,
+            full_snapshots_sent: 2,
+            full_snapshot_bytes: 4096,
+            max_full_snapshot_bytes: 3072,
+            recovery_snapshot_bytes_sent: 2048,
             full_snapshot_requests: 1,
             ping_requests: 3,
             state_deltas_sent: 9,
+            delta_messages_sent: 7,
+            delta_bytes_sent: 1024,
+            max_delta_bytes: 320,
+            delta_entities_updated: 18,
+            delta_entities_destroyed: 3,
             event_batches_sent: 4,
             debug_documents_sent: 6,
             rejected_messages_sent: 1,
@@ -299,10 +321,24 @@ describe("TOON contract parsing", () => {
     expect(summary.resumed_sessions).toBe(1);
     expect(summary.recovery_snapshots_sent).toBe(3);
     expect(summary.recovery_delivery_failures).toBe(1);
+    expect(summary.peak_pending_action_queue_depth).toBe(4);
+    expect(summary.full_snapshots_sent).toBe(4);
+    expect(summary.total_full_snapshot_bytes).toBe(8192);
+    expect(summary.total_recovery_snapshot_bytes).toBe(4096);
+    expect(summary.delta_messages_sent).toBe(15);
+    expect(summary.total_delta_entities_updated).toBe(32);
+    expect(summary.total_delta_entities_destroyed).toBe(6);
     expect(summary.queue_pressure_client_count).toBe(1);
     expect(summary.clients[0]?.session_resumes).toBe(1);
     expect(summary.clients[0]?.recovery_snapshots_sent).toBe(2);
     expect(summary.clients[0]?.recovery_delivery_failures).toBe(1);
+    expect(summary.clients[0]?.peak_pending_action_queue_depth).toBe(4);
+    expect(summary.clients[0]?.queue_pressure_events).toBe(2);
+    expect(summary.clients[0]?.full_snapshots_sent).toBe(2);
+    expect(summary.clients[0]?.recovery_snapshot_bytes_sent).toBe(2048);
+    expect(summary.clients[0]?.delta_messages_sent).toBe(7);
+    expect(summary.clients[0]?.delta_entities_updated).toBe(18);
+    expect(summary.clients[0]?.delta_entities_destroyed).toBe(3);
     expect(summary.clients[0]?.client_id).toBe("client-a");
   });
 
@@ -432,15 +468,25 @@ describe("TOON contract parsing", () => {
           recovery_delivery_failures: 0,
           queue_pressure_warn_depth: 192,
           total_pending_action_queue_depth: 0,
+          peak_pending_action_queue_depth: 0,
           queue_pressure_client_count: 0,
           total_inbound_messages: 2,
           total_outbound_messages: 6,
           total_inbound_bytes: 64,
           total_outbound_bytes: 256,
           action_batches_received: 1,
+          full_snapshots_sent: 1,
+          total_full_snapshot_bytes: 256,
+          max_full_snapshot_bytes: 256,
+          total_recovery_snapshot_bytes: 0,
           full_snapshot_requests: 0,
           ping_requests: 1,
           state_deltas_sent: 2,
+          delta_messages_sent: 1,
+          total_delta_bytes: 64,
+          max_delta_bytes: 64,
+          total_delta_entities_updated: 2,
+          total_delta_entities_destroyed: 0,
           event_batches_sent: 1,
           debug_documents_sent: 3,
           rejected_messages_sent: 0,
@@ -1579,5 +1625,47 @@ describe("TOON contract parsing", () => {
     expect(message.snapshot.population.chunks[0]?.counts.wildCreatures).toBe(3);
     expect(message.snapshot.population.chunks[0]?.nextRespawnTick).toBe(42);
     expect(message.snapshot.population.regions[0]?.populationPressure).toBe(0.875);
+  });
+
+  test("maps bootstrap showcase landmarks onto authored shoreline render batches", () => {
+    const world = new PodWebLocalWorld("Scout", "bootstrap-showcase");
+    world.connect();
+
+    const frame = buildAuthoritativeWorldFrame(world.snapshotState(), {
+      controlledEntity: world.controlledEntityId()
+    });
+    const tideglassBatch = frame.meshBatches.find((batch) =>
+      batch.instances.some((instance) => instance.sourceEntity === 26)
+    );
+    const shrineBatch = frame.meshBatches.find((batch) =>
+      batch.instances.some((instance) => instance.sourceEntity === 39)
+    );
+    const pineBatch = frame.meshBatches.find((batch) =>
+      batch.instances.some((instance) => instance.sourceEntity === 27)
+    );
+    const cairnBatch = frame.meshBatches.find((batch) =>
+      batch.instances.some((instance) => instance.sourceEntity === 24)
+    );
+
+    expect(tideglassBatch).toMatchObject({
+      mesh: "glass-spire",
+      material: "shore-tideglass:tideglass-monolith",
+      tint: [0.62, 0.84, 0.98, 1]
+    });
+    expect(shrineBatch).toMatchObject({
+      mesh: "basalt-column",
+      material: "shore-shrine:resonant-shrine",
+      tint: [0.42, 0.5, 0.58, 1]
+    });
+    expect(pineBatch).toMatchObject({
+      mesh: "canopy-tree",
+      material: "shore-pine:windward-pine",
+      tint: [0.3, 0.54, 0.38, 1]
+    });
+    expect(cairnBatch).toMatchObject({
+      mesh: "weathered-boulder",
+      material: "shore-cairn:shore-cairn",
+      tint: [0.68, 0.6, 0.5, 1]
+    });
   });
 });

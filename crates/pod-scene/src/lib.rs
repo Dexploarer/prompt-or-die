@@ -11,6 +11,7 @@
 
 pub mod asset;
 pub mod binding;
+mod json;
 pub mod prefab;
 pub mod save;
 pub mod scene;

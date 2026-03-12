@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::binding::{insert_bound_components, NativeComponentBinding};
+use crate::json::to_stable_json_string;
 use crate::prefab::{
     set_component_path_value, ComponentProvenance, ComponentProvenanceLayer, PrefabComponent,
     PrefabRegistry, PropertyOverride, PropertyOverrideReport,
@@ -477,7 +478,7 @@ impl Scene {
 
     /// Serialize scene to JSON
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
+        to_stable_json_string(self)
     }
 
     /// Deserialize scene from JSON

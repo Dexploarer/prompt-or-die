@@ -356,15 +356,26 @@ export interface ClientTransportSummaryDocument {
   ticks_since_last_seen: number;
   last_sent_tick?: number | null;
   pending_action_queue_depth: number;
+  peak_pending_action_queue_depth: number;
   queue_pressure: boolean;
+  queue_pressure_events: number;
   inbound_messages: number;
   outbound_messages: number;
   inbound_bytes: number;
   outbound_bytes: number;
   action_batches_received: number;
+  full_snapshots_sent: number;
+  full_snapshot_bytes: number;
+  max_full_snapshot_bytes: number;
+  recovery_snapshot_bytes_sent: number;
   full_snapshot_requests: number;
   ping_requests: number;
   state_deltas_sent: number;
+  delta_messages_sent: number;
+  delta_bytes_sent: number;
+  max_delta_bytes: number;
+  delta_entities_updated: number;
+  delta_entities_destroyed: number;
   event_batches_sent: number;
   debug_documents_sent: number;
   rejected_messages_sent: number;
@@ -381,15 +392,25 @@ export interface ShardTransportSummaryDocument {
   client_inactivity_timeout_ticks: number;
   queue_pressure_warn_depth: number;
   total_pending_action_queue_depth: number;
+  peak_pending_action_queue_depth: number;
   queue_pressure_client_count: number;
   total_inbound_messages: number;
   total_outbound_messages: number;
   total_inbound_bytes: number;
   total_outbound_bytes: number;
   action_batches_received: number;
+  full_snapshots_sent: number;
+  total_full_snapshot_bytes: number;
+  max_full_snapshot_bytes: number;
+  total_recovery_snapshot_bytes: number;
   full_snapshot_requests: number;
   ping_requests: number;
   state_deltas_sent: number;
+  delta_messages_sent: number;
+  total_delta_bytes: number;
+  max_delta_bytes: number;
+  total_delta_entities_updated: number;
+  total_delta_entities_destroyed: number;
   event_batches_sent: number;
   debug_documents_sent: number;
   rejected_messages_sent: number;
@@ -2713,6 +2734,107 @@ function entityRenderProfile(
       renderOrder: 5,
       roughness: 0.66,
       metallic: 0.08
+    }, entity, isControlled);
+  }
+
+  if (label.includes("resonant shrine")) {
+    return finalizeEntityRenderProfile({
+      mesh: "basalt-column",
+      material: "shore-shrine",
+      tint: [0.42, 0.5, 0.58, 1],
+      emissive: [0.04, 0.08, 0.1],
+      scale: [2.2, 3.35, 1.6],
+      groundOffset: 0.18,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.88,
+      metallic: 0.1
+    }, entity, isControlled);
+  }
+
+  if (label.includes("tideglass monolith")) {
+    return finalizeEntityRenderProfile({
+      mesh: "glass-spire",
+      material: "shore-tideglass",
+      tint: [0.62, 0.84, 0.98, 1],
+      emissive: [0.12, 0.2, 0.24],
+      scale: [2.2, 5.0, 2.2],
+      groundOffset: 0.26,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.18,
+      metallic: 0.06
+    }, entity, isControlled);
+  }
+
+  if (label.includes("tideglass")) {
+    return finalizeEntityRenderProfile({
+      mesh: "glass-spire",
+      material: "shore-tideglass",
+      tint: [0.54, 0.78, 0.96, 1],
+      emissive: [0.1, 0.16, 0.2],
+      scale: [1.8, 4.15, 1.8],
+      groundOffset: 0.24,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.22,
+      metallic: 0.08
+    }, entity, isControlled);
+  }
+
+  if (label.includes("windward pine")) {
+    return finalizeEntityRenderProfile({
+      mesh: "canopy-tree",
+      material: "shore-pine",
+      tint: [0.3, 0.54, 0.38, 1],
+      emissive: [0.02, 0.04, 0.025],
+      scale: [2.18, 4.36, 2.18],
+      groundOffset: 0.18,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.9,
+      metallic: 0.04
+    }, entity, isControlled);
+  }
+
+  if (
+    label.includes("attunement pylon") ||
+    label.includes("watcher pylon") ||
+    label.includes("shrine pylon")
+  ) {
+    const isWatcher = label.includes("watcher");
+    const isShrine = label.includes("shrine");
+    return finalizeEntityRenderProfile({
+      mesh: "basalt-column",
+      material: isShrine ? "shrine-pylon" : "shore-pylon",
+      tint: isShrine
+        ? [0.36, 0.44, 0.54, 1]
+        : isWatcher
+          ? [0.4, 0.46, 0.56, 1]
+          : [0.34, 0.42, 0.5, 1],
+      emissive: isShrine ? [0.03, 0.06, 0.08] : [0.02, 0.04, 0.06],
+      scale: isWatcher ? [1.55, 4.05, 1.55] : [1.45, 3.8, 1.45],
+      groundOffset: 0.16,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.9,
+      metallic: 0.08
+    }, entity, isControlled);
+  }
+
+  if (label.includes("breaker cairn") || label.includes("shore cairn")) {
+    const isBreaker = label.includes("breaker");
+    return finalizeEntityRenderProfile({
+      mesh: "weathered-boulder",
+      material: "shore-cairn",
+      tint: isBreaker ? [0.62, 0.54, 0.46, 1] : [0.68, 0.6, 0.5, 1],
+      emissive: isBreaker ? [0.03, 0.02, 0.015] : [0.02, 0.015, 0.01],
+      scale: isBreaker ? [1.72, 1.24, 1.72] : [1.58, 1.14, 1.58],
+      groundOffset: 0.08,
+      layer: 1,
+      renderOrder: 1,
+      roughness: 0.96,
+      metallic: 0.04
     }, entity, isControlled);
   }
 
