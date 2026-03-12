@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  assertRenderRouteMeasurementReportGates,
   buildRenderRouteComparison,
   buildRenderRouteMeasurement,
   buildRenderRouteMeasurementReport,
+  collectRenderRouteMeasurementFailures,
 } from "./measure-render-routes";
 
 function createStats(overrides?: Partial<ReturnType<typeof createStats>>) {
@@ -15,6 +17,10 @@ function createStats(overrides?: Partial<ReturnType<typeof createStats>>) {
     spriteLoadsCompleted: 1,
     pendingGeometryAssets: 0,
     pendingSpriteAssets: 0,
+    averageGeometryLoadMs: 42,
+    averageSpriteLoadMs: 18,
+    slowestGeometryLoadMs: 120,
+    slowestSpriteLoadMs: 44,
     mainThreadPerf: {
       warmupMs: 12,
       submissionsCompleted: 12,
@@ -87,6 +93,8 @@ describe("measure render routes", () => {
       createStats({
         renderThread: "worker",
         requestedRenderThread: "worker",
+        geometryLoadsCompleted: 8,
+        spriteLoadsCompleted: 4,
         mainThreadPerf: {
           submissionsCompleted: 5,
           byKind: {
@@ -103,8 +111,17 @@ describe("measure render routes", () => {
       }),
     );
 
-    expect(measurement.loadsCompleted).toBe(3);
+    expect(measurement.loadsCompleted).toBe(12);
     expect(measurement.pendingAssets).toBe(0);
+    expect(measurement.assetLoadPerf.averageGeometryLoadMs).toBe(42);
+    expect(measurement.gates.completedAssetLoadsFloor).toBe(10);
+    expect(measurement.gates.completedAssetLoadsFloorPassed).toBeTrue();
+    expect(measurement.gates.averageGeometryLoadMsCeiling).toBe(250);
+    expect(measurement.gates.averageGeometryLoadMsCeilingPassed).toBeTrue();
+    expect(measurement.gates.averageSpriteLoadMsCeiling).toBe(500);
+    expect(measurement.gates.averageSpriteLoadMsCeilingPassed).toBeTrue();
+    expect(measurement.gates.slowestGeometryLoadMsCeilingPassed).toBeTrue();
+    expect(measurement.gates.slowestSpriteLoadMsCeilingPassed).toBeTrue();
     expect(measurement.gates.stableFramePercentFloor).toBe(50);
     expect(measurement.gates.stableFramePercentFloorPassed).toBeTrue();
     expect(measurement.gates.controlSubmissionCeiling).toBe(0);
@@ -178,10 +195,52 @@ describe("measure render routes", () => {
       1234,
     );
 
-    expect(report.schemaVersion).toBe(1);
+    expect(report.schemaVersion).toBe(2);
     expect(report.generatedAtUnixMs).toBe(1234);
     expect(report.baseUrl).toBe("http://127.0.0.1:4178");
     expect(report.routes).toHaveLength(1);
     expect(report.comparison).toBeNull();
+  });
+
+  test("reports asset-load and worker-chatter gate failures", () => {
+    const report = buildRenderRouteMeasurementReport("http://127.0.0.1:4178", [
+      buildRenderRouteMeasurement(
+        "worker",
+        "http://127.0.0.1:4178/?world=local-sandbox&renderThread=worker&backend=webgl2",
+        createStats({
+          renderThread: "worker",
+          requestedRenderThread: "worker",
+          geometryLoadsCompleted: 3,
+          spriteLoadsCompleted: 2,
+          averageGeometryLoadMs: 320,
+          averageSpriteLoadMs: 540,
+          slowestGeometryLoadMs: 2200,
+          slowestSpriteLoadMs: 1200,
+          mainThreadPerf: {
+            byKind: {
+              control: {
+                submissionsCompleted: 1,
+              },
+            },
+          },
+          runtimePerf: {
+            stableFramePercent: 40,
+          },
+        }),
+      ),
+    ]);
+
+    expect(collectRenderRouteMeasurementFailures(report)).toEqual([
+      "worker route stable-frame percent 40 fell below 50",
+      "worker route completed only 5 asset loads; expected at least 10",
+      "worker route average geometry load 320ms exceeded 250ms",
+      "worker route average sprite load 540ms exceeded 500ms",
+      "worker route slowest geometry load 2200ms exceeded 2000ms",
+      "worker route slowest sprite load 1200ms exceeded 1000ms",
+      "worker route control submissions exceeded 0",
+    ]);
+    expect(() => assertRenderRouteMeasurementReportGates(report)).toThrow(
+      "worker route stable-frame percent 40 fell below 50",
+    );
   });
 });

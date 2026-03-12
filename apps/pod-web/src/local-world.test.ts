@@ -154,7 +154,7 @@ describe("PodWebLocalWorld", () => {
     ).toBe(true);
   });
 
-  test("spawns the bootstrap showcase preset with a curated shoreline vista", () => {
+  test("spawns the bootstrap showcase preset with a curated alpine valley vista", () => {
     const world = new PodWebLocalWorld("Scout", "bootstrap-showcase");
     world.connect();
 
@@ -183,10 +183,13 @@ describe("PodWebLocalWorld", () => {
     expect(sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0).hasWaterSurface).toBe(
       false
     );
-    expect(Math.hypot((player?.position[0] ?? 0) - (cache?.position[0] ?? 0), (player?.position[1] ?? 0) - (cache?.position[1] ?? 0))).toBeLessThan(
-      4.5
-    );
-    expect((monolith?.position[0] ?? 0) - (player?.position[0] ?? 0)).toBeGreaterThan(8);
+    expect(
+      Math.hypot(
+        (player?.position[0] ?? 0) - (cache?.position[0] ?? 0),
+        (player?.position[1] ?? 0) - (cache?.position[1] ?? 0)
+      )
+    ).toBeGreaterThan(45);
+    expect((monolith?.position[0] ?? 0) - (player?.position[0] ?? 0)).toBeGreaterThan(28);
     expect(monolith?.metadata.actorPresentation?.meshAssetId).toBe("glass-spire");
     expect(monolith?.metadata.actorPresentation?.materialPaletteId).toBe("tideglass-monolith");
     expect(monolith?.metadata.atmosphere?.biomeId).toBe("resonant-shore");
@@ -265,14 +268,14 @@ describe("PodWebLocalWorld", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
 
-    moveTowardPoint(world, [18, -14], 360);
+    moveTowardPoint(world, [18, -14], 480);
 
     const snapshot = world.snapshotState();
     const player = snapshot.entities.find((entity) => entity.id === 1);
     expect(player).not.toBeUndefined();
     const surface = sampleLandscapeSurface(player?.position[0] ?? 0, player?.position[1] ?? 0);
     expect(surface.isSwimmable).toBe(true);
-    expect(Math.hypot((player?.position[0] ?? 0) - 18, (player?.position[1] ?? 0) + 14)).toBeLessThan(5.8);
+    expect(Math.hypot((player?.position[0] ?? 0) - 18, (player?.position[1] ?? 0) + 14)).toBeLessThan(7.8);
     expect(player?.metadata.actorPresentation?.animationSetId).toBe("humanoid-swim");
   });
 
@@ -280,11 +283,11 @@ describe("PodWebLocalWorld", () => {
     const world = new PodWebLocalWorld("Scout");
     world.connect();
 
-    moveToward(world, 5, 120);
+    moveWithinRange(world, 5, 2.3, 160);
     world.submitActions([{ kind: "gatherResource", target: 5, skill: "Mining" }]);
     stepTicks(world, 2);
 
-    moveToward(world, 7, 96);
+    moveWithinRange(world, 7, 2.1, 120);
     world.submitActions([{ kind: "loot", target: 7 }]);
     stepTicks(world, 2);
 

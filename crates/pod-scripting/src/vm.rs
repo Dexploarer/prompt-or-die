@@ -135,11 +135,7 @@ impl ScriptVm {
     }
 
     /// Register a Rust function in the script's global namespace
-    pub fn register_function(
-        &self,
-        name: &str,
-        f: Function,
-    ) -> mlua::Result<()> {
+    pub fn register_function(&self, name: &str, f: Function) -> mlua::Result<()> {
         self.lua.globals().set(name, f)?;
         Ok(())
     }

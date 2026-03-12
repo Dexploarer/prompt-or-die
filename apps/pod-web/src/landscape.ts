@@ -63,6 +63,19 @@ export interface WaterSurfaceStyle {
   waveStrength: number;
 }
 
+interface TerrainBiomePalette {
+  grass: LandscapeVec3Tuple;
+  moss: LandscapeVec3Tuple;
+  cliff: LandscapeVec3Tuple;
+  basalt: LandscapeVec3Tuple;
+  highland: LandscapeVec3Tuple;
+  sand: LandscapeVec3Tuple;
+  foam: LandscapeVec3Tuple;
+  accent: LandscapeVec3Tuple;
+  accentStrength: number;
+  brightnessBias: number;
+}
+
 export const LANDSCAPE_PROFILE_ID = "cliff-lagoon-heightfield";
 export const WATER_PROFILE_ID = "animated-lagoon";
 export const LANDSCAPE_WORLD_SIZE = 260;
@@ -70,6 +83,14 @@ export const WATER_LEVEL = -2.35;
 export const WATER_CENTER: LandscapeVec2Tuple = [18, -14];
 export const WATER_RADII: LandscapeVec2Tuple = [22, 16];
 export const DAY_CYCLE_DURATION_SECONDS = 180;
+const INFINITE_WORLD_ITERATION_OFFSETS: LandscapeVec2Tuple[] = [
+  [-68214.5, 90412.75],
+  [23811.25, -51772.5],
+  [-14822.25, -83612.5],
+  [76122.25, 13844.25],
+  [49412.5, -19241.75],
+  [-92614.25, 30412.5]
+];
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -98,6 +119,30 @@ export function smoothstep(edge0: number, edge1: number, value: number): number 
 
   const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function distanceToSegment(
+  pointX: number,
+  pointY: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+): number {
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const segmentLengthSquared = deltaX * deltaX + deltaY * deltaY;
+  if (segmentLengthSquared <= Number.EPSILON) {
+    return Math.hypot(pointX - startX, pointY - startY);
+  }
+
+  const projection =
+    ((pointX - startX) * deltaX + (pointY - startY) * deltaY) /
+    segmentLengthSquared;
+  const clampedProjection = clamp(projection, 0, 1);
+  const closestX = startX + deltaX * clampedProjection;
+  const closestY = startY + deltaY * clampedProjection;
+  return Math.hypot(pointX - closestX, pointY - closestY);
 }
 
 function hashNoise(x: number, y: number): number {
@@ -136,6 +181,30 @@ export function fractalNoise(x: number, y: number): number {
   return value;
 }
 
+function ridgedFractalNoise(x: number, y: number): number {
+  const centered = fractalNoise(x, y) * 2 - 1;
+  return 1 - Math.abs(centered);
+}
+
+function sampleInfiniteWorldElevation(x: number, z: number): number {
+  let elevation = 0;
+  let frequency = 0.003;
+  let amplitude = 1;
+  let normalisation = 0;
+
+  for (let index = 0; index < INFINITE_WORLD_ITERATION_OFFSETS.length; index += 1) {
+    const [offsetX, offsetZ] = INFINITE_WORLD_ITERATION_OFFSETS[index] ?? [0, 0];
+    const noise = valueNoise(x * frequency + offsetX, z * frequency + offsetZ) * 2 - 1;
+    elevation += noise * amplitude;
+    normalisation += amplitude;
+    amplitude *= 0.45;
+    frequency *= 2.05;
+  }
+
+  const normalized = normalisation <= Number.EPSILON ? 0 : elevation / normalisation;
+  return Math.pow(Math.abs(normalized), 2) * Math.sign(normalized) * 40 + 1;
+}
+
 export function sampleLakeMask(x: number, z: number): number {
   const dx = (x - WATER_CENTER[0]) / WATER_RADII[0];
   const dz = (z - WATER_CENTER[1]) / WATER_RADII[1];
@@ -143,45 +212,105 @@ export function sampleLakeMask(x: number, z: number): number {
   return smoothstep(0, 1, radial);
 }
 
+export function sampleValleyFloorMask(x: number, z: number): number {
+  const corridor = clamp(1 - distanceToSegment(x, z, 10, 16, 4, -118) / 34, 0, 1);
+  const backfield = smoothstep(6, 112, -z);
+  const landingFan = clamp(1 - Math.hypot(x - 3, z + 2) / 34, 0, 1);
+  return clamp(corridor * (0.34 + backfield * 0.66) + landingFan * 0.18, 0, 1);
+}
+
+export function sampleRiverChannelMask(x: number, z: number): number {
+  const channel = clamp(1 - distanceToSegment(x, z, 16, 18, 12, -116) / 9.5, 0, 1);
+  const backfield = smoothstep(2, 108, -z);
+  return clamp(channel * (0.28 + backfield * 0.72), 0, 1);
+}
+
+export function sampleBackcountryMask(x: number, z: number): number {
+  const backdrop = smoothstep(12, 116, -z);
+  const flanks = smoothstep(18, 72, Math.abs(x));
+  return clamp(backdrop * 0.72 + flanks * 0.28, 0, 1);
+}
+
 export function sampleTerrainHeight(x: number, z: number): number {
   const distance = Math.hypot(x, z);
-  const macroMountains = (fractalNoise(x * 0.01, z * 0.01) - 0.5) * 20;
-  const rollingHills = (fractalNoise(x * 0.028 + 11, z * 0.028 - 17) - 0.5) * 7;
-  const centralPlateau = 6.8 * Math.exp(-(distance * distance) / (2 * 34 * 34));
-  const hubTerraceBlend = 1 - smoothstep(0, 22, distance);
-  const hubTerraceHeight = mixScalar(macroMountains + rollingHills + centralPlateau - 5, 3.8, hubTerraceBlend);
-  const outerWall = smoothstep(52, 136, distance) * 24;
+  const infiniteRanges = sampleInfiniteWorldElevation(x, z);
+  const macroMountains = infiniteRanges * 0.72 + (fractalNoise(x * 0.008 - 11, z * 0.008 + 7) - 0.5) * 10;
+  const rollingHills = (fractalNoise(x * 0.022 + 13, z * 0.022 - 19) - 0.5) * 6;
+  const ridgedRanges =
+    ridgedFractalNoise(x * 0.014 - 8, z * 0.014 + 19) * smoothstep(6, 110, -z) * 34;
+  const ridgeDetail =
+    ridgedFractalNoise(x * 0.028 + 21, z * 0.028 - 17) * smoothstep(18, 118, -z) * 11;
+  const centralShelf =
+    2.6 * Math.exp(-((x - 2) * (x - 2)) / (2 * 28 * 28) - ((z + 2) * (z + 2)) / (2 * 24 * 24));
+  const heroPeak =
+    52 *
+    Math.exp(-((x - 8) * (x - 8)) / (2 * 18 * 18) - ((z + 112) * (z + 112)) / (2 * 18 * 18));
+  const westRange =
+    34 *
+    Math.exp(-((x + 50) * (x + 50)) / (2 * 20 * 20) - ((z + 84) * (z + 84)) / (2 * 44 * 44));
+  const eastRange =
+    42 *
+    Math.exp(-((x - 46) * (x - 46)) / (2 * 24 * 24) - ((z + 94) * (z + 94)) / (2 * 54 * 54));
+  const alpineLift = sampleBackcountryMask(x, z) * 12;
+  const overlookShelf =
+    8 *
+    Math.exp(-((x + 24) * (x + 24)) / (2 * 28 * 28) - ((z - 18) * (z - 18)) / (2 * 20 * 20));
+  const westOverlookCliff =
+    26 *
+    Math.exp(-((x + 46) * (x + 46)) / (2 * 18 * 18) - ((z - 14) * (z - 14)) / (2 * 34 * 34));
+  const overlookRidge =
+    14 *
+    Math.exp(-((x + 12) * (x + 12)) / (2 * 30 * 30) - ((z - 28) * (z - 28)) / (2 * 14 * 14));
+  const overlookNotch =
+    -8 *
+    Math.exp(-((x + 24) * (x + 24)) / (2 * 16 * 16) - ((z - 8) * (z - 8)) / (2 * 10 * 10));
+  const hubBaseHeight = macroMountains + rollingHills + centralShelf + overlookShelf - 5.5;
+  const hubTerraceBlend = 1 - smoothstep(0, 24, distance);
+  const hubTerraceHeight = mixScalar(hubBaseHeight, 1.6, hubTerraceBlend);
+  const outerWall = smoothstep(96, 136, distance) * (6 + ridgedRanges * 0.36);
   const cliffBands =
-    Math.pow(Math.abs(valueNoise(x * 0.018 - 9, z * 0.018 + 23) - 0.5) * 2, 1.7) *
-    smoothstep(64, 112, distance) *
-    11;
+    Math.pow(ridgedFractalNoise(x * 0.018 - 9, z * 0.018 + 23), 1.45) *
+    smoothstep(32, 118, distance) *
+    12;
   const northRidge =
-    18 *
+    22 *
     Math.exp(-((x - 18) * (x - 18)) / (2 * 52 * 52) - ((z + 82) * (z + 82)) / (2 * 18 * 18));
   const westernBluffs =
-    14 *
-    Math.exp(-((x + 74) * (x + 74)) / (2 * 16 * 16) - ((z - 8) * (z - 8)) / (2 * 56 * 56));
-  const riverValley =
-    -3.4 *
-    Math.exp(-((x + 10) * (x + 10)) / (2 * 58 * 58) - ((z - 4) * (z - 4)) / (2 * 14 * 14));
+    11 *
+    Math.exp(-((x + 70) * (x + 70)) / (2 * 16 * 16) - ((z + 2) * (z + 2)) / (2 * 52 * 52));
+  const valleyFloor = sampleValleyFloorMask(x, z);
+  const riverChannel = sampleRiverChannelMask(x, z);
+  const riverValley = -7.5 * valleyFloor - 3.5 * riverChannel;
   const lakeMask = sampleLakeMask(x, z);
-  const lakeBasin = -8.2 * lakeMask;
+  const lakeReliefAttenuation = 1 - lakeMask * 0.82;
+  const lakeBasin =
+    -12.8 * lakeMask - 6.4 * smoothstep(0.42, 1, lakeMask);
   const shorelineShelf =
     -2 * smoothstep(0.08, 0.7, lakeMask) * (1 - smoothstep(0.7, 1, lakeMask));
 
   return (
-    macroMountains +
-    rollingHills +
-    centralPlateau +
+    macroMountains * lakeReliefAttenuation +
+    rollingHills * lakeReliefAttenuation +
+    centralShelf +
+    infiniteRanges * 0.28 * lakeReliefAttenuation +
+    ridgedRanges +
+    ridgeDetail +
+    alpineLift +
     outerWall +
     cliffBands +
     northRidge +
     westernBluffs +
+    westRange +
+    eastRange +
+    heroPeak +
+    westOverlookCliff +
+    overlookRidge +
+    overlookNotch +
     riverValley +
     lakeBasin +
     shorelineShelf -
-    5 +
-    (hubTerraceHeight - (macroMountains + rollingHills + centralPlateau - 5))
+    4 +
+    (hubTerraceHeight - hubBaseHeight)
   );
 }
 
@@ -210,6 +339,9 @@ export function sampleTerrainMaterial(
   );
   const meadowNoise = fractalNoise(x * 0.12 + 8, z * 0.12 - 12);
   const ridgeNoise = fractalNoise(x * 0.032 - 14, z * 0.032 + 21);
+  const valleyFloorMask = sampleValleyFloorMask(x, z);
+  const riverChannelMask = sampleRiverChannelMask(x, z);
+  const backcountryMask = sampleBackcountryMask(x, z);
   const distanceFalloff =
     1 - clamp(Math.hypot(x, z) / (LANDSCAPE_WORLD_SIZE * 0.5), 0, 1);
   const highlandMask = clamp((terrainHeight - 16) / 16, 0, 1);
@@ -218,41 +350,161 @@ export function sampleTerrainMaterial(
     0,
     1
   );
-  const foamMask = clamp(shoreMask * 1.35, 0, 1);
-  const grass = mixVec3(
-    environment.groundColor.slice(0, 3) as LandscapeVec3Tuple,
-    [0.2, 0.35, 0.22],
-    0.45
+  const snowMask = clamp(
+    (terrainHeight - 26) / 18 + highlandMask * 0.34 + cliffMask * 0.22 + ridgeNoise * 0.18,
+    0,
+    1
   );
-  const moss = mixVec3(grass, [0.36, 0.49, 0.24], 0.52);
-  const cliff = mixVec3(grass, [0.38, 0.35, 0.31], 0.78);
-  const basalt: LandscapeVec3Tuple = [0.22, 0.24, 0.28];
-  const highland: LandscapeVec3Tuple = [0.54, 0.52, 0.46];
-  const sand: LandscapeVec3Tuple = [0.72, 0.66, 0.48];
+  const foamMask = clamp(shoreMask * 1.35, 0, 1);
+  const palette = terrainPaletteForBiome(environment);
+  const sedimentNoise = fractalNoise(x * 0.08 - 13, z * 0.08 + 9);
+  const accentNoise = fractalNoise(x * 0.046 + 17, z * 0.046 - 11);
+  const isResonantShore = environment.biomeId === "resonant-shore";
+  const shorelineLandingMask = isResonantShore
+    ? clamp(
+        1 -
+          distanceToSegment(x, z, 24.4, -43.7, 31.6, -44.8) / 2.8,
+        0,
+        1
+      )
+    : 0;
+  const monolithApproachMask = isResonantShore
+    ? clamp(
+        1 -
+          distanceToSegment(x, z, 31.6, -44.8, 36.8, -45.4) / 3.2,
+        0,
+        1
+      )
+    : 0;
+  const campClearingMask = isResonantShore
+    ? clamp(1 - Math.hypot(x - 29.6, z + 38.4) / 8.8, 0, 1)
+    : 0;
+  const lagoonSandMask = isResonantShore
+    ? clamp(
+        sampleRiverChannelMask(x, z) * 0.42 +
+          smoothstep(0.04, 0.32, lake) * (1 - smoothstep(0.72, 1, lake)) * 0.12 +
+          shorelineLandingMask * 0.18,
+        0,
+        1
+      )
+    : 0;
+  const accentMask = clamp(
+    rockMask * 0.24 +
+      shoreMask * 0.38 +
+      highlandMask * 0.08 +
+      Math.max(accentNoise - 0.54, 0) * 1.9,
+    0,
+    1
+  );
 
-  let tint = mixVec3(grass, moss, meadowNoise * 0.75 + distanceFalloff * 0.15);
-  tint = mixVec3(tint, sand, shoreMask * 0.7);
-  tint = mixVec3(tint, cliff, cliffMask * 0.72);
-  tint = mixVec3(tint, highland, highlandMask * 0.52);
-  tint = mixVec3(tint, basalt, rockMask * 0.58);
-  tint = mixVec3(tint, [0.92, 0.9, 0.82], foamMask * 0.14);
+  let tint = mixVec3(
+    palette.grass,
+    palette.moss,
+    meadowNoise * 0.72 + distanceFalloff * 0.18
+  );
+  tint = mixVec3(tint, palette.grass, valleyFloorMask * 0.18);
+  tint = mixVec3(tint, palette.sand, shoreMask * (0.72 + sedimentNoise * 0.08));
+  tint = mixVec3(tint, palette.cliff, cliffMask * 0.7);
+  tint = mixVec3(tint, palette.highland, highlandMask * 0.56);
+  tint = mixVec3(tint, palette.basalt, rockMask * 0.62);
+  tint = mixVec3(tint, palette.accent, accentMask * palette.accentStrength);
+  tint = mixVec3(tint, palette.foam, foamMask * 0.16);
+  if (isResonantShore) {
+    tint = mixVec3(tint, [0.34, 0.54, 0.26], valleyFloorMask * 0.42);
+    tint = mixVec3(tint, [0.82, 0.76, 0.58], lagoonSandMask * 0.34);
+    tint = mixVec3(
+      tint,
+      [0.72, 0.66, 0.5],
+      clamp(shorelineLandingMask * 0.52 + monolithApproachMask * 0.34, 0, 1)
+    );
+    tint = mixVec3(tint, [0.52, 0.68, 0.46], campClearingMask * 0.18);
+    tint = mixVec3(tint, [0.97, 0.95, 0.9], snowMask * 0.62);
+  }
 
   return {
     tint,
     brightness: clamp(
       0.72 +
         terrainHeight * 0.011 -
-        cliffMask * 0.06 +
-        meadowNoise * 0.12 +
-        foamMask * 0.08,
-      0.34,
-      1.18
+        cliffMask * 0.08 +
+        meadowNoise * 0.11 +
+        foamMask * 0.1 +
+        valleyFloorMask * 0.06 +
+        snowMask * 0.12 -
+        riverChannelMask * 0.03 +
+        backcountryMask * 0.02 +
+        shorelineLandingMask * 0.08 +
+        monolithApproachMask * 0.05 +
+        campClearingMask * 0.04 +
+        palette.brightnessBias,
+      0.32,
+      1.2
     ),
     shoreMask,
     cliffMask,
     highlandMask,
     rockMask,
     foamMask
+  };
+}
+
+function terrainPaletteForBiome(environment: LandscapeEnvironment): TerrainBiomePalette {
+  const ground = environment.groundColor.slice(0, 3) as LandscapeVec3Tuple;
+  if (environment.biomeId === "resonant-shore") {
+    return {
+      grass: mixVec3(ground, [0.26, 0.38, 0.2], 0.66),
+      moss: [0.48, 0.64, 0.28],
+      cliff: [0.74, 0.66, 0.5],
+      basalt: [0.54, 0.5, 0.46],
+      highland: [0.96, 0.93, 0.84],
+      sand: [0.84, 0.76, 0.58],
+      foam: [0.98, 0.97, 0.94],
+      accent: [0.82, 0.7, 0.48],
+      accentStrength: 0.16,
+      brightnessBias: 0.22
+    };
+  }
+  if (environment.biomeId === "breaker-shelf") {
+    return {
+      grass: mixVec3(ground, [0.32, 0.28, 0.18], 0.48),
+      moss: [0.46, 0.36, 0.22],
+      cliff: [0.52, 0.4, 0.3],
+      basalt: [0.28, 0.24, 0.22],
+      highland: [0.66, 0.58, 0.46],
+      sand: [0.84, 0.72, 0.52],
+      foam: [0.96, 0.9, 0.82],
+      accent: [0.72, 0.54, 0.32],
+      accentStrength: 0.18,
+      brightnessBias: 0.04
+    };
+  }
+  if (environment.biomeId === "windward-shelf") {
+    return {
+      grass: mixVec3(ground, [0.2, 0.34, 0.24], 0.56),
+      moss: [0.28, 0.46, 0.28],
+      cliff: [0.42, 0.42, 0.38],
+      basalt: [0.24, 0.26, 0.3],
+      highland: [0.58, 0.58, 0.52],
+      sand: [0.74, 0.7, 0.58],
+      foam: [0.92, 0.93, 0.9],
+      accent: [0.34, 0.6, 0.42],
+      accentStrength: 0.16,
+      brightnessBias: 0.01
+    };
+  }
+
+  const grass = mixVec3(ground, [0.2, 0.35, 0.22], 0.45);
+  return {
+    grass,
+    moss: mixVec3(grass, [0.36, 0.49, 0.24], 0.52),
+    cliff: mixVec3(grass, [0.38, 0.35, 0.31], 0.78),
+    basalt: [0.22, 0.24, 0.28],
+    highland: [0.54, 0.52, 0.46],
+    sand: [0.72, 0.66, 0.48],
+    foam: [0.92, 0.9, 0.82],
+    accent: [0.34, 0.48, 0.3],
+    accentStrength: 0.1,
+    brightnessBias: 0
   };
 }
 
@@ -356,7 +608,7 @@ export function sampleWaterSurfaceStyle(
     shorelineOpacity: 0.28 + daylight * 0.12 + twilight * 0.04,
     shorelineEmissive,
     textureOffset: [textureOffsetX, textureOffsetY],
-    textureRepeat: [1.55 + daylight * 0.18, 1.42 + waveStrength * 0.16],
+    textureRepeat: [1.04 + daylight * 0.1, 1.08 + waveStrength * 0.08],
     waveStrength
   };
 }

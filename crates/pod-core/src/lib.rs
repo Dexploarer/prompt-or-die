@@ -66,11 +66,13 @@ pub use constraint::{
     ValidationPipeline,
 };
 pub use contract::{
-    AgentCapabilities, AgentRole, AgentRuntimeProfile, EncounterSpawnEntry, FactionReputationTier,
+    AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition, CrossWorldEffect,
+    CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry, FactionReputationTier,
     FactionReputationTrack, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
-    RuntimeContractVersion, ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest,
-    ToolInvocationResult, ToolPolicy, VersionedAgentAction, VersionedObservation,
-    VersionedTickTelemetry, WorldChunkDefinition, WorldRegionDefinition,
+    RuntimeContractVersion, TeamControlMode, ToolBudget, ToolCatalog, ToolDefinition,
+    ToolInvocationRequest, ToolInvocationResult, ToolPolicy, TournamentEliminationMode,
+    VersionedAgentAction, VersionedObservation, VersionedTickTelemetry, WorldChunkDefinition,
+    WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
     RUNTIME_CONTRACT_VERSION_V1,
 };
 pub use event::*;
@@ -86,12 +88,13 @@ pub use ops::{
 pub use orchestrator::{AgentBatch, AgentOrchestrator, DecisionFreshness, PriorityScore};
 pub use replay::{
     ActionOutcomeSummary, DecisionTrace, EncounterTransition, ReplayFile, ReplayHeader,
-    ReplayPlayer, ReplayRecorder, ReplayTrainingSample,
+    ReplayPlayer, ReplayRecorder, ReplayTrainingSample, RewardAttributionSummary,
 };
 pub use telemetry::{
-    ActionLifecycleStage, ActionSource, AgentActionTrace, AgentTelemetryFrame, AgentTickRollup,
-    AgentToolCallEvent, AgentToolCallTrace, AgentTrajectoryFrame, TelemetryArchive,
-    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
+    ActionLifecycleStage, ActionSource, AgentActionTrace, AgentRewardSignal, AgentTelemetryFrame,
+    AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace, AgentTrajectoryFrame, RewardReason,
+    RewardSource, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
+    TrajectorySample,
 };
 pub use toon::{
     decode_toon_document, decode_toon_string, decode_toon_value, encode_toon_document,

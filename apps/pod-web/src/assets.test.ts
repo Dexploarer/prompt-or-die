@@ -89,6 +89,22 @@ describe("createMeshMaterial", () => {
   });
 });
 
+describe("DefaultPodThreeAssetRegistry", () => {
+  test("uses composed fallback silhouettes for showcase-critical meshes", () => {
+    const registry = new DefaultPodThreeAssetRegistry();
+
+    expect(registry.resolveGeometry(meshBatch({ mesh: "adventurer-avatar" }), 0).type).not.toBe(
+      "BoxGeometry"
+    );
+    expect(registry.resolveGeometry(meshBatch({ mesh: "rift-beast" }), 0).type).not.toBe(
+      "BoxGeometry"
+    );
+    expect(registry.resolveGeometry(meshBatch({ mesh: "supply-crate" }), 0).type).not.toBe(
+      "BoxGeometry"
+    );
+  });
+});
+
 describe("createProceduralSpriteTexture", () => {
   test("routes shipped ring overlays through the procedural texture path", () => {
     expect(shouldUseProceduralSpriteTexture("/assets/textures/selection-ring.svg")).toBe(true);
@@ -256,6 +272,12 @@ describe("runtime asset path selection", () => {
     expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 2)).toBe(
       "/assets/meshes/rift-beast.lod2.meshopt.glb"
     );
+    expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 0, false)).toBe(
+      "/assets/meshes/rift-beast.glb"
+    );
+    expect(resolveMeshRuntimePath(manifest.meshes["rift-beast"], 2, false)).toBe(
+      "/assets/meshes/rift-beast.lod2.glb"
+    );
   });
 
   test("honors explicit sprite encoding preference before falling back", () => {
@@ -396,6 +418,45 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
     expect(geometry.type).toBe("SphereGeometry");
   });
 
+  test("returns immediate fallback geometry while manifest-backed loads resolve in the background", async () => {
+    let resolveGeometryLoad: ((geometry: SphereGeometry) => void) | null = null;
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        load() {
+          return new Promise((resolve) => {
+            resolveGeometryLoad = resolve as (geometry: SphereGeometry) => void;
+          });
+        }
+      },
+      textureLoader: {
+        async load() {
+          return new Texture();
+        }
+      },
+      preferNonBlockingFallbacks: true
+    });
+
+    const firstGeometry = registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
+    expect(firstGeometry).toBeInstanceOf(BoxGeometry);
+    expect(registry.getResidencyStats?.()).toMatchObject({
+      residentGeometryAssets: 0,
+      pendingGeometryAssets: 1
+    });
+
+    expect(resolveGeometryLoad).not.toBeNull();
+    resolveGeometryLoad!(new SphereGeometry(1.2, 6, 4));
+    await registry.prefetchMeshes?.([{ batch: meshBatch({ mesh: "monster" }), lodLevel: 0 }]);
+
+    const resolvedGeometry = await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
+    expect(resolvedGeometry.type).toBe("SphereGeometry");
+    expect(registry.getResidencyStats?.()).toMatchObject({
+      residentGeometryAssets: 1,
+      pendingGeometryAssets: 0
+    });
+  });
+
   test("loads binary glb mesh assets through the manifest path", async () => {
     const loadedPaths: string[] = [];
     const registry = new ManifestBackedPodThreeAssetRegistry({
@@ -445,7 +506,7 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
     });
 
     const geometry = await registry.resolveGeometry(meshBatch({ mesh: "unknown-crate" }), 0);
-    expect(geometry.type).toBe("BoxGeometry");
+    expect(geometry.type).toBe("BufferGeometry");
   });
 
   test("prefers compressed sprite textures when available", async () => {
@@ -479,6 +540,58 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
 
     expect(paths).toEqual(["ktx2:/assets/textures/selection-ring.ktx2"]);
     expect(resolved.repeat).toEqual([1.5, 1.5]);
+  });
+
+  test("returns immediate fallback sprites while manifest-backed textures finish loading", async () => {
+    let resolveTextureLoad: ((texture: Texture) => void) | null = null;
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest,
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load() {
+          return new BoxGeometry(1, 1, 1);
+        }
+      },
+      textureLoader: {
+        load() {
+          return new Promise((resolve) => {
+            resolveTextureLoad = resolve as (texture: Texture) => void;
+          });
+        }
+      },
+      preferNonBlockingFallbacks: true
+    });
+
+    const firstResolved = registry.resolveSpriteTexture(
+      { texture: "selection-ring", frame: 0 },
+      2
+    ) as Exclude<ReturnType<typeof registry.resolveSpriteTexture>, Promise<unknown>>;
+    expect(firstResolved.texture.name).toContain("selection-ring");
+    expect(registry.getResidencyStats?.()).toMatchObject({
+      residentSpriteAssets: 0,
+      pendingSpriteAssets: 1
+    });
+
+    const loadedTexture = new Texture();
+    loadedTexture.name = "loaded-selection-ring";
+    expect(resolveTextureLoad).not.toBeNull();
+    resolveTextureLoad!(loadedTexture);
+    await registry.prefetchSprites?.([
+      {
+        batch: { texture: "selection-ring", frame: 0 },
+        anisotropy: 2
+      }
+    ]);
+
+    const resolved = await registry.resolveSpriteTexture(
+      { texture: "selection-ring", frame: 0 },
+      2
+    );
+    expect(resolved.texture.name).toBe("loaded-selection-ring");
+    expect(registry.getResidencyStats?.()).toMatchObject({
+      residentSpriteAssets: 1,
+      pendingSpriteAssets: 0
+    });
   });
 
   test("falls back to plain textures when no compressed loader is configured", async () => {

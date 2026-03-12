@@ -2,17 +2,17 @@
   "version": 1,
   "meshes": {
     "adventurer-avatar": {
-      "totalVariantBytes": 46148,
-      "totalCompressedVariantBytes": 11784,
+      "totalVariantBytes": 70020,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/adventurer-avatar.glb",
-          "sizeBytes": 25612,
+          "sizeBytes": 49484,
           "triangleCount": 256,
-          "estimatedTransferMs": 2.1343,
-          "sizeBudgetBytes": 40960
+          "estimatedTransferMs": 4.1237,
+          "sizeBudgetBytes": 57344
         },
         "1": {
           "runtimePath": "/assets/meshes/adventurer-avatar.lod1.glb",
@@ -29,42 +29,20 @@
           "sizeBudgetBytes": 16384
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/adventurer-avatar.meshopt.glb",
-          "sizeBytes": 4796,
-          "triangleCount": 256,
-          "estimatedTransferMs": 0.3997,
-          "sizeBudgetBytes": 40960
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/adventurer-avatar.lod1.meshopt.glb",
-          "sizeBytes": 4004,
-          "triangleCount": 128,
-          "estimatedTransferMs": 0.3337,
-          "sizeBudgetBytes": 28672
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/adventurer-avatar.lod2.meshopt.glb",
-          "sizeBytes": 2984,
-          "triangleCount": 64,
-          "estimatedTransferMs": 0.2487,
-          "sizeBudgetBytes": 16384
-        }
-      }
+      "compressedVariants": {}
     },
     "adventurer-hero": {
-      "totalVariantBytes": 60252,
-      "totalCompressedVariantBytes": 13860,
+      "totalVariantBytes": 75196,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/adventurer-hero.glb",
-          "sizeBytes": 33676,
+          "sizeBytes": 48620,
           "triangleCount": 340,
-          "estimatedTransferMs": 2.8063,
-          "sizeBudgetBytes": 40960
+          "estimatedTransferMs": 4.0517,
+          "sizeBudgetBytes": 57344
         },
         "1": {
           "runtimePath": "/assets/meshes/adventurer-hero.lod1.glb",
@@ -81,42 +59,20 @@
           "sizeBudgetBytes": 16384
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/adventurer-hero.meshopt.glb",
-          "sizeBytes": 5744,
-          "triangleCount": 340,
-          "estimatedTransferMs": 0.47869999999999996,
-          "sizeBudgetBytes": 40960
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/adventurer-hero.lod1.meshopt.glb",
-          "sizeBytes": 4728,
-          "triangleCount": 170,
-          "estimatedTransferMs": 0.39399999999999996,
-          "sizeBudgetBytes": 28672
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/adventurer-hero.lod2.meshopt.glb",
-          "sizeBytes": 3388,
-          "triangleCount": 85,
-          "estimatedTransferMs": 0.2823,
-          "sizeBudgetBytes": 16384
-        }
-      }
+      "compressedVariants": {}
     },
     "basalt-column": {
-      "totalVariantBytes": 19388,
-      "totalCompressedVariantBytes": 7432,
+      "totalVariantBytes": 20208,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/basalt-column.glb",
-          "sizeBytes": 10304,
+          "sizeBytes": 11124,
           "triangleCount": 96,
-          "estimatedTransferMs": 0.8587,
-          "sizeBudgetBytes": 16384
+          "estimatedTransferMs": 0.927,
+          "sizeBudgetBytes": 24576
         },
         "1": {
           "runtimePath": "/assets/meshes/basalt-column.lod1.glb",
@@ -133,94 +89,50 @@
           "sizeBudgetBytes": 7168
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/basalt-column.meshopt.glb",
-          "sizeBytes": 2748,
-          "triangleCount": 96,
-          "estimatedTransferMs": 0.22899999999999998,
-          "sizeBudgetBytes": 16384
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/basalt-column.lod1.meshopt.glb",
-          "sizeBytes": 2504,
-          "triangleCount": 48,
-          "estimatedTransferMs": 0.2087,
-          "sizeBudgetBytes": 11264
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/basalt-column.lod2.meshopt.glb",
-          "sizeBytes": 2180,
-          "triangleCount": 24,
-          "estimatedTransferMs": 0.18170000000000003,
-          "sizeBudgetBytes": 7168
-        }
-      }
+      "compressedVariants": {}
     },
     "canopy-tree": {
-      "totalVariantBytes": 18416,
-      "totalCompressedVariantBytes": 7664,
+      "totalVariantBytes": 27800,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/canopy-tree.glb",
-          "sizeBytes": 9724,
-          "triangleCount": 90,
-          "estimatedTransferMs": 0.8103,
-          "sizeBudgetBytes": 12288
+          "sizeBytes": 17084,
+          "triangleCount": 118,
+          "estimatedTransferMs": 1.4237,
+          "sizeBudgetBytes": 20480
         },
         "1": {
           "runtimePath": "/assets/meshes/canopy-tree.lod1.glb",
-          "sizeBytes": 5404,
-          "triangleCount": 45,
-          "estimatedTransferMs": 0.45030000000000003,
+          "sizeBytes": 6752,
+          "triangleCount": 59,
+          "estimatedTransferMs": 0.5627,
           "sizeBudgetBytes": 8192
         },
         "2": {
           "runtimePath": "/assets/meshes/canopy-tree.lod2.glb",
-          "sizeBytes": 3288,
-          "triangleCount": 23,
-          "estimatedTransferMs": 0.27399999999999997,
+          "sizeBytes": 3964,
+          "triangleCount": 30,
+          "estimatedTransferMs": 0.33030000000000004,
           "sizeBudgetBytes": 6144
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/canopy-tree.meshopt.glb",
-          "sizeBytes": 2920,
-          "triangleCount": 90,
-          "estimatedTransferMs": 0.2433,
-          "sizeBudgetBytes": 12288
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/canopy-tree.lod1.meshopt.glb",
-          "sizeBytes": 2556,
-          "triangleCount": 45,
-          "estimatedTransferMs": 0.213,
-          "sizeBudgetBytes": 8192
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/canopy-tree.lod2.meshopt.glb",
-          "sizeBytes": 2188,
-          "triangleCount": 23,
-          "estimatedTransferMs": 0.18230000000000002,
-          "sizeBudgetBytes": 6144
-        }
-      }
+      "compressedVariants": {}
     },
     "glass-spire": {
-      "totalVariantBytes": 13716,
-      "totalCompressedVariantBytes": 7144,
+      "totalVariantBytes": 29956,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/glass-spire.glb",
-          "sizeBytes": 7040,
+          "sizeBytes": 23280,
           "triangleCount": 62,
-          "estimatedTransferMs": 0.5867,
-          "sizeBudgetBytes": 16384
+          "estimatedTransferMs": 1.94,
+          "sizeBudgetBytes": 24576
         },
         "1": {
           "runtimePath": "/assets/meshes/glass-spire.lod1.glb",
@@ -237,29 +149,7 @@
           "sizeBudgetBytes": 7168
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/glass-spire.meshopt.glb",
-          "sizeBytes": 2672,
-          "triangleCount": 62,
-          "estimatedTransferMs": 0.2227,
-          "sizeBudgetBytes": 16384
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/glass-spire.lod1.meshopt.glb",
-          "sizeBytes": 2388,
-          "triangleCount": 31,
-          "estimatedTransferMs": 0.19899999999999998,
-          "sizeBudgetBytes": 11264
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/glass-spire.lod2.meshopt.glb",
-          "sizeBytes": 2084,
-          "triangleCount": 16,
-          "estimatedTransferMs": 0.17370000000000002,
-          "sizeBudgetBytes": 7168
-        }
-      }
+      "compressedVariants": {}
     },
     "rift-beast": {
       "totalVariantBytes": 43812,
@@ -366,17 +256,17 @@
       }
     },
     "supply-crate": {
-      "totalVariantBytes": 15156,
-      "totalCompressedVariantBytes": 7056,
+      "totalVariantBytes": 18192,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/supply-crate.glb",
-          "sizeBytes": 7936,
+          "sizeBytes": 10972,
           "triangleCount": 72,
-          "estimatedTransferMs": 0.6613,
-          "sizeBudgetBytes": 10240
+          "estimatedTransferMs": 0.9143000000000001,
+          "sizeBudgetBytes": 12288
         },
         "1": {
           "runtimePath": "/assets/meshes/supply-crate.lod1.glb",
@@ -393,41 +283,19 @@
           "sizeBudgetBytes": 5120
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/supply-crate.meshopt.glb",
-          "sizeBytes": 2596,
-          "triangleCount": 72,
-          "estimatedTransferMs": 0.2163,
-          "sizeBudgetBytes": 10240
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/supply-crate.lod1.meshopt.glb",
-          "sizeBytes": 2392,
-          "triangleCount": 36,
-          "estimatedTransferMs": 0.1993,
-          "sizeBudgetBytes": 7168
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/supply-crate.lod2.meshopt.glb",
-          "sizeBytes": 2068,
-          "triangleCount": 18,
-          "estimatedTransferMs": 0.1723,
-          "sizeBudgetBytes": 5120
-        }
-      }
+      "compressedVariants": {}
     },
     "weathered-boulder": {
-      "totalVariantBytes": 23520,
-      "totalCompressedVariantBytes": 8772,
+      "totalVariantBytes": 18632,
+      "totalCompressedVariantBytes": 0,
       "selection": "explicit-lod",
-      "preferredEncoding": "meshopt",
+      "preferredEncoding": "source",
       "variants": {
         "0": {
           "runtimePath": "/assets/meshes/weathered-boulder.glb",
-          "sizeBytes": 12644,
+          "sizeBytes": 7756,
           "triangleCount": 120,
-          "estimatedTransferMs": 1.0537,
+          "estimatedTransferMs": 0.6463,
           "sizeBudgetBytes": 18432
         },
         "1": {
@@ -445,29 +313,7 @@
           "sizeBudgetBytes": 7168
         }
       },
-      "compressedVariants": {
-        "0": {
-          "runtimePath": "/assets/meshes/weathered-boulder.meshopt.glb",
-          "sizeBytes": 3320,
-          "triangleCount": 120,
-          "estimatedTransferMs": 0.2767,
-          "sizeBudgetBytes": 18432
-        },
-        "1": {
-          "runtimePath": "/assets/meshes/weathered-boulder.lod1.meshopt.glb",
-          "sizeBytes": 2988,
-          "triangleCount": 60,
-          "estimatedTransferMs": 0.249,
-          "sizeBudgetBytes": 12288
-        },
-        "2": {
-          "runtimePath": "/assets/meshes/weathered-boulder.lod2.meshopt.glb",
-          "sizeBytes": 2464,
-          "triangleCount": 30,
-          "estimatedTransferMs": 0.2053,
-          "sizeBudgetBytes": 7168
-        }
-      }
+      "compressedVariants": {}
     }
   },
   "sprites": {

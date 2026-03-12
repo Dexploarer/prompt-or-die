@@ -38,6 +38,16 @@ type BrowserRouteMeasurementsReport = {
   comparison: unknown;
 };
 
+type TransportMeasurementsReport = {
+  schema_version: number;
+  generated_at_unix_ms: number;
+  profile: string;
+  scenarios: unknown[];
+  aggregate: {
+    all_checks_passed: boolean;
+  };
+};
+
 type CreatorTimeReport =
   | {
       status: "manual_pending";
@@ -55,6 +65,7 @@ type CombinedReport = {
   generatedAtUnixMs: number;
   profile: Options["profile"];
   core: unknown;
+  transportMeasurements: TransportMeasurementsReport;
   browserNativeParity: BrowserParityReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
   creatorTimeToFirstAgentWorld: CreatorTimeReport;
@@ -275,17 +286,46 @@ async function main() {
   }
 
   const core = JSON.parse(coreCommand.stdout);
+  const transportCommand = runCommand(
+    "transport-benchmark",
+    [
+      "cargo",
+      "run",
+      "-p",
+      "pod-net",
+      "--example",
+      "transport_benchmark_suite",
+      "--",
+      "--profile",
+      options.profile,
+      "--fail-on-checks",
+    ],
+    repoRoot,
+  );
+  if (!transportCommand.summary.ok) {
+    throw new Error(
+      `transport benchmark failed:\n${transportCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+    );
+  }
+  const transportMeasurements = JSON.parse(
+    transportCommand.stdout,
+  ) as TransportMeasurementsReport;
   let browserNativeParity: BrowserParityReport | null = null;
   let browserRouteMeasurements: BrowserRouteMeasurementsReport | null = null;
   if (!options.skipBrowser) {
     const routeMeasurementCommand = runCommand(
       "pod-web-render-route-measurements",
-      ["bun", "run", "measure:render-routes"],
+      ["bun", "run", "measure:render-routes:check"],
       `${repoRoot}/apps/pod-web`,
     );
     const checks = [
       runCommand("native-render-tests", ["cargo", "test", "-p", "pod-render", "--lib"], repoRoot)
         .summary,
+      runCommand(
+        "pod-web-verify-assets",
+        ["bun", "run", "verify:assets"],
+        `${repoRoot}/apps/pod-web`,
+      ).summary,
       runCommand(
         "pod-web-typecheck",
         ["bun", "run", "typecheck"],
@@ -318,10 +358,11 @@ async function main() {
   }
 
   const report: CombinedReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAtUnixMs: Date.now(),
     profile: options.profile,
     core,
+    transportMeasurements,
     browserNativeParity,
     browserRouteMeasurements,
     creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),

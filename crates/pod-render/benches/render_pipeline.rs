@@ -34,11 +34,7 @@ fn build_mixed_render_world(world_size: usize, with_hierarchy: bool) -> World {
 
     for i in 0..mesh_count {
         let transform = Transform3D {
-            position: Vec3::new(
-                (i % 128) as f32,
-                (i / 128) as f32,
-                ((i % 64) as f32) / 4.0,
-            ),
+            position: Vec3::new((i % 128) as f32, (i / 128) as f32, ((i % 64) as f32) / 4.0),
             rotation: [0.0, 0.0, 0.0, 1.0],
             scale: Vec3::ONE,
         };
@@ -75,11 +71,7 @@ fn build_mixed_render_world(world_size: usize, with_hierarchy: bool) -> World {
     for i in 0..sprite3d_count {
         world.spawn((
             Transform3D {
-                position: Vec3::new(
-                    (i % 96) as f32,
-                    (i / 96) as f32,
-                    ((i % 32) as f32) * 0.5,
-                ),
+                position: Vec3::new((i % 96) as f32, (i / 96) as f32, ((i % 32) as f32) * 0.5),
                 rotation: [0.0, 0.0, 0.0, 1.0],
                 scale: Vec3::ONE,
             },

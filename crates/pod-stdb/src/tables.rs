@@ -7,8 +7,8 @@
 //! All tables are `public` — clients can subscribe to any table.
 //! Row-level security for observations is handled via filtered subscriptions.
 
-use spacetimedb::{Identity, Timestamp};
 use crate::types::*;
+use spacetimedb::{Identity, Timestamp};
 
 // ============================================================
 // CORE ENTITY TABLE

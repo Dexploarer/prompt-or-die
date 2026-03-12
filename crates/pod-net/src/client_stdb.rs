@@ -721,15 +721,11 @@ impl SpacetimeDBClient {
                 }
                 StdbEvent::AgentToolCallEventReceived { document, .. } => {
                     self.pending_debug_documents.push(document.clone());
-                    messages.push(ServerMessage::DebugDocument {
-                        document,
-                    });
+                    messages.push(ServerMessage::DebugDocument { document });
                 }
                 StdbEvent::AgentTickRollupReceived { document, .. } => {
                     self.pending_debug_documents.push(document.clone());
-                    messages.push(ServerMessage::DebugDocument {
-                        document,
-                    });
+                    messages.push(ServerMessage::DebugDocument { document });
                 }
                 StdbEvent::FocusedEntityDebugSummaryReceived { document, .. } => {
                     self.pending_debug_documents.push(document.clone());
@@ -1728,7 +1724,9 @@ mod tests {
             .sync_selected_entity_debug_focus(None)
             .expect("clearing selection should stage editor profile");
         let queries = client.subscriptions.queries_for_profile();
-        assert!(queries.iter().any(|query| query.contains("FROM world_state")));
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("FROM world_state")));
         assert!(!queries
             .iter()
             .any(|query| query.contains("FROM agent_telemetry_tick")));
@@ -1931,9 +1929,18 @@ mod tests {
         assert_eq!(focused_summary.tool_error_count, 1);
         assert_eq!(focused_summary.rejected_action_count, 1);
         assert_eq!(focused_summary.visible_entity_count, 9);
-        assert_eq!(focused_summary.latest_tool_name.as_deref(), Some("llm.complete"));
-        assert_eq!(focused_summary.latest_tool_status.as_deref(), Some("TimedOut"));
-        assert_eq!(focused_summary.latest_tool_error.as_deref(), Some("timeout"));
+        assert_eq!(
+            focused_summary.latest_tool_name.as_deref(),
+            Some("llm.complete")
+        );
+        assert_eq!(
+            focused_summary.latest_tool_status.as_deref(),
+            Some("TimedOut")
+        );
+        assert_eq!(
+            focused_summary.latest_tool_error.as_deref(),
+            Some("timeout")
+        );
         assert!((focused_summary.total_distance - 24.5).abs() < f32::EPSILON);
     }
 

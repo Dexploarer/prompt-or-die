@@ -303,3 +303,53 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Closed the remaining Phase 6 regression gap: `apps/pod-web/src/direct-connect.test.ts` now proves stale-authority backlog saturation forces reconnect instead of client-side recovery, and `crates/pod-net/src/server.rs` now exercises both `RequestFullSnapshot` recovery and reconnect-token resume flows through deterministic tests so the new transport counters are verified under degraded paths too.
 - Started Phase 7 by expanding `docs/plugin-model.md` and `docs/architecture.md` into an explicit seam map: exported crate APIs like `pod-scene::{NativeComponentBinding, PrefabRegistry, SceneManager}` and `pod-assets::{import_asset, build_runtime_bundle_manifest, materialize_runtime_bundle_manifest}` are now called out as the practical extension contract, while app bootstrap files such as `apps/pod-web/src/main.ts` are explicitly documented as composition roots, not plugin APIs.
 - Closed the first Phase 7 hardening pass too: the docs now name the concrete lifecycle hooks still missing (server world bootstrap, browser runtime bootstrap, editor panel registration, transport policy injection), define near-term extension conventions, and validate the current `pod-scene`, `pod-assets`, `pod-net`, and `pod-web` seams with deterministic crate-boundary checks.
+- Closed the first Phase 8 CI/regression slice: `apps/pod-web/scripts/verify-generated-assets.ts` now reruns `sync:assets` and fails if the committed generated source/staged/runtime asset trees drift, so asset sync is finally a routine gate instead of manual discipline.
+- Extended `apps/pod-web/src/render-runtime-gates.ts`, `apps/pod-web/tests/worker-input.e2e.ts`, and `apps/pod-web/scripts/measure-render-routes.ts` with completed-asset-load floors plus average/slowest geometry and sprite load ceilings, and `bun run measure:render-routes:check` now turns those browser thresholds into a failing local/CI command while still writing `apps/pod-web/artifacts/render-route-measurements.json`.
+- Promoted both command surfaces into automation: `.github/workflows/ci.yml` now runs `bun run verify:assets` and `bun run measure:render-routes:check`, uploads the route-measurement and runtime-budget artifacts, and `scripts/run_moat_benchmarks.ts` now includes the asset verifier in its browser parity checks while using the failing render-route command.
+- Revalidated the Phase 8 slice with:
+  - `cd apps/pod-web && bun test scripts/measure-render-routes.test.ts scripts/verify-generated-assets.test.ts`
+  - `cd apps/pod-web && bun run verify:assets`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run measure:render-routes:check`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+- Added a dedicated direct-connect transport moat artifact in `crates/pod-net/examples/transport_benchmark_suite.rs`, with structured scenario checks for steady delta delivery, recovery success/failure, reconnect-token resume, and queue-pressure/timeout behavior.
+- Threaded that new report through `crates/pod-net/src/server.rs` and `scripts/run_moat_benchmarks.ts` as `transportMeasurements`, so the combined moat artifact schema is now `2` and the runner fails with `--fail-on-checks` if transport invariants regress.
+- Added published shard-target byte and queue-depth baselines directly into the deterministic transport benchmark report, bumped the transport report schema to `2`, and made the shard-target runner fail if the current steady-delta, recovery-success, queue-pressure, or aggregate transport envelopes drift.
+- Revalidated the transport benchmark slice with:
+  - `cargo test -p pod-net transport_benchmark_suite -- --nocapture`
+  - `cargo check -p pod-net --example transport_benchmark_suite`
+  - `cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
+- Pivoted the active roadmap away from browser/asset infrastructure and back onto the agent stack, using the live `pod-core` and `pod-agents` code as the source of truth instead of the old Phase 8 benchmark queue.
+- Added `docs/agent-runtime-audit.md`, documenting how the shared `Agent` contract, authoritative tick loop, LLM agent, hybrid agent, neural agent, replay surfaces, and ONNX path actually work today.
+- Updated `docs/agent-integration-contract.md` so the public agent contract matches the real runtime surface, including `runtime_profile`, `drain_tool_calls`, telemetry expectations, and the current neural-policy shape.
+- Repointed `IMPLEMENTATION_PHASES.md`, `SESSION.md`, and `IMPLEMENTATION_PLAN.md` to the new active track: neural runtime hardening, reward/replay dataset contracts, evaluation harnesses, and remote agent topology on top of the same authoritative pipeline.
+- Added explicit neural runtime schema/version metadata in `crates/pod-agents/src/neural_agent.rs`, replacing scattered `32`/`10` assumptions with shared schema constants plus compatibility validation.
+- Extended `crates/pod-agents/src/onnx_network.rs` so the ONNX path can validate caller-supplied model metadata against the shared neural runtime schema before loading a model.
+- Revalidated the first neural-runtime slice with:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+- Replaced the neural action table with an explicit named action schema registry in `crates/pod-agents/src/neural_agent.rs`, so policy outputs are no longer only implied by raw positional indices.
+- Extended the `PolicyNetwork` trait and neural agent introspection path so policy identity, schema version, compatibility mode, last fallback state, last action, and experience-buffer depth are inspectable at runtime.
+- Extended the ONNX policy implementation with last-inference fallback tracking while preserving the existing safe uniform-output fallback on inference failure.
+- Revalidated the second neural-runtime slice with:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+- Added first-pass multi-world topology contracts in `pod-core` for developer-controlled teams, authoritative worlds, cross-world links, and tournaments, so Deadman-style agent squads and alternate-reality influence now have native engine vocabulary instead of living only in design notes.
+- Added `docs/multi-world-agent-topology.md` plus architecture/agent-contract/session updates, explicitly moving the future proving ground toward headless multi-world team orchestration rather than more browser-first scaffolding.
+- Revalidated the topology-contract slice with:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+- Added authoritative reward telemetry in `pod-core` via `AgentRewardSignal`, `RewardSource`, and `RewardReason`, and now attribute reward from executed/rejected/queued actions plus world-truth events like damage, kills, capture, gathering, loot, summons, and skill XP.
+- Extended replay-derived `ReplayTrainingSample` rows with `RewardAttributionSummary`, so training samples now carry reward totals, positive/negative splits, signal counts, and terminal-state flags derived from authoritative tick telemetry instead of caller-local `record_experience()` bookkeeping.
+- Revalidated the reward-attribution slice with:
+  - `cargo test -p pod-core replay_training_samples_capture_path_action_and_encounter_transitions -- --nocapture`
+  - `cargo test -p pod-core reward_signal_exports_to_toon_document -- --nocapture`
+  - `cargo test -p pod-core combat_events_generate_authoritative_reward_signals -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents -p pod-net`
+  - `git diff --check`

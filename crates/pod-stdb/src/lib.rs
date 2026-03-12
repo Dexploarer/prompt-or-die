@@ -61,13 +61,13 @@ pub mod types;
 // To build/test without WASM symbols: --no-default-features --features client
 
 #[cfg(all(feature = "module", target_arch = "wasm32"))]
-pub mod tables;
-#[cfg(all(feature = "module", target_arch = "wasm32"))]
-pub mod reducers;
-#[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod events;
 #[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod observation;
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
+pub mod reducers;
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
+pub mod tables;
 
 // ============================================================
 // NATIVE CLIENT WRAPPER

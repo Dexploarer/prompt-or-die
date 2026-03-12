@@ -195,11 +195,8 @@ mod map {
     fn load_verdant_hollow(world: &mut World) {
         use log::info;
 
-        let mut heart = WorldRegionDefinition::new(
-            "verdant-heart",
-            "Verdant Heart",
-            "verdant-hollow",
-        );
+        let mut heart =
+            WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
         heart.chunk_keys = vec!["-1:-1".into(), "-1:0".into(), "0:-1".into(), "0:0".into()];
         heart.active_quest_graph_ids = vec!["verdant-intro".into(), "tempered-trail".into()];
         heart.dominant_faction_track_id = "verdant-wardens".into();
@@ -343,7 +340,10 @@ mod map {
     ) -> WorldChunkDefinition {
         let mut chunk = WorldChunkDefinition::new(chunk_key, region_id, biome_id);
         chunk.neighbor_chunk_keys = neighbors.into_iter().map(str::to_string).collect();
-        chunk.encounter_table_ids = encounter_table_ids.into_iter().map(str::to_string).collect();
+        chunk.encounter_table_ids = encounter_table_ids
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         chunk.quest_graph_ids = quest_graph_ids.into_iter().map(str::to_string).collect();
         chunk.faction_track_ids = faction_track_ids.into_iter().map(str::to_string).collect();
         chunk
@@ -1253,12 +1253,10 @@ mod runtime_tests {
         let population = world.population_state();
         assert!(!population.regions.is_empty());
         assert!(!population.chunks.is_empty());
-        assert!(
-            population
-                .chunks
-                .iter()
-                .any(|chunk| chunk.counts.wild_creatures > 0 || chunk.counts.resource_nodes > 0)
-        );
+        assert!(population
+            .chunks
+            .iter()
+            .any(|chunk| chunk.counts.wild_creatures > 0 || chunk.counts.resource_nodes > 0));
     }
 
     fn restore_var(key: &str, value: Option<std::ffi::OsString>) {

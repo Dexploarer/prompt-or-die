@@ -17,6 +17,7 @@ import {
   createPodThreeRuntimePerfTracker,
   recordPodThreeMainThreadSubmission,
   recordPodThreeRuntimePerfFrame,
+  resetPodThreeMainThreadPerfTracker,
   snapshotPodThreeMainThreadPerfStats,
   snapshotPodThreeRuntimePerfStats,
   type PodThreeRendererStats
@@ -310,6 +311,38 @@ describe("render worker runtime", () => {
     });
   });
 
+  test("resets main-thread submission counters deterministically", () => {
+    const tracker = createPodThreeMainThreadPerfTracker(50);
+
+    recordPodThreeMainThreadSubmission(tracker, 0.4, 66);
+    recordPodThreeMainThreadSubmission(tracker, 1.6, 92, "control");
+    resetPodThreeMainThreadPerfTracker(tracker, 120);
+
+    expect(snapshotPodThreeMainThreadPerfStats(tracker)).toEqual({
+      warmupMs: null,
+      submissionsCompleted: 0,
+      averageSubmissionMs: 0,
+      slowestSubmissionMs: 0,
+      byKind: {
+        frame: {
+          submissionsCompleted: 0,
+          averageSubmissionMs: 0,
+          slowestSubmissionMs: 0
+        },
+        control: {
+          submissionsCompleted: 0,
+          averageSubmissionMs: 0,
+          slowestSubmissionMs: 0
+        },
+        resize: {
+          submissionsCompleted: 0,
+          averageSubmissionMs: 0,
+          slowestSubmissionMs: 0
+        }
+      }
+    });
+  });
+
   test("worker runtime does not post a duplicate resize after init surface sync", async () => {
     const originalWorker = globalThis.Worker;
     const originalOffscreenCanvas = globalThis.OffscreenCanvas;
@@ -485,6 +518,76 @@ describe("render worker runtime", () => {
         }
       });
       expect(runtime.getStats().mainThreadPerf.byKind.control.submissionsCompleted).toBe(1);
+
+      runtime.dispose();
+    } finally {
+      if (originalWorker === undefined) {
+        delete (globalThis as Record<string, unknown>).Worker;
+      } else {
+        globalThis.Worker = originalWorker;
+      }
+      if (originalOffscreenCanvas === undefined) {
+        delete (globalThis as Record<string, unknown>).OffscreenCanvas;
+      } else {
+        globalThis.OffscreenCanvas = originalOffscreenCanvas;
+      }
+    }
+  });
+
+  test("worker runtime waits for perf reset acknowledgment before resolving", async () => {
+    const originalWorker = globalThis.Worker;
+    const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+    const fakeWorker = new FakeRenderWorker();
+
+    try {
+      globalThis.Worker = (function Worker() {}) as unknown as typeof Worker;
+      globalThis.OffscreenCanvas = (function OffscreenCanvas() {}) as unknown as typeof OffscreenCanvas;
+
+      const runtime = await createPodRenderRuntime(
+        {
+          clientWidth: 1280,
+          clientHeight: 720,
+          width: 1280,
+          height: 720,
+          transferControlToOffscreen() {
+            return { tag: "offscreen" } as unknown as OffscreenCanvas;
+          }
+        } as unknown as HTMLCanvasElement,
+        {},
+        "?renderThread=worker&backend=webgl2",
+        () => fakeWorker as unknown as Worker
+      );
+
+      const resetPromise = Promise.resolve(runtime.resetPerfMetrics());
+      expect(fakeWorker.postedMessages.at(-1)?.message.type).toBe("resetPerfMetrics");
+      expect(runtime.getStats().mainThreadPerf.submissionsCompleted).toBe(0);
+
+      let resolved = false;
+      void resetPromise.then(() => {
+        resolved = true;
+      });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      fakeWorker.dispatchMessage({
+        type: "perfMetricsReset",
+        stats: {
+          ...BASE_RENDERER_STATS,
+          runtimePerf: {
+            warmupMs: null,
+            frameBudgetMs: Number(POD_THREE_FRAME_STABILITY_BUDGET_MS.toFixed(2)),
+            framesRendered: 0,
+            stableFrames: 0,
+            slowFrames: 0,
+            stableFramePercent: 0,
+            slowestFrameMs: 0
+          }
+        }
+      });
+
+      await resetPromise;
+      expect(runtime.getStats().runtimePerf.framesRendered).toBe(0);
+      expect(runtime.getStats().runtimePerf.warmupMs).toBeNull();
 
       runtime.dispose();
     } finally {

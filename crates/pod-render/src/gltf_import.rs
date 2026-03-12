@@ -53,7 +53,9 @@ pub struct GltfAsset {
 #[derive(Debug)]
 pub enum GltfImportError {
     Parse(gltf::Error),
-    MissingPositionAttribute { mesh_name: String },
+    MissingPositionAttribute {
+        mesh_name: String,
+    },
     UnsupportedPrimitiveMode {
         mesh_name: String,
         mode: String,
@@ -70,7 +72,10 @@ impl fmt::Display for GltfImportError {
         match self {
             Self::Parse(err) => write!(f, "Failed to parse glTF document: {err}"),
             Self::MissingPositionAttribute { mesh_name } => {
-                write!(f, "glTF mesh primitive is missing POSITION attribute: {mesh_name}")
+                write!(
+                    f,
+                    "glTF mesh primitive is missing POSITION attribute: {mesh_name}"
+                )
             }
             Self::UnsupportedPrimitiveMode { mesh_name, mode } => write!(
                 f,
@@ -159,7 +164,12 @@ pub fn import_gltf_asset(path: &Path) -> Result<GltfAsset, GltfImportError> {
                     let fallback = Vec3::Z;
                     vec![fallback.to_array(); positions.len()]
                 },
-                |values| values.map(Vec3::from).map(|normal| normal.to_array()).collect(),
+                |values| {
+                    values
+                        .map(Vec3::from)
+                        .map(|normal| normal.to_array())
+                        .collect()
+                },
             );
 
             let colors = reader.read_colors(0).map_or_else(
@@ -174,11 +184,11 @@ pub fn import_gltf_asset(path: &Path) -> Result<GltfAsset, GltfImportError> {
 
             for index in &indices {
                 if (*index as usize) >= positions.len() {
-                return Err(GltfImportError::IndexOutOfRange {
-                    mesh_name: mesh_name.clone(),
-                    index: *index,
-                    vertex_count: positions.len(),
-                });
+                    return Err(GltfImportError::IndexOutOfRange {
+                        mesh_name: mesh_name.clone(),
+                        index: *index,
+                        vertex_count: positions.len(),
+                    });
                 }
             }
 
@@ -232,11 +242,7 @@ mod tests {
         let gltf_path = folder.join("triangle.gltf");
 
         let mut binary = Vec::new();
-        let positions = [
-            (-0.5f32, 0.0, 0.0),
-            (0.5, 0.0, 0.0),
-            (0.0, 0.5, 0.0),
-        ];
+        let positions = [(-0.5f32, 0.0, 0.0), (0.5, 0.0, 0.0), (0.0, 0.5, 0.0)];
         let normals = [(0.0f32, 0.0, 1.0); 3];
         let indices: [u16; 3] = [0, 1, 2];
 

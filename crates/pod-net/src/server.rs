@@ -7,11 +7,12 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use quinn::Endpoint;
+use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -432,8 +433,10 @@ impl GameServer {
             clients
                 .iter()
                 .filter_map(|(client_id, session)| {
-                    let ticks_since_last_seen = self.tick.saturating_sub(session.transport.last_seen_tick);
-                    (ticks_since_last_seen > timeout_ticks).then_some((*client_id, ticks_since_last_seen))
+                    let ticks_since_last_seen =
+                        self.tick.saturating_sub(session.transport.last_seen_tick);
+                    (ticks_since_last_seen > timeout_ticks)
+                        .then_some((*client_id, ticks_since_last_seen))
                 })
                 .collect::<Vec<_>>()
         };
@@ -462,10 +465,7 @@ impl GameServer {
         self.client_tx.write().await.insert(client_id, outbound_tx);
         let mut session = ClientSession::new("pending".into());
         session.transport.last_seen_tick = self.tick;
-        self.clients
-            .write()
-            .await
-            .insert(client_id, session);
+        self.clients.write().await.insert(client_id, session);
         outbound_rx
     }
 
@@ -732,89 +732,92 @@ impl GameServer {
                         }
                     }
                     match message {
-                    ClientMessage::Connect {
-                        player_name,
-                        reconnect_token,
-                    } => {
-                        self.attach_remote_agent(client_id, player_name, reconnect_token)
-                            .await?;
-                    }
-                    ClientMessage::ActionBatch { tick, actions } => {
-                        let mut overflow = false;
-                        let mut unregistered = false;
-                        let mut stale_tick = false;
-                        let mut out_of_window = false;
-                        let mut queue_pressure = false;
-                        let mut queue_depth = 0usize;
-                        let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
-                        let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
-                        let queue_pressure_warn_depth = self.queue_pressure_warn_depth();
-                        {
-                            let mut clients = self.clients.write().await;
-                            if let Some(session) = clients.get_mut(&client_id) {
-                                session.transport.action_batches_received = session
-                                    .transport
-                                    .action_batches_received
-                                    .saturating_add(1);
-                                if session.agent_id.is_none() {
-                                    unregistered = true;
-                                }
+                        ClientMessage::Connect {
+                            player_name,
+                            reconnect_token,
+                        } => {
+                            self.attach_remote_agent(client_id, player_name, reconnect_token)
+                                .await?;
+                        }
+                        ClientMessage::ActionBatch { tick, actions } => {
+                            let mut overflow = false;
+                            let mut unregistered = false;
+                            let mut stale_tick = false;
+                            let mut out_of_window = false;
+                            let mut queue_pressure = false;
+                            let mut queue_depth = 0usize;
+                            let min_tick = self.tick.saturating_sub(ACTION_WINDOW_BACKWARD_TICKS);
+                            let max_tick = self.tick + ACTION_WINDOW_FORWARD_TICKS;
+                            let queue_pressure_warn_depth = self.queue_pressure_warn_depth();
+                            {
+                                let mut clients = self.clients.write().await;
+                                if let Some(session) = clients.get_mut(&client_id) {
+                                    session.transport.action_batches_received =
+                                        session.transport.action_batches_received.saturating_add(1);
+                                    if session.agent_id.is_none() {
+                                        unregistered = true;
+                                    }
 
-                                if !unregistered {
-                                    if tick < min_tick || tick > max_tick {
-                                        out_of_window = true;
-                                    } else if session
-                                        .last_action_tick
-                                        .map(|last| tick < last)
-                                        .unwrap_or(false)
-                                    {
-                                        stale_tick = true;
-                    } else {
-                        let available = ACTION_QUEUE_MAX_DEPTH
-                            .saturating_sub(session.pending_actions.len());
-                        if actions.len() > available {
-                            overflow = true;
-                        }
-                        for action in actions.into_iter().take(available) {
-                            session.pending_actions.push((tick, action));
-                        }
-                        queue_depth = session.pending_actions.len();
-                        session.transport.peak_pending_action_queue_depth = session
-                            .transport
-                            .peak_pending_action_queue_depth
-                            .max(queue_depth);
-                        queue_pressure = queue_depth >= queue_pressure_warn_depth;
-                        session.last_action_tick = Some(tick);
-                    }
-                }
-            }
-        }
-        if queue_pressure || overflow {
-            self.queue_pressure_events =
-                self.queue_pressure_events.saturating_add(1);
-            if let Some(session) = self.clients.write().await.get_mut(&client_id) {
-                session.transport.queue_pressure_events =
-                    session.transport.queue_pressure_events.saturating_add(1);
-            }
-            warn!(
+                                    if !unregistered {
+                                        if tick < min_tick || tick > max_tick {
+                                            out_of_window = true;
+                                        } else if session
+                                            .last_action_tick
+                                            .map(|last| tick < last)
+                                            .unwrap_or(false)
+                                        {
+                                            stale_tick = true;
+                                        } else {
+                                            let available = ACTION_QUEUE_MAX_DEPTH
+                                                .saturating_sub(session.pending_actions.len());
+                                            if actions.len() > available {
+                                                overflow = true;
+                                            }
+                                            for action in actions.into_iter().take(available) {
+                                                session.pending_actions.push((tick, action));
+                                            }
+                                            queue_depth = session.pending_actions.len();
+                                            session.transport.peak_pending_action_queue_depth =
+                                                session
+                                                    .transport
+                                                    .peak_pending_action_queue_depth
+                                                    .max(queue_depth);
+                                            queue_pressure =
+                                                queue_depth >= queue_pressure_warn_depth;
+                                            session.last_action_tick = Some(tick);
+                                        }
+                                    }
+                                }
+                            }
+                            if queue_pressure || overflow {
+                                self.queue_pressure_events =
+                                    self.queue_pressure_events.saturating_add(1);
+                                if let Some(session) =
+                                    self.clients.write().await.get_mut(&client_id)
+                                {
+                                    session.transport.queue_pressure_events =
+                                        session.transport.queue_pressure_events.saturating_add(1);
+                                }
+                                warn!(
                 "Client {} pending action queue reached pressure depth {} (threshold {})",
                 client_id.0,
                 queue_depth,
                 queue_pressure_warn_depth
                             );
-                        }
-                        if unregistered {
-                            self.send_to_client(
-                                client_id,
-                                ServerMessage::Rejected {
-                                    reason: "client must send Connect before action batches".into(),
-                                },
-                            )
-                            .await;
-                            continue;
-                        }
-                        if out_of_window {
-                            self.send_to_client(
+                            }
+                            if unregistered {
+                                self.send_to_client(
+                                    client_id,
+                                    ServerMessage::Rejected {
+                                        reason: "client must send Connect before action batches"
+                                            .into(),
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            if out_of_window {
+                                self.send_to_client(
                                     client_id,
                                     ServerMessage::Rejected {
                                         reason: format!(
@@ -823,10 +826,10 @@ impl GameServer {
                                     },
                                 )
                                 .await;
-                            continue;
-                        }
-                        if stale_tick {
-                            self.send_to_client(
+                                continue;
+                            }
+                            if stale_tick {
+                                self.send_to_client(
                                     client_id,
                                     ServerMessage::Rejected {
                                         reason: format!(
@@ -835,76 +838,74 @@ impl GameServer {
                                     },
                                 )
                                 .await;
-                            continue;
-                        }
-                        if overflow {
-                            self.send_to_client(
-                                client_id,
-                                ServerMessage::Rejected {
-                                    reason: format!(
+                                continue;
+                            }
+                            if overflow {
+                                self.send_to_client(
+                                    client_id,
+                                    ServerMessage::Rejected {
+                                        reason: format!(
                                         "action queue full (max depth={ACTION_QUEUE_MAX_DEPTH})"
                                     ),
+                                    },
+                                )
+                                .await;
+                            }
+                        }
+                        ClientMessage::RequestFullSnapshot {
+                            last_known_tick,
+                            last_known_digest,
+                        } => {
+                            {
+                                let mut clients = self.clients.write().await;
+                                if let Some(session) = clients.get_mut(&client_id) {
+                                    session.transport.full_snapshot_requests =
+                                        session.transport.full_snapshot_requests.saturating_add(1);
+                                }
+                            }
+                            debug!(
+                            "Client {} requested full snapshot recovery (tick={:?}, digest={:?})",
+                            client_id.0, last_known_tick, last_known_digest
+                        );
+                            self.send_full_snapshot_to_client(client_id).await;
+                        }
+                        ClientMessage::SetDebugTelemetry { enabled } => {
+                            let mut clients = self.clients.write().await;
+                            if let Some(session) = clients.get_mut(&client_id) {
+                                session.debug_telemetry_enabled = enabled;
+                            }
+                        }
+                        ClientMessage::SetDebugFocus { entity_id } => {
+                            let mut clients = self.clients.write().await;
+                            if let Some(session) = clients.get_mut(&client_id) {
+                                session.debug_focus_entity = entity_id;
+                            }
+                        }
+                        ClientMessage::Ping { timestamp } => {
+                            {
+                                let mut clients = self.clients.write().await;
+                                if let Some(session) = clients.get_mut(&client_id) {
+                                    session.transport.ping_requests =
+                                        session.transport.ping_requests.saturating_add(1);
+                                }
+                            }
+                            self.send_to_client(
+                                client_id,
+                                ServerMessage::Pong {
+                                    client_ts: timestamp,
+                                    server_ts: self.tick,
                                 },
                             )
                             .await;
                         }
-                    }
-                    ClientMessage::RequestFullSnapshot {
-                        last_known_tick,
-                        last_known_digest,
-                    } => {
-                        {
-                            let mut clients = self.clients.write().await;
-                            if let Some(session) = clients.get_mut(&client_id) {
-                                session.transport.full_snapshot_requests = session
-                                    .transport
-                                    .full_snapshot_requests
-                                    .saturating_add(1);
-                            }
-                        }
-                        debug!(
-                            "Client {} requested full snapshot recovery (tick={:?}, digest={:?})",
-                            client_id.0, last_known_tick, last_known_digest
-                        );
-                        self.send_full_snapshot_to_client(client_id).await;
-                    }
-                    ClientMessage::SetDebugTelemetry { enabled } => {
-                        let mut clients = self.clients.write().await;
-                        if let Some(session) = clients.get_mut(&client_id) {
-                            session.debug_telemetry_enabled = enabled;
+                        ClientMessage::Disconnect { reason } => {
+                            self.disconnect_client(
+                                client_id,
+                                reason.as_deref().unwrap_or("client requested disconnect"),
+                            )
+                            .await;
                         }
                     }
-                    ClientMessage::SetDebugFocus { entity_id } => {
-                        let mut clients = self.clients.write().await;
-                        if let Some(session) = clients.get_mut(&client_id) {
-                            session.debug_focus_entity = entity_id;
-                        }
-                    }
-                    ClientMessage::Ping { timestamp } => {
-                        {
-                            let mut clients = self.clients.write().await;
-                            if let Some(session) = clients.get_mut(&client_id) {
-                                session.transport.ping_requests =
-                                    session.transport.ping_requests.saturating_add(1);
-                            }
-                        }
-                        self.send_to_client(
-                            client_id,
-                            ServerMessage::Pong {
-                                client_ts: timestamp,
-                                server_ts: self.tick,
-                            },
-                        )
-                        .await;
-                    }
-                    ClientMessage::Disconnect { reason } => {
-                        self.disconnect_client(
-                            client_id,
-                            reason.as_deref().unwrap_or("client requested disconnect"),
-                        )
-                        .await;
-                    }
-                }
                 }
                 InboundPacket::Disconnected { client_id, reason } => {
                     self.disconnect_client(client_id, &reason).await;
@@ -1039,12 +1040,9 @@ impl GameServer {
                     &interest,
                     &interested_entities,
                 );
-                if let Some(focus_entity) = target
-                    .debug_focus_entity
-                    .filter(|entity_id| {
-                        interest.is_unbounded() || interested_entities.contains(entity_id)
-                    })
-                {
+                if let Some(focus_entity) = target.debug_focus_entity.filter(|entity_id| {
+                    interest.is_unbounded() || interested_entities.contains(entity_id)
+                }) {
                     if let Some(summary) = summarize_focused_entity_debug(
                         "direct-connect",
                         &self.debug_archive,
@@ -1115,7 +1113,9 @@ impl GameServer {
 
     async fn send_to_client(&self, client_id: ClientId, message: ServerMessage) -> bool {
         enum OutboundKind {
-            FullSnapshot { recovery: bool },
+            FullSnapshot {
+                recovery: bool,
+            },
             Delta {
                 updated_entities: usize,
                 destroyed_entities: usize,
@@ -1152,7 +1152,10 @@ impl GameServer {
             ServerMessage::Rejected { .. } => OutboundKind::Rejected,
             ServerMessage::Pong { .. } => OutboundKind::Other,
         };
-        let encoded_size = message.encode().map(|payload| payload.len()).unwrap_or_default() as u64;
+        let encoded_size = message
+            .encode()
+            .map(|payload| payload.len())
+            .unwrap_or_default() as u64;
 
         if let Some(tx) = self.client_tx.read().await.get(&client_id) {
             if let Err(err) = tx.send(message).await {
@@ -1170,18 +1173,14 @@ impl GameServer {
             session.transport.last_sent_tick = Some(self.tick);
             match outbound_kind {
                 OutboundKind::FullSnapshot { recovery } => {
-                    session.transport.full_snapshots_sent = session
-                        .transport
-                        .full_snapshots_sent
-                        .saturating_add(1);
+                    session.transport.full_snapshots_sent =
+                        session.transport.full_snapshots_sent.saturating_add(1);
                     session.transport.full_snapshot_bytes = session
                         .transport
                         .full_snapshot_bytes
                         .saturating_add(encoded_size);
-                    session.transport.max_full_snapshot_bytes = session
-                        .transport
-                        .max_full_snapshot_bytes
-                        .max(encoded_size);
+                    session.transport.max_full_snapshot_bytes =
+                        session.transport.max_full_snapshot_bytes.max(encoded_size);
                     session.transport.state_deltas_sent =
                         session.transport.state_deltas_sent.saturating_add(1);
                     if recovery {
@@ -1195,22 +1194,16 @@ impl GameServer {
                     updated_entities,
                     destroyed_entities,
                 } => {
-                    session.transport.state_deltas_sent = session
-                        .transport
-                        .state_deltas_sent
-                        .saturating_add(1);
-                    session.transport.delta_messages_sent = session
-                        .transport
-                        .delta_messages_sent
-                        .saturating_add(1);
+                    session.transport.state_deltas_sent =
+                        session.transport.state_deltas_sent.saturating_add(1);
+                    session.transport.delta_messages_sent =
+                        session.transport.delta_messages_sent.saturating_add(1);
                     session.transport.delta_bytes_sent = session
                         .transport
                         .delta_bytes_sent
                         .saturating_add(encoded_size);
-                    session.transport.max_delta_bytes = session
-                        .transport
-                        .max_delta_bytes
-                        .max(encoded_size);
+                    session.transport.max_delta_bytes =
+                        session.transport.max_delta_bytes.max(encoded_size);
                     session.transport.delta_entities_updated = session
                         .transport
                         .delta_entities_updated
@@ -1316,7 +1309,10 @@ impl GameServer {
                 .iter()
                 .map(|client| client.outbound_messages)
                 .sum(),
-            total_inbound_bytes: client_summaries.iter().map(|client| client.inbound_bytes).sum(),
+            total_inbound_bytes: client_summaries
+                .iter()
+                .map(|client| client.inbound_bytes)
+                .sum(),
             total_outbound_bytes: client_summaries
                 .iter()
                 .map(|client| client.outbound_bytes)
@@ -1346,7 +1342,10 @@ impl GameServer {
                 .iter()
                 .map(|client| client.full_snapshot_requests)
                 .sum(),
-            ping_requests: client_summaries.iter().map(|client| client.ping_requests).sum(),
+            ping_requests: client_summaries
+                .iter()
+                .map(|client| client.ping_requests)
+                .sum(),
             state_deltas_sent: client_summaries
                 .iter()
                 .map(|client| client.state_deltas_sent)
@@ -1601,18 +1600,17 @@ impl GameServer {
         let authoritative_snapshot = WorldSnapshot::capture(&self.world);
         let snapshot = self.snapshot_for_client(&authoritative_snapshot, agent_id);
         let message = self.build_full_snapshot_message(snapshot.clone(), acknowledged_action_tick);
-        let encoded_size = message.encode().map(|payload| payload.len()).unwrap_or_default() as u64;
-        let sent = self
-            .send_to_client(client_id, message)
-            .await;
+        let encoded_size = message
+            .encode()
+            .map(|payload| payload.len())
+            .unwrap_or_default() as u64;
+        let sent = self.send_to_client(client_id, message).await;
         if sent {
             self.recovery_snapshots_sent = self.recovery_snapshots_sent.saturating_add(1);
             if let Some(session) = self.clients.write().await.get_mut(&client_id) {
                 session.last_sent_snapshot = Some(snapshot);
-                session.transport.recovery_snapshots_sent = session
-                    .transport
-                    .recovery_snapshots_sent
-                    .saturating_add(1);
+                session.transport.recovery_snapshots_sent =
+                    session.transport.recovery_snapshots_sent.saturating_add(1);
                 session.transport.recovery_snapshot_bytes_sent = session
                     .transport
                     .recovery_snapshot_bytes_sent
@@ -1827,6 +1825,739 @@ impl GameServer {
 }
 
 // ============================================================
+// TRANSPORT BENCHMARKS
+// ============================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportBenchmarkProfile {
+    CiSmoke,
+    ShardTarget,
+}
+
+impl TransportBenchmarkProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CiSmoke => "ci-smoke",
+            Self::ShardTarget => "shard-target",
+        }
+    }
+
+    fn delta_messages(self) -> u64 {
+        match self {
+            Self::CiSmoke => 2,
+            Self::ShardTarget => 8,
+        }
+    }
+
+    fn recovery_requests(self) -> u64 {
+        match self {
+            Self::CiSmoke => 1,
+            Self::ShardTarget => 3,
+        }
+    }
+
+    fn queue_pressure_actions(self) -> Vec<Action> {
+        match self {
+            Self::CiSmoke => vec![Action::Idle, Action::Stop, Action::Idle],
+            Self::ShardTarget => vec![
+                Action::Idle,
+                Action::Stop,
+                Action::Idle,
+                Action::Stop,
+                Action::Idle,
+                Action::Stop,
+            ],
+        }
+    }
+}
+
+impl std::str::FromStr for TransportBenchmarkProfile {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "ci-smoke" => Ok(Self::CiSmoke),
+            "shard-target" => Ok(Self::ShardTarget),
+            unknown => Err(format!(
+                "unsupported transport benchmark profile '{unknown}' (expected 'ci-smoke' or 'shard-target')"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransportBenchmarkCheck {
+    pub metric: String,
+    pub passed: bool,
+    pub expected: String,
+    pub observed: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransportBenchmarkScenarioReport {
+    pub name: String,
+    pub description: String,
+    pub all_checks_passed: bool,
+    pub summary: ShardTransportSummary,
+    pub checks: Vec<TransportBenchmarkCheck>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransportBenchmarkAggregate {
+    pub all_checks_passed: bool,
+    pub scenarios_passed: usize,
+    pub scenario_count: usize,
+    pub published_baseline_profile: Option<String>,
+    pub checks: Vec<TransportBenchmarkCheck>,
+    pub total_full_snapshot_bytes: u64,
+    pub total_recovery_snapshot_bytes: u64,
+    pub total_delta_bytes: u64,
+    pub total_delta_entities_updated: u64,
+    pub total_delta_entities_destroyed: u64,
+    pub total_queue_pressure_events: u64,
+    pub total_resumed_sessions: u64,
+    pub total_timed_out_clients: u64,
+    pub total_recovery_delivery_failures: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransportBenchmarkReport {
+    pub schema_version: u32,
+    pub generated_at_unix_ms: u128,
+    pub profile: String,
+    pub scenarios: Vec<TransportBenchmarkScenarioReport>,
+    pub aggregate: TransportBenchmarkAggregate,
+    pub notes: Vec<String>,
+}
+
+impl TransportBenchmarkReport {
+    pub fn all_checks_passed(&self) -> bool {
+        self.aggregate.all_checks_passed
+    }
+}
+
+pub async fn run_transport_benchmark_suite(
+    profile: TransportBenchmarkProfile,
+) -> TransportBenchmarkReport {
+    let scenarios = vec![
+        benchmark_delta_delivery(profile).await,
+        benchmark_recovery_success(profile).await,
+        benchmark_recovery_failure().await,
+        benchmark_resume_connect().await,
+        benchmark_queue_pressure_and_timeout(profile).await,
+    ];
+    let aggregate = build_transport_benchmark_aggregate(profile, &scenarios);
+    let mut notes = vec![
+        "The transport benchmark uses in-process direct-connect scenarios instead of live sockets so it stays cheap and deterministic in CI.".to_string(),
+        "Use scripts/run_moat_benchmarks.ts to combine this transport report with the core moat suite, browser route measurements, and creator bootstrap timing.".to_string(),
+    ];
+    if matches!(profile, TransportBenchmarkProfile::ShardTarget) {
+        notes.push(
+            "The shard-target profile also enforces published byte and queue-depth baselines so deterministic transport drift becomes a conscious contract update instead of silent movement.".to_string(),
+        );
+    }
+
+    TransportBenchmarkReport {
+        schema_version: 2,
+        generated_at_unix_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+        profile: profile.as_str().to_string(),
+        scenarios,
+        aggregate,
+        notes,
+    }
+}
+
+fn build_transport_benchmark_aggregate(
+    profile: TransportBenchmarkProfile,
+    scenarios: &[TransportBenchmarkScenarioReport],
+) -> TransportBenchmarkAggregate {
+    let scenarios_passed = scenarios
+        .iter()
+        .filter(|scenario| scenario.all_checks_passed)
+        .count();
+    let total_full_snapshot_bytes: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.total_full_snapshot_bytes)
+        .sum();
+    let total_recovery_snapshot_bytes: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.total_recovery_snapshot_bytes)
+        .sum();
+    let total_delta_bytes: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.total_delta_bytes)
+        .sum();
+    let total_delta_entities_updated: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.total_delta_entities_updated)
+        .sum();
+    let total_delta_entities_destroyed: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.total_delta_entities_destroyed)
+        .sum();
+    let total_queue_pressure_events: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.queue_pressure_events)
+        .sum();
+    let total_resumed_sessions: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.resumed_sessions)
+        .sum();
+    let total_timed_out_clients: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.timed_out_clients)
+        .sum();
+    let total_recovery_delivery_failures: u64 = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.recovery_delivery_failures)
+        .sum();
+    let peak_pending_action_queue_depth = scenarios
+        .iter()
+        .map(|scenario| scenario.summary.peak_pending_action_queue_depth)
+        .max()
+        .unwrap_or_default();
+    let checks = match profile {
+        TransportBenchmarkProfile::CiSmoke => Vec::new(),
+        TransportBenchmarkProfile::ShardTarget => vec![
+            transport_check(
+                "published_baseline.aggregate.total_full_snapshot_bytes",
+                total_full_snapshot_bytes == 1187,
+                "1187",
+                total_full_snapshot_bytes.to_string(),
+            ),
+            transport_check(
+                "published_baseline.aggregate.total_recovery_snapshot_bytes",
+                total_recovery_snapshot_bytes == 234,
+                "234",
+                total_recovery_snapshot_bytes.to_string(),
+            ),
+            transport_check(
+                "published_baseline.aggregate.total_delta_bytes",
+                total_delta_bytes == 1816,
+                "1816",
+                total_delta_bytes.to_string(),
+            ),
+            transport_check(
+                "published_baseline.aggregate.peak_pending_action_queue_depth",
+                peak_pending_action_queue_depth == 6,
+                "6",
+                peak_pending_action_queue_depth.to_string(),
+            ),
+            transport_check(
+                "published_baseline.aggregate.total_queue_pressure_events",
+                total_queue_pressure_events == 1,
+                "1",
+                total_queue_pressure_events.to_string(),
+            ),
+        ],
+    };
+    let aggregate_checks_passed = checks.iter().all(|check| check.passed);
+    TransportBenchmarkAggregate {
+        all_checks_passed: scenarios_passed == scenarios.len() && aggregate_checks_passed,
+        scenarios_passed,
+        scenario_count: scenarios.len(),
+        published_baseline_profile: (!checks.is_empty()).then(|| profile.as_str().to_string()),
+        checks,
+        total_full_snapshot_bytes,
+        total_recovery_snapshot_bytes,
+        total_delta_bytes,
+        total_delta_entities_updated,
+        total_delta_entities_destroyed,
+        total_queue_pressure_events,
+        total_resumed_sessions,
+        total_timed_out_clients,
+        total_recovery_delivery_failures,
+    }
+}
+
+fn build_transport_scenario_report(
+    name: &str,
+    description: &str,
+    summary: ShardTransportSummary,
+    checks: Vec<TransportBenchmarkCheck>,
+) -> TransportBenchmarkScenarioReport {
+    let all_checks_passed = checks.iter().all(|check| check.passed);
+    TransportBenchmarkScenarioReport {
+        name: name.to_string(),
+        description: description.to_string(),
+        all_checks_passed,
+        summary,
+        checks,
+    }
+}
+
+fn transport_check(
+    metric: &str,
+    passed: bool,
+    expected: impl Into<String>,
+    observed: impl Into<String>,
+) -> TransportBenchmarkCheck {
+    TransportBenchmarkCheck {
+        metric: metric.to_string(),
+        passed,
+        expected: expected.into(),
+        observed: observed.into(),
+    }
+}
+
+fn benchmark_client_session(player_name: &str) -> ClientSession {
+    let mut session = ClientSession::new(player_name.to_string());
+    session.player_name = Some(player_name.to_string());
+    session
+}
+
+fn benchmark_entity_snapshot(id: u64, label: &str) -> crate::snapshot::EntitySnapshot {
+    crate::snapshot::EntitySnapshot {
+        id,
+        position: [id as f32, id as f32 + 1.0].into(),
+        velocity: [0.0, 0.0].into(),
+        rotation: 0.0,
+        health: None,
+        max_health: None,
+        movement_speed: None,
+        label: Some(label.to_string()),
+        metadata: Default::default(),
+    }
+}
+
+async fn benchmark_delta_delivery(
+    profile: TransportBenchmarkProfile,
+) -> TransportBenchmarkScenarioReport {
+    let repetitions = profile.delta_messages();
+    let world = World::new(42);
+    let server = GameServer::new(ProtoServerConfig::default(), world);
+    let client_id = ClientId::new();
+    let (tx, _rx) = mpsc::channel(16);
+    server.client_tx.write().await.insert(client_id, tx);
+    server
+        .clients
+        .write()
+        .await
+        .insert(client_id, benchmark_client_session("delta-client"));
+
+    for index in 0..repetitions {
+        let tick = index + 1;
+        let sent = server
+            .send_to_client(
+                client_id,
+                ServerMessage::StateDelta {
+                    tick,
+                    acknowledged_action_tick: None,
+                    authoritative_digest: 100 + tick,
+                    is_full_snapshot: false,
+                    delta: StateDelta {
+                        tick,
+                        updated: vec![benchmark_entity_snapshot(tick, "Delta")],
+                        destroyed: vec![tick + 1000],
+                        population: Default::default(),
+                    },
+                },
+            )
+            .await;
+        debug_assert!(sent, "delta benchmark requires a live client channel");
+    }
+
+    let summary = server.transport_summary().await;
+    let mut checks = vec![
+        transport_check(
+            "state_deltas_sent",
+            summary.state_deltas_sent == repetitions,
+            repetitions.to_string(),
+            summary.state_deltas_sent.to_string(),
+        ),
+        transport_check(
+            "delta_messages_sent",
+            summary.delta_messages_sent == repetitions,
+            repetitions.to_string(),
+            summary.delta_messages_sent.to_string(),
+        ),
+        transport_check(
+            "total_delta_bytes",
+            summary.total_delta_bytes > 0,
+            "> 0",
+            summary.total_delta_bytes.to_string(),
+        ),
+        transport_check(
+            "delta_entity_churn",
+            summary.total_delta_entities_updated == repetitions
+                && summary.total_delta_entities_destroyed == repetitions,
+            format!("updated={repetitions}, destroyed={repetitions}"),
+            format!(
+                "updated={}, destroyed={}",
+                summary.total_delta_entities_updated, summary.total_delta_entities_destroyed
+            ),
+        ),
+    ];
+    if matches!(profile, TransportBenchmarkProfile::ShardTarget) {
+        checks.push(transport_check(
+            "published_baseline.steady_delta.total_delta_bytes",
+            summary.total_delta_bytes == 1304,
+            "1304",
+            summary.total_delta_bytes.to_string(),
+        ));
+        checks.push(transport_check(
+            "published_baseline.steady_delta.max_delta_bytes",
+            summary.max_delta_bytes == 163,
+            "163",
+            summary.max_delta_bytes.to_string(),
+        ));
+    }
+
+    build_transport_scenario_report(
+        "steady-delta",
+        "Exercises the normal authoritative state-delta path and proves the byte/churn counters move without requiring a live socket.",
+        summary,
+        checks,
+    )
+}
+
+async fn benchmark_recovery_success(
+    profile: TransportBenchmarkProfile,
+) -> TransportBenchmarkScenarioReport {
+    let requests = profile.recovery_requests();
+    let world = World::new(42);
+    let mut server = GameServer::new(ProtoServerConfig::default(), world);
+    let client_id = ClientId::new();
+    let mut rx = server.register_pending_client(client_id).await;
+    {
+        let mut clients = server.clients.write().await;
+        let session = clients.get_mut(&client_id).expect("registered session");
+        session.player_name = Some("recovering".into());
+        session.last_processed_action_tick = Some(4);
+    }
+
+    for index in 0..requests {
+        let request = ClientMessage::RequestFullSnapshot {
+            last_known_tick: Some(index),
+            last_known_digest: Some(100 + index),
+        };
+        let encoded_len = request.encode().expect("request encoding").len();
+        server
+            .inbound_tx
+            .send(InboundPacket::Message {
+                client_id,
+                encoded_len,
+                message: request,
+            })
+            .await
+            .expect("queue recovery request");
+        server
+            .handle_connections()
+            .await
+            .expect("recovery request handled");
+        let message = rx.recv().await.expect("recovery snapshot delivered");
+        assert!(
+            matches!(
+                message,
+                ServerMessage::StateDelta {
+                    is_full_snapshot: true,
+                    ..
+                }
+            ),
+            "recovery benchmark expects a full snapshot response"
+        );
+    }
+
+    let summary = server.transport_summary().await;
+    let mut checks = vec![
+        transport_check(
+            "full_snapshot_requests",
+            summary.full_snapshot_requests == requests,
+            requests.to_string(),
+            summary.full_snapshot_requests.to_string(),
+        ),
+        transport_check(
+            "recovery_snapshots_sent",
+            summary.recovery_snapshots_sent == requests,
+            requests.to_string(),
+            summary.recovery_snapshots_sent.to_string(),
+        ),
+        transport_check(
+            "recovery_delivery_failures",
+            summary.recovery_delivery_failures == 0,
+            "0",
+            summary.recovery_delivery_failures.to_string(),
+        ),
+        transport_check(
+            "total_recovery_snapshot_bytes",
+            summary.total_recovery_snapshot_bytes > 0,
+            "> 0",
+            summary.total_recovery_snapshot_bytes.to_string(),
+        ),
+    ];
+    if matches!(profile, TransportBenchmarkProfile::ShardTarget) {
+        checks.push(transport_check(
+            "published_baseline.recovery_success.total_recovery_snapshot_bytes",
+            summary.total_recovery_snapshot_bytes == 234,
+            "234",
+            summary.total_recovery_snapshot_bytes.to_string(),
+        ));
+        checks.push(transport_check(
+            "published_baseline.recovery_success.max_full_snapshot_bytes",
+            summary.max_full_snapshot_bytes == 78,
+            "78",
+            summary.max_full_snapshot_bytes.to_string(),
+        ));
+    }
+
+    build_transport_scenario_report(
+        "recovery-success",
+        "Exercises explicit full-snapshot recovery requests and records the recovery byte budget without a live reconnect loop.",
+        summary,
+        checks,
+    )
+}
+
+async fn benchmark_recovery_failure() -> TransportBenchmarkScenarioReport {
+    let world = World::new(42);
+    let mut server = GameServer::new(ProtoServerConfig::default(), world);
+    let client_id = ClientId::new();
+    let rx = server.register_pending_client(client_id).await;
+    drop(rx);
+
+    server.send_full_snapshot_to_client(client_id).await;
+
+    let summary = server.transport_summary().await;
+    let checks = vec![
+        transport_check(
+            "recovery_delivery_failures",
+            summary.recovery_delivery_failures == 1,
+            "1",
+            summary.recovery_delivery_failures.to_string(),
+        ),
+        transport_check(
+            "recovery_snapshots_sent",
+            summary.recovery_snapshots_sent == 0,
+            "0",
+            summary.recovery_snapshots_sent.to_string(),
+        ),
+        transport_check(
+            "total_recovery_snapshot_bytes",
+            summary.total_recovery_snapshot_bytes == 0,
+            "0",
+            summary.total_recovery_snapshot_bytes.to_string(),
+        ),
+    ];
+
+    build_transport_scenario_report(
+        "recovery-failure",
+        "Exercises the recovery-delivery failure counter by forcing a closed outbound channel before the server tries to send a full snapshot.",
+        summary,
+        checks,
+    )
+}
+
+async fn benchmark_resume_connect() -> TransportBenchmarkScenarioReport {
+    let world = World::new(42);
+    let mut server = GameServer::new(ProtoServerConfig::default(), world);
+    let previous_client_id = ClientId::new();
+    let mut previous_rx = server.register_pending_client(previous_client_id).await;
+
+    server
+        .attach_remote_agent(previous_client_id, "resume-player".into(), None)
+        .await
+        .expect("attach previous client");
+
+    let reconnect_token = match previous_rx.recv().await.expect("initial welcome") {
+        ServerMessage::Welcome {
+            reconnect_token, ..
+        } => reconnect_token,
+        other => panic!("unexpected initial welcome: {other:?}"),
+    };
+
+    {
+        let mut clients = server.clients.write().await;
+        let session = clients
+            .get_mut(&previous_client_id)
+            .expect("previous session");
+        session.transport.session_resumes = 2;
+        session.transport.recovery_snapshots_sent = 1;
+        session.transport.delta_messages_sent = 3;
+        session.transport.delta_bytes_sent = 512;
+        session.transport.max_delta_bytes = 256;
+    }
+
+    let resumed_client_id = ClientId::new();
+    let mut resumed_rx = server.register_pending_client(resumed_client_id).await;
+    let resume_connect = ClientMessage::Connect {
+        player_name: "resume-player".into(),
+        reconnect_token: Some(reconnect_token),
+    };
+    let encoded_len = resume_connect
+        .encode()
+        .expect("resume connect encoding")
+        .len();
+    server
+        .inbound_tx
+        .send(InboundPacket::Message {
+            client_id: resumed_client_id,
+            encoded_len,
+            message: resume_connect,
+        })
+        .await
+        .expect("queue resume connect");
+    server
+        .handle_connections()
+        .await
+        .expect("resume connect handled");
+
+    let message = resumed_rx.recv().await.expect("resume welcome");
+    assert!(
+        matches!(message, ServerMessage::Welcome { .. }),
+        "resume benchmark expects a welcome response"
+    );
+
+    let summary = server.transport_summary().await;
+    let resumed_client = summary
+        .clients
+        .iter()
+        .find(|client| client.client_id == resumed_client_id.0.to_string())
+        .expect("resumed client summary");
+    let checks = vec![
+        transport_check(
+            "resumed_sessions",
+            summary.resumed_sessions == 1,
+            "1",
+            summary.resumed_sessions.to_string(),
+        ),
+        transport_check(
+            "session_resumes_preserved",
+            resumed_client.session_resumes == 3,
+            "3",
+            resumed_client.session_resumes.to_string(),
+        ),
+        transport_check(
+            "delta_counters_preserved",
+            resumed_client.delta_messages_sent == 3 && resumed_client.delta_bytes_sent == 512,
+            "delta_messages_sent=3, delta_bytes_sent=512",
+            format!(
+                "delta_messages_sent={}, delta_bytes_sent={}",
+                resumed_client.delta_messages_sent, resumed_client.delta_bytes_sent
+            ),
+        ),
+    ];
+
+    build_transport_scenario_report(
+        "resume-connect",
+        "Exercises reconnect-token resume so transport counters survive session handoff instead of resetting on the new client id.",
+        summary,
+        checks,
+    )
+}
+
+async fn benchmark_queue_pressure_and_timeout(
+    profile: TransportBenchmarkProfile,
+) -> TransportBenchmarkScenarioReport {
+    let config = ProtoServerConfig {
+        client_inactivity_timeout_ticks: 3,
+        queue_pressure_warn_depth: 2,
+        ..ProtoServerConfig::default()
+    };
+    let world = World::new(42);
+    let mut server = GameServer::new(config, world);
+
+    let active_client_id = ClientId::new();
+    let mut active_rx = server.register_pending_client(active_client_id).await;
+    server
+        .attach_remote_agent(active_client_id, "queue-player".into(), None)
+        .await
+        .expect("attach queue player");
+    let _welcome = active_rx.recv().await.expect("queue player welcome");
+
+    let action_batch = ClientMessage::ActionBatch {
+        tick: 1,
+        actions: profile.queue_pressure_actions(),
+    };
+    let encoded_len = action_batch.encode().expect("action batch encoding").len();
+    server
+        .inbound_tx
+        .send(InboundPacket::Message {
+            client_id: active_client_id,
+            encoded_len,
+            message: action_batch,
+        })
+        .await
+        .expect("queue action batch");
+    server
+        .handle_connections()
+        .await
+        .expect("action batch handled");
+
+    {
+        let mut clients = server.clients.write().await;
+        let active_session = clients
+            .get_mut(&active_client_id)
+            .expect("active client session");
+        active_session.transport.last_seen_tick = 4;
+    }
+
+    let stale_client_id = ClientId::new();
+    let stale_rx = server.register_pending_client(stale_client_id).await;
+    drop(stale_rx);
+    {
+        let mut clients = server.clients.write().await;
+        let stale_session = clients
+            .get_mut(&stale_client_id)
+            .expect("stale client session");
+        stale_session.transport.last_seen_tick = 0;
+    }
+    server.tick = 5;
+    server.prune_stale_clients().await;
+
+    let summary = server.transport_summary().await;
+    let mut checks = vec![
+        transport_check(
+            "queue_pressure_client_count",
+            summary.queue_pressure_client_count == 1,
+            "1",
+            summary.queue_pressure_client_count.to_string(),
+        ),
+        transport_check(
+            "queue_pressure_events",
+            summary.queue_pressure_events == 1,
+            "1",
+            summary.queue_pressure_events.to_string(),
+        ),
+        transport_check(
+            "timed_out_clients",
+            summary.timed_out_clients == 1,
+            "1",
+            summary.timed_out_clients.to_string(),
+        ),
+    ];
+    if matches!(profile, TransportBenchmarkProfile::ShardTarget) {
+        checks.push(transport_check(
+            "published_baseline.queue_pressure_timeout.total_pending_action_queue_depth",
+            summary.total_pending_action_queue_depth == 6,
+            "6",
+            summary.total_pending_action_queue_depth.to_string(),
+        ));
+        checks.push(transport_check(
+            "published_baseline.queue_pressure_timeout.peak_pending_action_queue_depth",
+            summary.peak_pending_action_queue_depth == 6,
+            "6",
+            summary.peak_pending_action_queue_depth.to_string(),
+        ));
+        checks.push(transport_check(
+            "published_baseline.queue_pressure_timeout.total_inbound_bytes",
+            summary.total_inbound_bytes == 44,
+            "44",
+            summary.total_inbound_bytes.to_string(),
+        ));
+    }
+
+    build_transport_scenario_report(
+        "queue-pressure-timeout",
+        "Exercises backlog pressure and inactivity pruning together so queue depth and timeout counters show up in one cheap degraded-path sample.",
+        summary,
+        checks,
+    )
+}
+
+// ============================================================
 // SERVER ERROR TYPES
 // ============================================================
 
@@ -2027,6 +2758,7 @@ mod tests {
                     trajectory: None,
                     action_trace: Vec::new(),
                     tool_calls: vec![alpha_trace.clone()],
+                    reward_signals: Vec::new(),
                 },
                 AgentTelemetryFrame {
                     tick: 7,
@@ -2042,6 +2774,7 @@ mod tests {
                     trajectory: None,
                     action_trace: Vec::new(),
                     tool_calls: vec![spire_trace.clone()],
+                    reward_signals: Vec::new(),
                 },
             ],
         };
@@ -2246,7 +2979,13 @@ mod tests {
         assert!(summary.clients[0].recovery_snapshot_bytes_sent > 0);
 
         let message = rx.recv().await.expect("recovery snapshot delivered");
-        assert!(matches!(message, ServerMessage::StateDelta { is_full_snapshot: true, .. }));
+        assert!(matches!(
+            message,
+            ServerMessage::StateDelta {
+                is_full_snapshot: true,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -2355,18 +3094,15 @@ mod tests {
             .await
             .unwrap();
 
-        let (reconnect_token, controlled_entity) = match previous_rx
-            .recv()
-            .await
-            .expect("initial welcome")
-        {
-            ServerMessage::Welcome {
-                reconnect_token,
-                controlled_entity,
-                ..
-            } => (reconnect_token, controlled_entity),
-            other => panic!("unexpected initial welcome: {other:?}"),
-        };
+        let (reconnect_token, controlled_entity) =
+            match previous_rx.recv().await.expect("initial welcome") {
+                ServerMessage::Welcome {
+                    reconnect_token,
+                    controlled_entity,
+                    ..
+                } => (reconnect_token, controlled_entity),
+                other => panic!("unexpected initial welcome: {other:?}"),
+            };
 
         {
             let mut clients = server.clients.write().await;
@@ -2409,15 +3145,26 @@ mod tests {
 
         server.handle_connections().await.unwrap();
 
-        assert!(!server.clients.read().await.contains_key(&previous_client_id));
-        assert!(!server.client_tx.read().await.contains_key(&previous_client_id));
+        assert!(!server
+            .clients
+            .read()
+            .await
+            .contains_key(&previous_client_id));
+        assert!(!server
+            .client_tx
+            .read()
+            .await
+            .contains_key(&previous_client_id));
         assert_eq!(server.client_count().await, 1);
         assert_eq!(server.resumed_sessions, 1);
 
         let summary = server.transport_summary().await;
         assert_eq!(summary.resumed_sessions, 1);
         assert_eq!(summary.client_count, 1);
-        assert_eq!(summary.clients[0].client_id, resumed_client_id.0.to_string());
+        assert_eq!(
+            summary.clients[0].client_id,
+            resumed_client_id.0.to_string()
+        );
         assert_eq!(summary.clients[0].session_resumes, 4);
         assert_eq!(summary.clients[0].recovery_snapshots_sent, 2);
         assert_eq!(summary.clients[0].full_snapshot_requests, 2);
@@ -3049,5 +3796,93 @@ mod tests {
                 .map(|value| value["document_type"] == "versioned_tick_telemetry")
                 .unwrap_or(false)
         )));
+    }
+
+    #[tokio::test]
+    async fn transport_benchmark_suite_reports_passing_ci_smoke_scenarios() {
+        let report = run_transport_benchmark_suite(TransportBenchmarkProfile::CiSmoke).await;
+
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.profile, "ci-smoke");
+        assert!(report.all_checks_passed());
+        assert_eq!(report.aggregate.scenario_count, 5);
+        assert_eq!(report.aggregate.scenarios_passed, 5);
+        assert!(report.aggregate.checks.is_empty());
+        assert_eq!(report.aggregate.published_baseline_profile, None);
+        assert!(report.aggregate.total_delta_bytes > 0);
+        assert!(report.aggregate.total_recovery_snapshot_bytes > 0);
+        assert_eq!(report.aggregate.total_recovery_delivery_failures, 1);
+        assert!(report
+            .scenarios
+            .iter()
+            .any(|scenario| scenario.name == "queue-pressure-timeout"));
+    }
+
+    #[tokio::test]
+    async fn transport_benchmark_suite_scales_shard_target_delta_load() {
+        let ci_report = run_transport_benchmark_suite(TransportBenchmarkProfile::CiSmoke).await;
+        let shard_report =
+            run_transport_benchmark_suite(TransportBenchmarkProfile::ShardTarget).await;
+
+        let ci_delta = ci_report
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.name == "steady-delta")
+            .expect("ci delta scenario");
+        let shard_delta = shard_report
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.name == "steady-delta")
+            .expect("shard delta scenario");
+        let ci_recovery = ci_report
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.name == "recovery-success")
+            .expect("ci recovery scenario");
+        let shard_recovery = shard_report
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.name == "recovery-success")
+            .expect("shard recovery scenario");
+
+        assert!(shard_report.all_checks_passed());
+        assert_eq!(
+            shard_report.aggregate.published_baseline_profile.as_deref(),
+            Some("shard-target")
+        );
+        assert_eq!(shard_report.aggregate.checks.len(), 5);
+        assert!(shard_report
+            .aggregate
+            .checks
+            .iter()
+            .all(|check| check.passed));
+        assert!(shard_report
+            .scenarios
+            .iter()
+            .filter(|scenario| scenario.name == "steady-delta")
+            .flat_map(|scenario| scenario.checks.iter())
+            .any(|check| check.metric == "published_baseline.steady_delta.total_delta_bytes"));
+        assert!(shard_report
+            .scenarios
+            .iter()
+            .filter(|scenario| scenario.name == "queue-pressure-timeout")
+            .flat_map(|scenario| scenario.checks.iter())
+            .any(|check| {
+                check.metric
+                    == "published_baseline.queue_pressure_timeout.peak_pending_action_queue_depth"
+            }));
+        assert!(
+            shard_delta.summary.total_delta_bytes > ci_delta.summary.total_delta_bytes,
+            "shard-target should emit more delta bytes than ci-smoke"
+        );
+        assert!(
+            shard_recovery.summary.total_recovery_snapshot_bytes
+                >= ci_recovery.summary.total_recovery_snapshot_bytes,
+            "shard-target recovery path should not emit fewer recovery bytes"
+        );
+        assert!(
+            shard_report.aggregate.total_delta_bytes > ci_report.aggregate.total_delta_bytes,
+            "aggregate delta bytes should scale with shard-target profile"
+        );
     }
 }

@@ -1602,5 +1602,93 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net handle_connections -- --nocapture`
   - `cd apps/pod-web && bun test src/direct-connect.test.ts src/contracts.test.ts src/hud.test.ts`
 
-**Last updated**: Iteration 151
-**Current focus**: Iteration 152 start Phase 8 by wiring asset and benchmark validation into routine local/CI command surfaces
+### Iteration 152
+- [x] Added `apps/pod-web/scripts/verify-generated-assets.ts` plus `bun run verify:assets`, which reruns `sync:assets` and fails if the committed generated source/staged/runtime asset trees drift.
+- [x] Extended the shared browser gate surface in `apps/pod-web/src/render-runtime-gates.ts`, `apps/pod-web/tests/worker-input.e2e.ts`, and `apps/pod-web/scripts/measure-render-routes.ts` with minimum completed-asset-load counts plus average/slowest geometry and sprite load ceilings.
+- [x] Added `bun run measure:render-routes:check`, so the route sampler now records `artifacts/render-route-measurements.json` and fails when browser frame-quality, worker-chatter, or asset-load thresholds regress.
+- [x] Wired both gates into `.github/workflows/ci.yml` and `scripts/run_moat_benchmarks.ts`, and the `pod-web` CI job now uploads `apps/pod-web/artifacts/render-route-measurements.json` plus `apps/pod-web/artifacts/staged-assets/pod-runtime-budget-report.json`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/measure-render-routes.test.ts scripts/verify-generated-assets.test.ts`
+  - `cd apps/pod-web && bun run verify:assets`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run measure:render-routes:check`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+### Iteration 153
+- [x] Added `crates/pod-net/examples/transport_benchmark_suite.rs`, a deterministic in-process transport benchmark that exercises steady delta delivery, recovery success, recovery failure, reconnect-token resume, and queue-pressure/timeout paths.
+- [x] Added structured `TransportBenchmarkReport` surfaces in `crates/pod-net/src/server.rs`, including per-scenario `ShardTransportSummary` payloads plus explicit pass/fail checks, and covered them with deterministic Rust tests.
+- [x] Threaded the new report into `scripts/run_moat_benchmarks.ts` as `transportMeasurements`, bumped the combined moat artifact schema to `2`, and used `--fail-on-checks` so the moat runner now fails if the direct-connect transport benchmark regresses.
+- [x] Documented the new transport benchmark command and the combined moat artifact shape in `docs/benchmark-suite.md` and `README.md`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net transport_benchmark_suite -- --nocapture`
+  - `cargo check -p pod-net --example transport_benchmark_suite`
+  - `cargo run -p pod-net --example transport_benchmark_suite -- --profile ci-smoke --fail-on-checks`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+### Iteration 154
+- [x] Added published shard-target transport baselines directly to `crates/pod-net/src/server.rs`, so the deterministic transport benchmark now checks exact byte and queue-depth envelopes instead of only generic scenario invariants.
+- [x] Extended the transport report aggregate with baseline metadata/checks, bumped the transport report schema to `2`, and documented the shard-target envelope values in `docs/benchmark-suite.md` and `README.md`.
+- [x] Covered the new baseline checks in the deterministic Rust benchmark tests and revalidated the shard-target transport/moat commands.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net transport_benchmark_suite -- --nocapture`
+  - `cargo check -p pod-net --example transport_benchmark_suite`
+  - `cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
+  - `git diff --check`
+
+### Iteration 155
+- [x] Pivoted the active roadmap away from browser/asset infrastructure and back onto the agent stack, based on the live `pod-core` and `pod-agents` source of truth rather than the previous Phase 8 benchmark queue.
+- [x] Added `docs/agent-runtime-audit.md`, documenting how the shared `Agent` runtime, authoritative tick loop, LLM controller, hybrid controller, neural controller, replay surfaces, and ONNX path actually work today.
+- [x] Updated `docs/agent-integration-contract.md` so the public contract matches the real runtime surface (`runtime_profile`, `drain_tool_calls`, telemetry expectations, and the current neural-policy shape).
+- [x] Repointed `IMPLEMENTATION_PHASES.md` and `SESSION.md` to the new active track: neural runtime hardening, reward/replay dataset contracts, evaluation harnesses, and remote agent topology on SpacetimeDB.
+- [x] Revalidated touched targets:
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 156
+- [x] Added explicit neural runtime schema/version metadata in `crates/pod-agents/src/neural_agent.rs`, including `NEURAL_INTERFACE_VERSION`, `NEURAL_FEATURE_COUNT`, `NEURAL_ACTION_COUNT`, `NeuralRuntimeSchema`, `NeuralModelMetadata`, and compatibility validation errors.
+- [x] Replaced scattered neural magic numbers with shared schema constants in the encoder and action-selection path, and re-exported the new schema surface from `crates/pod-agents/src/lib.rs`.
+- [x] Extended `crates/pod-agents/src/onnx_network.rs` so the ONNX path validates caller-supplied model metadata against the shared neural runtime schema instead of relying only on implicit `32 -> 10` assumptions.
+- [x] Added deterministic neural/ONNX tests for schema consistency and metadata mismatch handling, then revalidated the `pod-agents` library test surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 157
+- [x] Replaced the neural action table with an explicit named action schema registry in `crates/pod-agents/src/neural_agent.rs`, so policy outputs are no longer only implied by raw positional constants.
+- [x] Extended the `PolicyNetwork` trait with runtime-status reporting and taught `NeuralAgent::introspect()` to surface policy identity, schema version, compatibility mode, fallback state, last chosen action, and experience-buffer depth.
+- [x] Extended the ONNX policy implementation with runtime-status tracking for last inference fallback and model identity, while preserving the existing uniform-output safety fallback on inference failure.
+- [x] Added deterministic tests for named action-schema contents and neural introspection output, then revalidated the `pod-agents` library test surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 158
+- [x] Added first-pass multi-world runtime contracts to `crates/pod-core/src/contract.rs` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`, so developer-controlled squads, Deadman-style worlds, and alternate-reality links have native engine vocabulary.
+- [x] Exported the new topology surface from `crates/pod-core/src/lib.rs` and covered the TOON/document contract with deterministic unit tests.
+- [x] Added `docs/multi-world-agent-topology.md` and updated `docs/architecture.md`, `docs/agent-integration-contract.md`, `IMPLEMENTATION_PHASES.md`, and `SESSION.md` so the repo now explicitly treats headless multi-world team orchestration as a first-class future runtime surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 159
+- [x] Added authoritative reward telemetry to `crates/pod-core/src/telemetry.rs` via `AgentRewardSignal`, `RewardSource`, and `RewardReason`, and threaded reward traces into `AgentTelemetryFrame`.
+- [x] Added canonical reward attribution in `crates/pod-core/src/tick.rs`, mapping action outcomes plus authoritative world events like damage, kills, capture, gathering, loot, summons, and skill XP into per-agent reward signals.
+- [x] Extended `crates/pod-core/src/replay.rs` so replay-derived `ReplayTrainingSample` rows now include `RewardAttributionSummary` with total reward, polarity totals, signal counts, and terminal-state flags.
+- [x] Updated the agent/runtime docs and live planning state to reflect that reward attribution is now authoritative and replay-derived training rows carry reward summaries.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core replay_training_samples_capture_path_action_and_encounter_transitions -- --nocapture`
+  - `cargo test -p pod-core reward_signal_exports_to_toon_document -- --nocapture`
+  - `cargo test -p pod-core combat_events_generate_authoritative_reward_signals -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents -p pod-net`
+  - `git diff --check`
+
+**Last updated**: Iteration 159
+**Current focus**: Iteration 160 add explicit reward-aware replay dataset export/report surfaces, then build the first headless multi-world team runner on top of the completed reward spine

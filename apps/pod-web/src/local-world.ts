@@ -819,7 +819,7 @@ export class PodWebLocalWorld {
     const player = requireEntity(this.state, PLAYER_ID);
     const desiredChunks = expandDesiredChunkKeys(
       chunkKeyFromPosition(player.position),
-      LOCAL_ACTIVE_CHUNK_RADIUS
+      activeChunkRadiusForPreset(this.presetId)
     );
     const currentChunks = new Set(this.state.activeChunkKeys);
 
@@ -1318,7 +1318,7 @@ function createInitialState(playerName: string, presetId: LocalWorldPresetId): L
 
   draftState.activeChunkKeys = expandDesiredChunkKeys(
     chunkKeyFromPosition(player.position),
-    LOCAL_ACTIVE_CHUNK_RADIUS
+    activeChunkRadiusForPreset(presetId)
   );
 
   for (const chunkKey of draftState.activeChunkKeys) {
@@ -1333,6 +1333,10 @@ function createInitialState(playerName: string, presetId: LocalWorldPresetId): L
   }
 
   return draftState;
+}
+
+function activeChunkRadiusForPreset(presetId: LocalWorldPresetId): number {
+  return presetId === "bootstrap-showcase" ? 5 : LOCAL_ACTIVE_CHUNK_RADIUS;
 }
 
 function authoredTemplateEntities(presetId: LocalWorldPresetId): LocalEntity[] {
@@ -1385,52 +1389,71 @@ function defaultSandboxTemplateEntities(): LocalEntity[] {
 }
 
 function bootstrapShowcaseTemplateEntities(): LocalEntity[] {
+  const campOffset: Vec2Tuple = [10, -18];
+  const campEntities = offsetTemplateEntities(
+    [
+      createNpcEntity(2, "Archivist Mara", [0.2, -1.6]),
+      createNpcEntity(8, "Forgekeeper Ivo", [2.6, -2.2]),
+      createNpcEntity(9, "Warden Selene", [5.0, -1.2]),
+      createWildCreatureEntity(3, "Verdant Lynx", [11.2, 6.2], 18, 32),
+      createWildCreatureEntity(4, "Cinder Hare", [15.2, 0.8], 22, 30),
+      createWildCreatureEntity(10, "Rift Stag", [18.0, 10.6], 26, 36),
+      createResourceEntity(5, "Copper Vein", [6.6, 4.8], "Mining", "copper-ore"),
+      createResourceEntity(6, "Ancient Pine", [-7.8, 7.6], "Woodcutting", "pine-log"),
+      createResourceEntity(11, "Moonstone Outcrop", [15.4, 10.8], "Mining", "moonstone-shard"),
+      createResourceEntity(12, "Silver Birch", [-10.6, 1.2], "Woodcutting", "birch-log"),
+      createLootEntity(7, "Supply Cache", [2.8, -3.4], 48, "travel-ration"),
+      createLootEntity(13, "Expedition Chest", [15.6, 11.8], 96, "ember-charm"),
+      createSceneryEntity(24, "shore cairn", [4.2, -4.2], [0, 0]),
+      createSceneryEntity(25, "shore cairn", [5.6, -3.6], [0, 0]),
+      createSceneryEntity(26, "tideglass monolith", [5.8, -5.2], [0, 0]),
+      createSceneryEntity(29, "attunement pylon", [2.8, -4.8], [0, 0]),
+      createSceneryEntity(30, "attunement pylon", [4.2, -4.4], [0, 0]),
+      createSceneryEntity(31, "breaker cairn", [7.2, -5.4], [0, 0]),
+      createSceneryEntity(32, "breaker cairn", [9.4, -5.8], [0, 0]),
+      createSceneryEntity(34, "tideglass beacon", [10.8, -5.6], [0, 0]),
+      createSceneryEntity(35, "watcher pylon", [8.6, -4.8], [0, 0]),
+      createSceneryEntity(36, "watcher pylon", [9.8, -4.8], [0, 0]),
+      createSceneryEntity(37, "shore cairn", [-2.2, -4.6], [0, 0]),
+      createSceneryEntity(39, "resonant shrine", [0.8, -5.6], [0, 0]),
+      createSceneryEntity(41, "shore cairn", [6.8, -4.6], [0, 0]),
+      createSceneryEntity(42, "shrine pylon", [0.4, -4.8], [0, 0]),
+      createSceneryEntity(43, "shrine pylon", [2.0, -4.8], [0, 0]),
+      createSceneryEntity(44, "breaker cairn", [11.6, -5.4], [0, 0])
+    ],
+    campOffset
+  );
+
   return [
-    createNpcEntity(2, "Archivist Mara", [-2.6, 0.6]),
-    createNpcEntity(8, "Forgekeeper Ivo", [1.8, -0.2]),
-    createNpcEntity(9, "Warden Selene", [2.8, 4.4]),
-    createWildCreatureEntity(3, "Verdant Lynx", [11.2, 6.2], 18, 32),
-    createWildCreatureEntity(4, "Cinder Hare", [15.2, 0.8], 22, 30),
-    createWildCreatureEntity(10, "Rift Stag", [18.0, 10.6], 26, 36),
-    createResourceEntity(5, "Copper Vein", [6.6, 4.8], "Mining", "copper-ore"),
-    createResourceEntity(6, "Ancient Pine", [-7.8, 7.6], "Woodcutting", "pine-log"),
-    createResourceEntity(11, "Moonstone Outcrop", [15.4, 10.8], "Mining", "moonstone-shard"),
-    createResourceEntity(12, "Silver Birch", [-10.6, 1.2], "Woodcutting", "birch-log"),
-    createLootEntity(7, "Supply Cache", [1.0, -1.8], 48, "travel-ration"),
-    createLootEntity(13, "Expedition Chest", [15.6, 11.8], 96, "ember-charm"),
-    createSceneryEntity(20, "wall north", [0, -16.4], [0, 0]),
-    createSceneryEntity(21, "wall south", [0, 16.4], [0, 0]),
-    createSceneryEntity(22, "wall west", [-16.8, 0], [0, 0]),
-    createSceneryEntity(23, "wall east", [16.8, 0], [0, 0]),
-    createSceneryEntity(24, "shore cairn", [4.2, 1.8], [0, 0]),
-    createSceneryEntity(25, "shore cairn", [6.8, 3.4], [0, 0]),
-    createSceneryEntity(26, "tideglass monolith", [7.2, 2.8], [0, 0]),
-    createSceneryEntity(27, "windward pine", [-5.8, 6.8], [0, 0]),
-    createSceneryEntity(28, "windward pine", [-9.2, 4.2], [0, 0]),
-    createSceneryEntity(29, "attunement pylon", [5.9, 0.4], [0, 0]),
-    createSceneryEntity(30, "attunement pylon", [7.8, -0.6], [0, 0]),
-    createSceneryEntity(31, "breaker cairn", [11.2, 8.4], [0, 0]),
-    createSceneryEntity(32, "breaker cairn", [14.4, 7.6], [0, 0]),
-    createSceneryEntity(33, "windward pine", [12.8, -2.6], [0, 0]),
-    createSceneryEntity(34, "tideglass beacon", [16.8, 8.6], [0, 0]),
-    createSceneryEntity(35, "watcher pylon", [13.4, 5.2], [0, 0]),
-    createSceneryEntity(36, "watcher pylon", [15.6, 4.6], [0, 0]),
-    createSceneryEntity(37, "shore cairn", [-3.4, -2.4], [0, 0]),
-    createSceneryEntity(38, "windward pine", [-11.4, -0.8], [0, 0]),
-    createSceneryEntity(39, "resonant shrine", [0.8, -5.2], [0, 0]),
-    createSceneryEntity(40, "windward pine", [3.6, 7.8], [0, 0]),
-    createSceneryEntity(41, "shore cairn", [6.4, 2.2], [0, 0]),
-    createSceneryEntity(42, "shrine pylon", [2.8, -4.2], [0, 0]),
-    createSceneryEntity(43, "shrine pylon", [5.2, -4.6], [0, 0]),
-    createSceneryEntity(44, "breaker cairn", [9.4, 5.0], [0, 0])
+    ...campEntities,
+    createSceneryEntity(27, "windward pine", [-40.0, 16.8], [0, 0]),
+    createSceneryEntity(28, "windward pine", [-33.8, 11.4], [0, 0]),
+    createSceneryEntity(33, "windward pine", [-28.4, 7.2], [0, 0]),
+    createSceneryEntity(38, "windward pine", [-18.0, 0.2], [0, 0]),
+    createSceneryEntity(40, "windward pine", [8.0, -16.4], [0, 0]),
+    createSceneryEntity(45, "weathered boulder", [-33.6, 10.2], [0, 0]),
+    createSceneryEntity(46, "weathered boulder", [-27.4, 5.6], [0, 0]),
+    createSceneryEntity(47, "weathered boulder", [-16.8, 2.2], [0, 0]),
+    createSceneryEntity(48, "shore cairn", [-22.6, 8.2], [0, 0])
   ];
 }
 
 function playerSpawnPosition(presetId: LocalWorldPresetId): Vec2Tuple {
   if (presetId === "bootstrap-showcase") {
-    return [-1.6, -1.2];
+    return [-22, 18];
   }
   return [0, 0];
+}
+
+function offsetTemplateEntities(
+  entities: LocalEntity[],
+  [offsetX, offsetY]: Vec2Tuple
+): LocalEntity[] {
+  return entities.map((entity) => ({
+    ...entity,
+    position: [entity.position[0] + offsetX, entity.position[1] + offsetY],
+    spawn: [entity.spawn[0] + offsetX, entity.spawn[1] + offsetY]
+  }));
 }
 
 function createRegionCatalog(presetId: LocalWorldPresetId): Map<string, LocalRegionState> {
@@ -2500,21 +2523,21 @@ function verdantAtmosphereProfile(): NetworkAtmosphereProfile {
 function resonantShoreAtmosphereProfile(): NetworkAtmosphereProfile {
   return {
     biomeId: "resonant-shore",
-    skyColor: [0.58, 0.76, 0.95, 1],
-    fogColor: [0.68, 0.8, 0.86, 1],
-    fogNear: 24,
-    fogFar: 182,
-    ambientColor: [0.78, 0.88, 0.92],
-    ambientIntensity: 1.48,
-    sunColor: [1, 0.93, 0.8],
-    sunIntensity: 3.08,
-    sunDirection: [26, 42, 22],
-    fillColor: [0.38, 0.78, 0.98],
-    fillIntensity: 1.02,
-    fillDirection: [-16, 12, -12],
-    rimColor: [0.46, 0.92, 0.98],
-    rimIntensity: 10.2,
-    groundColor: [0.18, 0.26, 0.24, 1],
+    skyColor: [0.72, 0.77, 0.82, 1],
+    fogColor: [0.9, 0.89, 0.84, 1],
+    fogNear: 54,
+    fogFar: 320,
+    ambientColor: [0.9, 0.91, 0.88],
+    ambientIntensity: 1.92,
+    sunColor: [1, 0.95, 0.82],
+    sunIntensity: 3.5,
+    sunDirection: [54, 68, 18],
+    fillColor: [0.7, 0.76, 0.78],
+    fillIntensity: 1.04,
+    fillDirection: [-26, 18, -18],
+    rimColor: [0.96, 0.92, 0.84],
+    rimIntensity: 5.4,
+    groundColor: [0.16, 0.2, 0.16, 1],
     starfieldIntensity: 0.05
   };
 }
@@ -3121,38 +3144,38 @@ function movementResponseProfile(entity: LocalEntity): LocalMovementResponseProf
     if (entity.role === "player") {
       return {
         maxSpeedScale: swimScale,
-        acceleration: 0.16,
+        acceleration: 0.11,
         deceleration: 0.08,
-        steeringBoost: 0.28,
-        turnLerp: 0.16
+        steeringBoost: 0.16,
+        turnLerp: 0.1
       };
     }
 
     return {
       maxSpeedScale: swimScale,
-      acceleration: 0.13,
-      deceleration: 0.09,
-      steeringBoost: 0.2,
-      turnLerp: entity.role === "companion" ? 0.19 : 0.17
+      acceleration: 0.1,
+      deceleration: 0.08,
+      steeringBoost: 0.14,
+      turnLerp: entity.role === "companion" ? 0.14 : 0.12
     };
   }
 
   if (entity.role === "player") {
     return {
       maxSpeedScale: 1,
-      acceleration: 0.24,
-      deceleration: 0.32,
-      steeringBoost: 0.44,
-      turnLerp: 0.3
+      acceleration: 0.15,
+      deceleration: 0.18,
+      steeringBoost: 0.18,
+      turnLerp: 0.16
     };
   }
 
   return {
     maxSpeedScale: 1,
-    acceleration: 0.16,
-    deceleration: 0.2,
-    steeringBoost: 0.24,
-    turnLerp: entity.role === "companion" ? 0.24 : 0.2
+    acceleration: 0.13,
+    deceleration: 0.16,
+    steeringBoost: 0.16,
+    turnLerp: entity.role === "companion" ? 0.18 : 0.15
   };
 }
 

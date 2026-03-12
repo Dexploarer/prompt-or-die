@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "generatedAtUnixMs": 1773296405203,
+  "schemaVersion": 2,
+  "generatedAtUnixMs": 1773312847580,
   "baseUrl": "http://127.0.0.1:4178",
   "routes": [
     {
@@ -11,16 +11,24 @@
       "renderThreadFallbackReason": null,
       "loadsCompleted": 15,
       "pendingAssets": 0,
+      "assetLoadPerf": {
+        "geometryLoadsCompleted": 13,
+        "spriteLoadsCompleted": 2,
+        "averageGeometryLoadMs": 5089.55,
+        "averageSpriteLoadMs": 9047.15,
+        "slowestGeometryLoadMs": 5350.5,
+        "slowestSpriteLoadMs": 9047.7
+      },
       "mainThreadPerf": {
-        "warmupMs": 5397.6,
-        "submissionsCompleted": 78,
-        "averageSubmissionMs": 70.11,
-        "slowestSubmissionMs": 5373.1,
+        "warmupMs": 421.6,
+        "submissionsCompleted": 75,
+        "averageSubmissionMs": 389.36,
+        "slowestSubmissionMs": 15731.5,
         "byKind": {
           "frame": {
-            "submissionsCompleted": 78,
-            "averageSubmissionMs": 70.11,
-            "slowestSubmissionMs": 5373.1
+            "submissionsCompleted": 75,
+            "averageSubmissionMs": 389.36,
+            "slowestSubmissionMs": 15731.5
           },
           "control": {
             "submissionsCompleted": 0,
@@ -35,17 +43,27 @@
         }
       },
       "runtimePerf": {
-        "warmupMs": 11383.7,
+        "warmupMs": 421.6,
         "frameBudgetMs": 16.67,
-        "framesRendered": 78,
-        "stableFrames": 77,
-        "slowFrames": 1,
-        "stableFramePercent": 98.7,
-        "slowestFrameMs": 1806.3
+        "framesRendered": 75,
+        "stableFrames": 14,
+        "slowFrames": 61,
+        "stableFramePercent": 18.7,
+        "slowestFrameMs": 15730.8
       },
       "gates": {
         "stableFramePercentFloor": 90,
-        "stableFramePercentFloorPassed": true,
+        "stableFramePercentFloorPassed": false,
+        "completedAssetLoadsFloor": 10,
+        "completedAssetLoadsFloorPassed": true,
+        "averageGeometryLoadMsCeiling": 250,
+        "averageGeometryLoadMsCeilingPassed": false,
+        "averageSpriteLoadMsCeiling": 500,
+        "averageSpriteLoadMsCeilingPassed": false,
+        "slowestGeometryLoadMsCeiling": 2000,
+        "slowestGeometryLoadMsCeilingPassed": false,
+        "slowestSpriteLoadMsCeiling": 1000,
+        "slowestSpriteLoadMsCeilingPassed": false,
         "controlSubmissionCeiling": null,
         "controlSubmissionCeilingPassed": null,
         "resizeSubmissionCeiling": null,
@@ -60,16 +78,24 @@
       "renderThreadFallbackReason": null,
       "loadsCompleted": 14,
       "pendingAssets": 0,
+      "assetLoadPerf": {
+        "geometryLoadsCompleted": 12,
+        "spriteLoadsCompleted": 2,
+        "averageGeometryLoadMs": 11123.68,
+        "averageSpriteLoadMs": 1.85,
+        "slowestGeometryLoadMs": 11125.5,
+        "slowestSpriteLoadMs": 2.5
+      },
       "mainThreadPerf": {
-        "warmupMs": 23.1,
-        "submissionsCompleted": 6,
-        "averageSubmissionMs": 0.03,
-        "slowestSubmissionMs": 0.1,
+        "warmupMs": 1450.1,
+        "submissionsCompleted": 3,
+        "averageSubmissionMs": 0,
+        "slowestSubmissionMs": 0,
         "byKind": {
           "frame": {
-            "submissionsCompleted": 6,
-            "averageSubmissionMs": 0.03,
-            "slowestSubmissionMs": 0.1
+            "submissionsCompleted": 3,
+            "averageSubmissionMs": 0,
+            "slowestSubmissionMs": 0
           },
           "control": {
             "submissionsCompleted": 0,
@@ -84,17 +110,27 @@
         }
       },
       "runtimePerf": {
-        "warmupMs": 21265.6,
+        "warmupMs": 929.4,
         "frameBudgetMs": 16.67,
-        "framesRendered": 5,
-        "stableFrames": 4,
-        "slowFrames": 1,
-        "stableFramePercent": 80,
-        "slowestFrameMs": 8745.9
+        "framesRendered": 2,
+        "stableFrames": 0,
+        "slowFrames": 2,
+        "stableFramePercent": 0,
+        "slowestFrameMs": 693.6
       },
       "gates": {
         "stableFramePercentFloor": 50,
-        "stableFramePercentFloorPassed": true,
+        "stableFramePercentFloorPassed": false,
+        "completedAssetLoadsFloor": 10,
+        "completedAssetLoadsFloorPassed": true,
+        "averageGeometryLoadMsCeiling": 250,
+        "averageGeometryLoadMsCeilingPassed": false,
+        "averageSpriteLoadMsCeiling": 500,
+        "averageSpriteLoadMsCeilingPassed": true,
+        "slowestGeometryLoadMsCeiling": 2000,
+        "slowestGeometryLoadMsCeilingPassed": false,
+        "slowestSpriteLoadMsCeiling": 1000,
+        "slowestSpriteLoadMsCeilingPassed": true,
         "controlSubmissionCeiling": 0,
         "controlSubmissionCeilingPassed": true,
         "resizeSubmissionCeiling": 0,
@@ -103,15 +139,15 @@
     }
   ],
   "comparison": {
-    "mainFrameSubmissions": 78,
-    "workerFrameSubmissions": 6,
-    "frameSubmissionReductionPercent": 92.3,
-    "mainStableFramePercent": 98.7,
-    "workerStableFramePercent": 80,
+    "mainFrameSubmissions": 75,
+    "workerFrameSubmissions": 3,
+    "frameSubmissionReductionPercent": 96,
+    "mainStableFramePercent": 18.7,
+    "workerStableFramePercent": 0,
     "stableFramePercentDelta": -18.7,
-    "mainSlowFrames": 1,
-    "workerSlowFrames": 1,
-    "slowFrameDelta": 0,
-    "workerGatesPassed": true
+    "mainSlowFrames": 61,
+    "workerSlowFrames": 2,
+    "slowFrameDelta": -59,
+    "workerGatesPassed": false
   }
 }

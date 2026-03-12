@@ -27,11 +27,26 @@ cd /Users/home/Desktop/prompt-or-die
 cargo run -p pod-core --example moat_benchmark_suite --release -- --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-core.json
 ```
 
+Direct-connect transport benchmark report:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks --output artifacts/transport-benchmark-shard.json
+```
+
 Combined moat benchmark suite:
 
 ```bash
 cd /Users/home/Desktop/prompt-or-die
 bun ./scripts/run_moat_benchmarks.ts --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-benchmarks.json
+```
+
+Browser asset and render-route regression gates:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die/apps/pod-web
+bun run verify:assets
+bun run measure:render-routes:check
 ```
 
 Fast CI-oriented smoke profile:
@@ -71,9 +86,11 @@ Produced by `scripts/run_moat_benchmarks.ts`.
 It records pass/fail and duration for:
 
 - `cargo test -p pod-render --lib`
+- `cd apps/pod-web && bun run verify:assets`
 - `cd apps/pod-web && bun run typecheck`
 - `cd apps/pod-web && bun test`
 - `cd apps/pod-web && bun run test:smoke`
+- `cd apps/pod-web && bun run measure:render-routes:check`
 
 `bun run test:smoke` now covers two separate browser responsibilities:
 
@@ -119,15 +136,61 @@ provides an artifact-grade browser sample of the same main-vs-worker
 `apps/pod-web/artifacts/render-route-measurements.json` and captures:
 
 - per-route `runtimePerf` and `mainThreadPerf` payloads
+- per-route geometry/sprite load timing stats from `window.podRender.getStats()`
 - gate pass/fail results for stability and worker-route chatter
+- gate pass/fail results for completed-asset-load floors plus average/slowest geometry and sprite load ceilings
 - main-vs-worker frame-submission reduction percentage
 - stable-frame and slow-frame deltas between the two routes
 
 `scripts/run_moat_benchmarks.ts` now includes that payload as
 `browserRouteMeasurements`, so the combined moat artifact records both the
-browser parity checks and the live route measurement summary.
+browser parity checks and the live route measurement summary. The same route
+sampler also has a failing gate mode now: `bun run measure:render-routes:check`.
+Use that for local/CI validation when you want a cheap browser perf threshold
+without running the full smoke suite.
 
-Phase 6 transport counters now exist on the direct-connect debug path as well.
+The generated asset lane is also a first-class benchmark gate now.
+`bun run verify:assets` reruns `sync:assets` and then fails if any committed
+generated source, staged, or runtime asset outputs drift. That keeps the
+binary asset fast path and runtime budget report in routine validation instead
+of depending on manual “did you remember to resync?” discipline.
+
+### Transport benchmark report
+
+Produced by `crates/pod-net/examples/transport_benchmark_suite.rs`.
+
+It runs deterministic in-process direct-connect scenarios for:
+
+- steady-state delta delivery
+- explicit full-snapshot recovery success
+- explicit recovery-delivery failure
+- reconnect-token session resume
+- queue pressure plus inactivity timeout pruning
+
+Each scenario records the full `ShardTransportSummary` payload plus structured
+pass/fail checks. The current checks cover:
+
+- full snapshot count, bytes, and max full-snapshot size
+- recovery snapshot bytes plus recovery-delivery failure accounting
+- delta message count, bytes, max delta size, and entity churn (`updated` / `destroyed`)
+- current and peak pending queue depth plus queue-pressure incidents
+- session-resume counter preservation across reconnect
+- timeout-pruning counters on inactive clients
+
+`scripts/run_moat_benchmarks.ts` now includes that payload as
+`transportMeasurements`, so the combined moat artifact records core,
+transport, browser, and creator bootstrap surfaces together. The transport
+example also supports `--fail-on-checks`, and the combined moat runner uses
+that mode so CI fails if the direct-connect transport invariants regress.
+On the `shard-target` profile, the benchmark now also enforces published
+deterministic baselines for:
+
+- `steady-delta` total delta bytes (`1304`) and max delta size (`163`)
+- `recovery-success` total recovery snapshot bytes (`234`) and max full-snapshot size (`78`)
+- `queue-pressure-timeout` total / peak pending queue depth (`6`) and inbound bytes (`44`)
+- aggregate total full-snapshot bytes (`1187`), total recovery bytes (`234`), total delta bytes (`1816`), peak pending queue depth (`6`), and queue-pressure event count (`1`)
+
+Phase 6 transport counters still exist on the direct-connect debug path too.
 `shard_transport_summary` documents include:
 
 - full snapshot count, bytes, and max full-snapshot size
@@ -135,12 +198,12 @@ Phase 6 transport counters now exist on the direct-connect debug path as well.
 - delta message count, bytes, max delta size, and entity churn (`updated` / `destroyed`)
 - current and peak pending queue depth plus queue-pressure incident counts
 
-Those counters are currently exposed through the browser debug transport summary
-and are now exercised by targeted reconnect/recovery regression tests in
+Those counters remain exposed through the browser debug transport summary and
+are still exercised by targeted reconnect/recovery regression tests in
 `apps/pod-web/src/direct-connect.test.ts` and `crates/pod-net/src/server.rs`.
-They are still not part of a dedicated moat benchmark lane, so the next
-follow-on slice should turn those same degraded-path assertions into a cheap
-repeatable benchmark or threshold report.
+The next follow-on gap is historical drift tracking: the benchmark now has
+published shard-target baselines, but it still needs a routine snapshot
+comparison story across monthly moat reports instead of only pass/fail gates.
 
 ### Creator time-to-first-agent-world
 

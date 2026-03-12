@@ -13,8 +13,8 @@
 
 use glam::Vec2;
 use log::{debug, warn};
-use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 pub use pod_core::{Collider, ColliderShape, Transform};
 
@@ -157,7 +157,11 @@ impl SpatialIndex {
             }
         }
 
-        results.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(Ordering::Equal));
+        results.sort_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(Ordering::Equal)
+        });
         results
     }
 
@@ -197,27 +201,27 @@ impl SpatialIndex {
             .nearest_neighbor_iter(&point)
             .take(count)
             .filter_map(|p| {
-                self.entity_positions.get(&p.entity_id).map(|stored| {
-                    SpatialQueryResult {
+                self.entity_positions
+                    .get(&p.entity_id)
+                    .map(|stored| SpatialQueryResult {
                         entity_id: p.entity_id,
                         position: Vec2::new(stored.x, stored.y),
                         distance: position.distance(Vec2::new(stored.x, stored.y)),
-                    }
-                })
+                    })
             })
             .collect();
 
-        results.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(Ordering::Equal));
+        results.sort_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(Ordering::Equal)
+        });
         results
     }
 
     /// Rebuild the entire R-tree from internal positions
     pub fn rebuild(&mut self) {
-        let points: Vec<RTreePoint> = self
-            .entity_positions
-            .values()
-            .copied()
-            .collect();
+        let points: Vec<RTreePoint> = self.entity_positions.values().copied().collect();
 
         self.tree = rstar::RTree::bulk_load(points);
     }
@@ -234,7 +238,10 @@ impl SpatialIndex {
                     half_width,
                     half_height,
                 } => (half_width * half_width + half_height * half_height).sqrt(),
-                ColliderShape::Capsule { half_height, radius } => half_height.abs() + radius,
+                ColliderShape::Capsule {
+                    half_height,
+                    radius,
+                } => half_height.abs() + radius,
             };
 
             self.entity_positions.insert(
@@ -309,7 +316,10 @@ impl UniformGrid {
     /// Insert an entity at a position
     pub fn insert(&mut self, entity_id: u64, position: Vec2) {
         let cell = self.get_cell(position);
-        self.cells.entry(cell).or_insert_with(HashSet::new).insert(entity_id);
+        self.cells
+            .entry(cell)
+            .or_insert_with(HashSet::new)
+            .insert(entity_id);
     }
 
     /// Get all entities in a specific cell
@@ -557,8 +567,10 @@ impl NavMesh {
 
         // Check obstacles
         for (min, max) in &self.obstacles {
-            if position.x >= min.x && position.x <= max.x
-                && position.y >= min.y && position.y <= max.y
+            if position.x >= min.x
+                && position.x <= max.x
+                && position.y >= min.y
+                && position.y <= max.y
             {
                 return false;
             }

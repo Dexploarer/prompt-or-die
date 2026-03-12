@@ -41,17 +41,20 @@
 
 #![allow(clippy::should_implement_trait)]
 
-pub mod vm;
 pub mod api;
 pub mod sandbox;
+pub mod vm;
 
-pub use vm::ScriptVm;
-pub use api::{ScriptContext, build_api};
+pub use api::{build_api, ScriptContext};
 pub use sandbox::SandboxConfig;
+pub use vm::ScriptVm;
 
 /// Initialize the scripting module
 pub fn init() {
-    log::info!("{} initialized (Lua 5.4 VM with sandbox)", env!("CARGO_PKG_NAME"));
+    log::info!(
+        "{} initialized (Lua 5.4 VM with sandbox)",
+        env!("CARGO_PKG_NAME")
+    );
 }
 
 #[cfg(test)]

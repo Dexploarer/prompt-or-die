@@ -1,6 +1,6 @@
 # Agent Integration Contract
 
-This document defines how an agent integrates with Prompt or Die. It is the main contract for human control, scripted NPCs, LLM agents, neural policies, and system automation.
+This document defines how an agent integrates with Prompt or Die. It is the main runtime contract for human control, scripted NPCs, LLM agents, neural policies, hybrid controllers, and system automation.
 
 ## Core invariant
 
@@ -20,10 +20,12 @@ The core trait lives in `pod-core`:
 pub trait Agent: Send {
     fn id(&self) -> AgentId;
     fn agent_type(&self) -> AgentType;
+    fn runtime_profile(&self) -> AgentRuntimeProfile;
     fn observe(&mut self, observation: Observation);
     fn decide(&mut self) -> Vec<Action>;
     fn constraints(&self) -> &AgentConstraints;
     fn constraints_mut(&mut self) -> &mut AgentConstraints;
+    fn drain_tool_calls(&mut self) -> Vec<AgentToolCallTrace> { /* ... */ }
 
     fn on_join(&mut self) {}
     fn on_leave(&mut self) {}
@@ -41,8 +43,9 @@ The minimum implementation surface is:
 - accept an `Observation`
 - choose zero or more `Action` values
 - expose constraint settings
+- declare a runtime profile for transport, replay, and parity tooling
 
-Everything else is optional lifecycle and debugging support.
+Everything else is optional lifecycle, telemetry, and debugging support.
 
 ## What an agent receives
 
@@ -98,6 +101,8 @@ This means:
 - Returning no actions is valid.
 - Returning stale actions is tolerated for async agents, but validation still applies.
 
+The runtime also drains tool-call traces after `decide()` and records them into the same authoritative telemetry spine as action lifecycle traces.
+
 ## Agent categories
 
 ### Human agents
@@ -112,9 +117,30 @@ Scripted agents are the simplest deterministic integration path. They use observ
 
 LLM agents should translate observations into prompts and translate model outputs back into `Action` values. They must still obey the same runtime constraints and may return delayed decisions if the model response is asynchronous.
 
+In practice, the current LLM path already supports:
+
+- async provider execution
+- prompt templates and parsers
+- stale-action replay
+- conversation memory
+- token budgets
+- decision traces and tool-call traces
+
 ### Neural agents
 
 Neural agents should treat observations as the authoritative sensor input and map them to standard actions or action scores.
+
+The current neural path in `pod-agents` uses:
+
+- a versioned runtime schema for feature/action compatibility
+- a named action schema registry for policy output indices
+- a fixed 32-feature observation encoder
+- a discrete 10-action policy output
+- pluggable `PolicyNetwork` and `ActionSelector` traits
+- optional ONNX-backed inference behind the `onnx` feature
+- introspection-visible policy runtime status, including fallback state
+- replay/training sample extraction on top of authoritative telemetry and replay artifacts
+- authoritative reward summaries and terminal-state flags derived from tick telemetry instead of caller-local reward bookkeeping
 
 ### System agents
 
@@ -134,6 +160,37 @@ Regardless of transport, the gameplay contract does not change:
 - the agent emits standard actions
 - the authoritative runtime validates and applies them
 
+Transport may change latency, batching, and availability. It does not change gameplay authority.
+
+## Teams, worlds, and alternate realities
+
+Agents should also be understood as members of a wider topology, not only as
+controllers attached to one local entity.
+
+The intended direction is:
+
+- agents belong to developer-controlled or autonomous teams
+- teams may operate across multiple authoritative worlds
+- one world's outcomes may produce bounded authored effects in another world
+- those effects still enter the target world through authority, not through an
+  agent bypass
+
+The first-pass topology contracts are now:
+
+- `AgentTeamDefinition`
+- `WorldRealityDefinition`
+- `CrossWorldLinkDefinition`
+- `WorldTournamentDefinition`
+
+They are defined in
+[`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
+and described in
+[`docs/multi-world-agent-topology.md`](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
+This matters for integration because the long-term remote/headless surface is
+not "one browser client per world". It is "one runtime contract across many
+worlds, teams, and evaluation runners."
+
 ## Determinism and safety rules
 
 Agent authors should follow these rules:
@@ -143,6 +200,7 @@ Agent authors should follow these rules:
 - Keep nondeterminism inside the agent implementation, not the world authority path.
 - Treat `Observation` as complete for the current tick; do not rely on hidden state.
 - Use `introspect()` for debugging instead of side-channel state leaks.
+- Treat `runtime_profile()` and drained tool-call traces as part of the observability contract, not optional metadata.
 
 If an agent needs memory, planning, prompt templates, model calls, or policy inference, that belongs inside the agent implementation, not in the world execution layer.
 
@@ -177,5 +235,6 @@ impl Agent for SimpleAgent {
 - Emit only standard `Action` values.
 - Keep world mutation out of agent code.
 - Respect constraint-driven execution.
+- Keep feature schemas, prompt schemas, and model assumptions versioned inside the agent layer.
 - Add tests for observation handling and chosen actions.
 - Use the same path whether the controller is human, scripted, LLM, neural, or remote.

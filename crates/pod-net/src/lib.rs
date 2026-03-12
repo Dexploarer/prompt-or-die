@@ -73,12 +73,16 @@ pub use snapshot::{
     compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntityInteractionHints,
     EntityKind, EntityMetadataSnapshot, EntitySnapshot, InterpolatedSnapshot, InterpolationConfig,
     PredictedActionBatch, ReconciliationReport, RecoveryRequestState, RenderClock, RollbackPreview,
-    SnapshotInterest, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
-    WorldSnapshot,
+    SnapshotInterest, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError,
+    StateDelta, WorldSnapshot,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use server::{GameServer, ServerError};
+pub use server::{
+    run_transport_benchmark_suite, GameServer, ServerError, TransportBenchmarkAggregate,
+    TransportBenchmarkCheck, TransportBenchmarkProfile, TransportBenchmarkReport,
+    TransportBenchmarkScenarioReport,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use client_native::{ClientError, NativeClient};

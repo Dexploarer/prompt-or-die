@@ -4,8 +4,8 @@ use glam::Vec2;
 use mlua::{Lua, Table};
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 const SCRIPT_WORLD_BOUND: f32 = 10_000.0;
@@ -137,7 +137,9 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
     // world.spawn(type, x, y) -> entity_id
     let spawn = lua.create_function(|_, (type_name, x, y): (String, f32, f32)| {
         if type_name.trim().is_empty() {
-            return Err(mlua::Error::external("world.spawn type name cannot be empty"));
+            return Err(mlua::Error::external(
+                "world.spawn type name cannot be empty",
+            ));
         }
         if !x.is_finite() || !y.is_finite() {
             return Err(mlua::Error::external(
@@ -176,7 +178,9 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
     // world.destroy(entity_id)
     let destroy = lua.create_function(|_, id: u64| {
         if id == 0 {
-            return Err(mlua::Error::external("world.destroy entity id must be non-zero"));
+            return Err(mlua::Error::external(
+                "world.destroy entity id must be non-zero",
+            ));
         }
         let mut state = runtime_state()
             .lock()
@@ -191,59 +195,62 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
     world_table.set("destroy", destroy)?;
 
     // world.find_nearest(x, y, radius, tag) -> [{id, x, y, distance}]
-    let find_nearest = lua.create_function(|lua, (x, y, radius, tag): (f32, f32, f32, String)| {
-        if !x.is_finite() || !y.is_finite() || !radius.is_finite() {
-            return Err(mlua::Error::external(
-                "world.find_nearest inputs must be finite values",
-            ));
-        }
-        if radius < 0.0 {
-            return Err(mlua::Error::external(
-                "world.find_nearest radius must be non-negative",
-            ));
-        }
+    let find_nearest =
+        lua.create_function(|lua, (x, y, radius, tag): (f32, f32, f32, String)| {
+            if !x.is_finite() || !y.is_finite() || !radius.is_finite() {
+                return Err(mlua::Error::external(
+                    "world.find_nearest inputs must be finite values",
+                ));
+            }
+            if radius < 0.0 {
+                return Err(mlua::Error::external(
+                    "world.find_nearest radius must be non-negative",
+                ));
+            }
 
-        let tag = tag.trim().to_string();
-        let state = runtime_state()
-            .lock()
-            .map_err(|_| mlua::Error::external("world.find_nearest failed to lock runtime state"))?;
-        let mut matches: Vec<(u64, String, f32, f32, f32)> = state
-            .entities
-            .values()
-            .filter_map(|entity| {
-                if !tag.is_empty() && entity.type_name != tag {
-                    return None;
-                }
-                let dx = entity.position.x - x;
-                let dy = entity.position.y - y;
-                let dist = (dx * dx + dy * dy).sqrt();
-                (dist <= radius).then_some((
-                    entity.entity_id,
-                    entity.type_name.clone(),
-                    entity.position.x,
-                    entity.position.y,
-                    dist,
-                ))
-            })
-            .collect();
-        matches.sort_by(|a, b| {
-            a.4.partial_cmp(&b.4)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
+            let tag = tag.trim().to_string();
+            let state = runtime_state().lock().map_err(|_| {
+                mlua::Error::external("world.find_nearest failed to lock runtime state")
+            })?;
+            let mut matches: Vec<(u64, String, f32, f32, f32)> = state
+                .entities
+                .values()
+                .filter_map(|entity| {
+                    if !tag.is_empty() && entity.type_name != tag {
+                        return None;
+                    }
+                    let dx = entity.position.x - x;
+                    let dy = entity.position.y - y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    (dist <= radius).then_some((
+                        entity.entity_id,
+                        entity.type_name.clone(),
+                        entity.position.x,
+                        entity.position.y,
+                        dist,
+                    ))
+                })
+                .collect();
+            matches.sort_by(|a, b| {
+                a.4.partial_cmp(&b.4)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
 
-        let result = lua.create_table()?;
-        for (index, (entity_id, type_name, ex, ey, distance)) in matches.into_iter().take(32).enumerate() {
-            let row = lua.create_table()?;
-            row.set("id", entity_id)?;
-            row.set("type", type_name)?;
-            row.set("x", ex)?;
-            row.set("y", ey)?;
-            row.set("distance", distance)?;
-            result.set(index + 1, row)?;
-        }
-        Ok(result)
-    })?;
+            let result = lua.create_table()?;
+            for (index, (entity_id, type_name, ex, ey, distance)) in
+                matches.into_iter().take(32).enumerate()
+            {
+                let row = lua.create_table()?;
+                row.set("id", entity_id)?;
+                row.set("type", type_name)?;
+                row.set("x", ex)?;
+                row.set("y", ey)?;
+                row.set("distance", distance)?;
+                result.set(index + 1, row)?;
+            }
+            Ok(result)
+        })?;
     world_table.set("find_nearest", find_nearest)?;
 
     api_table.set("world", world_table)?;
@@ -258,12 +265,13 @@ pub fn build_api(lua: &Lua, context: &ScriptContext) -> mlua::Result<Table> {
             return Err(mlua::Error::external("Event name cannot be empty"));
         }
         if name.len() > 64 {
-            return Err(mlua::Error::external("Event name cannot exceed 64 characters"));
+            return Err(mlua::Error::external(
+                "Event name cannot exceed 64 characters",
+            ));
         }
 
-        let payload = serde_json::to_string(&data).unwrap_or_else(|_| {
-            json!({ "error": "unserializable_event_payload" }).to_string()
-        });
+        let payload = serde_json::to_string(&data)
+            .unwrap_or_else(|_| json!({ "error": "unserializable_event_payload" }).to_string());
 
         let mut state = runtime_state()
             .lock()

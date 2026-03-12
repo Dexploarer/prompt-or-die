@@ -12,10 +12,10 @@
 //!   - Relationship: same non-zero team = Friendly, different non-zero = Hostile, else Neutral
 //!   - Health visibility: only within 100 units
 
-use spacetimedb::{Identity, ReducerContext, Table};
-use crate::tables::*;
 use crate::events::*;
+use crate::tables::*;
 use crate::types::AgentType;
+use spacetimedb::{Identity, ReducerContext, Table};
 
 // ============================================================
 // CONSTANTS
@@ -311,22 +311,13 @@ fn build_self_state_json(obs: &ObserverData, self_data: Option<&TargetData>) -> 
 
     format!(
         r#"{{"entity_id":{},"name":"{}","position":[{:.1},{:.1}],"rotation":{:.3},"velocity":[{:.1},{:.1}],"health":{:.1},"max_health":{:.1},"team":{}}}"#,
-        obs.entity_id, name,
-        obs.pos_x, obs.pos_y,
-        obs.rotation,
-        vel_x, vel_y,
-        health, max_hp,
-        team
+        obs.entity_id, name, obs.pos_x, obs.pos_y, obs.rotation, vel_x, vel_y, health, max_hp, team
     )
 }
 
 /// Find visible entities and build JSON array string.
 /// Applies range check + FOV check, sorts by distance, caps at MAX_VISIBLE_ENTITIES.
-fn build_visible_json(
-    obs: &ObserverData,
-    observer_team: u8,
-    targets: &[TargetData],
-) -> String {
+fn build_visible_json(obs: &ObserverData, observer_team: u8, targets: &[TargetData]) -> String {
     let full_circle = obs.vision_fov >= std::f32::consts::TAU - 0.01;
 
     // Collect visible entities with distance
@@ -348,7 +339,16 @@ fn build_visible_json(
         }
 
         // FOV check (skip if entity has 360° vision)
-        if !full_circle && !is_in_fov(obs.pos_x, obs.pos_y, obs.rotation, obs.vision_fov, target.pos_x, target.pos_y) {
+        if !full_circle
+            && !is_in_fov(
+                obs.pos_x,
+                obs.pos_y,
+                obs.rotation,
+                obs.vision_fov,
+                target.pos_x,
+                target.pos_y,
+            )
+        {
             continue;
         }
 
@@ -378,7 +378,11 @@ fn build_visible_json(
     }
 
     // Sort by distance (closest first) — matches pod-core salience ordering
-    visible.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+    visible.sort_by(|a, b| {
+        a.distance
+            .partial_cmp(&b.distance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Cap at max
     visible.truncate(MAX_VISIBLE_ENTITIES);
@@ -442,7 +446,11 @@ fn build_audible_json(obs: &ObserverData, speeches: &[SpeechData]) -> String {
     }
 
     // Sort by intensity (loudest first)
-    audible.sort_by(|a, b| b.intensity.partial_cmp(&a.intensity).unwrap_or(std::cmp::Ordering::Equal));
+    audible.sort_by(|a, b| {
+        b.intensity
+            .partial_cmp(&a.intensity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Cap at max
     audible.truncate(MAX_AUDIBLE_EVENTS);

@@ -5,11 +5,27 @@ use crate::event::{Event, EventBus};
 use crate::id::EntityId;
 use crate::observation::*;
 use crate::telemetry::{
-    ActionLifecycleStage, ActionSource, AgentTelemetryFrame, TickTelemetryFrame, TrajectorySample,
+    ActionLifecycleStage, ActionSource, AgentRewardSignal, AgentTelemetryFrame, RewardReason,
+    RewardSource, TickTelemetryFrame, TrajectorySample,
 };
 use crate::TICK_DURATION_SECS;
 use glam::{Vec2, Vec3};
 use std::collections::HashMap;
+
+const EXECUTED_ACTION_REWARD: f32 = 0.05;
+const REJECTED_ACTION_PENALTY: f32 = -0.10;
+const QUEUED_ACTION_PENALTY: f32 = -0.02;
+const DAMAGE_DEALT_REWARD_SCALE: f32 = 0.10;
+const DAMAGE_TAKEN_PENALTY_SCALE: f32 = -0.10;
+const KILL_REWARD: f32 = 5.0;
+const DEATH_PENALTY: f32 = -5.0;
+const SKILL_XP_REWARD_SCALE: f32 = 0.01;
+const CREATURE_CAPTURE_REWARD: f32 = 4.0;
+const COMPANION_SUMMON_REWARD: f32 = 0.25;
+const COMPANION_COMMAND_REWARD: f32 = 0.10;
+const RESOURCE_GATHER_REWARD: f32 = 1.0;
+const LOOT_ITEM_REWARD: f32 = 0.25;
+const LOOT_COIN_REWARD_SCALE: f32 = 0.01;
 
 /// Result of a single tick
 #[derive(Debug, Clone)]
@@ -219,6 +235,7 @@ pub fn execute_tick(
     }
 
     let tick_events = events.current_events().to_vec();
+    apply_authoritative_reward_signals(&mut telemetry_frames, &tick_events);
     events.flush(tick + 1);
 
     TickResult {
@@ -1438,6 +1455,205 @@ fn apply_damage_from_source(
     applied_damage
 }
 
+fn apply_authoritative_reward_signals(
+    telemetry_frames: &mut [AgentTelemetryFrame],
+    tick_events: &[crate::event::GameEvent],
+) {
+    let mut agent_to_index = HashMap::<crate::id::AgentId, usize>::new();
+    let mut entity_to_index = HashMap::<EntityId, usize>::new();
+
+    for (index, frame) in telemetry_frames.iter_mut().enumerate() {
+        agent_to_index.insert(frame.agent_id, index);
+        if let Some(entity_id) = frame.entity_id {
+            entity_to_index.insert(entity_id, index);
+        }
+
+        let action_rewards = frame
+            .action_trace
+            .iter()
+            .filter_map(|trace| {
+                let value = match trace.stage {
+                    ActionLifecycleStage::Executed => Some(EXECUTED_ACTION_REWARD),
+                    ActionLifecycleStage::Rejected => Some(REJECTED_ACTION_PENALTY),
+                    ActionLifecycleStage::Queued => Some(QUEUED_ACTION_PENALTY),
+                    ActionLifecycleStage::Submitted => None,
+                }?;
+                let reason = match trace.stage {
+                    ActionLifecycleStage::Executed => RewardReason::ActionExecuted,
+                    ActionLifecycleStage::Rejected => RewardReason::ActionRejected,
+                    ActionLifecycleStage::Queued => RewardReason::ActionQueued,
+                    ActionLifecycleStage::Submitted => return None,
+                };
+                Some(AgentRewardSignal::new(
+                    frame.tick,
+                    RewardSource::ActionOutcome,
+                    reason,
+                    value,
+                    false,
+                    None,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        for reward in action_rewards {
+            frame.record_reward(reward);
+        }
+    }
+
+    for game_event in tick_events {
+        match &game_event.event {
+            Event::Damage {
+                source,
+                target,
+                amount,
+            } => {
+                if let Some(index) = source.and_then(|entity| entity_to_index.get(&entity).copied())
+                {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::DamageDealt,
+                        amount * DAMAGE_DEALT_REWARD_SCALE,
+                        false,
+                        None,
+                    ));
+                }
+                if let Some(index) = entity_to_index.get(target).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::DamageTaken,
+                        amount * DAMAGE_TAKEN_PENALTY_SCALE,
+                        false,
+                        None,
+                    ));
+                }
+            }
+            Event::Kill { killer, victim } => {
+                if let Some(index) = killer.and_then(|entity| entity_to_index.get(&entity).copied())
+                {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::KillSecured,
+                        KILL_REWARD,
+                        false,
+                        None,
+                    ));
+                }
+                if let Some(index) = entity_to_index.get(victim).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::DeathTaken,
+                        DEATH_PENALTY,
+                        true,
+                        None,
+                    ));
+                }
+            }
+            Event::SkillXpGained {
+                entity,
+                skill,
+                amount,
+                ..
+            } => {
+                if let Some(index) = entity_to_index.get(entity).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::SkillExperienceGained,
+                        *amount as f32 * SKILL_XP_REWARD_SCALE,
+                        false,
+                        Some(skill.clone()),
+                    ));
+                }
+            }
+            Event::CreatureCaptured {
+                agent_id,
+                species_id,
+                ..
+            } => {
+                if let Some(index) = agent_to_index.get(agent_id).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::CreatureCaptured,
+                        CREATURE_CAPTURE_REWARD,
+                        false,
+                        Some(species_id.clone()),
+                    ));
+                }
+            }
+            Event::CompanionSummoned {
+                agent_id,
+                species_id,
+            } => {
+                if let Some(index) = agent_to_index.get(agent_id).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::CompanionSummoned,
+                        COMPANION_SUMMON_REWARD,
+                        false,
+                        Some(species_id.clone()),
+                    ));
+                }
+            }
+            Event::CompanionCommandIssued {
+                agent_id, command, ..
+            } => {
+                if let Some(index) = agent_to_index.get(agent_id).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::CompanionCommandIssued,
+                        COMPANION_COMMAND_REWARD,
+                        false,
+                        Some(command.clone()),
+                    ));
+                }
+            }
+            Event::ResourceGathered {
+                entity,
+                skill,
+                quantity,
+                ..
+            } => {
+                if let Some(index) = entity_to_index.get(entity).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::ResourceGathered,
+                        RESOURCE_GATHER_REWARD + *quantity as f32 * 0.25,
+                        false,
+                        Some(skill.clone()),
+                    ));
+                }
+            }
+            Event::LootClaimed {
+                entity,
+                coins,
+                item_count,
+                ..
+            } => {
+                if let Some(index) = entity_to_index.get(entity).copied() {
+                    telemetry_frames[index].record_reward(AgentRewardSignal::new(
+                        game_event.tick,
+                        RewardSource::WorldEvent,
+                        RewardReason::LootClaimed,
+                        *item_count as f32 * LOOT_ITEM_REWARD
+                            + *coins as f32 * LOOT_COIN_REWARD_SCALE,
+                        false,
+                        None,
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Simple movement integration (before full physics)
 fn step_movement(ecs: &mut hecs::World) {
     for (_, (transform, velocity)) in ecs.query_mut::<(&mut Transform, &Velocity)>() {
@@ -2121,6 +2337,10 @@ mod tests {
                 && matches!(trace.source, ActionSource::AgentDecision)
                 && matches!(trace.action, Action::Move { .. })
         }));
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::ActionExecuted
+                && (signal.value - EXECUTED_ACTION_REWARD).abs() < f32::EPSILON
+        }));
     }
 
     #[test]
@@ -2218,6 +2438,10 @@ mod tests {
             telemetry.tool_calls[0].error_message.as_deref(),
             Some("invalid response")
         );
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::ActionExecuted
+                && (signal.value - EXECUTED_ACTION_REWARD).abs() < f32::EPSILON
+        }));
     }
 
     #[test]
@@ -2390,6 +2614,65 @@ mod tests {
             &event.event,
             Event::CreatureCaptured { species_id, .. } if species_id == "spark-mouse"
         )));
+        let telemetry = &result.telemetry.agents[0];
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::CreatureCaptured
+                && (signal.value - CREATURE_CAPTURE_REWARD).abs() < f32::EPSILON
+        }));
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::CompanionSummoned
+                && signal.tag.as_deref() == Some("spark-mouse")
+        }));
+    }
+
+    #[test]
+    fn combat_events_generate_authoritative_reward_signals() {
+        let mut ecs = hecs::World::new();
+        let attacker_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(0.0, 0.0),
+            Team::Team(1),
+            Health::new(100.0),
+        );
+        let target_entity = spawn_actor(
+            &mut ecs,
+            Vec2::new(20.0, 0.0),
+            Team::Team(2),
+            Health::new(10.0),
+        );
+        let target_id = EntityId(target_entity.id() as u64);
+
+        let obs_store = Arc::new(Mutex::new(Vec::new()));
+        let (agent, agent_id) = RecordingAgent::new(vec![], obs_store);
+        let mut slot = AgentSlot::new(Box::new(agent));
+        slot.entity_id = Some(attacker_entity);
+        let mut agents = vec![slot];
+        let mut events = EventBus::new();
+        let mut next_entity_id = 1;
+
+        let result = execute_tick(
+            &mut ecs,
+            &mut agents,
+            &mut events,
+            1,
+            vec![AgentAction {
+                agent_id,
+                tick: 1,
+                action: Action::AttackTarget { target: target_id },
+            }],
+            &mut next_entity_id,
+        );
+
+        let telemetry = &result.telemetry.agents[0];
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::DamageDealt
+                && (signal.value - BASE_ATTACK_DAMAGE * DAMAGE_DEALT_REWARD_SCALE).abs()
+                    < f32::EPSILON
+        }));
+        assert!(telemetry.reward_signals.iter().any(|signal| {
+            signal.reason == RewardReason::KillSecured
+                && (signal.value - KILL_REWARD).abs() < f32::EPSILON
+        }));
     }
 
     #[test]

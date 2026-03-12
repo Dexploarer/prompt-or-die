@@ -25,17 +25,22 @@
 /// Inner module gated behind the `onnx` feature flag.
 #[cfg(feature = "onnx")]
 mod inner {
-    use crate::neural_agent::{ActionSelector, PolicyNetwork};
+    use crate::neural_agent::{
+        ActionSelector, NeuralCompatibilityStatus, NeuralInferenceStatus, NeuralModelMetadata,
+        NeuralPolicyRuntimeStatus, NeuralRuntimeSchema, PolicyNetwork, NEURAL_ACTION_COUNT,
+        NEURAL_FEATURE_COUNT,
+    };
     use std::fmt;
     use std::path::Path;
+    use std::sync::Mutex;
 
     // ─── Constants ────────────────────────────────────────────────────────────
 
     /// Expected input feature vector length (must match NeuralAgent::observation_to_features).
-    pub const EXPECTED_INPUT_SIZE: usize = 32;
+    pub const EXPECTED_INPUT_SIZE: usize = NEURAL_FEATURE_COUNT;
 
-    /// Expected output logit count (must match ACTION_COUNT in neural_agent.rs).
-    pub const EXPECTED_OUTPUT_SIZE: usize = 10;
+    /// Expected output logit count (must match the shared neural action schema).
+    pub const EXPECTED_OUTPUT_SIZE: usize = NEURAL_ACTION_COUNT;
 
     // ─── Error type ───────────────────────────────────────────────────────────
 
@@ -51,6 +56,8 @@ mod inner {
             expected: Vec<usize>,
             got: Vec<usize>,
         },
+        /// The model metadata does not match the current neural runtime schema.
+        MetadataMismatch(String),
         /// An ORT session-level error (environment init, option setting, etc.).
         SessionError(String),
     }
@@ -60,10 +67,10 @@ mod inner {
             match self {
                 OnnxError::LoadError(msg) => write!(f, "ONNX load error: {msg}"),
                 OnnxError::InferenceError(msg) => write!(f, "ONNX inference error: {msg}"),
-                OnnxError::ShapeMismatch { expected, got } => write!(
-                    f,
-                    "ONNX shape mismatch: expected {expected:?}, got {got:?}"
-                ),
+                OnnxError::ShapeMismatch { expected, got } => {
+                    write!(f, "ONNX shape mismatch: expected {expected:?}, got {got:?}")
+                }
+                OnnxError::MetadataMismatch(msg) => write!(f, "ONNX metadata mismatch: {msg}"),
                 OnnxError::SessionError(msg) => write!(f, "ONNX session error: {msg}"),
             }
         }
@@ -90,13 +97,21 @@ mod inner {
         session: ort::Session,
         input_name: String,
         output_name: String,
+        metadata: NeuralModelMetadata,
         /// Expected length of the input feature slice.
         input_size: usize,
         /// Expected length of the output logit slice.
         output_size: usize,
+        last_inference: Mutex<NeuralInferenceStatus>,
     }
 
     impl OnnxPolicyNetwork {
+        pub(crate) fn validate_metadata(metadata: &NeuralModelMetadata) -> Result<(), OnnxError> {
+            NeuralRuntimeSchema::current()
+                .validate_model_metadata(metadata)
+                .map_err(|error| OnnxError::MetadataMismatch(error.to_string()))
+        }
+
         // ── Construction ──────────────────────────────────────────────────
 
         /// Load an ONNX model from a file on disk.
@@ -111,12 +126,41 @@ mod inner {
             let session = ort::Session::builder()
                 .map_err(|e| OnnxError::SessionError(e.to_string()))?
                 .commit_from_file(path)
-                .map_err(|e| OnnxError::LoadError(format!(
-                    "could not load model from '{}': {e}",
-                    path.display()
-                )))?;
+                .map_err(|e| {
+                    OnnxError::LoadError(format!(
+                        "could not load model from '{}': {e}",
+                        path.display()
+                    ))
+                })?;
 
-            Self::from_session(session)
+            let model_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("onnx-policy")
+                .to_string();
+
+            Self::from_session(session, NeuralModelMetadata::current(model_name))
+        }
+
+        /// Load an ONNX model only if the caller-supplied metadata matches the
+        /// current neural runtime schema.
+        pub fn from_file_with_metadata(
+            path: impl AsRef<Path>,
+            metadata: &NeuralModelMetadata,
+        ) -> Result<Self, OnnxError> {
+            Self::validate_metadata(metadata)?;
+            let path = path.as_ref();
+            let session = ort::Session::builder()
+                .map_err(|e| OnnxError::SessionError(e.to_string()))?
+                .commit_from_file(path)
+                .map_err(|e| {
+                    OnnxError::LoadError(format!(
+                        "could not load model from '{}': {e}",
+                        path.display()
+                    ))
+                })?;
+
+            Self::from_session(session, metadata.clone())
         }
 
         /// Load an ONNX model from a byte slice in memory.
@@ -127,16 +171,36 @@ mod inner {
             let session = ort::Session::builder()
                 .map_err(|e| OnnxError::SessionError(e.to_string()))?
                 .commit_from_memory(model_data)
-                .map_err(|e| OnnxError::LoadError(format!(
-                    "could not load model from bytes: {e}"
-                )))?;
+                .map_err(|e| {
+                    OnnxError::LoadError(format!("could not load model from bytes: {e}"))
+                })?;
 
-            Self::from_session(session)
+            Self::from_session(session, NeuralModelMetadata::current("onnx-bytes"))
+        }
+
+        /// Load an in-memory ONNX model only if the caller-supplied metadata
+        /// matches the current neural runtime schema.
+        pub fn from_bytes_with_metadata(
+            model_data: &[u8],
+            metadata: &NeuralModelMetadata,
+        ) -> Result<Self, OnnxError> {
+            Self::validate_metadata(metadata)?;
+            let session = ort::Session::builder()
+                .map_err(|e| OnnxError::SessionError(e.to_string()))?
+                .commit_from_memory(model_data)
+                .map_err(|e| {
+                    OnnxError::LoadError(format!("could not load model from bytes: {e}"))
+                })?;
+
+            Self::from_session(session, metadata.clone())
         }
 
         /// Build the struct from a ready-made `ort::Session`, probing its
         /// input/output metadata.
-        fn from_session(session: ort::Session) -> Result<Self, OnnxError> {
+        fn from_session(
+            session: ort::Session,
+            metadata: NeuralModelMetadata,
+        ) -> Result<Self, OnnxError> {
             // --- Probe input name & size ---
             let input = session
                 .inputs
@@ -159,8 +223,10 @@ mod inner {
                 session,
                 input_name,
                 output_name,
+                metadata,
                 input_size,
                 output_size,
+                last_inference: Mutex::new(NeuralInferenceStatus::Ready),
             })
         }
 
@@ -174,6 +240,10 @@ mod inner {
         /// The number of output logits this model produces.
         pub fn output_size(&self) -> usize {
             self.output_size
+        }
+
+        pub fn runtime_schema(&self) -> NeuralRuntimeSchema {
+            self.metadata.runtime_schema
         }
 
         // ── Internal inference ────────────────────────────────────────────
@@ -204,12 +274,12 @@ mod inner {
                 .map_err(|e| OnnxError::InferenceError(e.to_string()))?;
 
             // Extract the first output tensor
-            let output = outputs
-                .get(&self.output_name)
-                .ok_or_else(|| OnnxError::InferenceError(format!(
+            let output = outputs.get(&self.output_name).ok_or_else(|| {
+                OnnxError::InferenceError(format!(
                     "output '{}' not found in session result",
                     self.output_name
-                )))?;
+                ))
+            })?;
 
             let logits: ort::Tensor<f32> = output
                 .try_extract_tensor::<f32>()
@@ -228,8 +298,18 @@ mod inner {
         /// the model produces unexpected output.
         fn forward(&self, features: &[f32]) -> Vec<f32> {
             match self.run_inference(features) {
-                Ok(logits) => logits,
+                Ok(logits) => {
+                    if let Ok(mut state) = self.last_inference.lock() {
+                        *state = NeuralInferenceStatus::Ready;
+                    }
+                    logits
+                }
                 Err(e) => {
+                    if let Ok(mut state) = self.last_inference.lock() {
+                        *state = NeuralInferenceStatus::Fallback {
+                            reason: e.to_string(),
+                        };
+                    }
                     log::warn!("OnnxPolicyNetwork::forward failed: {e}; returning uniform output");
                     vec![1.0 / self.output_size as f32; self.output_size]
                 }
@@ -239,6 +319,23 @@ mod inner {
         /// Return raw logits (same as `forward` for standard classification models).
         fn get_logits(&self, features: &[f32]) -> Vec<f32> {
             self.forward(features)
+        }
+
+        fn runtime_status(&self) -> NeuralPolicyRuntimeStatus {
+            let last_inference = self
+                .last_inference
+                .lock()
+                .map(|state| state.clone())
+                .unwrap_or(NeuralInferenceStatus::Fallback {
+                    reason: "introspection lock poisoned".to_string(),
+                });
+
+            NeuralPolicyRuntimeStatus {
+                model_name: self.metadata.model_name.clone(),
+                runtime_schema: self.metadata.runtime_schema,
+                compatibility: NeuralCompatibilityStatus::Compatible,
+                last_inference,
+            }
         }
     }
 
@@ -318,10 +415,7 @@ mod inner {
         let scaled: Vec<f32> = logits.iter().map(|&x| x / t).collect();
 
         // Subtract max for numerical stability
-        let max_val = scaled
-            .iter()
-            .cloned()
-            .fold(f32::NEG_INFINITY, f32::max);
+        let max_val = scaled.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
 
         let exps: Vec<f32> = scaled.iter().map(|&x| (x - max_val).exp()).collect();
         let sum: f32 = exps.iter().sum();
@@ -363,7 +457,9 @@ mod tests {
     // ── softmax ───────────────────────────────────────────────────────────────
 
     #[cfg(feature = "onnx")]
-    use super::inner::{argmax, softmax, OnnxError};
+    use super::inner::{argmax, softmax, OnnxError, EXPECTED_INPUT_SIZE, EXPECTED_OUTPUT_SIZE};
+    #[cfg(feature = "onnx")]
+    use crate::neural_agent::{NeuralModelMetadata, NeuralRuntimeSchema};
 
     #[cfg(feature = "onnx")]
     #[test]
@@ -372,7 +468,10 @@ mod tests {
         let probs = softmax(&logits, 1.0);
         assert_eq!(probs.len(), 5);
         let total: f32 = probs.iter().sum();
-        assert!((total - 1.0).abs() < 1e-5, "softmax should sum to 1, got {total}");
+        assert!(
+            (total - 1.0).abs() < 1e-5,
+            "softmax should sum to 1, got {total}"
+        );
     }
 
     #[cfg(feature = "onnx")]
@@ -436,7 +535,10 @@ mod tests {
         // max_by returns the *last* maximum due to Ordering::Less on equal;
         // document the actual behaviour (last index wins in Rust's max_by).
         let idx = argmax(&values);
-        assert!(idx == 0 || idx == 2, "tied argmax should return one of the tied indices");
+        assert!(
+            idx == 0 || idx == 2,
+            "tied argmax should return one of the tied indices"
+        );
     }
 
     #[cfg(feature = "onnx")]
@@ -491,6 +593,14 @@ mod tests {
         assert!(s.contains("session error"), "unexpected: {s}");
     }
 
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn test_onnx_error_display_metadata_mismatch() {
+        let e = OnnxError::MetadataMismatch("bad schema".into());
+        let s = e.to_string();
+        assert!(s.contains("metadata mismatch"), "unexpected: {s}");
+    }
+
     // ── OnnxActionSelector temperature ────────────────────────────────────────
     // These tests mock the selector's temperature-scaling logic without needing
     // an actual .onnx model by verifying the softmax helper used inside it.
@@ -518,9 +628,24 @@ mod tests {
     #[cfg(feature = "onnx")]
     #[test]
     fn test_constants_match_neural_agent() {
-        use super::inner::{EXPECTED_INPUT_SIZE, EXPECTED_OUTPUT_SIZE};
         // These must stay in sync with neural_agent.rs constants.
-        assert_eq!(EXPECTED_INPUT_SIZE, 32);
-        assert_eq!(EXPECTED_OUTPUT_SIZE, 10);
+        assert_eq!(EXPECTED_INPUT_SIZE, crate::neural_agent::NEURAL_FEATURE_COUNT);
+        assert_eq!(EXPECTED_OUTPUT_SIZE, crate::neural_agent::NEURAL_ACTION_COUNT);
+    }
+
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn test_runtime_schema_metadata_validation_rejects_mismatch() {
+        let metadata = NeuralModelMetadata {
+            model_name: "bad-model".to_string(),
+            runtime_schema: NeuralRuntimeSchema {
+                interface_version: 1,
+                feature_count: EXPECTED_INPUT_SIZE + 4,
+                action_count: EXPECTED_OUTPUT_SIZE,
+            },
+        };
+
+        let error = super::inner::OnnxPolicyNetwork::validate_metadata(&metadata).unwrap_err();
+        assert!(matches!(error, OnnxError::MetadataMismatch(_)));
     }
 }

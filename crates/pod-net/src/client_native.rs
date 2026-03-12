@@ -854,15 +854,10 @@ impl NativeClient {
         (250u64.saturating_mul(2u64.pow(self.reconnect_attempts.min(6)))).min(10_000)
     }
 
-    fn schedule_reconnect_backoff(
-        &mut self,
-        now: std::time::Instant,
-        reason: impl Into<String>,
-    ) {
+    fn schedule_reconnect_backoff(&mut self, now: std::time::Instant, reason: impl Into<String>) {
         self.reconnect_attempts = self.reconnect_attempts.saturating_add(1);
-        self.next_reconnect_at = Some(
-            now + std::time::Duration::from_millis(self.reconnect_delay_ms()),
-        );
+        self.next_reconnect_at =
+            Some(now + std::time::Duration::from_millis(self.reconnect_delay_ms()));
         if let Ok(mut runtime) = self.runtime_state.lock() {
             runtime.closed = true;
             runtime.closed_explicitly = false;
@@ -1815,6 +1810,9 @@ mod tests {
             next_reconnect_at: Some(now + std::time::Duration::from_secs(1)),
         };
 
-        assert!(!client.recover_connection().await.expect("backoff should defer"));
+        assert!(!client
+            .recover_connection()
+            .await
+            .expect("backoff should defer"));
     }
 }

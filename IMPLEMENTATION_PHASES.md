@@ -1,16 +1,16 @@
-# Infrastructure Implementation Phases
+# Agent and Runtime Implementation Phases
 
-**Project**: Prompt or Die infrastructure hardening
-**Primary surfaces**: `apps/pod-web`, `crates/pod-assets`, `crates/pod-render`, `crates/pod-net`, `crates/pod-stdb`, docs/tooling
-**Planning basis**: current repo architecture, `IMPLEMENTATION_PLAN.md`, and active browser/runtime work already underway
+**Project**: Prompt or Die runtime hardening and agent intelligence
+**Primary surfaces**: `crates/pod-core`, `crates/pod-agents`, `crates/pod-net`, `crates/pod-stdb`, docs/tooling, with `apps/pod-web` only as a proving ground when agent work needs it
+**Planning basis**: current repo architecture, `IMPLEMENTATION_PLAN.md`, `docs/agent-integration-contract.md`, and `docs/agent-runtime-audit.md`
 **Execution model**: small atomic phases, each independently verifiable, each safe to resume after context loss
 
 ## Scope assumptions
 
-- The immediate priority is infrastructure, not more showcase fiction or encounter content.
-- Runtime asset delivery should converge on precompiled browser-ready formats, not direct heavy authoring-format loading in the browser.
-- `apps/pod-web` is the current highest-leverage proving ground because it exercises rendering, asset ingest, transport, and tooling together.
-- Native/runtime crates should only be touched when the browser-side proof surface exposes a real platform-level gap.
+- Foundation infrastructure phases 1-8 are complete enough to stop being the active track.
+- The immediate priority is the agent stack: shared runtime contracts, neural policy interfaces, replay-derived training data, evaluation, and remote execution topology.
+- `apps/pod-web` remains a consumer and inspection surface, not the driver of the roadmap.
+- Visual/content work is out of scope unless it directly unlocks or validates agent behavior.
 
 ---
 
@@ -200,21 +200,160 @@
 
 ## Phase 8: CI and Regression Gates
 **Type**: Infrastructure
-**Status**: Pending
+**Status**: Complete
 **Estimated**: 2-4 hours
 **Files**: CI config/scripts, `docs/benchmark-suite.md`, test harnesses
 
 **Tasks**:
-- [ ] Add asset-pipeline validation to standard local/CI command surfaces
-- [ ] Add a cheap benchmark or threshold gate for asset load regressions
-- [ ] Ensure smoke routes and binary asset sync remain part of routine validation
+- [x] Add asset-pipeline validation to standard local/CI command surfaces
+- [x] Add a cheap benchmark or threshold gate for asset load regressions
+- [x] Ensure smoke routes and binary asset sync remain part of routine validation
 
 **Verification Criteria**:
-- [ ] CI/local scripts fail on broken asset sync or materially regressed load metrics
-- [ ] Benchmark guidance is documented and repeatable
+- [x] CI/local scripts fail on broken asset sync or materially regressed load metrics
+- [x] Benchmark guidance is documented and repeatable
 
 **Exit Criteria**:
-- Infrastructure regressions are caught by automation rather than manual spot checks
+- [x] Infrastructure regressions are caught by automation rather than manual spot checks
+
+---
+
+## Phase 9: Agent Runtime Audit and Contract Alignment
+**Type**: Agent Runtime
+**Status**: Complete
+**Estimated**: 1-2 hours
+**Files**: `docs/agent-integration-contract.md`, `docs/agent-runtime-audit.md`, `SESSION.md`, `IMPLEMENTATION_PLAN.md`
+
+**Tasks**:
+- [x] Audit the live `Agent` trait, authoritative tick loop, and exported `pod-agents` families instead of planning against stale assumptions
+- [x] Align the public integration contract with the actual runtime surface (`runtime_profile`, `drain_tool_calls`, telemetry/replay expectations)
+- [x] Publish a grounded maturity assessment for human, scripted, LLM, hybrid, and neural controllers
+- [x] Identify the actual weak point in the current stack: neural schema, reward, evaluation, and model lifecycle discipline
+
+**Verification Criteria**:
+- [x] `cargo check -p pod-core -p pod-agents`
+- [x] `git diff --check`
+
+**Exit Criteria**:
+- Agent planning is grounded in the live code, not the old browser-infrastructure queue
+- Public docs no longer describe an outdated `Agent` contract
+
+---
+
+## Phase 10: Neural Runtime Hardening
+**Type**: Agent Runtime
+**Status**: Complete
+**Estimated**: 3-5 hours
+**Files**: `crates/pod-agents/src/neural_agent.rs`, `crates/pod-agents/src/onnx_network.rs`, `crates/pod-agents/src/lib.rs`, `crates/pod-core/src/contract.rs`, docs/tests`
+
+**Tasks**:
+- [x] Extract the neural feature schema into an explicit versioned contract shared by encoder, ONNX loader, tests, and docs
+- [x] Extract the neural action schema into an explicit registry instead of hard-coded positional assumptions buried in one file
+- [x] Add model metadata and compatibility checks so mismatched feature/action layouts fail loudly
+- [x] Add deterministic tests for schema count/version mismatches and inference fallback behavior
+- [x] Surface neural-runtime compatibility and fallback status through introspection/telemetry
+
+**Verification Criteria**:
+- [ ] `cargo test -p pod-agents neural -- --nocapture`
+- [ ] `cargo test -p pod-agents onnx -- --nocapture`
+- [ ] `cargo check -p pod-core -p pod-agents`
+- [ ] `git diff --check`
+
+**Exit Criteria**:
+- Neural models have a stable runtime contract instead of implicit array-shape coupling
+- Schema drift is caught by tests before a model is loaded into gameplay
+
+---
+
+## Phase 11: Reward, Experience, and Replay Dataset Contract
+**Type**: Agent Runtime
+**Status**: Planned
+**Estimated**: 3-5 hours
+**Files**: `crates/pod-core/src/telemetry.rs`, `crates/pod-core/src/replay.rs`, `crates/pod-core/src/tick.rs`, `crates/pod-agents/src/neural_agent.rs`, docs/tooling`
+
+**Tasks**:
+- [x] Define authoritative reward/outcome attribution primitives instead of relying on caller-local `record_experience()` usage
+- [x] Derive replay training rows from action outcomes, encounter transitions, and telemetry windows with stable semantics
+- [ ] Add export tooling for neural datasets grounded in authoritative replay files
+- [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
+
+**Verification Criteria**:
+- [ ] `cargo test -p pod-core replay -- --nocapture`
+- [ ] `cargo test -p pod-agents neural -- --nocapture`
+- [ ] `cargo check -p pod-core -p pod-agents`
+
+**Exit Criteria**:
+- Neural training data is derived from authoritative runtime truth
+- Replay export is a real dataset surface, not just a debug artifact
+
+---
+
+## Phase 12: Agent Evaluation and Parity Harness
+**Type**: Agent Runtime
+**Status**: Planned
+**Estimated**: 3-6 hours
+**Files**: `crates/pod-core/*`, `crates/pod-agents/*`, benchmark scripts/docs`
+
+**Tasks**:
+- [ ] Add scenario/replay-based evaluation harnesses for scripted, LLM, hybrid, and neural agents
+- [ ] Publish common metrics: action validity, objective progress, encounter outcomes, latency, and tool-call reliance
+- [ ] Add parity checks that compare neural behavior against deterministic baselines on curated scenarios
+- [ ] Thread the results into a cheap local benchmark/report surface
+
+**Verification Criteria**:
+- [ ] `cargo test -p pod-agents --lib`
+- [ ] `cargo test -p pod-core parity -- --nocapture`
+- [ ] Benchmark/report command documented and reproducible
+
+**Exit Criteria**:
+- Agent quality is measurable across controller types
+- Neural iteration has a non-anecdotal benchmark target
+
+---
+
+## Phase 13: Remote Agent Topology on SpacetimeDB
+**Type**: Agent Runtime
+**Status**: Planned
+**Estimated**: 4-6 hours
+**Files**: `crates/pod-stdb/*`, `crates/pod-net/*`, `docs/agent-integration-contract.md`, remote agent tooling/tests`
+
+**Tasks**:
+- [ ] Define the observation/action envelope and budget contract for remote agents over SpacetimeDB
+- [ ] Clarify admission, heartbeat, timeout, and fallback rules for remote neural/LLM agents
+- [ ] Ensure transport preserves the same gameplay contract as local in-process agents
+- [ ] Add degraded-network and stale-decision tests for remote autonomous agents
+
+**Verification Criteria**:
+- [ ] `cargo test -p pod-stdb -- --nocapture`
+- [ ] `cargo test -p pod-net transport -- --nocapture`
+- [ ] `cargo check --workspace`
+
+**Exit Criteria**:
+- Remote agent execution is an explicit supported topology, not an implied extension of direct-connect tooling
+
+---
+
+## Phase 14: Multi-World Teams and Reality Links
+**Type**: Agent Runtime
+**Status**: Planned
+**Estimated**: 4-6 hours
+**Files**: `crates/pod-core/src/contract.rs`, `crates/pod-core/*`, `crates/pod-net/*`, `crates/pod-stdb/*`, docs/tooling`
+
+**Tasks**:
+- [x] Define native contract types for teams, worlds, tournaments, and cross-world links
+- [ ] Add a headless team/world runner that can operate without the browser client
+- [ ] Define deterministic cross-world effect application rules at authority boundaries
+- [ ] Thread multi-world team admission and world identity through remote execution topology
+- [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
+
+**Verification Criteria**:
+- [x] `cargo test -p pod-core contract -- --nocapture`
+- [x] `cargo check -p pod-core -p pod-agents`
+- [x] `git diff --check`
+
+**Exit Criteria**:
+- POD supports developer-controlled teams and neural swarms as first-class runtime topology
+- Linked-world tournaments are modeled as explicit engine contracts instead of app-local glue
 
 ---
 
@@ -223,10 +362,10 @@
 - Work one phase at a time, but split again if a phase exceeds 5-8 touched files or 2-4 focused hours.
 - Every phase ends with a validation block copied into `SESSION.md`.
 - If context runs low, resume from `SESSION.md` without needing the prior chat.
-- Do not expand showcase/gameplay content unless it directly unlocks or validates infrastructure.
+- Do not expand showcase/gameplay content unless it directly unlocks or validates agent-runtime work.
 
 ## Immediate Next Actions
 
-1. Start Phase 7 by turning the current plugin/runtime seams into explicit contracts, beginning with the existing extension points already exercised by `pod-assets`, `pod-editor`, and `pod-web`.
-2. Identify which bootstrap and registration paths are still “internal by convention” instead of documented/typed extension hooks.
-3. Keep the current direct-connect transport tests as the regression floor while Phase 7 clarifies where integrators are allowed to attach behavior.
+1. Start Phase 10 by freezing the neural feature schema and action schema into explicit versioned contracts.
+2. Add model metadata plus compatibility checks so ONNX/runtime loads cannot silently assume the wrong tensor layout.
+3. Keep the replay/telemetry spine as the foundation for later reward attribution and evaluation work instead of inventing a parallel neural-only data path.

@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 8 - CI and Regression Gates
-**Current Stage**: Implementation
-**Last Checkpoint**: `b790e13b`
+**Current Phase**: Phase 11 - Reward, Experience, and Replay Dataset Contract
+**Current Stage**: In Progress
+**Last Checkpoint**: `aff7c184`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -123,7 +123,7 @@
 - [apps/pod-web/src/hud.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/hud.ts)
 
 **Known Issues**:
-- The transport counters are now inspectable and regression-tested, but they still live in targeted tests and debug summaries rather than a dedicated moat benchmark lane.
+- The moat suite now has published shard-target transport byte and queue-depth baselines, but it still lacks committed historical shard-target snapshots for transport/browser drift review across monthly runs.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -135,7 +135,83 @@
 - [x] Identified the remaining missing lifecycle/registration hooks that still force integrators into app bootstrap code
 
 **Next Action**:
-- Start Phase 8 by promoting the current asset-sync and benchmark checks into routine local/CI command surfaces.
+- Publish committed shard-target moat snapshots for `transportMeasurements` and `browserRouteMeasurements` so drift can be reviewed historically instead of only through pass/fail gates.
 
-## Phase 8: CI and Regression Gates 🔄
+## Phase 8: CI and Regression Gates ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Added `apps/pod-web/scripts/verify-generated-assets.ts` plus `bun run verify:assets`, so local/CI validation now reruns `sync:assets` and fails if the committed generated source/staged/runtime asset trees drift.
+- [x] Extended the shared render-route gate surface with minimum completed-asset-load counts plus average/slowest geometry and sprite load ceilings in `apps/pod-web/src/render-runtime-gates.ts`, and enforced them in both `apps/pod-web/tests/worker-input.e2e.ts` and `apps/pod-web/scripts/measure-render-routes.ts`.
+- [x] Added `bun run measure:render-routes:check`, which records `artifacts/render-route-measurements.json` and fails when shared frame-quality, worker-chatter, or asset-load thresholds regress.
+- [x] Promoted both new gates into standard command surfaces by wiring them into `.github/workflows/ci.yml` and `scripts/run_moat_benchmarks.ts`, and CI now uploads `apps/pod-web/artifacts/render-route-measurements.json` plus `apps/pod-web/artifacts/staged-assets/pod-runtime-budget-report.json`.
+
+**Key Files**:
+- [apps/pod-web/scripts/verify-generated-assets.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/scripts/verify-generated-assets.ts)
+- [apps/pod-web/scripts/measure-render-routes.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/scripts/measure-render-routes.ts)
+- [apps/pod-web/tests/worker-input.e2e.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/tests/worker-input.e2e.ts)
+- [apps/pod-web/src/render-runtime-gates.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/render-runtime-gates.ts)
+- [.github/workflows/ci.yml](/Users/home/Desktop/prompt-or-die/.github/workflows/ci.yml)
+- [scripts/run_moat_benchmarks.ts](/Users/home/Desktop/prompt-or-die/scripts/run_moat_benchmarks.ts)
+
+**Known Issues**:
+- The browser asset/render-route gates and transport baselines are now routine, but the repo still lacks committed shard-target benchmark snapshots for drift review across monthly runs.
+
+## Phase 9: Agent Runtime Audit and Contract Alignment ✅
+**Completed**: 2026-03-12
+**Summary**: Audited the live agent source of truth in `pod-core` and `pod-agents`, corrected the public agent integration contract to match the actual runtime surface, and published a grounded agent runtime audit that identifies the neural stack as the current weak point.
+
+**Key Files**:
+- [docs/agent-integration-contract.md](/Users/home/Desktop/prompt-or-die/docs/agent-integration-contract.md)
+- [docs/agent-runtime-audit.md](/Users/home/Desktop/prompt-or-die/docs/agent-runtime-audit.md)
+- [crates/pod-core/src/agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/agent.rs)
+- [crates/pod-core/src/tick.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/tick.rs)
+- [crates/pod-agents/src/neural_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/neural_agent.rs)
+- [crates/pod-agents/src/llm_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/llm_agent.rs)
+- [crates/pod-agents/src/hybrid_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/hybrid_agent.rs)
+
+## Phase 10: Neural Runtime Hardening ✅
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Extract the neural feature schema into an explicit versioned contract shared by encoder, ONNX loader, tests, and docs
+- [x] Extract the neural action schema into an explicit registry instead of hard-coded positional assumptions
+- [x] Add model metadata and compatibility checks so mismatched feature/action layouts fail loudly
+- [x] Add deterministic tests for schema mismatch and inference fallback behavior
+- [x] Surface neural-runtime compatibility and fallback status through introspection and telemetry
+
+**Next Action**:
+- Start the reward/replay contract by moving training outcomes away from caller-local `record_experience()` calls and toward authoritative action-outcome attribution.
+
+**Known Issues**:
+- The neural path is functional, but still mostly a thin inference scaffold compared with the LLM and hybrid agents.
+- Reward attribution, dataset export discipline, and scenario evaluation still depend on follow-up phases and are not yet first-class runtime contracts.
+
+## Phase 11: Reward, Experience, and Replay Dataset Contract ⏳
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Define authoritative reward/outcome attribution primitives instead of relying on caller-local `record_experience()` usage
+- [x] Derive replay training rows from action outcomes, encounter transitions, and telemetry windows with stable semantics
+- [ ] Add export tooling for neural datasets grounded in authoritative replay files
+- [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
+
+**Next Action**:
+- Add explicit reward-aware dataset export/report surfaces on top of the new authoritative telemetry signals, then use that completed reward spine to build the first headless multi-world team runner.
+
+**Discovered Follow-up**:
+- The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
+- The first-pass topology contracts for that direction now live in [crates/pod-core/src/contract.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs) and are documented in [docs/multi-world-agent-topology.md](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
+## Phase 14: Multi-World Teams and Reality Links 📋
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Added first-pass topology contracts in `pod-core` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`
+- [x] Documented the intended Deadman-style / neural-swarm architecture in `docs/multi-world-agent-topology.md`
+- [ ] Add a headless team/world runner that can execute developer-controlled squads and autonomous swarms without depending on `apps/pod-web`
+- [ ] Define deterministic cross-world effect application against authoritative world state
+- [ ] Thread world identity and team admission through remote topology and evaluation harnesses
+
+**Next Action**:
+- Keep Phase 11 active for authoritative reward attribution, then use that completed reward spine to build the first headless multi-world runner on top of the new topology contracts.

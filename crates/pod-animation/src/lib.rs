@@ -13,26 +13,29 @@
 #![allow(clippy::derivable_impls)]
 #![allow(clippy::new_without_default)]
 
-pub mod keyframe;
-pub mod easing;
-pub mod state_machine;
 pub mod blending;
+pub mod easing;
+pub mod keyframe;
+pub mod state_machine;
 pub mod tween;
 
+pub use blending::{blend_transforms, AdditiveBlend, BlendNode, CrossfadeBlend};
+pub use easing::{ease, EasingFunction};
 pub use keyframe::{
-    Keyframe, KeyframeValue, AnimationTrack, AnimationClip, AnimationPlayer, AnimPlayback,
+    AnimPlayback, AnimationClip, AnimationPlayer, AnimationTrack, Keyframe, KeyframeValue,
 };
-pub use easing::{EasingFunction, ease};
 pub use state_machine::{
-    AnimState, AnimTransition, TransitionCondition, AnimStateMachine, AnimStatePlayer,
+    AnimState, AnimStateMachine, AnimStatePlayer, AnimTransition, TransitionCondition,
 };
-pub use blending::{blend_transforms, AdditiveBlend, CrossfadeBlend, BlendNode};
-pub use tween::{Tween, TweenTarget, TweenBuilder};
+pub use tween::{Tween, TweenBuilder, TweenTarget};
 
 use hecs::World;
 
 pub fn init() {
-    log::info!("{} initialized — Animation system ready", env!("CARGO_PKG_NAME"));
+    log::info!(
+        "{} initialized — Animation system ready",
+        env!("CARGO_PKG_NAME")
+    );
 }
 
 /// Top-level animation update system.

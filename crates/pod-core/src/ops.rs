@@ -306,13 +306,7 @@ mod tests {
     #[test]
     fn focused_entity_debug_summary_aggregates_from_archive() {
         let mut archive = TelemetryArchive::with_capacity(16);
-        let start = TrajectorySample::new(
-            12,
-            12.0 / 60.0,
-            glam::Vec2::ZERO,
-            glam::Vec2::ZERO,
-            0.0,
-        );
+        let start = TrajectorySample::new(12, 12.0 / 60.0, glam::Vec2::ZERO, glam::Vec2::ZERO, 0.0);
         let end = TrajectorySample::new(
             12,
             13.0 / 60.0,
@@ -431,8 +425,8 @@ mod tests {
             }],
         };
 
-        let value =
-            decode_toon_value(&summary.to_toon_document()).expect("transport summary should decode");
+        let value = decode_toon_value(&summary.to_toon_document())
+            .expect("transport summary should decode");
         assert_eq!(value["document_type"], "shard_transport_summary");
         assert_eq!(value["payload"]["client_count"], 2);
         assert_eq!(value["payload"]["resumed_sessions"], 1);
@@ -453,17 +447,32 @@ mod tests {
         assert_eq!(value["payload"]["clients"][0]["client_id"], "client-a");
         assert_eq!(value["payload"]["clients"][0]["session_resumes"], 1);
         assert_eq!(value["payload"]["clients"][0]["recovery_snapshots_sent"], 2);
-        assert_eq!(value["payload"]["clients"][0]["recovery_delivery_failures"], 1);
-        assert_eq!(value["payload"]["clients"][0]["peak_pending_action_queue_depth"], 4);
+        assert_eq!(
+            value["payload"]["clients"][0]["recovery_delivery_failures"],
+            1
+        );
+        assert_eq!(
+            value["payload"]["clients"][0]["peak_pending_action_queue_depth"],
+            4
+        );
         assert_eq!(value["payload"]["clients"][0]["queue_pressure_events"], 2);
         assert_eq!(value["payload"]["clients"][0]["full_snapshots_sent"], 2);
         assert_eq!(value["payload"]["clients"][0]["full_snapshot_bytes"], 4096);
-        assert_eq!(value["payload"]["clients"][0]["recovery_snapshot_bytes_sent"], 2048);
+        assert_eq!(
+            value["payload"]["clients"][0]["recovery_snapshot_bytes_sent"],
+            2048
+        );
         assert_eq!(value["payload"]["clients"][0]["delta_messages_sent"], 7);
         assert_eq!(value["payload"]["clients"][0]["delta_bytes_sent"], 1024);
         assert_eq!(value["payload"]["clients"][0]["delta_entities_updated"], 18);
-        assert_eq!(value["payload"]["clients"][0]["delta_entities_destroyed"], 3);
+        assert_eq!(
+            value["payload"]["clients"][0]["delta_entities_destroyed"],
+            3
+        );
         assert_eq!(value["payload"]["clients"][0]["queue_pressure"], true);
-        assert_eq!(value["payload"]["clients"][0]["debug_telemetry_enabled"], true);
+        assert_eq!(
+            value["payload"]["clients"][0]["debug_telemetry_enabled"],
+            true
+        );
     }
 }

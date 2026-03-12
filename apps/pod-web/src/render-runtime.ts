@@ -8,6 +8,7 @@ import {
   PodThreeWorldRenderer,
   createPodThreeMainThreadPerfTracker,
   recordPodThreeMainThreadSubmission,
+  resetPodThreeMainThreadPerfTracker,
   snapshotPodThreeMainThreadPerfStats,
   type PodThreeMainThreadSubmissionKind,
   type RenderSurfaceMetrics,
@@ -38,6 +39,7 @@ export interface PodThreeRenderRuntime {
   notifyWorldEvents(events: NetworkGameEvent[]): void | Promise<void>;
   setTelemetryTrail(samples: TelemetryTrajectorySample[]): void | Promise<void>;
   clearTelemetryTrail(): void | Promise<void>;
+  resetPerfMetrics(): void | Promise<void>;
   getStats(): PodThreeRendererStats;
   dispose(): void;
 }
@@ -60,6 +62,11 @@ interface RenderWorkerStatsMessage {
   stats: PodThreeRendererStats;
 }
 
+interface RenderWorkerPerfMetricsResetMessage {
+  type: "perfMetricsReset";
+  stats: PodThreeRendererStats;
+}
+
 interface RenderWorkerRenderCompleteMessage {
   type: "renderComplete";
   stats: PodThreeRendererStats;
@@ -73,6 +80,7 @@ interface RenderWorkerErrorMessage {
 type RenderWorkerResponse =
   | RenderWorkerReadyMessage
   | RenderWorkerStatsMessage
+  | RenderWorkerPerfMetricsResetMessage
   | RenderWorkerRenderCompleteMessage
   | RenderWorkerErrorMessage;
 
@@ -100,6 +108,9 @@ export type RenderWorkerRequest =
     }
   | {
       type: "clearTelemetryTrail";
+    }
+  | {
+      type: "resetPerfMetrics";
     }
   | {
       type: "applyControlState";
@@ -147,9 +158,13 @@ export async function createPodRenderRuntime(
     capabilities,
     Boolean(workerFactory)
   );
+  const defaultWorkerQualityPreset = preference === "worker" ? "performance" : undefined;
   const resolvedOptions: PodThreeWorldRendererOptions = {
     ...options,
-    backendPreference
+    backendPreference,
+    qualityPreset: options.qualityPreset ?? defaultWorkerQualityPreset,
+    enableShadows:
+      options.enableShadows ?? (preference === "worker" ? false : undefined)
   };
 
   if (shouldUseRenderWorker(preference, capabilities) && workerFactory) {
@@ -289,6 +304,12 @@ class MainThreadPodRenderRuntime implements PodThreeRenderRuntime {
     this.renderer.clearTelemetryTrail();
   }
 
+  resetPerfMetrics(): void {
+    const nowMs = monotonicNowMs();
+    resetPodThreeMainThreadPerfTracker(this.mainThreadPerf, nowMs);
+    this.renderer.resetPerfMetrics(nowMs);
+  }
+
   getStats(): PodThreeRendererStats {
     return this.decorateStats(this.renderer.getStats());
   }
@@ -390,6 +411,10 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
   private controlFlushScheduled = false;
   private disposed = false;
   private lastSurfaceMetrics: RenderSurfaceMetrics;
+  private readonly pendingPerfResetResolvers: Array<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
   private readonly handleWindowResize = () => {
     this.syncSurfaceMetrics();
   };
@@ -423,6 +448,12 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
         return;
       }
 
+      if (event.data.type === "perfMetricsReset") {
+        this.latestStats = this.decorateStats(event.data.stats);
+        this.resolvePendingPerfResetResolvers();
+        return;
+      }
+
       if (event.data.type === "renderComplete") {
         this.latestStats = this.decorateStats(event.data.stats);
         this.renderSubmissionInFlight = false;
@@ -432,6 +463,7 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
 
       if (event.data.type === "error") {
         console.error("pod-web render worker error:", event.data.message);
+        this.rejectPendingPerfResetResolvers(new Error(event.data.message));
         this.renderSubmissionInFlight = false;
         this.flushQueuedRenderCommand();
       }
@@ -477,6 +509,21 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
     this.scheduleControlFlush();
   }
 
+  resetPerfMetrics(): Promise<void> {
+    if (this.disposed) {
+      return Promise.resolve();
+    }
+
+    const nowMs = monotonicNowMs();
+    resetPodThreeMainThreadPerfTracker(this.mainThreadPerf, nowMs);
+    this.latestStats = this.decorateStats(this.latestStats);
+
+    return new Promise<void>((resolve, reject) => {
+      this.pendingPerfResetResolvers.push({ resolve, reject });
+      this.worker.postMessage({ type: "resetPerfMetrics" } satisfies RenderWorkerRequest);
+    });
+  }
+
   getStats(): PodThreeRendererStats {
     return this.latestStats;
   }
@@ -492,6 +539,7 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
     this.queuedTelemetryCommand = null;
     this.controlFlushScheduled = false;
     this.renderSubmissionInFlight = false;
+    this.rejectPendingPerfResetResolvers(new Error("render worker disposed"));
     this.worker.postMessage({ type: "dispose" } satisfies RenderWorkerRequest);
     this.worker.terminate();
   }
@@ -582,6 +630,26 @@ class WorkerPodRenderRuntime implements PodThreeRenderRuntime {
       kind
     );
     this.latestStats = this.decorateStats(this.latestStats);
+  }
+
+  private resolvePendingPerfResetResolvers(): void {
+    if (this.pendingPerfResetResolvers.length === 0) {
+      return;
+    }
+    const pendingResolvers = this.pendingPerfResetResolvers.splice(0);
+    for (const resolver of pendingResolvers) {
+      resolver.resolve();
+    }
+  }
+
+  private rejectPendingPerfResetResolvers(error: Error): void {
+    if (this.pendingPerfResetResolvers.length === 0) {
+      return;
+    }
+    const pendingResolvers = this.pendingPerfResetResolvers.splice(0);
+    for (const resolver of pendingResolvers) {
+      resolver.reject(error);
+    }
   }
 
   private decorateStats(stats: PodThreeRendererStats): PodThreeRendererStats {

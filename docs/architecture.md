@@ -127,6 +127,23 @@ The intended responsibilities are:
 - `pod-editor`: authoring UX
 - `pod-assets`: import and generation pipeline
 
+## Multi-world direction
+
+Prompt or Die should support more than one authoritative world at a time.
+The intended shape is:
+
+- one authoritative simulation per world or shard
+- first-class team definitions for developer-controlled squads and neural swarms
+- bounded cross-world links that turn outcomes in one reality into authored
+  effects in another
+- headless tournament and evaluation runners that sit above the worlds instead
+  of depending on the browser client
+
+The current contract surface for that direction lives in
+[`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
+and is documented in
+[`docs/multi-world-agent-topology.md`](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
 ## Current extension seam map
 
 The repo already has a few extension seams that are stronger than the rest of

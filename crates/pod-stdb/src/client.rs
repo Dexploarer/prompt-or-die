@@ -1994,9 +1994,10 @@ impl StdbClient {
     fn refresh_focused_summary_notes(summary: &mut FocusedEntityDebugSummary) {
         summary.notes.clear();
         if summary.tool_error_count > 0 {
-            summary
-                .notes
-                .push(format!("{} tool-call errors retained", summary.tool_error_count));
+            summary.notes.push(format!(
+                "{} tool-call errors retained",
+                summary.tool_error_count
+            ));
         }
         if summary.rejected_action_count > 0 {
             summary.notes.push(format!(
@@ -2010,28 +2011,26 @@ impl StdbClient {
         &mut self,
         agent_entity_id: u64,
     ) -> Option<String> {
-        let tool_document = self
-            .events
-            .iter()
-            .rev()
-            .find_map(|event| match event {
-                StdbEvent::AgentToolCallEventReceived {
-                    agent_entity_id: current_entity_id,
-                    document,
-                    ..
-                } if *current_entity_id == agent_entity_id => Some(document.as_str()),
-                _ => None,
-            })?;
-        let event: AgentToolCallEvent =
-            match decode_toon_document(tool_document, "agent_tool_call_event") {
-                Ok(event) => event,
-                Err(error) => {
-                    log::warn!(
+        let tool_document = self.events.iter().rev().find_map(|event| match event {
+            StdbEvent::AgentToolCallEventReceived {
+                agent_entity_id: current_entity_id,
+                document,
+                ..
+            } if *current_entity_id == agent_entity_id => Some(document.as_str()),
+            _ => None,
+        })?;
+        let event: AgentToolCallEvent = match decode_toon_document(
+            tool_document,
+            "agent_tool_call_event",
+        ) {
+            Ok(event) => event,
+            Err(error) => {
+                log::warn!(
                         "[pod-stdb client] Failed to decode agent_tool_call_event for focused summary synthesis: {error}"
                     );
-                    return None;
-                }
-            };
+                return None;
+            }
+        };
 
         let summary = self.focused_debug_summary_entry(event.agent_entity_id);
         let prior_tool_count = summary.tool_call_count;
@@ -2069,8 +2068,10 @@ impl StdbClient {
             } if *current_entity_id == agent_entity_id => Some(document.as_str()),
             _ => None,
         })?;
-        let rollup: AgentTickRollup = match decode_toon_document(rollup_document, "agent_tick_rollup")
-        {
+        let rollup: AgentTickRollup = match decode_toon_document(
+            rollup_document,
+            "agent_tick_rollup",
+        ) {
             Ok(rollup) => rollup,
             Err(error) => {
                 log::warn!(
@@ -2409,8 +2410,14 @@ mod tests {
         };
         assert_eq!(focused_summary.latest_tick, 60);
         assert_eq!(focused_summary.tool_call_count, 2);
-        assert_eq!(focused_summary.latest_tool_name.as_deref(), Some("llm.complete"));
-        assert_eq!(focused_summary.latest_tool_status.as_deref(), Some("Succeeded"));
+        assert_eq!(
+            focused_summary.latest_tool_name.as_deref(),
+            Some("llm.complete")
+        );
+        assert_eq!(
+            focused_summary.latest_tool_status.as_deref(),
+            Some("Succeeded")
+        );
     }
 
     #[test]
