@@ -353,3 +353,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-core combat_events_generate_authoritative_reward_signals -- --nocapture`
   - `cargo check -p pod-core -p pod-agents -p pod-net`
   - `git diff --check`
+- Added `apps/pod-headless` as the first non-UI runtime app for agent/team/world orchestration, wired it into the workspace, and exposed a deterministic `deadman-neural-cup` scenario driven by the new multi-world topology contracts.
+- The new headless app runs one flagship acceptance simulation per authored world, then emits a JSON report with world runtime metrics, authoritative reward totals/reason counts, cross-world trigger projections, and projected team standings derived from replay telemetry instead of browser-local state.
+- Revalidated the new app with:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`

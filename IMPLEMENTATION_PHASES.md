@@ -267,7 +267,7 @@
 
 ## Phase 11: Reward, Experience, and Replay Dataset Contract
 **Type**: Agent Runtime
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 3-5 hours
 **Files**: `crates/pod-core/src/telemetry.rs`, `crates/pod-core/src/replay.rs`, `crates/pod-core/src/tick.rs`, `crates/pod-agents/src/neural_agent.rs`, docs/tooling`
 
@@ -335,13 +335,13 @@
 
 ## Phase 14: Multi-World Teams and Reality Links
 **Type**: Agent Runtime
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 hours
 **Files**: `crates/pod-core/src/contract.rs`, `crates/pod-core/*`, `crates/pod-net/*`, `crates/pod-stdb/*`, docs/tooling`
 
 **Tasks**:
 - [x] Define native contract types for teams, worlds, tournaments, and cross-world links
-- [ ] Add a headless team/world runner that can operate without the browser client
+- [x] Add a headless team/world runner that can operate without the browser client
 - [ ] Define deterministic cross-world effect application rules at authority boundaries
 - [ ] Thread multi-world team admission and world identity through remote execution topology
 - [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
@@ -349,6 +349,8 @@
 **Verification Criteria**:
 - [x] `cargo test -p pod-core contract -- --nocapture`
 - [x] `cargo check -p pod-core -p pod-agents`
+- [x] `cargo test -p pod-headless`
+- [x] `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
 - [x] `git diff --check`
 
 **Exit Criteria**:
@@ -366,6 +368,6 @@
 
 ## Immediate Next Actions
 
-1. Start Phase 10 by freezing the neural feature schema and action schema into explicit versioned contracts.
-2. Add model metadata plus compatibility checks so ONNX/runtime loads cannot silently assume the wrong tensor layout.
-3. Keep the replay/telemetry spine as the foundation for later reward attribution and evaluation work instead of inventing a parallel neural-only data path.
+1. Add reward-aware dataset export/report tooling on top of the authoritative replay samples so the neural pipeline has a first-class training surface.
+2. Thread team/world identity through the headless runner and remote topology so standings stop being projection-only aggregates.
+3. Replace projected cross-world effects with deterministic authority-side application rules backed by replay/evaluation coverage.

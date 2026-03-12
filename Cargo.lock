@@ -3791,6 +3791,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pod-headless"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "pod-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pod-net"
 version = "0.1.0"
 dependencies = [

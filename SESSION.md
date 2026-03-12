@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 11 - Reward, Experience, and Replay Dataset Contract
+**Current Phase**: Phase 14 - Multi-World Teams and Reality Links
 **Current Stage**: In Progress
-**Last Checkpoint**: `aff7c184`
+**Last Checkpoint**: `17a46e76`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -197,7 +197,7 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Add explicit reward-aware dataset export/report surfaces on top of the new authoritative telemetry signals, then use that completed reward spine to build the first headless multi-world team runner.
+- Add explicit reward-aware dataset export/report surfaces on top of the new authoritative telemetry signals so the neural path has a first-class training artifact, then thread those exports into the new headless runner.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -209,9 +209,9 @@
 **Progress**:
 - [x] Added first-pass topology contracts in `pod-core` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`
 - [x] Documented the intended Deadman-style / neural-swarm architecture in `docs/multi-world-agent-topology.md`
-- [ ] Add a headless team/world runner that can execute developer-controlled squads and autonomous swarms without depending on `apps/pod-web`
+- [x] Added `apps/pod-headless`, a deterministic multi-world runner that executes the built-in `deadman-neural-cup` scenario, emits a JSON report, and projects cross-world effects from authoritative reward telemetry
 - [ ] Define deterministic cross-world effect application against authoritative world state
 - [ ] Thread world identity and team admission through remote topology and evaluation harnesses
 
 **Next Action**:
-- Keep Phase 11 active for authoritative reward attribution, then use that completed reward spine to build the first headless multi-world runner on top of the new topology contracts.
+- Keep Phase 11 active for reward-aware dataset export, then upgrade `apps/pod-headless` from projection-only standings to admission-aware multi-world team execution and authority-side cross-world effect application.

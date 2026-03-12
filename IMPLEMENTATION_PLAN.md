@@ -1690,5 +1690,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-core -p pod-agents -p pod-net`
   - `git diff --check`
 
-**Last updated**: Iteration 159
-**Current focus**: Iteration 160 add explicit reward-aware replay dataset export/report surfaces, then build the first headless multi-world team runner on top of the completed reward spine
+### Iteration 160
+- [x] Added `apps/pod-headless` as a new workspace app and first non-UI entrypoint for deterministic multi-world agent/team evaluation.
+- [x] Implemented the built-in `deadman-neural-cup` scenario on top of `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`, with deterministic per-world seed derivation and per-world `run_flagship_mmo_acceptance(...)` execution.
+- [x] Added authoritative report assembly for world runtime metrics, replay-derived reward totals/reason counts, cross-world trigger matching, projected effect envelopes, and team standings.
+- [x] Added deterministic unit coverage for seed derivation, topology wiring, propagation math, trigger tagging, effect projection, and standing accumulation.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 160
+**Current focus**: Iteration 161 add reward-aware replay dataset export/report surfaces, then thread team/world identity and deterministic cross-world effect application through `apps/pod-headless`

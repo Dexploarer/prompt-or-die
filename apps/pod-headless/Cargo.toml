@@ -1,0 +1,15 @@
+[package]
+name = "pod-headless"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pod-headless"
+path = "src/main.rs"
+
+[dependencies]
+pod-core = { path = "../../crates/pod-core" }
+serde.workspace = true
+serde_json.workspace = true
+env_logger.workspace = true
+log.workspace = true

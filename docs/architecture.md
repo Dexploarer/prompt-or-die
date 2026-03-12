@@ -139,6 +139,12 @@ The intended shape is:
 - headless tournament and evaluation runners that sit above the worlds instead
   of depending on the browser client
 
+The first concrete app surface for that direction is now
+[`apps/pod-headless`](/Users/home/Desktop/prompt-or-die/apps/pod-headless),
+which runs deterministic multi-world scenarios on top of `pod-core`,
+aggregates authoritative reward telemetry, and projects cross-world effects
+without depending on `apps/pod-web`.
+
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
 and is documented in
