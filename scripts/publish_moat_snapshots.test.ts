@@ -80,6 +80,42 @@ describe("publish moat snapshots", () => {
             },
           ],
         },
+        headlessTopology: {
+          sourceSchemaVersion: 2,
+          scenario: "deadman-neural-cup",
+          profile: "shard-target",
+          teamCount: 2,
+          worldCount: 3,
+          linkCount: 3,
+          worldQuestBindingCount: 3,
+          appliedWorldStateCount: 2,
+          evaluationWorldCount: 3,
+          topologyParity: {
+            consistent: true,
+            teams_match: true,
+            worlds_match: true,
+            links_match: true,
+            quest_graphs_match: true,
+            world_quest_bindings_match: true,
+            applied_world_states_match: true,
+            evaluation_match: true,
+            missing_world_quest_binding_ids: [],
+            unexpected_world_quest_binding_ids: [],
+            missing_applied_world_ids: [],
+            unexpected_applied_world_ids: [],
+            missing_evaluation_world_ids: [],
+            unexpected_evaluation_world_ids: [],
+          },
+          checks: [
+            {
+              metric: "topology_parity.consistent",
+              passed: true,
+              expected: "true",
+              observed: "true",
+            },
+          ],
+          allChecksPassed: true,
+        },
         browserRouteMeasurements: {
           schemaVersion: 2,
           routes: [
@@ -168,7 +204,7 @@ describe("publish moat snapshots", () => {
       "2026-03",
     );
 
-    expect(snapshot.schemaVersion).toBe(1);
+    expect(snapshot.schemaVersion).toBe(2);
     expect(snapshot.label).toBe("2026-03");
     expect(snapshot.transport.aggregate.published_baseline_profile).toBe(
       "shard-target",
@@ -186,6 +222,8 @@ describe("publish moat snapshots", () => {
     expect(snapshot.browserRoutes.comparison?.frameSubmissionReductionPercent).toBe(
       93.4,
     );
+    expect(snapshot.headlessTopology.teamCount).toBe(2);
+    expect(snapshot.headlessTopology.topologyParity.consistent).toBe(true);
   });
 
   test("rejects non shard-target moat reports", () => {
@@ -194,6 +232,7 @@ describe("publish moat snapshots", () => {
         {
           profile: "ci-smoke",
           transportMeasurements: null,
+          headlessTopology: null,
           browserRouteMeasurements: null,
         },
         "2026-03",

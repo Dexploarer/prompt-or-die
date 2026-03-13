@@ -15,6 +15,7 @@ AI-agent-native worlds.
 | Authoritative tick stability | Proves shard simulation stays within budget | `pod-core` acceptance harness | Automated |
 | Agent action acceptance/rejection transparency | Proves creators and operators can explain runtime decisions | `pod-core` telemetry | Automated |
 | Browser/native parity | Proves web is a first-class runtime, not an afterthought | `pod-render` tests plus `pod-web` checks | Automated |
+| Multi-world topology parity | Proves the exported remote-topology contract matches quest/effect/evaluation truth | `pod-headless` scenario runner via moat suite | Automated |
 | Creator time-to-first-agent-world | Measures creator adoption friction | Reference bootstrap flow | Scripted |
 | Cost per 100/1000 active agents | Measures operational competitiveness | Acceptance scale target plus host-cost normalization | Semi-automated |
 
@@ -32,6 +33,13 @@ Direct-connect transport benchmark report:
 ```bash
 cd /Users/home/Desktop/prompt-or-die
 cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks --output artifacts/transport-benchmark-shard.json
+```
+
+Headless multi-world topology parity report:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+cargo run -p pod-headless -- --profile shard-target --output artifacts/pod-headless-shard.json --topology-output artifacts/pod-headless-topology-shard.json
 ```
 
 Combined moat benchmark suite:
@@ -155,6 +163,31 @@ generated source, staged, or runtime asset outputs drift. That keeps the
 binary asset fast path and runtime budget report in routine validation instead
 of depending on manual “did you remember to resync?” discipline.
 
+### Headless topology parity report
+
+Produced by `apps/pod-headless` and folded into the combined moat artifact by
+`scripts/run_moat_benchmarks.ts` as `headlessTopology`.
+
+It records:
+
+- scenario/profile identity for the exported topology report
+- admitted team/world/link counts
+- world quest binding count
+- applied world state count
+- evaluation world count
+- the full `topology_parity` payload from `pod-headless`
+- explicit pass/fail checks for:
+  - overall parity consistency
+  - teams/worlds/links/quest-graph parity
+  - world-quest-binding parity
+  - applied-world-state parity
+  - evaluation parity
+
+The moat runner now fails immediately if any of those parity checks regress,
+which means multi-world quest/effect progress is benchmarked through the same
+artifact path as core, transport, and browser surfaces instead of being
+inspectable only through raw headless report JSON.
+
 ### Transport benchmark report
 
 Produced by `crates/pod-net/examples/transport_benchmark_suite.rs`.
@@ -204,6 +237,8 @@ are still exercised by targeted reconnect/recovery regression tests in
 The next follow-on gap is historical drift tracking: the benchmark now has
 published shard-target baselines, but it still needs a routine snapshot
 comparison story across monthly moat reports instead of only pass/fail gates.
+That monthly path now preserves `headlessTopology` too, so historical shard
+snapshots can compare multi-world parity alongside transport and browser data.
 
 ### Creator time-to-first-agent-world
 

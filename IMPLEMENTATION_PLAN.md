@@ -1836,5 +1836,14 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-headless`
   - `git diff --check`
 
-**Last updated**: Iteration 173
-**Current focus**: Iteration 174 promote the headless topology parity report into benchmark/CI surfaces, then extend authority-fed churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring
+### Iteration 174
+- [x] Extended `scripts/run_moat_benchmarks.ts` so the combined moat artifact now runs `pod-headless`, records `headlessTopology`, and fails if `topology_parity` drifts from the exported `RemoteTopologyBundle`.
+- [x] Added deterministic Bun coverage in `scripts/run_moat_benchmarks.test.ts` for passing and failing headless topology parity projection.
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so committed shard-target moat snapshots preserve the new headless topology parity summary instead of dropping it.
+- [x] Revalidated touched targets:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 174
+**Current focus**: Iteration 175 extend authority-fed churn coverage to cross-world quest/effect updates, then replace the generated-runtime adapter seam with real generated binding/runtime wiring

@@ -48,6 +48,60 @@ type TransportMeasurementsReport = {
   };
 };
 
+type HeadlessTopologyParityReport = {
+  consistent: boolean;
+  teams_match: boolean;
+  worlds_match: boolean;
+  links_match: boolean;
+  quest_graphs_match: boolean;
+  world_quest_bindings_match: boolean;
+  applied_world_states_match: boolean;
+  evaluation_match: boolean;
+  missing_world_quest_binding_ids: string[];
+  unexpected_world_quest_binding_ids: string[];
+  missing_applied_world_ids: string[];
+  unexpected_applied_world_ids: string[];
+  missing_evaluation_world_ids: string[];
+  unexpected_evaluation_world_ids: string[];
+};
+
+type HeadlessTopologySourceReport = {
+  schema_version: number;
+  scenario: string;
+  profile: string;
+  teams: Array<{ team_id: string }>;
+  worlds: Array<{ world_id: string }>;
+  links: Array<{ link_id: string }>;
+  world_quest_bindings: Array<{ world_id: string; quest_graph_ids: string[] }>;
+  applied_world_states: Array<{ world_id: string }>;
+  evaluation: {
+    worlds: Array<{ world_id: string }>;
+  };
+  topology_parity: HeadlessTopologyParityReport;
+};
+
+type HeadlessTopologyCheck = {
+  metric: string;
+  passed: boolean;
+  expected: string;
+  observed: string;
+};
+
+type HeadlessTopologyMeasurementsReport = {
+  sourceSchemaVersion: number;
+  scenario: string;
+  profile: string;
+  teamCount: number;
+  worldCount: number;
+  linkCount: number;
+  worldQuestBindingCount: number;
+  appliedWorldStateCount: number;
+  evaluationWorldCount: number;
+  topologyParity: HeadlessTopologyParityReport;
+  checks: HeadlessTopologyCheck[];
+  allChecksPassed: boolean;
+};
+
 type CreatorTimeReport =
   | {
       status: "manual_pending";
@@ -66,10 +120,77 @@ type CombinedReport = {
   profile: Options["profile"];
   core: unknown;
   transportMeasurements: TransportMeasurementsReport;
+  headlessTopology: HeadlessTopologyMeasurementsReport;
   browserNativeParity: BrowserParityReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
   creatorTimeToFirstAgentWorld: CreatorTimeReport;
 };
+
+function buildBooleanCheck(
+  metric: string,
+  observed: boolean,
+): HeadlessTopologyCheck {
+  return {
+    metric,
+    passed: observed,
+    expected: "true",
+    observed: String(observed),
+  };
+}
+
+export function buildHeadlessTopologyMeasurements(
+  report: HeadlessTopologySourceReport,
+): HeadlessTopologyMeasurementsReport {
+  const checks = [
+    buildBooleanCheck(
+      "topology_parity.consistent",
+      report.topology_parity.consistent,
+    ),
+    buildBooleanCheck(
+      "topology_parity.teams_match",
+      report.topology_parity.teams_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.worlds_match",
+      report.topology_parity.worlds_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.links_match",
+      report.topology_parity.links_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.quest_graphs_match",
+      report.topology_parity.quest_graphs_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.world_quest_bindings_match",
+      report.topology_parity.world_quest_bindings_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.applied_world_states_match",
+      report.topology_parity.applied_world_states_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.evaluation_match",
+      report.topology_parity.evaluation_match,
+    ),
+  ];
+
+  return {
+    sourceSchemaVersion: report.schema_version,
+    scenario: report.scenario,
+    profile: report.profile,
+    teamCount: report.teams.length,
+    worldCount: report.worlds.length,
+    linkCount: report.links.length,
+    worldQuestBindingCount: report.world_quest_bindings.length,
+    appliedWorldStateCount: report.applied_world_states.length,
+    evaluationWorldCount: report.evaluation.worlds.length,
+    topologyParity: report.topology_parity,
+    allChecksPassed: checks.every((check) => check.passed),
+    checks,
+  };
+}
 
 function parseArgs(argv: string[]): Options {
   const options: Options = {
@@ -310,6 +431,29 @@ async function main() {
   const transportMeasurements = JSON.parse(
     transportCommand.stdout,
   ) as TransportMeasurementsReport;
+  const headlessCommand = runCommand(
+    "headless-topology-benchmark",
+    ["cargo", "run", "-p", "pod-headless", "--", "--profile", options.profile],
+    repoRoot,
+  );
+  if (!headlessCommand.summary.ok) {
+    throw new Error(
+      `headless topology benchmark failed:\n${headlessCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+    );
+  }
+  const headlessTopology = buildHeadlessTopologyMeasurements(
+    JSON.parse(headlessCommand.stdout) as HeadlessTopologySourceReport,
+  );
+  if (!headlessTopology.allChecksPassed) {
+    const failedChecks = headlessTopology.checks
+      .filter((check) => !check.passed)
+      .map(
+        (check) =>
+          `${check.metric} expected ${check.expected} observed ${check.observed}`,
+      )
+      .join("\n");
+    throw new Error(`headless topology parity checks failed:\n${failedChecks}`);
+  }
   let browserNativeParity: BrowserParityReport | null = null;
   let browserRouteMeasurements: BrowserRouteMeasurementsReport | null = null;
   if (!options.skipBrowser) {
@@ -358,11 +502,12 @@ async function main() {
   }
 
   const report: CombinedReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAtUnixMs: Date.now(),
     profile: options.profile,
     core,
     transportMeasurements,
+    headlessTopology,
     browserNativeParity,
     browserRouteMeasurements,
     creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),
@@ -374,7 +519,9 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

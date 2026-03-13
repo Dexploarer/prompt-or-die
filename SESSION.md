@@ -227,6 +227,7 @@
 - [x] Added generated-mode coverage in both `pod-stdb` and `pod-net::SpacetimeDBClient`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through the existing debug stream
 - [x] Added `pod-net` networking integration coverage for authority-fed topology churn and world switching, proving a newer `remote_topology_document` row rebuilds snapshot metadata while a stale older row cannot roll the active world/evaluation state back
 - [x] Added `topology_parity` plus `world_quest_bindings` to the `pod-headless` report, so the headless evaluation surface now verifies that the exported `RemoteTopologyBundle` exactly matches the applied world state and evaluation data it publishes
+- [x] Promoted the `pod-headless` topology parity surface into the moat benchmark path: `scripts/run_moat_benchmarks.ts` now runs `pod-headless`, records `headlessTopology`, fails on parity drift, and `scripts/publish_moat_snapshots.ts` now preserves the same headless topology data in committed shard-target snapshots
 
 **Next Action**:
-- Promote the new headless topology parity report into benchmark/CI surfaces, then extend the authority-fed churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring.
+- Extend the authority-fed churn coverage to cross-world quest/effect updates, then replace the generated-runtime adapter seam with real generated binding/runtime wiring.

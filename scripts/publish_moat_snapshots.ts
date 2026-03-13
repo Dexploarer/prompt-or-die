@@ -156,14 +156,54 @@ type BrowserRouteMeasurementsReport = {
   } | null;
 };
 
+type HeadlessTopologyParityReport = {
+  consistent: boolean;
+  teams_match: boolean;
+  worlds_match: boolean;
+  links_match: boolean;
+  quest_graphs_match: boolean;
+  world_quest_bindings_match: boolean;
+  applied_world_states_match: boolean;
+  evaluation_match: boolean;
+  missing_world_quest_binding_ids: string[];
+  unexpected_world_quest_binding_ids: string[];
+  missing_applied_world_ids: string[];
+  unexpected_applied_world_ids: string[];
+  missing_evaluation_world_ids: string[];
+  unexpected_evaluation_world_ids: string[];
+};
+
+type HeadlessTopologyCheck = {
+  metric: string;
+  passed: boolean;
+  expected: string;
+  observed: string;
+};
+
+type HeadlessTopologyMeasurementsReport = {
+  sourceSchemaVersion: number;
+  scenario: string;
+  profile: string;
+  teamCount: number;
+  worldCount: number;
+  linkCount: number;
+  worldQuestBindingCount: number;
+  appliedWorldStateCount: number;
+  evaluationWorldCount: number;
+  topologyParity: HeadlessTopologyParityReport;
+  checks: HeadlessTopologyCheck[];
+  allChecksPassed: boolean;
+};
+
 type CombinedReport = {
   profile: string;
   transportMeasurements: TransportMeasurementsReport | null;
+  headlessTopology: HeadlessTopologyMeasurementsReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
 };
 
 export type PublishedMoatSnapshot = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   label: string;
   profile: "shard-target";
   transport: {
@@ -180,6 +220,7 @@ export type PublishedMoatSnapshot = {
     >;
     comparison: BrowserRouteMeasurementsReport["comparison"];
   };
+  headlessTopology: HeadlessTopologyMeasurementsReport;
 };
 
 type Options = {
@@ -454,6 +495,43 @@ function normalizeBrowserRouteMeasurements(
   };
 }
 
+function normalizeHeadlessTopologyMeasurements(
+  report: HeadlessTopologyMeasurementsReport,
+): PublishedMoatSnapshot["headlessTopology"] {
+  return {
+    sourceSchemaVersion: report.sourceSchemaVersion,
+    scenario: report.scenario,
+    profile: report.profile,
+    teamCount: report.teamCount,
+    worldCount: report.worldCount,
+    linkCount: report.linkCount,
+    worldQuestBindingCount: report.worldQuestBindingCount,
+    appliedWorldStateCount: report.appliedWorldStateCount,
+    evaluationWorldCount: report.evaluationWorldCount,
+    topologyParity: {
+      ...report.topologyParity,
+      missing_world_quest_binding_ids: [
+        ...report.topologyParity.missing_world_quest_binding_ids,
+      ],
+      unexpected_world_quest_binding_ids: [
+        ...report.topologyParity.unexpected_world_quest_binding_ids,
+      ],
+      missing_applied_world_ids: [...report.topologyParity.missing_applied_world_ids],
+      unexpected_applied_world_ids: [
+        ...report.topologyParity.unexpected_applied_world_ids,
+      ],
+      missing_evaluation_world_ids: [
+        ...report.topologyParity.missing_evaluation_world_ids,
+      ],
+      unexpected_evaluation_world_ids: [
+        ...report.topologyParity.unexpected_evaluation_world_ids,
+      ],
+    },
+    checks: report.checks.map((check) => ({ ...check })),
+    allChecksPassed: report.allChecksPassed,
+  };
+}
+
 export function normalizeShardTargetMoatSnapshot(
   report: CombinedReport,
   label: string,
@@ -469,14 +547,20 @@ export function normalizeShardTargetMoatSnapshot(
   if (!report.browserRouteMeasurements) {
     throw new Error("missing browserRouteMeasurements in moat report");
   }
+  if (!report.headlessTopology) {
+    throw new Error("missing headlessTopology in moat report");
+  }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     label,
     profile: "shard-target",
     transport: normalizeTransportMeasurements(report.transportMeasurements),
     browserRoutes: normalizeBrowserRouteMeasurements(
       report.browserRouteMeasurements,
+    ),
+    headlessTopology: normalizeHeadlessTopologyMeasurements(
+      report.headlessTopology,
     ),
   };
 }

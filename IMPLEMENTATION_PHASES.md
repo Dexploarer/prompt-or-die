@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Thread the new `pod-headless` topology parity report into benchmark/CI surfaces so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
-2. Replace the new generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
-3. Extend the churn/world-switch coverage to cross-world quest/effect update flows on top of the authority-fed path.
+1. Extend the churn/world-switch coverage to cross-world quest/effect update flows on top of the authority-fed path.
+2. Replace the generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
+3. Thread the authority-fed topology row path into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.

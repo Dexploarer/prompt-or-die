@@ -432,3 +432,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Threaded remote topology into the headless evaluation surface too: `apps/pod-headless/src/main.rs` now emits `world_quest_bindings` and a `topology_parity` report that checks the exported `RemoteTopologyBundle` against the same applied world state and evaluation summaries the scenario report publishes.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
+- Promoted that headless topology parity surface into the moat benchmark contract: `scripts/run_moat_benchmarks.ts` now runs `pod-headless`, records `headlessTopology`, and fails when parity checks drift, while `scripts/publish_moat_snapshots.ts` now keeps the same headless summary in shard-target benchmark snapshots.
