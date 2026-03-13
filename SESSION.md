@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `a9f2dda1`
+**Last Checkpoint**: `b1900b3f`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -237,6 +237,8 @@
 - [x] Added `GeneratedBindingCallbacks`, `GeneratedRemoteTopologyDocumentRow`, `GeneratedRuntimeTrace`, and `build_generated_runtime_callback_bridge(...)`, so generated-mode topology ingestion now has one typed callback surface instead of bespoke per-test bridge wiring
 - [x] Replaced the last ad hoc generated-topology bridge wiring in `pod-stdb` integration coverage and `pod-net` topology-feed measurements with the shared callback bridge plus typed row inserts
 - [x] Added generated-path linked-world quest/effect churn coverage in both `pod-stdb` and `pod-net`, proving newer generated-mode topology rows update linked-world quest bindings, applied state, evaluation, and snapshot metadata while stale older rows are ignored
+- [x] Added `GeneratedBindingCommand`, `GeneratedBindingRuntime`, and `GeneratedBindingEndpoint`, so generated mode now has a command-driven runtime seam that records outbound connect/subscribe/disconnect requests and accepts inbound callbacks separately instead of auto-acking connect/subscription hooks
+- [x] Moved the public generated-mode integration path in `pod-stdb` and the moat/public generated path in `pod-net` onto that command-driven runtime, including explicit connect/subscription command assertions before topology-row callbacks are delivered
 
 **Next Action**:
-- Replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the generated binding layer exists, then project that live generated feed into the parity/evaluation harnesses.
+- Swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the generated binding layer exists, then project that live generated feed into the parity/evaluation harnesses.

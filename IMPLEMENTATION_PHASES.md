@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the generated binding layer is available.
+1. Swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the generated binding layer is available.
 2. Feed that live generated topology stream into the parity/evaluation harnesses so the moat path stops depending on helper-driven callback injection.
 3. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history so topology-feed drift becomes historical, not just pass/fail.

@@ -227,22 +227,42 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
         connection_mode: StdbConnectionMode::Generated,
         ..StdbClientConfig::default()
     });
-    let (bridge, callbacks, trace) =
-        build_generated_runtime_callback_bridge(vec![1, 2, 3, 4], "tok-generated");
-    client.set_generated_runtime_bridge(bridge);
+    let (runtime, endpoint) = GeneratedBindingRuntime::new();
+    let callbacks = endpoint.callbacks();
+    client.set_generated_runtime(Box::new(runtime));
 
     client.connect().expect("generated runtime should connect");
-    assert_eq!(trace.connect_configs().len(), 1);
+    let commands = endpoint.drain_commands();
+    assert_eq!(commands.len(), 1);
+    match &commands[0] {
+        GeneratedBindingCommand::Connect { config } => {
+            assert_eq!(config.db_name, "deadman-shadow");
+            assert!(matches!(
+                config.connection_mode,
+                StdbConnectionMode::Generated
+            ));
+        }
+        other => panic!("expected connect command, got {other:?}"),
+    }
+    callbacks.connected(vec![1, 2, 3, 4], "tok-generated");
     client.frame_tick();
     assert!(client.is_connected());
 
     client
         .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
         .expect("subscription should be routed to runtime");
-    assert_eq!(
-        trace.subscription_queries(),
-        vec![vec!["SELECT * FROM remote_topology_document".to_string()]]
-    );
+    let commands = endpoint.drain_commands();
+    assert_eq!(commands.len(), 1);
+    match &commands[0] {
+        GeneratedBindingCommand::Subscribe { queries } => {
+            assert_eq!(
+                queries,
+                &vec!["SELECT * FROM remote_topology_document".to_string()]
+            );
+        }
+        other => panic!("expected subscribe command, got {other:?}"),
+    }
+    callbacks.subscription_applied();
 
     let topology = pod_core::RemoteTopologyBundle {
         version: pod_core::RuntimeContractVersion::V1,

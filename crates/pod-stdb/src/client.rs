@@ -212,6 +212,17 @@ pub trait GeneratedRuntimeAdapter {
     fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent>;
 }
 
+/// Outbound command issued by [`StdbClient`] to a generated SpacetimeDB binding layer.
+#[derive(Debug, Clone)]
+pub enum GeneratedBindingCommand {
+    /// Begin connecting with the provided client config.
+    Connect { config: StdbClientConfig },
+    /// Apply the active SQL subscription set.
+    Subscribe { queries: Vec<String> },
+    /// Tear down the active generated connection.
+    Disconnect,
+}
+
 /// Thread-safe event handle for a generated SpacetimeDB runtime.
 ///
 /// Real generated bindings should keep a clone of this handle inside their SDK
@@ -329,6 +340,97 @@ impl GeneratedBindingCallbacks {
     }
 }
 
+/// External control surface for a command-driven generated runtime.
+///
+/// A real generated SpacetimeDB binding layer can drain outgoing commands from
+/// this endpoint and drive inbound runtime callbacks through the paired
+/// [`GeneratedBindingCallbacks`] object.
+#[derive(Debug, Clone, Default)]
+pub struct GeneratedBindingEndpoint {
+    commands: Arc<Mutex<VecDeque<GeneratedBindingCommand>>>,
+    callbacks: GeneratedBindingCallbacks,
+}
+
+impl GeneratedBindingEndpoint {
+    fn new(
+        commands: Arc<Mutex<VecDeque<GeneratedBindingCommand>>>,
+        callbacks: GeneratedBindingCallbacks,
+    ) -> Self {
+        Self {
+            commands,
+            callbacks,
+        }
+    }
+
+    /// Drain all pending client-to-binding commands.
+    pub fn drain_commands(&self) -> Vec<GeneratedBindingCommand> {
+        self.commands
+            .lock()
+            .expect("generated binding command queue poisoned")
+            .drain(..)
+            .collect()
+    }
+
+    /// Clone the callback surface used by the generated binding layer.
+    pub fn callbacks(&self) -> GeneratedBindingCallbacks {
+        self.callbacks.clone()
+    }
+}
+
+/// Command-driven runtime adapter for real generated SpacetimeDB bindings.
+///
+/// Unlike [`GeneratedRuntimeBridge`], this adapter does not synthesize connect
+/// or subscription acknowledgements on its own. It only records outbound client
+/// commands, leaving an external generated binding layer to decide when to emit
+/// the corresponding callbacks through [`GeneratedBindingCallbacks`].
+#[derive(Debug, Default)]
+pub struct GeneratedBindingRuntime {
+    commands: Arc<Mutex<VecDeque<GeneratedBindingCommand>>>,
+    handle: GeneratedRuntimeHandle,
+}
+
+impl GeneratedBindingRuntime {
+    /// Create a new command-driven generated runtime plus its external endpoint.
+    pub fn new() -> (Self, GeneratedBindingEndpoint) {
+        let commands = Arc::new(Mutex::new(VecDeque::new()));
+        let handle = GeneratedRuntimeHandle::default();
+        let callbacks = GeneratedBindingCallbacks::new(handle.clone());
+        let endpoint = GeneratedBindingEndpoint::new(commands.clone(), callbacks);
+        (Self { commands, handle }, endpoint)
+    }
+
+    fn push_command(&self, command: GeneratedBindingCommand) {
+        self.commands
+            .lock()
+            .expect("generated binding command queue poisoned")
+            .push_back(command);
+    }
+}
+
+impl GeneratedRuntimeAdapter for GeneratedBindingRuntime {
+    fn connect(&mut self, config: &StdbClientConfig) -> Result<(), String> {
+        self.push_command(GeneratedBindingCommand::Connect {
+            config: config.clone(),
+        });
+        Ok(())
+    }
+
+    fn disconnect(&mut self) {
+        self.push_command(GeneratedBindingCommand::Disconnect);
+    }
+
+    fn subscribe(&mut self, queries: &[String]) -> Result<(), String> {
+        self.push_command(GeneratedBindingCommand::Subscribe {
+            queries: queries.to_vec(),
+        });
+        Ok(())
+    }
+
+    fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+        self.handle.drain()
+    }
+}
+
 /// Introspection for the callback-driven generated runtime helper.
 #[derive(Debug, Clone, Default)]
 pub struct GeneratedRuntimeTrace {
@@ -384,11 +486,13 @@ impl GeneratedRuntimeTrace {
     }
 }
 
-/// Reusable helper that behaves like a generated binding runtime with live callbacks.
+/// Reusable helper that auto-acks connect/subscription callbacks for tests.
 ///
 /// The returned [`GeneratedBindingCallbacks`] are what benchmarks/tests should
 /// drive when they want to simulate real callback delivery from generated
 /// SpacetimeDB bindings, without re-defining ad hoc bridge closures each time.
+///
+/// Prefer [`GeneratedBindingRuntime`] for live-like command/callback flows.
 pub fn build_generated_runtime_callback_bridge(
     identity: Vec<u8>,
     token: impl Into<String>,
@@ -1191,10 +1295,10 @@ impl StdbClient {
 
     /// Wire a generated-runtime bridge backed by callback hooks.
     ///
-    /// This is the preferred seam for real generated SpacetimeDB bindings:
-    /// transport callbacks should push events through the returned
-    /// [`GeneratedRuntimeHandle`] instead of implementing bespoke test-only
-    /// adapters.
+    /// This is kept as a lightweight hook seam for focused tests and helpers.
+    /// Real generated binding integrations should prefer
+    /// [`GeneratedBindingRuntime`] plus [`GeneratedBindingEndpoint`], which
+    /// preserve the connect/subscribe command flow instead of auto-acking it.
     pub fn set_generated_runtime_bridge(&mut self, runtime: GeneratedRuntimeBridge) {
         self.generated_runtime = Some(Box::new(runtime));
     }

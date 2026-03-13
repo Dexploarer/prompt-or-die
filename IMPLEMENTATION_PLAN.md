@@ -1907,4 +1907,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Last updated**: Iteration 179
-**Current focus**: Iteration 180 replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the binding layer is available, then project the live generated topology feed into the parity/evaluation harnesses
+**Current focus**: Iteration 180 move the moat/public generated path onto a command-driven binding runtime, then swap that seam over to actual generated SpacetimeDB callbacks when the binding layer is available
+
+### Iteration 180
+- [x] Added `GeneratedBindingCommand`, `GeneratedBindingRuntime`, and `GeneratedBindingEndpoint` in `crates/pod-stdb/src/client.rs`, so generated mode now has a command-driven runtime seam that records outbound connect/subscribe/disconnect requests and accepts inbound callbacks separately instead of auto-acking connect/subscription hooks.
+- [x] Moved the public generated-mode integration path in `crates/pod-stdb/tests/client_integration.rs` and the moat/public generated path in `crates/pod-net/src/client_stdb.rs` onto that command-driven runtime, including explicit connect/subscription command assertions before topology-row callbacks are delivered.
+- [x] Kept `GeneratedRuntimeBridge` as a lightweight hook seam for focused unit tests, but updated docs/comments to make `GeneratedBindingRuntime` the live-like generated binding path.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb test_build_topology_feed_measurements_matches_authority_and_generated_paths -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+**Last updated**: Iteration 180
+**Current focus**: Iteration 181 swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the binding layer exists, then push that live feed into parity/evaluation harnesses

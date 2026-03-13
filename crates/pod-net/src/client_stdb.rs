@@ -52,9 +52,9 @@ use pod_core::id::{AgentId, EntityId};
 use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
 
 use pod_stdb::client::{
-    build_generated_runtime_callback_bridge, CachedEntity, GeneratedRemoteTopologyDocumentRow,
-    StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent, SubmittedAction,
-    Subscriptions,
+    CachedEntity, GeneratedBindingCommand, GeneratedBindingRuntime,
+    GeneratedRemoteTopologyDocumentRow, StdbClient, StdbClientConfig, StdbConnectionMode,
+    StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
 use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
@@ -1593,14 +1593,35 @@ pub fn build_topology_feed_measurements(
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (bridge, callbacks, _trace) =
-            build_generated_runtime_callback_bridge(vec![7; 16], "tok-generated");
+        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let callbacks = endpoint.callbacks();
         generated_client
             .inner_mut()
-            .set_generated_runtime_bridge(bridge);
+            .set_generated_runtime(Box::new(runtime));
         generated_client.connect()?;
+        let commands = endpoint.drain_commands();
+        assert!(
+            matches!(
+                commands.as_slice(),
+                [GeneratedBindingCommand::Connect { config }]
+                    if config.db_name == world_id
+                        && matches!(config.connection_mode, StdbConnectionMode::Generated)
+            ),
+            "generated topology feed benchmark should request one connect command for {world_id}"
+        );
+        callbacks.connected(vec![7; 16], "tok-generated");
         generated_client.inner_mut().frame_tick();
         generated_client.subscribe_custom(vec!["SELECT * FROM remote_topology_document".into()])?;
+        let commands = endpoint.drain_commands();
+        assert!(
+            matches!(
+                commands.as_slice(),
+                [GeneratedBindingCommand::Subscribe { queries }]
+                    if queries == &vec!["SELECT * FROM remote_topology_document".to_string()]
+            ),
+            "generated topology feed benchmark should request the topology subscription for {world_id}"
+        );
+        callbacks.subscription_applied();
         generated_client.inner_mut().frame_tick();
         callbacks.remote_topology_document_insert(
             GeneratedRemoteTopologyDocumentRow::from_topology_bundle(index as u64 + 1, topology)
@@ -2141,10 +2162,18 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (bridge, callbacks, trace) =
-            build_generated_runtime_callback_bridge(vec![7; 16], "tok-generated");
-        client.inner_mut().set_generated_runtime_bridge(bridge);
+        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let callbacks = endpoint.callbacks();
+        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Connect { config }]
+                if config.db_name == "deadman-shadow"
+                    && matches!(config.connection_mode, StdbConnectionMode::Generated)
+        ));
+        callbacks.connected(vec![7; 16], "tok-generated");
 
         let topology = RemoteTopologyBundle {
             version: pod_core::RuntimeContractVersion::V1,
@@ -2205,11 +2234,12 @@ mod tests {
         );
 
         let messages = client.poll_updates();
-        assert!(trace.subscription_queries().iter().any(|queries| {
-            queries
-                .iter()
-                .any(|query| query == "SELECT * FROM remote_topology_document")
-        }));
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }]
+                if queries.iter().any(|query| query == "SELECT * FROM remote_topology_document")
+        ));
         assert!(messages.iter().any(|message| matches!(
             message,
             ServerMessage::DebugDocument { document: current }
@@ -2232,10 +2262,22 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (bridge, callbacks, _trace) =
-            build_generated_runtime_callback_bridge(vec![6; 16], "tok-generated");
-        client.inner_mut().set_generated_runtime_bridge(bridge);
+        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let callbacks = endpoint.callbacks();
+        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Connect { config }]
+                if config.db_name == "deadman-shadow"
+                    && matches!(config.connection_mode, StdbConnectionMode::Generated)
+        ));
+        callbacks.connected(vec![6; 16], "tok-generated");
+        client.inner_mut().frame_tick();
+        client
+            .subscribe_as_spectator()
+            .expect("spectator subscription should be requested");
 
         let mut cached = CachedEntity::from_entity(29, None, true);
         cached.team_id = Some(1);
@@ -2401,6 +2443,13 @@ mod tests {
             },
         };
 
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }]
+                if queries.iter().any(|query| query == "SELECT * FROM remote_topology_document")
+        ));
+        callbacks.subscription_applied();
         callbacks.remote_topology_document_insert(
             GeneratedRemoteTopologyDocumentRow::from_topology_bundle(31, &initial)
                 .expect("initial callback row should build"),
@@ -2461,10 +2510,22 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (bridge, callbacks, _trace) =
-            build_generated_runtime_callback_bridge(vec![5; 16], "tok-generated");
-        client.inner_mut().set_generated_runtime_bridge(bridge);
+        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let callbacks = endpoint.callbacks();
+        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Connect { config }]
+                if config.db_name == "deadman-shadow"
+                    && matches!(config.connection_mode, StdbConnectionMode::Generated)
+        ));
+        callbacks.connected(vec![5; 16], "tok-generated");
+        client.inner_mut().frame_tick();
+        client
+            .subscribe_as_spectator()
+            .expect("spectator subscription should be requested");
 
         let mut cached = CachedEntity::from_entity(33, None, true);
         cached.team_id = Some(2);
@@ -2690,6 +2751,13 @@ mod tests {
             },
         };
 
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }]
+                if queries.iter().any(|query| query == "SELECT * FROM remote_topology_document")
+        ));
+        callbacks.subscription_applied();
         callbacks.remote_topology_document_insert(
             GeneratedRemoteTopologyDocumentRow::from_topology_bundle(41, &initial)
                 .expect("initial linked callback row should build"),

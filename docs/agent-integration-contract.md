@@ -208,12 +208,15 @@ publishes `RemoteTopologyBundle` payloads through the public
 `remote_topology_document` row and the `publish_remote_topology_document`
 reducer, and the native client wrappers can ingest those rows directly with
 stale-row protection. [`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs)
-now also has a reusable `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
-pair, so generated mode can receive those authority-fed rows through the same
-`frame_tick()` ingress as emulated mode without custom per-test runtimes. The
-remaining gap is shipping the real generated binding/runtime callbacks and
-threading that live feed into the parity/evaluation harnesses, not redefining
-the contract or publication format itself.
+now also has both a reusable `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
+pair for focused callback-hook tests and a command-driven
+`GeneratedBindingRuntime` / `GeneratedBindingEndpoint` seam that lets generated
+mode receive those authority-fed rows through the same `frame_tick()` ingress
+without custom per-test runtimes or auto-acked connect/subscription hooks. The
+remaining gap is swapping that command/callback seam over to actual generated
+SpacetimeDB binding callbacks and threading the live feed into the
+parity/evaluation harnesses, not redefining the contract or publication format
+itself.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many
