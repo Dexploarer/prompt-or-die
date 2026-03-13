@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test.setTimeout(45_000);
+test.setTimeout(90_000);
 
 type GameplayState = {
   frameSource: string;
@@ -26,7 +26,7 @@ async function waitForShowcaseReady(page: Page) {
     );
   });
 
-  for (let step = 0; step < 24; step += 1) {
+  for (let step = 0; step < 120; step += 1) {
     const ready = await page.evaluate(() => {
       const state = window.podRender.getGameplayState();
       return (

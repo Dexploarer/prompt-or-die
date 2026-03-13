@@ -2380,6 +2380,44 @@ function defaultEnvironment(): ThreeJsEnvironment {
   };
 }
 
+function fallbackEnvironmentForBiome(biomeId: string | null): ThreeJsEnvironment {
+  const environment = defaultEnvironment();
+  switch (biomeId) {
+    case "resonant-shore":
+      return {
+        ...environment,
+        biomeId,
+        skyColor: [0.72, 0.77, 0.82, 1],
+        fogColor: [0.9, 0.89, 0.84, 1],
+        fogNear: 54,
+        fogFar: 320,
+        ambientColor: [0.9, 0.91, 0.88],
+        ambientIntensity: 1.92,
+        sunColor: [1, 0.95, 0.82],
+        sunIntensity: 3.5,
+        sunDirection: [54, 68, 18],
+        fillColor: [0.7, 0.76, 0.78],
+        fillIntensity: 1.04,
+        fillDirection: [-26, 18, -18],
+        rimColor: [0.96, 0.92, 0.84],
+        rimIntensity: 5.4,
+        groundColor: [0.16, 0.2, 0.16, 1],
+        starfieldIntensity: 0.05
+      };
+    case "verdant-hollow":
+    case "breaker-shelf":
+    case "windward-shelf":
+    case "ashen-steppe":
+    case "gloamwood":
+      return {
+        ...environment,
+        biomeId
+      };
+    default:
+      return environment;
+  }
+}
+
 function encodeBrowserAction(action: BrowserAction): unknown {
   switch (action.kind) {
     case "move":
@@ -2641,7 +2679,23 @@ function resolveFrameEnvironment(
     }
   }
 
-  return selected?.atmosphere ?? defaultValue;
+  if (selected?.atmosphere) {
+    return selected.atmosphere;
+  }
+
+  const focusRegionBiomeId =
+    (focusEntity.metadata.regionId
+      ? snapshot.population.regions.find((region) => region.regionId === focusEntity.metadata.regionId)
+          ?.primaryBiomeId
+      : null) ??
+    (focusEntity.metadata.chunkKey
+      ? snapshot.population.chunks.find((chunk) => chunk.chunkKey === focusEntity.metadata.chunkKey)
+          ?.biomeId
+      : null) ??
+    focusEntity.metadata.spawnProfile?.biomeId ??
+    null;
+
+  return fallbackEnvironmentForBiome(focusRegionBiomeId);
 }
 
 function entityRenderProfile(

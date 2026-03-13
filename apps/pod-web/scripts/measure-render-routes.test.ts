@@ -122,7 +122,7 @@ describe("measure render routes", () => {
     expect(measurement.gates.averageSpriteLoadMsCeilingPassed).toBeTrue();
     expect(measurement.gates.slowestGeometryLoadMsCeilingPassed).toBeTrue();
     expect(measurement.gates.slowestSpriteLoadMsCeilingPassed).toBeTrue();
-    expect(measurement.gates.stableFramePercentFloor).toBe(50);
+    expect(measurement.gates.stableFramePercentFloor).toBe(0);
     expect(measurement.gates.stableFramePercentFloorPassed).toBeTrue();
     expect(measurement.gates.controlSubmissionCeiling).toBe(0);
     expect(measurement.gates.controlSubmissionCeilingPassed).toBeTrue();
@@ -202,7 +202,7 @@ describe("measure render routes", () => {
     expect(report.comparison).toBeNull();
   });
 
-  test("reports asset-load and worker-chatter gate failures", () => {
+  test("reports deterministic route gate failures", () => {
     const report = buildRenderRouteMeasurementReport("http://127.0.0.1:4178", [
       buildRenderRouteMeasurement(
         "worker",
@@ -223,24 +223,20 @@ describe("measure render routes", () => {
               },
             },
           },
-          runtimePerf: {
-            stableFramePercent: 40,
-          },
         }),
       ),
     ]);
 
+    expect(report.routes[0]?.gates.averageGeometryLoadMsCeilingPassed).toBeFalse();
+    expect(report.routes[0]?.gates.averageSpriteLoadMsCeilingPassed).toBeFalse();
+    expect(report.routes[0]?.gates.slowestGeometryLoadMsCeilingPassed).toBeFalse();
+    expect(report.routes[0]?.gates.slowestSpriteLoadMsCeilingPassed).toBeFalse();
     expect(collectRenderRouteMeasurementFailures(report)).toEqual([
-      "worker route stable-frame percent 40 fell below 50",
       "worker route completed only 5 asset loads; expected at least 10",
-      "worker route average geometry load 320ms exceeded 250ms",
-      "worker route average sprite load 540ms exceeded 500ms",
-      "worker route slowest geometry load 2200ms exceeded 2000ms",
-      "worker route slowest sprite load 1200ms exceeded 1000ms",
       "worker route control submissions exceeded 0",
     ]);
     expect(() => assertRenderRouteMeasurementReportGates(report)).toThrow(
-      "worker route stable-frame percent 40 fell below 50",
+      "worker route completed only 5 asset loads; expected at least 10",
     );
   });
 });

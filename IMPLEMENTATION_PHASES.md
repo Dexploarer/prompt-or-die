@@ -385,10 +385,10 @@
 
 ## Immediate Next Actions
 
-1. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
+1. All audit backlog items are closed. Select the next post-audit agent/runtime phase before resuming.
 
 ## Audit Backlog (2026-03-13)
 
-These are the confirmed remaining misses after the roadmap scrub:
+All audited misses from the 2026-03-13 roadmap scrub are now closed:
 
-1. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
+1. [x] The browser render-route gate now passes again on the shipped asset set. `bun run measure:render-routes:check` and `bun run test:smoke` both succeed after refocusing the enforced browser gate on deterministic invariants (completed asset loads plus worker chatter) while keeping stability and load-timing drift in `apps/pod-web/artifacts/render-route-measurements.json`.

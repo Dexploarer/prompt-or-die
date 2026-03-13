@@ -13,7 +13,7 @@
     "measure:render-routes:check": "bun run scripts/measure-render-routes.ts --fail-on-gates",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:smoke": "playwright test --config=playwright.config.ts"
+    "test:smoke": "playwright test tests/showcase-visual.e2e.ts --config=playwright.config.ts && playwright test tests/worker-input.e2e.ts --config=playwright.config.ts"
   },
   "dependencies": {
     "@toon-format/toon": "^2.1.0",

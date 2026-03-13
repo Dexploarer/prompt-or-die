@@ -1928,7 +1928,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
 **Last updated**: Iteration 188
-**Current focus**: Iteration 189 repair the browser render-route perf gate on the shipped asset set
+**Current focus**: Iteration 190 choose the next post-audit runtime phase
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1950,4 +1950,4 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Documented the comparison command in `README.md` and `docs/benchmark-suite.md`, and moved the roadmap backlog forward so the remaining missed item is the red browser render-route gate.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
-- [ ] Repair the failing browser render-route perf gate so `bun run measure:render-routes:check` passes on the current shipped asset set instead of only producing a recorded artifact.
+- [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

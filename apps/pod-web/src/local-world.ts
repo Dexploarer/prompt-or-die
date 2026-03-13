@@ -1478,7 +1478,9 @@ function createRegionCatalog(presetId: LocalWorldPresetId): Map<string, LocalReg
         regionId: "spirewatch",
         displayName: isBootstrapShowcase ? "Monolith Reach" : "Spirewatch Rise",
         primaryBiomeId: isBootstrapShowcase ? "resonant-shore" : "verdant-hollow",
-        chunkKeys: ["-1:1", "0:1"],
+        chunkKeys: isBootstrapShowcase
+          ? ["-3:1", "-3:2", "-2:1", "-2:2", "-1:1", "0:1"]
+          : ["-1:1", "0:1"],
         activeQuestGraphIds: ["spire-attunement", "ember-charm-recovery"],
         dominantFactionTrackId: "ancient-spirekeepers",
         encounterTableIds: ["spirewatch-encounters", "spirewatch-resources"]

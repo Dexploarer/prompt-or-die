@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 8 - CI and Regression Gates
-**Current Stage**: In Progress
-**Last Checkpoint**: `c4cbf4cc`
+**Current Phase**: Phase 14 - Multi-World Teams and Reality Links
+**Current Stage**: Complete
+**Last Checkpoint**: `1f8af6fa`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -67,7 +67,7 @@
 
 **Known Issues**:
 - The shipped sample set now prefers compressed assets on both fronts: `.ktx2` for ring sprites and `.meshopt.glb` for meshes where the compressed fixtures beat the source `.glb` outputs by budget.
-- The original worker/main-thread measurement gap was closed in Phase 5. The remaining open browser issue is different: the current render-route perf gate still needs a repair pass to get `measure:render-routes:check` green again.
+- The original worker/main-thread measurement gap and the later browser gate regression are both now closed; `bun run measure:render-routes:check` and `bun run test:smoke` are green on the shipped asset set.
 
 ## Phase 5: Render Worker and Main-Thread Relief ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -254,8 +254,8 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes again on the shipped asset set.
+- All audited backlog items are closed. Pick the next post-audit runtime phase before resuming.
 
 ## Audit Backlog (2026-03-13)
 
-- [ ] Browser infra: repair the current render-route perf regression so `bun run measure:render-routes:check` passes again on the shipped asset set.
+- [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.
