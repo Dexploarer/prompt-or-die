@@ -68,7 +68,8 @@
 //!
 //! Full SpacetimeDB SDK integration requires generated client bindings:
 //! ```bash
-//! spacetime generate --lang rust --out-dir src/module_bindings --project-path .
+//! cargo build -p pod-stdb --target wasm32-unknown-unknown --release --no-default-features --features module
+//! spacetime generate --lang rust --out-dir src/module_bindings --bin-path .cargo-target/wasm32-unknown-unknown/release/pod_stdb.wasm
 //! ```
 //! Until bindings are generated, this module provides the typed API surface
 //! with stub implementations. See [`StdbClient::connect`] for details.

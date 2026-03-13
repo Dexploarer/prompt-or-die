@@ -25,6 +25,7 @@ module = [
     "dep:serde_json",
     "dep:rand",
     "dep:rand_chacha",
+    "dep:getrandom",
 ]
 # Enable SpacetimeDB unstable features (client_visibility_filter for RLS).
 # Activate when the SpacetimeDB SDK supports the unstable API.
@@ -48,6 +49,7 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
-uuid.workspace = true
+getrandom = { workspace = true, optional = true, features = ["custom"] }
+uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]

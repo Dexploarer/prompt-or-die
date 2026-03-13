@@ -69,6 +69,38 @@ pub mod reducers;
 #[cfg(all(feature = "module", target_arch = "wasm32"))]
 pub mod tables;
 
+#[cfg(all(feature = "module", target_arch = "wasm32"))]
+mod module_entropy {
+    use core::sync::atomic::{AtomicU32, Ordering};
+    use getrandom::{register_custom_getrandom, Error};
+
+    static MODULE_RANDOM_STATE: AtomicU32 = AtomicU32::new(0xA341_316C);
+
+    fn fill_module_random(dest: &mut [u8]) -> Result<(), Error> {
+        let mut state = MODULE_RANDOM_STATE
+            .fetch_add(0x9E37_79B9, Ordering::Relaxed)
+            .wrapping_add(dest.len() as u32);
+
+        for chunk in dest.chunks_mut(4) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+
+            let bytes = state.to_le_bytes();
+            for (slot, byte) in chunk.iter_mut().zip(bytes.iter()) {
+                *slot = *byte;
+            }
+        }
+
+        Ok(())
+    }
+
+    // Gameplay randomness remains world-seeded and deterministic. This backend
+    // only satisfies transitive crates that require `getrandom` in the wasm
+    // reducer module path.
+    register_custom_getrandom!(fill_module_random);
+}
+
 // ============================================================
 // NATIVE CLIENT WRAPPER
 // ============================================================
