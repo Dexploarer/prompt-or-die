@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 14 - Multi-World Teams and Reality Links
+**Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `30eed712`
+**Last Checkpoint**: `45086efa`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -197,13 +197,13 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Consume the shared remote topology artifact in `pod-net` / `pod-stdb` so admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner.
+- Thread reward/evaluation outputs into the broader remote topology and parity harnesses now that admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
 - The first-pass topology contracts for that direction now live in [crates/pod-core/src/contract.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs) and are documented in [docs/multi-world-agent-topology.md](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
 
-## Phase 14: Multi-World Teams and Reality Links 📋
+## Phase 14: Multi-World Teams and Reality Links ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
 
 **Progress**:
@@ -216,6 +216,7 @@
 - [x] Added shared `RemoteTopologyBundle` contracts in `pod-core` for world quest bindings, applied world state, and scenario evaluation, so remote surfaces have one portable topology artifact instead of app-local JSON shapes
 - [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner can emit that portable remote-topology artifact alongside the existing report and dataset outputs
 - [x] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`, including `pod-stdb` cache resolution helpers plus `pod-net::client_stdb` snapshot metadata refresh on `RemoteTopologyUpdated`
+- [x] Added replay/evaluation coverage for linked-world tournaments and neural swarms across both `apps/pod-headless` and the public `pod-net::SpacetimeDBClient` topology surface
 
 **Next Action**:
-- Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface, so admission-aware quest-line state and alternate-reality effects are validated in remote execution too.
+- Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract in `pod-stdb` / `pod-net`.

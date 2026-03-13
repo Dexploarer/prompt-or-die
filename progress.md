@@ -397,3 +397,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo check -p pod-stdb --no-default-features --features client`
   - `cargo check -p pod-net --features spacetimedb`
   - `git diff --check`
+- Extended `pod-net::SpacetimeDBClient` with public remote-topology/evaluation accessors and added multi-world linked-world / neural-swarm tests in both `apps/pod-headless` and `crates/pod-net`, so replay-derived quest/effect progress is now covered on top of the shared remote-topology surface instead of only through local report JSON.
+- Revalidated the linked-world replay/evaluation slice with:
+  - `cargo test -p pod-headless`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`

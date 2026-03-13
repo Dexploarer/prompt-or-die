@@ -1766,5 +1766,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --features spacetimedb`
   - `git diff --check`
 
-**Last updated**: Iteration 166
-**Current focus**: Iteration 167 add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface, so quest-line state and alternate-reality effects are validated beyond local headless reports
+### Iteration 167
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with public remote-topology accessors (`remote_topology`, `remote_world_id`, `remote_applied_world_state`, `remote_world_evaluation`) so remote consumers can inspect linked-world quest/evaluation state without reaching into the raw `StdbClient`.
+- [x] Added multi-world linked-world / neural-swarm coverage in `apps/pod-headless/src/main.rs`, proving `RemoteTopologyBundle` preserves quest-line progress, cross-world application counts, and world-level neural evaluation for shadow-world tournament flows.
+- [x] Added remote-client coverage in both `crates/pod-net/src/client_stdb.rs` and `crates/pod-net/tests/networking_integration.rs`, proving the public SpacetimeDB client resolves linked-world quest/evaluation state and still projects the correct team/world quest metadata into snapshots.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 167
+**Current focus**: Iteration 168 promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract in `pod-stdb` / `pod-net`, so multi-world teams, quest lines, and alternate-reality effects stop depending on local injection paths

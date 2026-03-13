@@ -48,7 +48,7 @@ use uuid::Uuid;
 use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
 use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
-use pod_core::RemoteTopologyBundle;
+use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
 
 use pod_stdb::client::{
     CachedEntity, StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent,
@@ -1035,6 +1035,26 @@ impl SpacetimeDBClient {
         Ok(())
     }
 
+    /// Access the last applied multi-world topology artifact, if any.
+    pub fn remote_topology(&self) -> Option<&RemoteTopologyBundle> {
+        self.inner.remote_topology()
+    }
+
+    /// Resolve the active remote world id for this client.
+    pub fn remote_world_id(&self) -> Option<&str> {
+        self.inner.resolved_remote_world_id()
+    }
+
+    /// Resolve the applied cross-world state summary for this client's active world.
+    pub fn remote_applied_world_state(&self) -> Option<&AppliedWorldStateSummary> {
+        self.inner.resolved_remote_applied_world_state()
+    }
+
+    /// Resolve the replay/evaluation summary for this client's active world.
+    pub fn remote_world_evaluation(&self) -> Option<&WorldEvaluationSummary> {
+        self.inner.resolved_remote_world_evaluation()
+    }
+
     // ── Internal helpers ──
 
     fn current_tick_or_zero(&self) -> u64 {
@@ -1508,6 +1528,171 @@ mod tests {
         assert_eq!(
             hero.metadata.world_active_quest_graph_ids,
             vec!["deadman-prime-season".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_remote_topology_exposes_linked_world_evaluation_for_neural_swarm_world() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: "deadman-shadow".into(),
+            connection_mode: StdbConnectionMode::Emulated,
+            ..Default::default()
+        });
+        client.connect().expect("client connects in emulated mode");
+        client
+            .subscribe_as_spectator()
+            .expect("spectator subscriptions stage or apply");
+        client.inner.frame_tick();
+
+        let mut cached = CachedEntity::from_entity(9, None, true);
+        cached.name = Some("Swarm Vanguard".into());
+        cached.team_id = Some(2);
+        client.inner.upsert_entity(cached);
+
+        let mut prime =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        prime.role = WorldRealityRole::Tournament;
+        prime.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+
+        let mut shadow =
+            WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow-seasonal");
+        shadow.role = WorldRealityRole::Shadow;
+        shadow.linked_world_ids = vec!["deadman-prime".into()];
+        shadow.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+
+        let topology = RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![
+                pod_core::AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
+                pod_core::AgentTeamDefinition::new(
+                    "gloam-mesh",
+                    "Gloam Mesh",
+                    "deadman-shadow",
+                ),
+            ],
+            worlds: vec![prime, shadow],
+            links: vec![],
+            world_quest_bindings: vec![
+                WorldQuestBinding {
+                    world_id: "deadman-prime".into(),
+                    quest_graph_ids: vec!["deadman-prime-season".into()],
+                },
+                WorldQuestBinding {
+                    world_id: "deadman-shadow".into(),
+                    quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+                },
+            ],
+            quest_graphs: vec![],
+            applied_world_states: vec![pod_core::AppliedWorldStateSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                team_scores: vec![pod_core::TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 10,
+                }],
+                death_marks: vec![pod_core::TeamDeathMarkSummary {
+                    team_id: "gloam-mesh".into(),
+                    applications: 2,
+                    total_duration_ticks: 1200,
+                }],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![pod_core::ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    stage_tag: "marked-by-kills".into(),
+                    applications: 2,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![pod_core::QuestLineStateSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    display_name: "Deadman Shadow: Mirror Hunt".into(),
+                    current_stage_ids: vec!["marked-by-kills".into()],
+                    completed_stage_ids: vec!["shadow-observe".into()],
+                    pending_stage_ids: vec!["rift-collapse".into()],
+                    next_stage_ids: vec!["rift-collapse".into()],
+                    progress_basis_points: 6666,
+                    terminal: false,
+                    stage_applications: vec![pod_core::QuestStageApplicationSummary {
+                        stage_id: "marked-by-kills".into(),
+                        title: "Marked by Kills".into(),
+                        applications: 2,
+                    }],
+                }],
+            }],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: WorldRealityRole::Shadow,
+                    average_reward_per_row: 4.5,
+                    controller_mix: vec![pod_core::ControllerEvaluationSummary {
+                        agent_type: "neural_agent".into(),
+                        row_count: 3,
+                        reward_total: 13.5,
+                        average_reward_per_row: 4.5,
+                    }],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 6666,
+                    applied_score_delta_total: 10,
+                    applied_death_mark_count: 2,
+                    applied_death_mark_ticks: 1200,
+                    applied_objective_shift_count: 2,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        };
+
+        client
+            .apply_remote_topology(topology)
+            .expect("topology applies");
+
+        assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
+        let applied = client
+            .remote_applied_world_state()
+            .expect("applied world state should resolve");
+        assert_eq!(applied.quest_lines[0].current_stage_ids, vec!["marked-by-kills"]);
+        assert_eq!(applied.death_marks[0].applications, 2);
+
+        let evaluation = client
+            .remote_world_evaluation()
+            .expect("world evaluation should resolve");
+        assert_eq!(evaluation.controller_mix[0].agent_type, "neural_agent");
+        assert_eq!(evaluation.controller_mix[0].row_count, 3);
+        assert_eq!(evaluation.average_reward_per_row, 4.5);
+        assert_eq!(evaluation.applied_objective_shift_count, 2);
+
+        let messages = client.poll_updates();
+        let delta = messages
+            .into_iter()
+            .find_map(|message| match message {
+                ServerMessage::StateDelta { delta, .. } => Some(delta),
+                _ => None,
+            })
+            .expect("state delta emitted after topology update");
+        let entity = delta
+            .updated
+            .into_iter()
+            .find(|entity| entity.id == 9)
+            .expect("swarm vanguard snapshot updated");
+        assert_eq!(entity.metadata.team_key.as_deref(), Some("gloam-mesh"));
+        assert_eq!(entity.metadata.world_id.as_deref(), Some("deadman-shadow"));
+        assert_eq!(entity.metadata.world_role, Some(WorldRealityRole::Shadow));
+        assert_eq!(
+            entity.metadata.world_active_quest_graph_ids,
+            vec!["deadman-shadow-hunt".to_string()]
         );
     }
 

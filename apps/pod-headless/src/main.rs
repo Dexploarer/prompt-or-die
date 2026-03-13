@@ -2756,6 +2756,227 @@ mod tests {
     }
 
     #[test]
+    fn remote_topology_bundle_preserves_linked_world_evaluation_and_neural_swarm_progress() {
+        let mut tournament =
+            WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup");
+        tournament.world_ids = vec!["deadman-prime".into(), "deadman-shadow".into()];
+        tournament.team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+        tournament.cross_world_link_ids = vec!["prime-to-shadow".into()];
+
+        let mut prime =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        prime.role = WorldRealityRole::Tournament;
+        prime.linked_world_ids = vec!["deadman-shadow".into()];
+        prime.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+
+        let mut shadow =
+            WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow-seasonal");
+        shadow.role = WorldRealityRole::Shadow;
+        shadow.linked_world_ids = vec!["deadman-prime".into()];
+        shadow.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+
+        let bundle = build_remote_topology_bundle(
+            "deadman-neural-cup",
+            "ci-smoke",
+            42,
+            &tournament,
+            &[
+                AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
+                AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow"),
+            ],
+            &[prime, shadow],
+            &[CrossWorldLinkDefinition::new(
+                "prime-to-shadow",
+                "deadman-prime",
+                "deadman-shadow",
+            )],
+            &[
+                QuestStateGraph::new(
+                    "deadman-prime-season",
+                    "Deadman Prime: Blood Season",
+                    "enter-bracket",
+                    vec![QuestStageDefinition {
+                        stage_id: "enter-bracket".into(),
+                        title: "Enter the Bracket".into(),
+                        objectives: vec!["Establish camp.".into()],
+                        next_stage_ids: vec!["wilds-under-siege".into()],
+                        reward_tags: vec!["season-open".into()],
+                    }],
+                ),
+                QuestStateGraph::new(
+                    "deadman-shadow-hunt",
+                    "Deadman Shadow: Mirror Hunt",
+                    "shadow-observe",
+                    vec![QuestStageDefinition {
+                        stage_id: "shadow-observe".into(),
+                        title: "Shadow Observe".into(),
+                        objectives: vec!["Scout the breach.".into()],
+                        next_stage_ids: vec!["marked-by-kills".into()],
+                        reward_tags: vec!["shadow-start".into()],
+                    }],
+                ),
+            ],
+            &BTreeMap::from([
+                ("deadman-prime".into(), vec!["deadman-prime-season".into()]),
+                ("deadman-shadow".into(), vec!["deadman-shadow-hunt".into()]),
+            ]),
+            &[
+                AppliedWorldStateReport {
+                    world_id: "deadman-prime".into(),
+                    display_name: "Deadman Prime".into(),
+                    role: WorldRealityRole::Tournament,
+                    team_scores: vec![TeamDeltaReport {
+                        team_id: "gloam-mesh".into(),
+                        total_delta: 8,
+                    }],
+                    death_marks: vec![],
+                    faction_reputation_deltas: vec![],
+                    encounter_weight_deltas: vec![],
+                    resource_scarcity_deltas: vec![],
+                    objective_state_shifts: vec![],
+                    unresolved_objective_state_shifts: vec![],
+                    quest_lines: vec![QuestLineStateReport {
+                        quest_graph_id: "deadman-prime-season".into(),
+                        display_name: "Deadman Prime: Blood Season".into(),
+                        current_stage_ids: vec!["wilds-under-siege".into()],
+                        completed_stage_ids: vec!["enter-bracket".into()],
+                        pending_stage_ids: vec![],
+                        next_stage_ids: vec![],
+                        progress_basis_points: 5_000,
+                        terminal: false,
+                        stage_applications: vec![QuestStageApplicationReport {
+                            stage_id: "wilds-under-siege".into(),
+                            title: "Wilds Under Siege".into(),
+                            applications: 1,
+                        }],
+                    }],
+                },
+                AppliedWorldStateReport {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: WorldRealityRole::Shadow,
+                    team_scores: vec![TeamDeltaReport {
+                        team_id: "iron-sigil".into(),
+                        total_delta: 10,
+                    }],
+                    death_marks: vec![TeamDeathMarkReport {
+                        team_id: "gloam-mesh".into(),
+                        applications: 2,
+                        total_duration_ticks: 1200,
+                    }],
+                    faction_reputation_deltas: vec![],
+                    encounter_weight_deltas: vec![],
+                    resource_scarcity_deltas: vec![],
+                    objective_state_shifts: vec![ObjectiveShiftReport {
+                        quest_graph_id: "deadman-shadow-hunt".into(),
+                        stage_tag: "marked-by-kills".into(),
+                        applications: 2,
+                    }],
+                    unresolved_objective_state_shifts: vec![],
+                    quest_lines: vec![QuestLineStateReport {
+                        quest_graph_id: "deadman-shadow-hunt".into(),
+                        display_name: "Deadman Shadow: Mirror Hunt".into(),
+                        current_stage_ids: vec!["marked-by-kills".into()],
+                        completed_stage_ids: vec!["shadow-observe".into()],
+                        pending_stage_ids: vec!["rift-collapse".into()],
+                        next_stage_ids: vec!["rift-collapse".into()],
+                        progress_basis_points: 6666,
+                        terminal: false,
+                        stage_applications: vec![QuestStageApplicationReport {
+                            stage_id: "marked-by-kills".into(),
+                            title: "Marked by Kills".into(),
+                            applications: 2,
+                        }],
+                    }],
+                },
+            ],
+            &ScenarioEvaluationReport {
+                controller_mix: vec![
+                    ControllerEvaluationReport {
+                        agent_type: "llm_agent".into(),
+                        row_count: 1,
+                        reward_total: 1.0,
+                        average_reward_per_row: 1.0,
+                    },
+                    ControllerEvaluationReport {
+                        agent_type: "neural_agent".into(),
+                        row_count: 3,
+                        reward_total: 13.5,
+                        average_reward_per_row: 4.5,
+                    },
+                ],
+                worlds: vec![
+                    WorldEvaluationReport {
+                        world_id: "deadman-prime".into(),
+                        display_name: "Deadman Prime".into(),
+                        role: WorldRealityRole::Tournament,
+                        average_reward_per_row: 1.0,
+                        controller_mix: vec![ControllerEvaluationReport {
+                            agent_type: "llm_agent".into(),
+                            row_count: 1,
+                            reward_total: 1.0,
+                            average_reward_per_row: 1.0,
+                        }],
+                        quest_line_count: 1,
+                        progressed_quest_line_count: 1,
+                        average_quest_progress_basis_points: 5_000,
+                        applied_score_delta_total: 8,
+                        applied_death_mark_count: 0,
+                        applied_death_mark_ticks: 0,
+                        applied_objective_shift_count: 0,
+                        applied_reputation_delta_total: 0,
+                        applied_encounter_delta_total: 0,
+                        applied_resource_delta_total: 0,
+                    },
+                    WorldEvaluationReport {
+                        world_id: "deadman-shadow".into(),
+                        display_name: "Deadman Shadow".into(),
+                        role: WorldRealityRole::Shadow,
+                        average_reward_per_row: 4.5,
+                        controller_mix: vec![ControllerEvaluationReport {
+                            agent_type: "neural_agent".into(),
+                            row_count: 3,
+                            reward_total: 13.5,
+                            average_reward_per_row: 4.5,
+                        }],
+                        quest_line_count: 1,
+                        progressed_quest_line_count: 1,
+                        average_quest_progress_basis_points: 6666,
+                        applied_score_delta_total: 10,
+                        applied_death_mark_count: 2,
+                        applied_death_mark_ticks: 1200,
+                        applied_objective_shift_count: 2,
+                        applied_reputation_delta_total: 0,
+                        applied_encounter_delta_total: 0,
+                        applied_resource_delta_total: 0,
+                    },
+                ],
+            },
+        );
+
+        assert_eq!(bundle.links.len(), 1);
+        assert_eq!(bundle.world_quest_bindings.len(), 2);
+        let shadow_state = bundle
+            .applied_world_states
+            .iter()
+            .find(|state| state.world_id == "deadman-shadow")
+            .expect("shadow world state present");
+        assert_eq!(shadow_state.quest_lines[0].current_stage_ids, vec!["marked-by-kills"]);
+        assert_eq!(shadow_state.death_marks[0].applications, 2);
+
+        let shadow_eval = bundle
+            .evaluation
+            .worlds
+            .iter()
+            .find(|world| world.world_id == "deadman-shadow")
+            .expect("shadow evaluation present");
+        assert_eq!(shadow_eval.controller_mix[0].agent_type, "neural_agent");
+        assert_eq!(shadow_eval.controller_mix[0].row_count, 3);
+        assert_eq!(shadow_eval.applied_objective_shift_count, 2);
+        assert_eq!(shadow_eval.average_quest_progress_basis_points, 6666);
+    }
+
+    #[test]
     fn collect_reward_reason_stats_aggregates_counts_and_totals() {
         let signals = vec![
             reward(RewardReason::DamageDealt, None, 1.5),

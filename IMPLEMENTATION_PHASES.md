@@ -336,7 +336,7 @@
 
 ## Phase 14: Multi-World Teams and Reality Links
 **Type**: Agent Runtime
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 hours
 **Files**: `crates/pod-core/src/contract.rs`, `crates/pod-core/*`, `crates/pod-net/*`, `crates/pod-stdb/*`, docs/tooling`
 
@@ -346,7 +346,7 @@
 - [x] Define deterministic cross-world effect application rules at authority boundaries
 - [x] Add a shared remote-topology export contract for world quest bindings, applied world state, and scenario evaluation
 - [x] Consume the shared remote-topology artifact through remote execution topology
-- [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
+- [x] Add replay/evaluation coverage for linked-world tournaments and neural swarms
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-core contract -- --nocapture`
@@ -375,5 +375,5 @@
 ## Immediate Next Actions
 
 1. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface now that `pod-stdb` and `pod-net` both consume it.
-2. Preserve quest-line state and alternate-reality objective progression in those replay/evaluation paths instead of validating them only through `pod-headless` JSON artifacts.
-3. Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract once the first replay/evaluation coverage is in place.
+2. Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract so remote execution stops depending on local injection paths.
+3. Thread the same authority-fed topology contract into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
