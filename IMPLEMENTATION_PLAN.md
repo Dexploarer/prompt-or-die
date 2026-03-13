@@ -1822,5 +1822,11 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --features spacetimedb`
   - `git diff --check`
 
-**Last updated**: Iteration 171
-**Current focus**: Iteration 172 replace the fake generated-runtime adapter with actual generated binding/runtime wiring, then thread that authority-fed topology stream into parity/evaluation harnesses with churn and world-switch coverage
+### Iteration 172
+- [x] Added `integration_remote_topology_feed_rows_handle_world_switch_and_stale_churn` in `crates/pod-net/tests/networking_integration.rs`, proving the public authority-fed row path can switch the resolved world/quest metadata on a newer `remote_topology_document` and ignore an older stale row without rolling back state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 172
+**Current focus**: Iteration 173 thread the authority-fed topology stream into parity/evaluation harnesses, then extend churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring

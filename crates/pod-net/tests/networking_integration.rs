@@ -15,7 +15,97 @@ use pod_core::{
     WorldTournamentDefinition,
 };
 use pod_net::{SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError};
-use pod_stdb::client::StdbConnectionMode;
+use pod_stdb::client::{CachedEntity, StdbConnectionMode};
+
+fn topology_document_for_single_world(
+    world_id: &str,
+    display_name: &str,
+    role: WorldRealityRole,
+    quest_graph_id: &str,
+    generated_at_unix_ms: u64,
+    average_reward_per_row: f32,
+) -> String {
+    let mut world = WorldRealityDefinition::new(world_id, display_name, "topology-test");
+    world.role = role;
+    world.active_team_ids = vec!["iron-sigil".into()];
+
+    RemoteTopologyBundle {
+        version: pod_core::RuntimeContractVersion::V1,
+        scenario_id: "deadman-neural-cup".into(),
+        profile_id: "ci-smoke".into(),
+        generated_at_unix_ms: generated_at_unix_ms.into(),
+        tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
+        teams: vec![],
+        worlds: vec![world],
+        links: vec![],
+        world_quest_bindings: vec![WorldQuestBinding {
+            world_id: world_id.into(),
+            quest_graph_ids: vec![quest_graph_id.into()],
+        }],
+        quest_graphs: vec![],
+        applied_world_states: vec![AppliedWorldStateSummary {
+            world_id: world_id.into(),
+            display_name: display_name.into(),
+            role,
+            team_scores: vec![TeamDeltaSummary {
+                team_id: "iron-sigil".into(),
+                total_delta: 3,
+            }],
+            death_marks: vec![],
+            faction_reputation_deltas: vec![],
+            encounter_weight_deltas: vec![],
+            resource_scarcity_deltas: vec![],
+            objective_state_shifts: vec![],
+            unresolved_objective_state_shifts: vec![],
+            quest_lines: vec![QuestLineStateSummary {
+                quest_graph_id: quest_graph_id.into(),
+                display_name: format!("{display_name}: Active Quest"),
+                current_stage_ids: vec!["active-stage".into()],
+                completed_stage_ids: vec!["intro".into()],
+                pending_stage_ids: vec!["finale".into()],
+                next_stage_ids: vec!["finale".into()],
+                progress_basis_points: 5000,
+                terminal: false,
+                stage_applications: vec![QuestStageApplicationSummary {
+                    stage_id: "active-stage".into(),
+                    title: "Active Stage".into(),
+                    applications: 1,
+                }],
+            }],
+        }],
+        evaluation: pod_core::ScenarioEvaluationSummary {
+            controller_mix: vec![ControllerEvaluationSummary {
+                agent_type: "neural_agent".into(),
+                row_count: 2,
+                reward_total: average_reward_per_row * 2.0,
+                average_reward_per_row,
+            }],
+            worlds: vec![WorldEvaluationSummary {
+                world_id: world_id.into(),
+                display_name: display_name.into(),
+                role,
+                average_reward_per_row,
+                controller_mix: vec![ControllerEvaluationSummary {
+                    agent_type: "neural_agent".into(),
+                    row_count: 2,
+                    reward_total: average_reward_per_row * 2.0,
+                    average_reward_per_row,
+                }],
+                quest_line_count: 1,
+                progressed_quest_line_count: 1,
+                average_quest_progress_basis_points: 5000,
+                applied_score_delta_total: 3,
+                applied_death_mark_count: 0,
+                applied_death_mark_ticks: 0,
+                applied_objective_shift_count: 0,
+                applied_reputation_delta_total: 0,
+                applied_encounter_delta_total: 0,
+                applied_resource_delta_total: 0,
+            }],
+        },
+    }
+    .to_toon_document()
+}
 
 #[test]
 fn integration_connect_stages_default_subscriptions_without_network() {
@@ -105,10 +195,7 @@ fn integration_remote_topology_surfaces_linked_world_quest_and_evaluation_state(
             scenario_id: "deadman-neural-cup".into(),
             profile_id: "ci-smoke".into(),
             generated_at_unix_ms: 42,
-            tournament: WorldTournamentDefinition::new(
-                "deadman-neural-cup",
-                "Deadman Neural Cup",
-            ),
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
             teams: vec![],
             worlds: vec![shadow],
             links: vec![],
@@ -228,10 +315,7 @@ fn integration_remote_topology_feed_row_surfaces_debug_and_evaluation_state() {
         scenario_id: "deadman-neural-cup".into(),
         profile_id: "ci-smoke".into(),
         generated_at_unix_ms: 42,
-        tournament: WorldTournamentDefinition::new(
-            "deadman-neural-cup",
-            "Deadman Neural Cup",
-        ),
+        tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
         teams: vec![],
         worlds: vec![shadow],
         links: vec![],
@@ -293,5 +377,141 @@ fn integration_remote_topology_feed_row_surfaces_debug_and_evaluation_state() {
             .and_then(|world| world.controller_mix.first())
             .map(|controller| controller.agent_type.as_str()),
         Some("neural_agent")
+    );
+}
+
+#[test]
+fn integration_remote_topology_feed_rows_handle_world_switch_and_stale_churn() {
+    let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+        db_name: "deadman-shadow".into(),
+        connection_mode: StdbConnectionMode::Emulated,
+        ..SpacetimeDBClientConfig::default()
+    });
+
+    client.connect().expect("connect in emulated mode");
+    client
+        .subscribe_as_spectator()
+        .expect("staging spectator subscriptions");
+
+    let _ = client.poll_updates();
+    let _ = client.poll_updates();
+
+    let mut entity = CachedEntity::from_entity(17, None, true);
+    entity.team_id = Some(1);
+    entity.name = Some("Topology Scout".into());
+    client.inner_mut().upsert_entity(entity);
+
+    let prime_document = topology_document_for_single_world(
+        "deadman-prime",
+        "Deadman Prime",
+        WorldRealityRole::Tournament,
+        "deadman-prime-season",
+        100,
+        1.5,
+    );
+    client
+        .receive_remote_topology_document_row(
+            10,
+            100,
+            "deadman-neural-cup",
+            "ci-smoke",
+            prime_document.clone(),
+        )
+        .expect("prime row applies");
+
+    let prime_messages = client.poll_updates();
+    let prime_delta = prime_messages
+        .iter()
+        .find_map(|message| match message {
+            pod_net::ServerMessage::StateDelta { delta, .. } => Some(delta),
+            _ => None,
+        })
+        .expect("prime topology update should rebuild snapshot metadata");
+    let prime_entity = prime_delta
+        .updated
+        .iter()
+        .find(|entity| entity.id == 17)
+        .expect("tracked entity should be updated for prime topology");
+    assert_eq!(client.remote_world_id(), Some("deadman-prime"));
+    assert_eq!(
+        prime_entity.metadata.world_id.as_deref(),
+        Some("deadman-prime")
+    );
+    assert_eq!(
+        prime_entity.metadata.world_active_quest_graph_ids,
+        vec!["deadman-prime-season".to_string()]
+    );
+
+    let shadow_document = topology_document_for_single_world(
+        "deadman-shadow",
+        "Deadman Shadow",
+        WorldRealityRole::Shadow,
+        "deadman-shadow-hunt",
+        200,
+        4.5,
+    );
+    client
+        .receive_remote_topology_document_row(
+            11,
+            200,
+            "deadman-neural-cup",
+            "ci-smoke",
+            shadow_document.clone(),
+        )
+        .expect("shadow row applies");
+
+    let shadow_messages = client.poll_updates();
+    let shadow_delta = shadow_messages
+        .iter()
+        .find_map(|message| match message {
+            pod_net::ServerMessage::StateDelta { delta, .. } => Some(delta),
+            _ => None,
+        })
+        .expect("shadow topology update should rebuild snapshot metadata");
+    let shadow_entity = shadow_delta
+        .updated
+        .iter()
+        .find(|entity| entity.id == 17)
+        .expect("tracked entity should be updated for shadow topology");
+    assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
+    assert_eq!(
+        shadow_entity.metadata.world_id.as_deref(),
+        Some("deadman-shadow")
+    );
+    assert_eq!(
+        shadow_entity.metadata.world_role,
+        Some(WorldRealityRole::Shadow)
+    );
+    assert_eq!(
+        shadow_entity.metadata.world_active_quest_graph_ids,
+        vec!["deadman-shadow-hunt".to_string()]
+    );
+    assert_eq!(
+        client
+            .remote_world_evaluation()
+            .map(|evaluation| evaluation.average_reward_per_row),
+        Some(4.5)
+    );
+
+    client
+        .receive_remote_topology_document_row(
+            9,
+            150,
+            "deadman-neural-cup",
+            "ci-smoke",
+            prime_document,
+        )
+        .expect("stale row should be ignored");
+    let stale_messages = client.poll_updates();
+    assert!(stale_messages.iter().all(|message| !matches!(
+        message,
+        pod_net::ServerMessage::DebugDocument { document } if document.contains("deadman-prime")
+    )));
+    assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
+    assert_eq!(
+        client
+            .remote_world_evaluation()
+            .map(|evaluation| evaluation.average_reward_per_row),
+        Some(4.5)
     );
 }

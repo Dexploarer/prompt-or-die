@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Replace the new generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
-2. Thread that same authority-fed topology document stream into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
-3. Add remote execution coverage for topology document churn, world switching, and cross-world quest/effect updates on top of the new authority-fed path.
+1. Thread the authority-fed topology document stream into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
+2. Replace the new generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
+3. Extend the new churn/world-switch coverage to cross-world quest/effect update flows on top of the authority-fed path.

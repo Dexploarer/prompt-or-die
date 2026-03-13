@@ -225,6 +225,7 @@
 - [x] Extended `pod-stdb` and `pod-net::SpacetimeDBClient` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and subscription query coverage so remote topology can now arrive as an authority-published feed row instead of only as direct document injection
 - [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` to `pod-stdb::StdbClient`, so generated mode can connect, subscribe, and consume authority-fed `remote_topology_document` rows through `frame_tick()` instead of hard-failing immediately
 - [x] Added generated-mode coverage in both `pod-stdb` and `pod-net::SpacetimeDBClient`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through the existing debug stream
+- [x] Added `pod-net` networking integration coverage for authority-fed topology churn and world switching, proving a newer `remote_topology_document` row rebuilds snapshot metadata while a stale older row cannot roll the active world/evaluation state back
 
 **Next Action**:
-- Replace the fake generated-runtime adapter with real generated binding/runtime wiring, then thread that authority-fed path into the parity and evaluation harnesses with churn/world-switch coverage.
+- Thread the authority-fed topology stream into the parity/evaluation harnesses, then extend the churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring.
