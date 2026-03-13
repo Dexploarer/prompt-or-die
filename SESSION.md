@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `b1a522b1`
+**Last Checkpoint**: `5baba581`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -240,6 +240,7 @@
 - [x] Added `GeneratedBindingCommand`, `GeneratedBindingRuntime`, and `GeneratedBindingEndpoint`, so generated mode now has a command-driven runtime seam that records outbound connect/subscribe/disconnect requests and accepts inbound callbacks separately instead of auto-acking connect/subscription hooks
 - [x] Moved the public generated-mode integration path in `pod-stdb` and the moat/public generated path in `pod-net` onto that command-driven runtime, including explicit connect/subscription command assertions before topology-row callbacks are delivered
 - [x] Added `install_generated_binding_runtime(...)` to `StdbClient` and `pod-net::SpacetimeDBClient`, so generated-mode consumers install the command-driven runtime through one public handoff instead of re-creating `GeneratedBindingRuntime::new()` boilerplate at each call site
+- [x] Moved `world_quest_bindings` + `topology_parity` ownership out of `pod-headless` private report code and into `pod-core`, which now exports `build_world_quest_bindings(...)`, `RemoteTopologyParitySummary`, and `build_remote_topology_parity_summary(...)` for app, benchmark, and remote runtime reuse
 
 **Next Action**:
 - Swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the generated binding layer exists, then project that live generated feed into the parity/evaluation harnesses.

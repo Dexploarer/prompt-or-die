@@ -66,17 +66,19 @@ pub use constraint::{
     ValidationPipeline,
 };
 pub use contract::{
-    AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition,
-    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
-    CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry, FactionReputationTier,
-    FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary, QuestLineStateSummary,
-    QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
-    RemoteTopologyBundle, RuntimeContractVersion, ScenarioEvaluationSummary, TeamControlMode,
-    TeamDeathMarkSummary, TeamDeltaSummary, ToolBudget, ToolCatalog, ToolDefinition,
-    ToolInvocationRequest, ToolInvocationResult, ToolPolicy, TournamentEliminationMode,
-    VersionedAgentAction, VersionedObservation, VersionedTickTelemetry, WorldChunkDefinition,
-    WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
-    WorldRegionDefinition, WorldTournamentDefinition, RUNTIME_CONTRACT_VERSION_V1,
+    build_remote_topology_parity_summary, build_world_quest_bindings, AgentCapabilities, AgentRole,
+    AgentRuntimeProfile, AgentTeamDefinition, AppliedWorldStateSummary,
+    ControllerEvaluationSummary, CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation,
+    EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack, NamedDeltaSummary,
+    ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
+    QuestStageDefinition, QuestStateGraph, RegionEncounterTable, RemoteTopologyBundle,
+    RemoteTopologyParitySummary, RuntimeContractVersion, ScenarioEvaluationSummary,
+    TeamControlMode, TeamDeathMarkSummary, TeamDeltaSummary, ToolBudget, ToolCatalog,
+    ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
+    TournamentEliminationMode, VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+    WorldChunkDefinition, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
+    WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
+    RUNTIME_CONTRACT_VERSION_V1,
 };
 pub use event::*;
 pub use id::*;

@@ -5,15 +5,16 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
-    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
-    AgentType, AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+    build_remote_topology_parity_summary, build_world_quest_bindings, run_flagship_mmo_acceptance,
+    AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition, AgentType,
+    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
     CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
     FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
     ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
-    QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, ReplayTrainingSample,
-    RewardReason, ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary,
-    TeamDeltaSummary, TournamentEliminationMode, WorldEvaluationSummary, WorldQuestBinding,
-    WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+    QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, RemoteTopologyParitySummary,
+    ReplayTrainingSample, RewardReason, ScenarioEvaluationSummary, TeamControlMode,
+    TeamDeathMarkSummary, TeamDeltaSummary, TournamentEliminationMode, WorldEvaluationSummary,
+    WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
 
@@ -172,24 +173,6 @@ type QuestLineStateReport = QuestLineStateSummary;
 type QuestStageApplicationReport = QuestStageApplicationSummary;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct TopologyParityReport {
-    consistent: bool,
-    teams_match: bool,
-    worlds_match: bool,
-    links_match: bool,
-    quest_graphs_match: bool,
-    world_quest_bindings_match: bool,
-    applied_world_states_match: bool,
-    evaluation_match: bool,
-    missing_world_quest_binding_ids: Vec<String>,
-    unexpected_world_quest_binding_ids: Vec<String>,
-    missing_applied_world_ids: Vec<String>,
-    unexpected_applied_world_ids: Vec<String>,
-    missing_evaluation_world_ids: Vec<String>,
-    unexpected_evaluation_world_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 struct LinkTriggerMatch {
     tag: String,
     matches: usize,
@@ -249,6 +232,7 @@ struct TeamStandingReport {
 type ScenarioEvaluationReport = ScenarioEvaluationSummary;
 type ControllerEvaluationReport = ControllerEvaluationSummary;
 type WorldEvaluationReport = WorldEvaluationSummary;
+type TopologyParityReport = RemoteTopologyParitySummary;
 
 #[derive(Debug, Default, Clone)]
 struct TeamStandingAccumulator {
@@ -684,6 +668,7 @@ fn run_scenario(
         "Team standings are projection totals from cross-world links; per-team in-world attribution still needs admission-aware runtime wiring.".into(),
         "Dataset rows are replay-derived training samples enriched with authoritative reward reasons and runtime profile metadata.".into(),
     ];
+    let world_quest_bindings = build_world_quest_bindings(&scenario.world_quest_graph_ids);
     let topology = build_remote_topology_bundle(
         &options.scenario,
         &options.profile,
@@ -697,12 +682,12 @@ fn run_scenario(
         &applied_world_states,
         &evaluation,
     );
-    let topology_parity = build_topology_parity_report(
+    let topology_parity = build_remote_topology_parity_summary(
         &scenario.teams,
         &scenario.worlds,
         &scenario.links,
         &scenario.quest_graphs,
-        &scenario.world_quest_graph_ids,
+        &world_quest_bindings,
         &applied_world_states,
         &evaluation,
         &topology,
@@ -746,20 +731,6 @@ fn run_scenario(
     })
 }
 
-fn expected_world_quest_bindings(
-    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
-) -> Vec<WorldQuestBinding> {
-    let mut bindings = world_quest_graph_ids
-        .iter()
-        .map(|(world_id, quest_graph_ids)| WorldQuestBinding {
-            world_id: world_id.clone(),
-            quest_graph_ids: quest_graph_ids.clone(),
-        })
-        .collect::<Vec<_>>();
-    bindings.sort_by(|left, right| left.world_id.cmp(&right.world_id));
-    bindings
-}
-
 fn build_remote_topology_bundle(
     scenario_id: &str,
     profile_id: &str,
@@ -773,7 +744,7 @@ fn build_remote_topology_bundle(
     applied_world_states: &[AppliedWorldStateReport],
     evaluation: &ScenarioEvaluationReport,
 ) -> RemoteTopologyBundle {
-    let world_quest_bindings = expected_world_quest_bindings(world_quest_graph_ids);
+    let world_quest_bindings = build_world_quest_bindings(world_quest_graph_ids);
 
     RemoteTopologyBundle {
         version: pod_core::RuntimeContractVersion::V1,
@@ -788,105 +759,6 @@ fn build_remote_topology_bundle(
         quest_graphs: quest_graphs.to_vec(),
         applied_world_states: applied_world_states.to_vec(),
         evaluation: evaluation.clone(),
-    }
-}
-
-fn build_topology_parity_report(
-    teams: &[AgentTeamDefinition],
-    worlds: &[WorldRealityDefinition],
-    links: &[CrossWorldLinkDefinition],
-    quest_graphs: &[QuestStateGraph],
-    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
-    applied_world_states: &[AppliedWorldStateReport],
-    evaluation: &ScenarioEvaluationReport,
-    topology: &RemoteTopologyBundle,
-) -> TopologyParityReport {
-    let expected_bindings = expected_world_quest_bindings(world_quest_graph_ids);
-    let expected_binding_ids = expected_bindings
-        .iter()
-        .map(|binding| binding.world_id.clone())
-        .collect::<BTreeSet<_>>();
-    let actual_binding_ids = topology
-        .world_quest_bindings
-        .iter()
-        .map(|binding| binding.world_id.clone())
-        .collect::<BTreeSet<_>>();
-    let expected_applied_ids = applied_world_states
-        .iter()
-        .map(|state| state.world_id.clone())
-        .collect::<BTreeSet<_>>();
-    let actual_applied_ids = topology
-        .applied_world_states
-        .iter()
-        .map(|state| state.world_id.clone())
-        .collect::<BTreeSet<_>>();
-    let expected_evaluation_ids = evaluation
-        .worlds
-        .iter()
-        .map(|world| world.world_id.clone())
-        .collect::<BTreeSet<_>>();
-    let actual_evaluation_ids = topology
-        .evaluation
-        .worlds
-        .iter()
-        .map(|world| world.world_id.clone())
-        .collect::<BTreeSet<_>>();
-
-    let missing_world_quest_binding_ids = expected_binding_ids
-        .difference(&actual_binding_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    let unexpected_world_quest_binding_ids = actual_binding_ids
-        .difference(&expected_binding_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    let missing_applied_world_ids = expected_applied_ids
-        .difference(&actual_applied_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    let unexpected_applied_world_ids = actual_applied_ids
-        .difference(&expected_applied_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    let missing_evaluation_world_ids = expected_evaluation_ids
-        .difference(&actual_evaluation_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    let unexpected_evaluation_world_ids = actual_evaluation_ids
-        .difference(&expected_evaluation_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let teams_match = topology.teams == teams;
-    let worlds_match = topology.worlds == worlds;
-    let links_match = topology.links == links;
-    let quest_graphs_match = topology.quest_graphs == quest_graphs;
-    let world_quest_bindings_match = topology.world_quest_bindings == expected_bindings;
-    let applied_world_states_match = topology.applied_world_states == applied_world_states;
-    let evaluation_match = topology.evaluation == *evaluation;
-    let consistent = teams_match
-        && worlds_match
-        && links_match
-        && quest_graphs_match
-        && world_quest_bindings_match
-        && applied_world_states_match
-        && evaluation_match;
-
-    TopologyParityReport {
-        consistent,
-        teams_match,
-        worlds_match,
-        links_match,
-        quest_graphs_match,
-        world_quest_bindings_match,
-        applied_world_states_match,
-        evaluation_match,
-        missing_world_quest_binding_ids,
-        unexpected_world_quest_binding_ids,
-        missing_applied_world_ids,
-        unexpected_applied_world_ids,
-        missing_evaluation_world_ids,
-        unexpected_evaluation_world_ids,
     }
 }
 
@@ -3223,12 +3095,12 @@ mod tests {
             &evaluation,
         );
 
-        let parity = build_topology_parity_report(
+        let parity = build_remote_topology_parity_summary(
             &teams,
             &[world],
             &links,
             &quest_graphs,
-            &world_quest_graph_ids,
+            &build_world_quest_bindings(&world_quest_graph_ids),
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3320,12 +3192,12 @@ mod tests {
         topology.world_quest_bindings.clear();
         topology.evaluation.worlds.clear();
 
-        let parity = build_topology_parity_report(
+        let parity = build_remote_topology_parity_summary(
             &teams,
             &worlds,
             &[],
             &quest_graphs,
-            &world_quest_graph_ids,
+            &build_world_quest_bindings(&world_quest_graph_ids),
             &applied_world_states,
             &evaluation,
             &topology,

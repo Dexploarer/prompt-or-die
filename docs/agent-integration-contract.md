@@ -219,7 +219,11 @@ that seam without manual adapter injection. The remaining gap is swapping that
 command/callback seam over to actual generated
 SpacetimeDB binding callbacks and threading the live feed into the
 parity/evaluation harnesses, not redefining the contract or publication format
-itself.
+itself. The topology parity contract is shared now too: `pod-core` owns
+`RemoteTopologyParitySummary` plus the `build_world_quest_bindings(...)` and
+`build_remote_topology_parity_summary(...)` helpers, so `pod-headless`,
+benchmark surfaces, and future remote consumers do not carry private copies of
+that comparison logic.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many

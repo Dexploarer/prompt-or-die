@@ -222,6 +222,10 @@ install that seam through `install_generated_binding_runtime(...)`, so the
 benchmark and integration paths no longer hand-wire the adapter. The in-tree
 coverage now includes both
 same-world and linked-world quest/effect churn on that generated path.
+`pod-core` also owns the shared `RemoteTopologyParitySummary` contract and
+builder helpers now, so headless and moat parity checks compare exported
+topology artifacts through one engine-level definition instead of app-local
+report code.
 
 `scripts/run_moat_benchmarks.ts` now includes that payload as
 `topologyFeedMeasurements`, so the combined moat artifact records core,
