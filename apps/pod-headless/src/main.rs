@@ -6,19 +6,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
     build_remote_topology_bundle, build_remote_topology_parity_summary,
-    build_tournament_control_plane_summary, build_world_admission_summary,
-    build_world_control_plane_summary, build_world_quest_bindings, run_flagship_mmo_acceptance,
-    AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition, AgentType,
-    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+    build_tournament_control_plane_summary, build_tournament_orchestration_summary,
+    build_world_admission_summary, build_world_control_plane_summary, build_world_quest_bindings,
+    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
+    AgentType, AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
     CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
     FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
     ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
     QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, RemoteTopologyParitySummary,
     ReplayTrainingSample, RewardReason, ScenarioEvaluationSummary, TeamControlMode,
     TeamDeathMarkSummary, TeamDeltaSummary, TeamRewardLedgerSummary, TournamentControlPlaneSummary,
-    TournamentEliminationMode, TournamentTeamStandingSummary, WorldAdmissionSummary,
-    WorldControlPlaneSummary, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
-    WorldRealityRole, WorldTournamentDefinition,
+    TournamentEliminationMode, TournamentOrchestrationSummary, TournamentTeamStandingSummary,
+    WorldAdmissionSummary, WorldControlPlaneSummary, WorldEvaluationSummary, WorldQuestBinding,
+    WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
 
@@ -71,6 +71,7 @@ struct HeadlessAppReport {
     cross_world_projections: Vec<CrossWorldProjectionReport>,
     applied_world_states: Vec<AppliedWorldStateReport>,
     tournament_control_plane: TournamentControlPlaneSummary,
+    tournament_orchestration: TournamentOrchestrationSummary,
     standings: Vec<TeamStandingReport>,
     evaluation: ScenarioEvaluationReport,
     topology_parity: TopologyParityReport,
@@ -663,6 +664,14 @@ fn run_scenario(
         &build_team_reward_ledgers(&dataset_worlds),
         &applied_world_states,
     );
+    let tournament_orchestration = build_tournament_orchestration_summary(
+        &scenario.tournament,
+        &scenario.worlds,
+        &scenario.links,
+        &world_control_planes,
+        &tournament_control_plane,
+        &applied_world_states,
+    );
     let evaluation = build_scenario_evaluation(&dataset_worlds, &applied_world_states);
 
     let generated_at_unix_ms = SystemTime::now()
@@ -690,6 +699,7 @@ fn run_scenario(
         &world_admissions,
         &world_control_planes,
         &tournament_control_plane,
+        &tournament_orchestration,
         &applied_world_states,
         &evaluation,
     );
@@ -702,6 +712,7 @@ fn run_scenario(
         &world_admissions,
         &world_control_planes,
         &tournament_control_plane,
+        &tournament_orchestration,
         &applied_world_states,
         &evaluation,
         &topology,
@@ -729,6 +740,7 @@ fn run_scenario(
             cross_world_projections,
             applied_world_states,
             tournament_control_plane: tournament_control_plane.clone(),
+            tournament_orchestration,
             standings: tournament_control_plane.standings.clone(),
             evaluation,
             topology_parity,
@@ -2670,6 +2682,7 @@ mod tests {
                 }],
             }],
             &TournamentControlPlaneSummary::default(),
+            &TournamentOrchestrationSummary::default(),
             &[AppliedWorldStateReport {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -2882,6 +2895,7 @@ mod tests {
                 },
             ],
             &TournamentControlPlaneSummary::default(),
+            &TournamentOrchestrationSummary::default(),
             &[
                 AppliedWorldStateReport {
                     world_id: "deadman-prime".into(),
@@ -3193,6 +3207,7 @@ mod tests {
             &world_admissions,
             &world_control_planes,
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &applied_world_states,
             &evaluation,
         );
@@ -3206,6 +3221,7 @@ mod tests {
             &world_admissions,
             &world_control_planes,
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3344,6 +3360,7 @@ mod tests {
             &world_admissions,
             &world_control_planes,
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &applied_world_states,
             &evaluation,
         );
@@ -3362,6 +3379,7 @@ mod tests {
             &world_admissions,
             &world_control_planes,
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &applied_world_states,
             &evaluation,
             &topology,

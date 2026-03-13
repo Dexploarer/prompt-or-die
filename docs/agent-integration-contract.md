@@ -241,9 +241,9 @@ without custom per-test runtimes or auto-acked connect/subscription hooks.
 `install_generated_binding_runtime(...)` for the deterministic command-driven
 path and `install_generated_sdk_runtime(...)` for the live generated SDK path,
 so external generated hosts no longer need manual adapter injection. The
-remaining gap is building shared tournament orchestration state on top of the
-remote topology and benchmark surfaces, not redefining the contract or
-publication format itself. The topology parity contract is shared now too: `pod-core` owns
+remaining gap is no longer the topology contract itself. It is benchmarking and
+historically tracking shared tournament/swarm orchestration on top of the same
+remote topology and parity surfaces. The topology parity contract is shared now too: `pod-core` owns
 `assign_roster_to_world_teams(...)`, `build_world_admission_summary(...)`,
 `build_world_control_plane_summary(...)`, `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, plus the `build_world_quest_bindings(...)` and
@@ -254,8 +254,10 @@ travels in `RemoteTopologyBundle.world_admissions`, and per-world admitted
 roster/controller mix now travels in `RemoteTopologyBundle.world_control_planes`
 instead of staying headless-local. Tournament standings and control-plane
 rollups now also travel in `RemoteTopologyBundle.tournament_control_plane`, and
-both `pod-stdb` and `pod-net::SpacetimeDBClient` expose that shared tournament
-summary directly instead of reconstructing it locally.
+shared world-by-world tournament pressure now travels in
+`RemoteTopologyBundle.tournament_orchestration`, with both `pod-stdb` and
+`pod-net::SpacetimeDBClient` exposing the shared tournament summaries directly
+instead of reconstructing them locally.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many

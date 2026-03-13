@@ -1002,6 +1002,73 @@ impl Default for TournamentControlPlaneSummary {
     }
 }
 
+/// Shared tournament phase derived from world pressure and elimination state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TournamentOrchestrationPhase {
+    Muster,
+    Active,
+    SuddenDeath,
+    Resolved,
+}
+
+/// World-scoped tournament orchestration state derived from control-plane,
+/// link, and applied-effect summaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldTournamentOrchestrationSummary {
+    pub world_id: String,
+    pub display_name: String,
+    pub role: WorldRealityRole,
+    pub active_team_ids: Vec<String>,
+    pub linked_world_ids: Vec<String>,
+    pub active_link_ids: Vec<String>,
+    pub assigned_agent_count: usize,
+    pub controller_mix: Vec<AgentTypeCountSummary>,
+    pub applied_score_delta_total: i32,
+    pub applied_death_mark_count: usize,
+    pub applied_death_mark_ticks: u64,
+    pub objective_shift_count: usize,
+    pub unresolved_objective_shift_count: usize,
+    pub progressed_quest_line_count: usize,
+    pub terminal_quest_line_count: usize,
+    pub leading_team_ids: Vec<String>,
+    pub at_risk_team_ids: Vec<String>,
+}
+
+/// Shared tournament orchestration rollup derived from the authoritative
+/// control plane, world links, and applied world-state summaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentOrchestrationSummary {
+    pub tournament_id: String,
+    pub phase: TournamentOrchestrationPhase,
+    pub active_world_ids: Vec<String>,
+    pub contested_world_ids: Vec<String>,
+    pub active_link_ids: Vec<String>,
+    pub leading_team_ids: Vec<String>,
+    pub at_risk_team_ids: Vec<String>,
+    pub worlds: Vec<WorldTournamentOrchestrationSummary>,
+}
+
+impl TournamentOrchestrationSummary {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("tournament_orchestration_summary", self)
+    }
+}
+
+impl Default for TournamentOrchestrationSummary {
+    fn default() -> Self {
+        Self {
+            tournament_id: String::new(),
+            phase: TournamentOrchestrationPhase::Muster,
+            active_world_ids: Vec::new(),
+            contested_world_ids: Vec::new(),
+            active_link_ids: Vec::new(),
+            leading_team_ids: Vec::new(),
+            at_risk_team_ids: Vec::new(),
+            worlds: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct TournamentStandingAccumulator {
     assigned_agents: BTreeSet<String>,
@@ -1103,6 +1170,291 @@ pub fn build_tournament_control_plane_summary(
     TournamentControlPlaneSummary {
         tournament_id: tournament.tournament_id.clone(),
         standings,
+    }
+}
+
+pub fn build_tournament_orchestration_summary(
+    tournament: &WorldTournamentDefinition,
+    worlds: &[WorldRealityDefinition],
+    links: &[CrossWorldLinkDefinition],
+    world_control_planes: &[WorldControlPlaneSummary],
+    tournament_control_plane: &TournamentControlPlaneSummary,
+    applied_world_states: &[AppliedWorldStateSummary],
+) -> TournamentOrchestrationSummary {
+    let tournament_world_ids = if tournament.world_ids.is_empty() {
+        worlds
+            .iter()
+            .map(|world| world.world_id.clone())
+            .collect::<BTreeSet<_>>()
+    } else {
+        tournament.world_ids.iter().cloned().collect::<BTreeSet<_>>()
+    };
+    let tournament_link_ids = if tournament.cross_world_link_ids.is_empty() {
+        links.iter()
+            .map(|link| link.link_id.clone())
+            .collect::<BTreeSet<_>>()
+    } else {
+        tournament
+            .cross_world_link_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+    let standings_by_team = tournament_control_plane
+        .standings
+        .iter()
+        .map(|standing| (standing.team_id.clone(), standing))
+        .collect::<BTreeMap<_, _>>();
+
+    let worlds = worlds
+        .iter()
+        .filter(|world| tournament_world_ids.contains(&world.world_id))
+        .map(|world| {
+            let control_plane = world_control_planes
+                .iter()
+                .find(|summary| summary.world_id == world.world_id);
+            let applied_world_state = applied_world_states
+                .iter()
+                .find(|summary| summary.world_id == world.world_id);
+
+            let mut controller_mix = BTreeMap::<String, usize>::new();
+            let assigned_agent_count = control_plane
+                .map(|summary| {
+                    summary
+                        .teams
+                        .iter()
+                        .map(|team| {
+                            for count in &team.controller_mix {
+                                *controller_mix
+                                    .entry(count.agent_type.clone())
+                                    .or_default() += count.count;
+                            }
+                            team.assignments.len()
+                        })
+                        .sum()
+                })
+                .unwrap_or(0);
+            let controller_mix = controller_mix
+                .into_iter()
+                .map(|(agent_type, count)| AgentTypeCountSummary { agent_type, count })
+                .collect::<Vec<_>>();
+
+            let active_link_ids = links
+                .iter()
+                .filter(|link| tournament_link_ids.contains(&link.link_id))
+                .filter(|link| {
+                    link.source_world_id == world.world_id || link.target_world_id == world.world_id
+                })
+                .map(|link| link.link_id.clone())
+                .collect::<Vec<_>>();
+
+            let applied_score_delta_total = applied_world_state
+                .map(|state| {
+                    state
+                        .team_scores
+                        .iter()
+                        .map(|summary| summary.total_delta)
+                        .sum()
+                })
+                .unwrap_or(0);
+            let applied_death_mark_count = applied_world_state
+                .map(|state| state.death_marks.iter().map(|summary| summary.applications).sum())
+                .unwrap_or(0);
+            let applied_death_mark_ticks = applied_world_state
+                .map(|state| {
+                    state
+                        .death_marks
+                        .iter()
+                        .map(|summary| summary.total_duration_ticks)
+                        .sum()
+                })
+                .unwrap_or(0);
+            let objective_shift_count = applied_world_state
+                .map(|state| {
+                    state
+                        .objective_state_shifts
+                        .iter()
+                        .map(|summary| summary.applications)
+                        .sum()
+                })
+                .unwrap_or(0);
+            let unresolved_objective_shift_count = applied_world_state
+                .map(|state| {
+                    state
+                        .unresolved_objective_state_shifts
+                        .iter()
+                        .map(|summary| summary.applications)
+                        .sum()
+                })
+                .unwrap_or(0);
+            let progressed_quest_line_count = applied_world_state
+                .map(|state| {
+                    state
+                        .quest_lines
+                        .iter()
+                        .filter(|quest_line| quest_line.progress_basis_points > 0)
+                        .count()
+                })
+                .unwrap_or(0);
+            let terminal_quest_line_count = applied_world_state
+                .map(|state| state.quest_lines.iter().filter(|quest_line| quest_line.terminal).count())
+                .unwrap_or(0);
+
+            let mut at_risk_team_ids = world
+                .active_team_ids
+                .iter()
+                .filter_map(|team_id| {
+                    standings_by_team
+                        .get(team_id)
+                        .filter(|standing| standing.active_death_marks > 0)
+                        .map(|_| team_id.clone())
+                })
+                .collect::<Vec<_>>();
+            at_risk_team_ids.sort();
+
+            let world_lead_candidates = world
+                .active_team_ids
+                .iter()
+                .filter_map(|team_id| standings_by_team.get(team_id).copied())
+                .collect::<Vec<_>>();
+            let mut leading_team_ids = if let Some(max_score_delta) = world_lead_candidates
+                .iter()
+                .map(|standing| standing.applied_score_delta)
+                .max()
+            {
+                let score_delta_leaders = world_lead_candidates
+                    .iter()
+                    .copied()
+                    .filter(|standing| standing.applied_score_delta == max_score_delta)
+                    .collect::<Vec<_>>();
+                let max_world_reward = score_delta_leaders
+                    .iter()
+                    .map(|standing| standing.world_reward_total)
+                    .max_by(|left, right| {
+                        left.partial_cmp(right)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .unwrap_or(0.0);
+                score_delta_leaders
+                    .iter()
+                    .filter(|standing| standing.world_reward_total == max_world_reward)
+                    .map(|standing| standing.team_id.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            leading_team_ids.sort();
+
+            WorldTournamentOrchestrationSummary {
+                world_id: world.world_id.clone(),
+                display_name: world.display_name.clone(),
+                role: world.role,
+                active_team_ids: world.active_team_ids.clone(),
+                linked_world_ids: world.linked_world_ids.clone(),
+                active_link_ids,
+                assigned_agent_count,
+                controller_mix,
+                applied_score_delta_total,
+                applied_death_mark_count,
+                applied_death_mark_ticks,
+                objective_shift_count,
+                unresolved_objective_shift_count,
+                progressed_quest_line_count,
+                terminal_quest_line_count,
+                leading_team_ids,
+                at_risk_team_ids,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let active_world_ids = worlds
+        .iter()
+        .map(|world| world.world_id.clone())
+        .collect::<Vec<_>>();
+    let contested_world_ids = worlds
+        .iter()
+        .filter(|world| world.active_team_ids.len() > 1)
+        .map(|world| world.world_id.clone())
+        .collect::<Vec<_>>();
+    let active_link_ids = links
+        .iter()
+        .filter(|link| tournament_link_ids.contains(&link.link_id))
+        .map(|link| link.link_id.clone())
+        .collect::<Vec<_>>();
+
+    let mut at_risk_team_ids = tournament_control_plane
+        .standings
+        .iter()
+        .filter(|standing| standing.active_death_marks > 0)
+        .map(|standing| standing.team_id.clone())
+        .collect::<Vec<_>>();
+    at_risk_team_ids.sort();
+
+    let mut leading_team_ids = if let Some(max_score_delta) = tournament_control_plane
+        .standings
+        .iter()
+        .map(|standing| standing.applied_score_delta)
+        .max()
+    {
+        let score_delta_leaders = tournament_control_plane
+            .standings
+            .iter()
+            .filter(|standing| standing.applied_score_delta == max_score_delta)
+            .collect::<Vec<_>>();
+        let max_world_reward = score_delta_leaders
+            .iter()
+            .map(|standing| standing.world_reward_total)
+            .max_by(|left, right| {
+                left.partial_cmp(right)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0.0);
+        score_delta_leaders
+            .iter()
+            .filter(|standing| standing.world_reward_total == max_world_reward)
+            .map(|standing| standing.team_id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    leading_team_ids.sort();
+
+    let all_quest_lines_terminal = !applied_world_states.is_empty()
+        && applied_world_states
+            .iter()
+            .flat_map(|state| state.quest_lines.iter())
+            .all(|quest_line| quest_line.terminal);
+    let no_unresolved_objective_shifts = applied_world_states
+        .iter()
+        .all(|state| state.unresolved_objective_state_shifts.is_empty());
+    let no_active_death_marks = tournament_control_plane
+        .standings
+        .iter()
+        .all(|standing| standing.active_death_marks == 0);
+
+    let phase = if active_world_ids.is_empty() || tournament_control_plane.standings.is_empty() {
+        TournamentOrchestrationPhase::Muster
+    } else if matches!(
+        tournament.elimination_mode,
+        TournamentEliminationMode::Permadeath
+    ) && !at_risk_team_ids.is_empty()
+    {
+        TournamentOrchestrationPhase::SuddenDeath
+    } else if all_quest_lines_terminal && no_unresolved_objective_shifts && no_active_death_marks {
+        TournamentOrchestrationPhase::Resolved
+    } else {
+        TournamentOrchestrationPhase::Active
+    };
+
+    TournamentOrchestrationSummary {
+        tournament_id: tournament.tournament_id.clone(),
+        phase,
+        active_world_ids,
+        contested_world_ids,
+        active_link_ids,
+        leading_team_ids,
+        at_risk_team_ids,
+        worlds,
     }
 }
 
@@ -1305,6 +1657,8 @@ pub struct RemoteTopologyBundle {
     pub world_control_planes: Vec<WorldControlPlaneSummary>,
     #[serde(default)]
     pub tournament_control_plane: TournamentControlPlaneSummary,
+    #[serde(default)]
+    pub tournament_orchestration: TournamentOrchestrationSummary,
     pub quest_graphs: Vec<QuestStateGraph>,
     pub applied_world_states: Vec<AppliedWorldStateSummary>,
     pub evaluation: ScenarioEvaluationSummary,
@@ -1329,6 +1683,7 @@ pub fn build_remote_topology_bundle(
     world_admissions: &[WorldAdmissionSummary],
     world_control_planes: &[WorldControlPlaneSummary],
     tournament_control_plane: &TournamentControlPlaneSummary,
+    tournament_orchestration: &TournamentOrchestrationSummary,
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
 ) -> RemoteTopologyBundle {
@@ -1345,6 +1700,7 @@ pub fn build_remote_topology_bundle(
         world_admissions: world_admissions.to_vec(),
         world_control_planes: world_control_planes.to_vec(),
         tournament_control_plane: tournament_control_plane.clone(),
+        tournament_orchestration: tournament_orchestration.clone(),
         quest_graphs: quest_graphs.to_vec(),
         applied_world_states: applied_world_states.to_vec(),
         evaluation: evaluation.clone(),
@@ -1364,6 +1720,7 @@ pub struct RemoteTopologyParitySummary {
     pub world_admissions_match: bool,
     pub world_control_planes_match: bool,
     pub tournament_control_plane_match: bool,
+    pub tournament_orchestration_match: bool,
     pub applied_world_states_match: bool,
     pub evaluation_match: bool,
     pub missing_world_quest_binding_ids: Vec<String>,
@@ -1393,6 +1750,7 @@ pub fn build_remote_topology_parity_summary(
     world_admissions: &[WorldAdmissionSummary],
     world_control_planes: &[WorldControlPlaneSummary],
     tournament_control_plane: &TournamentControlPlaneSummary,
+    tournament_orchestration: &TournamentOrchestrationSummary,
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
     topology: &RemoteTopologyBundle,
@@ -1495,6 +1853,8 @@ pub fn build_remote_topology_parity_summary(
     let world_control_planes_match = topology.world_control_planes == world_control_planes;
     let tournament_control_plane_match =
         topology.tournament_control_plane == *tournament_control_plane;
+    let tournament_orchestration_match =
+        topology.tournament_orchestration == *tournament_orchestration;
     let applied_world_states_match = topology.applied_world_states == applied_world_states;
     let evaluation_match = topology.evaluation == *evaluation;
     let consistent = teams_match
@@ -1505,6 +1865,7 @@ pub fn build_remote_topology_parity_summary(
         && world_admissions_match
         && world_control_planes_match
         && tournament_control_plane_match
+        && tournament_orchestration_match
         && applied_world_states_match
         && evaluation_match;
 
@@ -1518,6 +1879,7 @@ pub fn build_remote_topology_parity_summary(
         world_admissions_match,
         world_control_planes_match,
         tournament_control_plane_match,
+        tournament_orchestration_match,
         applied_world_states_match,
         evaluation_match,
         missing_world_quest_binding_ids,
@@ -1664,23 +2026,26 @@ mod tests {
     use super::{
         assign_roster_to_world_teams, build_remote_topology_bundle,
         build_remote_topology_parity_summary, build_tournament_control_plane_summary,
-        build_world_admission_summary, build_world_control_plane_summary,
-        build_world_quest_bindings, AgentCapabilities, AgentRole, AgentRuntimeProfile,
-        AgentTeamDefinition, AgentTypeCountSummary, AppliedWorldStateSummary,
-        ControllerEvaluationSummary, CrossWorldEffect, CrossWorldLinkDefinition,
-        CrossWorldPropagation, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
-        NamedDeltaSummary, ObjectiveShiftSummary, QuestLineStateSummary,
-        QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
+        build_tournament_orchestration_summary, build_world_admission_summary,
+        build_world_control_plane_summary, build_world_quest_bindings, AgentCapabilities,
+        AgentRole, AgentRuntimeProfile, AgentTeamDefinition, AgentTypeCountSummary,
+        AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+        CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
+        FactionReputationTier, FactionReputationTrack, NamedDeltaSummary,
+        ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
+        QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
         RemoteAgentFallbackMode, RemoteAgentObservationBudget, RemoteAgentTransportContract,
         RemoteTopologyBundle, RuntimeContractVersion, ScenarioEvaluationSummary, TeamControlMode,
         TeamDeathMarkSummary, TeamDeltaSummary, TeamRewardLedgerSummary, ToolBudget, ToolCatalog,
         ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
-        TournamentControlPlaneSummary, TournamentEliminationMode, TournamentTeamStandingSummary,
-        VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
-        WorldAdmissionAssignment, WorldAdmissionSummary, WorldChunkDefinition,
-        WorldControlAssignmentSummary, WorldControlPlaneSummary, WorldEvaluationSummary,
-        WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTeamControlSummary,
-        WorldTournamentDefinition, REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
+        TournamentControlPlaneSummary, TournamentEliminationMode, TournamentOrchestrationPhase,
+        TournamentOrchestrationSummary, TournamentTeamStandingSummary, VersionedAgentAction,
+        VersionedObservation, VersionedTickTelemetry, WorldAdmissionAssignment,
+        WorldAdmissionSummary, WorldChunkDefinition, WorldControlAssignmentSummary,
+        WorldControlPlaneSummary, WorldEvaluationSummary, WorldRealityDefinition,
+        WorldRealityRole, WorldRegionDefinition, WorldTeamControlSummary,
+        WorldTournamentDefinition, WorldTournamentOrchestrationSummary,
+        REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
         REMOTE_AGENT_MAX_AUDIBLE_EVENTS, REMOTE_AGENT_MAX_VISIBLE_ENTITIES,
         REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS, REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
         RUNTIME_CONTRACT_VERSION_V1,
@@ -2057,6 +2422,7 @@ mod tests {
                 }],
             }],
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &[AppliedWorldStateSummary {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -2478,6 +2844,252 @@ mod tests {
     }
 
     #[test]
+    fn tournament_orchestration_summary_rolls_up_world_pressure_and_phase() {
+        let worlds = vec![
+            WorldRealityDefinition {
+                version: RuntimeContractVersion::V1,
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                ruleset_id: "deadman".into(),
+                role: WorldRealityRole::Tournament,
+                linked_world_ids: vec!["deadman-shadow".into()],
+                active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+            },
+            WorldRealityDefinition {
+                version: RuntimeContractVersion::V1,
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                ruleset_id: "shadow".into(),
+                role: WorldRealityRole::Shadow,
+                linked_world_ids: vec!["deadman-prime".into()],
+                active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+            },
+        ];
+        let world_control_planes = vec![
+            WorldControlPlaneSummary {
+                world_id: "deadman-prime".into(),
+                teams: vec![
+                    WorldTeamControlSummary {
+                        team_id: "iron-sigil".into(),
+                        assignments: vec![WorldControlAssignmentSummary {
+                            agent_id: "agent-a".into(),
+                            slot_index: 0,
+                            runtime_profile: AgentRuntimeProfile::for_agent_type(
+                                AgentType::NeuralAgent,
+                            ),
+                        }],
+                        controller_mix: vec![AgentTypeCountSummary {
+                            agent_type: "neural_agent".into(),
+                            count: 1,
+                        }],
+                    },
+                    WorldTeamControlSummary {
+                        team_id: "gloam-mesh".into(),
+                        assignments: vec![WorldControlAssignmentSummary {
+                            agent_id: "agent-b".into(),
+                            slot_index: 0,
+                            runtime_profile: AgentRuntimeProfile::for_agent_type(
+                                AgentType::LlmAgent,
+                            ),
+                        }],
+                        controller_mix: vec![AgentTypeCountSummary {
+                            agent_type: "llm_agent".into(),
+                            count: 1,
+                        }],
+                    },
+                ],
+            },
+            WorldControlPlaneSummary {
+                world_id: "deadman-shadow".into(),
+                teams: vec![],
+            },
+        ];
+        let applied_world_states = vec![
+            AppliedWorldStateSummary {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                team_scores: vec![TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 15,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    stage_tag: "blood-round".into(),
+                    applications: 1,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![QuestLineStateSummary {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    display_name: "Deadman Prime: Blood Season".into(),
+                    current_stage_ids: vec!["blood-round".into()],
+                    completed_stage_ids: vec!["enter-bracket".into()],
+                    pending_stage_ids: vec!["crown-push".into()],
+                    next_stage_ids: vec!["crown-push".into()],
+                    progress_basis_points: 5_000,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationSummary {
+                        stage_id: "blood-round".into(),
+                        title: "Blood Round".into(),
+                        applications: 1,
+                    }],
+                }],
+            },
+            AppliedWorldStateSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                team_scores: vec![TeamDeltaSummary {
+                    team_id: "gloam-mesh".into(),
+                    total_delta: 8,
+                }],
+                death_marks: vec![TeamDeathMarkSummary {
+                    team_id: "gloam-mesh".into(),
+                    applications: 2,
+                    total_duration_ticks: 1200,
+                }],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    stage_tag: "marked-by-kills".into(),
+                    applications: 2,
+                }],
+                unresolved_objective_state_shifts: vec![ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    stage_tag: "rift-collapse".into(),
+                    applications: 1,
+                }],
+                quest_lines: vec![QuestLineStateSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    display_name: "Deadman Shadow: Mirror Hunt".into(),
+                    current_stage_ids: vec!["marked-by-kills".into()],
+                    completed_stage_ids: vec!["shadow-observe".into()],
+                    pending_stage_ids: vec!["rift-collapse".into()],
+                    next_stage_ids: vec!["rift-collapse".into()],
+                    progress_basis_points: 6_666,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationSummary {
+                        stage_id: "marked-by-kills".into(),
+                        title: "Marked by Kills".into(),
+                        applications: 2,
+                    }],
+                }],
+            },
+        ];
+        let tournament_control_plane = TournamentControlPlaneSummary {
+            tournament_id: "deadman-neural-cup".into(),
+            standings: vec![
+                TournamentTeamStandingSummary {
+                    team_id: "iron-sigil".into(),
+                    display_name: "Iron Sigil".into(),
+                    control_mode: TeamControlMode::HybridCommand,
+                    home_world_id: "deadman-prime".into(),
+                    participating_world_ids: vec![
+                        "deadman-prime".into(),
+                        "deadman-shadow".into(),
+                    ],
+                    assigned_agent_count: 1,
+                    controller_mix: vec![AgentTypeCountSummary {
+                        agent_type: "neural_agent".into(),
+                        count: 1,
+                    }],
+                    dataset_row_count: 1,
+                    world_reward_total: 2.0,
+                    applied_score_delta: 15,
+                    active_death_marks: 0,
+                    active_death_mark_ticks: 0,
+                },
+                TournamentTeamStandingSummary {
+                    team_id: "gloam-mesh".into(),
+                    display_name: "Gloam Mesh".into(),
+                    control_mode: TeamControlMode::AutonomousSwarm,
+                    home_world_id: "deadman-shadow".into(),
+                    participating_world_ids: vec![
+                        "deadman-prime".into(),
+                        "deadman-shadow".into(),
+                    ],
+                    assigned_agent_count: 1,
+                    controller_mix: vec![AgentTypeCountSummary {
+                        agent_type: "llm_agent".into(),
+                        count: 1,
+                    }],
+                    dataset_row_count: 1,
+                    world_reward_total: 1.0,
+                    applied_score_delta: 8,
+                    active_death_marks: 2,
+                    active_death_mark_ticks: 1200,
+                },
+            ],
+        };
+        let mut tournament =
+            WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup");
+        tournament.world_ids = vec!["deadman-prime".into(), "deadman-shadow".into()];
+        tournament.team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+        tournament.cross_world_link_ids = vec!["prime-to-shadow".into()];
+        tournament.elimination_mode = TournamentEliminationMode::Permadeath;
+
+        let summary = build_tournament_orchestration_summary(
+            &tournament,
+            &worlds,
+            &[CrossWorldLinkDefinition::new(
+                "prime-to-shadow",
+                "deadman-prime",
+                "deadman-shadow",
+            )],
+            &world_control_planes,
+            &tournament_control_plane,
+            &applied_world_states,
+        );
+
+        assert_eq!(summary.phase, TournamentOrchestrationPhase::SuddenDeath);
+        assert_eq!(summary.leading_team_ids, vec!["iron-sigil".to_string()]);
+        assert_eq!(summary.at_risk_team_ids, vec!["gloam-mesh".to_string()]);
+        assert_eq!(summary.contested_world_ids.len(), 2);
+        assert_eq!(summary.active_link_ids, vec!["prime-to-shadow".to_string()]);
+        assert_eq!(
+            summary
+                .worlds
+                .iter()
+                .find(|world| world.world_id == "deadman-prime")
+                .expect("prime world summary present"),
+            &WorldTournamentOrchestrationSummary {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+                linked_world_ids: vec!["deadman-shadow".into()],
+                active_link_ids: vec!["prime-to-shadow".into()],
+                assigned_agent_count: 2,
+                controller_mix: vec![
+                    AgentTypeCountSummary {
+                        agent_type: "llm_agent".into(),
+                        count: 1,
+                    },
+                    AgentTypeCountSummary {
+                        agent_type: "neural_agent".into(),
+                        count: 1,
+                    },
+                ],
+                applied_score_delta_total: 15,
+                applied_death_mark_count: 0,
+                applied_death_mark_ticks: 0,
+                objective_shift_count: 1,
+                unresolved_objective_shift_count: 0,
+                progressed_quest_line_count: 1,
+                terminal_quest_line_count: 0,
+                leading_team_ids: vec!["iron-sigil".into()],
+                at_risk_team_ids: vec!["gloam-mesh".into()],
+            }
+        );
+    }
+
+    #[test]
     fn remote_topology_parity_summary_flags_missing_bundle_sections() {
         let teams = vec![AgentTeamDefinition::new(
             "iron-sigil",
@@ -2596,6 +3208,7 @@ mod tests {
             world_admissions: world_admissions.clone(),
             world_control_planes: world_control_planes.clone(),
             tournament_control_plane: tournament_control_plane.clone(),
+            tournament_orchestration: TournamentOrchestrationSummary::default(),
             quest_graphs: quest_graphs.clone(),
             applied_world_states: applied_world_states.clone(),
             evaluation: evaluation.clone(),
@@ -2615,6 +3228,7 @@ mod tests {
             &world_admissions,
             &world_control_planes,
             &tournament_control_plane,
+            &TournamentOrchestrationSummary::default(),
             &applied_world_states,
             &evaluation,
             &topology,

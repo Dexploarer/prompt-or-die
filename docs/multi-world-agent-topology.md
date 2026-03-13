@@ -164,10 +164,11 @@ This lets us support:
 
 In order:
 
-1. Build shared tournament orchestration state on top of the now-remote
-   `tournament_control_plane` surface in `pod-stdb` and `pod-net`.
-2. Add tournament- and swarm-level orchestration benchmarks using the same
+1. Add tournament- and swarm-level orchestration benchmarks using the same
    replay/evaluation spine and shared topology artifacts.
+2. Carry orchestration drift into the published topology/moat history so
+   monthly shard-target snapshots show world-pressure changes, not just static
+   parity.
 3. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 

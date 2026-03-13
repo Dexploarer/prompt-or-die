@@ -271,10 +271,11 @@ and the first committed monthly snapshot at
 headless and moat parity checks compare exported topology artifacts through one
 engine-level assembly/consistency definition instead of app-local report code.
 The same topology-feed report now also checks
-`RemoteTopologyBundle.tournament_control_plane` on both the authority-row and
-generated-runtime paths, so tournament standings/control-plane drift is part of
-the same remote parity artifact as quest bindings, applied world state, and
-evaluation.
+`RemoteTopologyBundle.tournament_control_plane` and
+`RemoteTopologyBundle.tournament_orchestration` on both the authority-row and
+generated-runtime paths, so tournament standings/control-plane and
+world-pressure drift are part of the same remote parity artifact as quest
+bindings, applied world state, and evaluation.
 
 `scripts/run_moat_benchmarks.ts` now includes that payload as
 `topologyFeedMeasurements`, so the combined moat artifact records core,

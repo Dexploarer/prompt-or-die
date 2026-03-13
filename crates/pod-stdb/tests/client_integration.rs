@@ -291,7 +291,8 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
         }],
         world_admissions: vec![],
         world_control_planes: vec![],
-            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
+        tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
+        tournament_orchestration: pod_core::TournamentOrchestrationSummary::default(),
         quest_graphs: vec![],
         applied_world_states: vec![],
         evaluation: pod_core::ScenarioEvaluationSummary {

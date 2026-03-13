@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 194
-**Current focus**: Iteration 195 define shared tournament orchestration state on top of the remote tournament control-plane surface
+**Last updated**: Iteration 195
+**Current focus**: Iteration 196 benchmark shared tournament/swarm orchestration on top of the remote topology surface and publish that drift in the moat history
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1989,6 +1989,23 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-stdb --no-default-features --features client -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-core -p pod-headless`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 195
+- [x] Added `TournamentOrchestrationPhase`, `WorldTournamentOrchestrationSummary`, `TournamentOrchestrationSummary`, and `build_tournament_orchestration_summary(...)` in `crates/pod-core/src/contract.rs`, so world-by-world tournament pressure and phase/state rollups are now shared runtime contracts instead of future `pod-headless`-local aggregation.
+- [x] Extended `RemoteTopologyBundle` and `RemoteTopologyParitySummary` with the shared `tournament_orchestration` surface, so world-pressure drift now travels through the same remote topology contract as admissions, world control planes, tournament control planes, quest bindings, applied world state, and evaluation.
+- [x] Updated `apps/pod-headless`, `crates/pod-stdb`, and `crates/pod-net` to emit, resolve, and expose the shared tournament orchestration summary, including `StdbClient::resolved_remote_tournament_orchestration()`, `StdbClient::resolved_remote_world_tournament_orchestration()`, `pod-net::SpacetimeDBClient::remote_tournament_orchestration()`, and `pod-net::SpacetimeDBClient::remote_world_tournament_orchestration()`.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` topology-feed parity reporting to check tournament-orchestration parity on both authority-row and generated-runtime paths.
+- [x] Validation:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless topology_parity -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client test_apply_remote_topology_resolves_world_and_team_metadata -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb test_build_topology_feed_measurements_matches_authority_and_generated_paths -- --nocapture`
   - `cargo check -p pod-core -p pod-headless`
   - `cargo check -p pod-stdb --no-default-features --features client`
   - `cargo check -p pod-net --features spacetimedb`

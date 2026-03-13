@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Build shared tournament orchestration state on top of the now-remote `tournament_control_plane` surface before opening a new phase.
+1. All audit backlog items are closed. Benchmark shared tournament/swarm orchestration on top of the now-remote topology surface before opening a new phase.
 
 ## Audit Backlog (2026-03-13)
 
