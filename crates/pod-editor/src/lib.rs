@@ -16,9 +16,9 @@ use pod_core::{
     AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentType, CreatureIdentity,
     CreatureTemperament, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
     FocusedEntityDebugSummary, PopulationBreakdown, QuestStageDefinition, QuestStateGraph,
-    RegionEncounterTable, ReplayFile, ShardIncidentSummary, ShardTransportSummary,
-    TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
-    VersionedTickTelemetry, WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
+    RegionEncounterTable, ReplayFile, ShardIncidentSummary, ShardTransportSummary, TelemetryConfig,
+    TickTelemetryFrame, ToolCallStatus, TrajectorySample, VersionedTickTelemetry,
+    WorldChunkDefinition, WorldPopulationState, WorldRegionDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -996,12 +996,18 @@ impl SpacetimeDashboardState {
         } else if let Some(summary) = &latest_focused_summary {
             summary.tool_error_count
         } else {
-            agent_summary.map(|summary| summary.tool_errors).unwrap_or_default()
+            agent_summary
+                .map(|summary| summary.tool_errors)
+                .unwrap_or_default()
         };
         let trajectory_distance = latest_rollup
             .as_ref()
             .map(|rollup| rollup.total_distance)
-            .or_else(|| latest_focused_summary.as_ref().map(|summary| summary.total_distance))
+            .or_else(|| {
+                latest_focused_summary
+                    .as_ref()
+                    .map(|summary| summary.total_distance)
+            })
             .or_else(|| agent_summary.map(|summary| summary.trajectory_distance))
             .unwrap_or_default();
         let rejected_actions = latest_rollup
@@ -2375,9 +2381,11 @@ impl EditorSnapshotExport {
             .selected_entity
             .map(|entity_id| state.telemetry.trajectory_for_entity(entity_id))
             .unwrap_or_default();
-        let selected_entity_debug_summary = state
-            .selected_entity
-            .and_then(|entity_id| state.spacetime_dashboard.debug_summary_for_entity(entity_id));
+        let selected_entity_debug_summary = state.selected_entity.and_then(|entity_id| {
+            state
+                .spacetime_dashboard
+                .debug_summary_for_entity(entity_id)
+        });
 
         Self {
             project_name: state.project_name.clone(),
@@ -2689,9 +2697,11 @@ impl PodEditorApp {
     }
 
     pub fn selected_entity_debug_summary(&self) -> Option<SelectedEntityDebugSummary> {
-        self.state
-            .selected_entity
-            .and_then(|entity_id| self.state.spacetime_dashboard.debug_summary_for_entity(entity_id))
+        self.state.selected_entity.and_then(|entity_id| {
+            self.state
+                .spacetime_dashboard
+                .debug_summary_for_entity(entity_id)
+        })
     }
 
     pub fn import_replay_toon_document(&mut self, document: &str) -> Result<(), String> {
@@ -2770,10 +2780,7 @@ impl PodEditorApp {
         Ok(())
     }
 
-    pub fn import_world_population_toon_document(
-        &mut self,
-        document: &str,
-    ) -> Result<(), String> {
+    pub fn import_world_population_toon_document(&mut self, document: &str) -> Result<(), String> {
         let population: WorldPopulationState =
             decode_toon_document(document, "world_population_state")?;
         let tick = population.tick;
@@ -2786,10 +2793,7 @@ impl PodEditorApp {
         Ok(())
     }
 
-    pub fn import_shard_transport_toon_document(
-        &mut self,
-        document: &str,
-    ) -> Result<(), String> {
+    pub fn import_shard_transport_toon_document(&mut self, document: &str) -> Result<(), String> {
         let summary: ShardTransportSummary =
             decode_toon_document(document, "shard_transport_summary")?;
         let tick = summary.latest_tick;
@@ -3110,11 +3114,7 @@ impl PodEditorApp {
         ));
     }
 
-    pub fn adjust_world_encounter_table_ambient_cap(
-        &mut self,
-        table_id: &str,
-        delta: i16,
-    ) -> bool {
+    pub fn adjust_world_encounter_table_ambient_cap(&mut self, table_id: &str, delta: i16) -> bool {
         let Some(index) = self
             .state
             .world_graph
@@ -3159,7 +3159,8 @@ impl PodEditorApp {
                     .chunks
                     .iter()
                     .filter(|chunk| {
-                        chunk.encounter_table_ids
+                        chunk
+                            .encounter_table_ids
                             .iter()
                             .any(|table_id| table_id == &table.table_id)
                     })
@@ -3182,8 +3183,7 @@ impl PodEditorApp {
                     .iter()
                     .filter_map(|chunk| chunk.next_respawn_tick)
                     .min();
-                let spawn_budget_remaining =
-                    effective_cap.saturating_sub(active_spawned_actors);
+                let spawn_budget_remaining = effective_cap.saturating_sub(active_spawned_actors);
                 let population_pressure = if effective_cap == 0 {
                     0.0
                 } else {
@@ -3722,7 +3722,11 @@ impl PodEditorApp {
         ));
         ui.label(format!(
             "Authoritative population: {} regions · {} chunks",
-            self.state.spacetime_dashboard.population_state.regions.len(),
+            self.state
+                .spacetime_dashboard
+                .population_state
+                .regions
+                .len(),
             self.state.spacetime_dashboard.population_state.chunks.len()
         ));
         let mut hottest_chunks = self
@@ -3806,7 +3810,10 @@ impl PodEditorApp {
                     }
                 }
             }
-            if let Some(summary) = self.state.spacetime_dashboard.debug_summary_for_entity(entity_id)
+            if let Some(summary) = self
+                .state
+                .spacetime_dashboard
+                .debug_summary_for_entity(entity_id)
             {
                 ui.label(format!(
                     "Selected debug focus: {} tool calls · {} rollups · {:.1}ms avg tool latency",
@@ -3816,9 +3823,7 @@ impl PodEditorApp {
                 ));
                 ui.label(format!(
                     "Selected debug totals: {:.2}u moved · {} rejected · {} tool errors",
-                    summary.trajectory_distance,
-                    summary.rejected_actions,
-                    summary.tool_errors
+                    summary.trajectory_distance, summary.rejected_actions, summary.tool_errors
                 ));
             }
         }
@@ -3887,12 +3892,10 @@ impl PodEditorApp {
                     ));
                     ui.horizontal(|ui| {
                         if ui.button("Cap -1").clicked() {
-                            pending_adjustment =
-                                Some((selected_preview.table_id.clone(), -1));
+                            pending_adjustment = Some((selected_preview.table_id.clone(), -1));
                         }
                         if ui.button("Cap +1").clicked() {
-                            pending_adjustment =
-                                Some((selected_preview.table_id.clone(), 1));
+                            pending_adjustment = Some((selected_preview.table_id.clone(), 1));
                         }
                     });
                 }
@@ -3993,8 +3996,10 @@ impl PodEditorApp {
                         trajectory.end.position.y
                     ));
                 }
-            } else if let Some(summary) =
-                self.state.spacetime_dashboard.debug_summary_for_entity(entity_id)
+            } else if let Some(summary) = self
+                .state
+                .spacetime_dashboard
+                .debug_summary_for_entity(entity_id)
             {
                 ui.label(format!(
                     "Entity-scoped raw debug telemetry @ tick {}",
@@ -4456,8 +4461,8 @@ mod tests {
         decode_toon_value, Action, ActionLifecycleStage, ActionSource, AgentCapabilities, AgentId,
         AgentRole, AgentRuntimeProfile, AgentTelemetryFrame, AgentToolCallTrace,
         ChunkPopulationState, CreatureTemperament, EntityId, FocusedEntityDebugSummary,
-        RegionPopulationState, ReplayFile, ReplayHeader, ShardIncidentSummary,
-        TickTelemetryFrame, ToolCallStatus,
+        RegionPopulationState, ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame,
+        ToolCallStatus,
     };
 
     fn sample_tick_telemetry(tick: u64, entity_id: u64) -> TickTelemetryFrame {
@@ -5306,10 +5311,7 @@ mod tests {
             .expect("seeded encounter table");
         assert_eq!(initial_cap, 12);
 
-        assert!(app.adjust_world_encounter_table_ambient_cap(
-            "verdant-heart-wildlife",
-            3
-        ));
+        assert!(app.adjust_world_encounter_table_ambient_cap("verdant-heart-wildlife", 3));
         let boosted = app
             .state
             .world_graph
@@ -5319,10 +5321,7 @@ mod tests {
             .expect("boosted encounter table");
         assert_eq!(boosted.ambient_cap, 15);
 
-        assert!(app.adjust_world_encounter_table_ambient_cap(
-            "verdant-heart-wildlife",
-            -99
-        ));
+        assert!(app.adjust_world_encounter_table_ambient_cap("verdant-heart-wildlife", -99));
         let clamped = app
             .state
             .world_graph
@@ -5428,7 +5427,10 @@ mod tests {
         assert_eq!(summary.entity_id, 1001);
         assert_eq!(summary.recent_tool_call_count, 1);
         assert_eq!(summary.recent_rollup_count, 1);
-        assert_eq!(summary.rejected_actions, rollup.rejected_action_count as usize);
+        assert_eq!(
+            summary.rejected_actions,
+            rollup.rejected_action_count as usize
+        );
         assert_eq!(summary.tool_errors, rollup.tool_error_count as usize);
         assert_eq!(summary.trajectory_distance, rollup.total_distance);
         assert_eq!(

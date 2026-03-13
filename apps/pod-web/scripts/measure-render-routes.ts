@@ -3,7 +3,12 @@
 import { chromium } from "@playwright/test";
 import { resolve } from "node:path";
 import {
+  AVERAGE_GEOMETRY_LOAD_MS_CEILING,
+  AVERAGE_SPRITE_LOAD_MS_CEILING,
   MAIN_STABLE_FRAME_PERCENT_FLOOR,
+  MIN_COMPLETED_ASSET_LOADS,
+  SLOWEST_GEOMETRY_LOAD_MS_CEILING,
+  SLOWEST_SPRITE_LOAD_MS_CEILING,
   WORKER_CONTROL_SUBMISSION_CEILING,
   WORKER_RESIZE_SUBMISSION_CEILING,
   WORKER_STABLE_FRAME_PERCENT_FLOOR,
@@ -27,6 +32,10 @@ type RendererStats = {
   spriteLoadsCompleted: number;
   pendingGeometryAssets: number;
   pendingSpriteAssets: number;
+  averageGeometryLoadMs: number;
+  averageSpriteLoadMs: number;
+  slowestGeometryLoadMs: number;
+  slowestSpriteLoadMs: number;
   mainThreadPerf: {
     warmupMs: number | null;
     submissionsCompleted: number;
@@ -61,10 +70,20 @@ type RendererStats = {
   };
 };
 
+export type RenderRouteAssetLoadPerf = {
+  geometryLoadsCompleted: number;
+  spriteLoadsCompleted: number;
+  averageGeometryLoadMs: number;
+  averageSpriteLoadMs: number;
+  slowestGeometryLoadMs: number;
+  slowestSpriteLoadMs: number;
+};
+
 type WindowWithPodRender = Window & {
   advanceTime: (ms: number) => Promise<void>;
   podRender: {
     requestGameplayFocus: () => boolean;
+    resetPerfMetrics: () => void | Promise<void>;
     getGameplayState: () => GameplayState;
     getStats: () => RendererStats;
   };
@@ -78,11 +97,22 @@ export type RenderRouteMeasurement = {
   renderThreadFallbackReason: string | null;
   loadsCompleted: number;
   pendingAssets: number;
+  assetLoadPerf: RenderRouteAssetLoadPerf;
   mainThreadPerf: RendererStats["mainThreadPerf"];
   runtimePerf: RendererStats["runtimePerf"];
   gates: {
     stableFramePercentFloor: number;
     stableFramePercentFloorPassed: boolean;
+    completedAssetLoadsFloor: number;
+    completedAssetLoadsFloorPassed: boolean;
+    averageGeometryLoadMsCeiling: number;
+    averageGeometryLoadMsCeilingPassed: boolean;
+    averageSpriteLoadMsCeiling: number;
+    averageSpriteLoadMsCeilingPassed: boolean;
+    slowestGeometryLoadMsCeiling: number;
+    slowestGeometryLoadMsCeilingPassed: boolean;
+    slowestSpriteLoadMsCeiling: number;
+    slowestSpriteLoadMsCeilingPassed: boolean;
     controlSubmissionCeiling: number | null;
     controlSubmissionCeilingPassed: boolean | null;
     resizeSubmissionCeiling: number | null;
@@ -114,6 +144,7 @@ export type RenderRouteMeasurementReport = {
 type Options = {
   baseUrl: string;
   output: string;
+  failOnGates: boolean;
 };
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:4178";
@@ -133,6 +164,7 @@ function parseArgs(argv: string[]): Options {
   const options: Options = {
     baseUrl: DEFAULT_BASE_URL,
     output: DEFAULT_OUTPUT,
+    failOnGates: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -156,10 +188,13 @@ function parseArgs(argv: string[]): Options {
         index += 1;
         break;
       }
+      case "--fail-on-gates":
+        options.failOnGates = true;
+        break;
       case "--help":
       case "-h":
         console.error(
-          "Usage: bun run scripts/measure-render-routes.ts [--base-url URL] [--output PATH]",
+          "Usage: bun run scripts/measure-render-routes.ts [--base-url URL] [--output PATH] [--fail-on-gates]",
         );
         process.exit(0);
       default:
@@ -190,6 +225,14 @@ export function buildRenderRouteMeasurement(
   const pendingAssets = stats.pendingGeometryAssets + stats.pendingSpriteAssets;
   const controlCeiling = label === "worker" ? WORKER_CONTROL_SUBMISSION_CEILING : null;
   const resizeCeiling = label === "worker" ? WORKER_RESIZE_SUBMISSION_CEILING : null;
+  const assetLoadPerf = {
+    geometryLoadsCompleted: stats.geometryLoadsCompleted,
+    spriteLoadsCompleted: stats.spriteLoadsCompleted,
+    averageGeometryLoadMs: stats.averageGeometryLoadMs,
+    averageSpriteLoadMs: stats.averageSpriteLoadMs,
+    slowestGeometryLoadMs: stats.slowestGeometryLoadMs,
+    slowestSpriteLoadMs: stats.slowestSpriteLoadMs,
+  };
 
   return {
     label,
@@ -199,12 +242,27 @@ export function buildRenderRouteMeasurement(
     renderThreadFallbackReason: stats.renderThreadFallbackReason,
     loadsCompleted,
     pendingAssets,
+    assetLoadPerf,
     mainThreadPerf: stats.mainThreadPerf,
     runtimePerf: stats.runtimePerf,
     gates: {
       stableFramePercentFloor,
       stableFramePercentFloorPassed:
         stats.runtimePerf.stableFramePercent >= stableFramePercentFloor,
+      completedAssetLoadsFloor: MIN_COMPLETED_ASSET_LOADS,
+      completedAssetLoadsFloorPassed: loadsCompleted >= MIN_COMPLETED_ASSET_LOADS,
+      averageGeometryLoadMsCeiling: AVERAGE_GEOMETRY_LOAD_MS_CEILING,
+      averageGeometryLoadMsCeilingPassed:
+        stats.averageGeometryLoadMs <= AVERAGE_GEOMETRY_LOAD_MS_CEILING,
+      averageSpriteLoadMsCeiling: AVERAGE_SPRITE_LOAD_MS_CEILING,
+      averageSpriteLoadMsCeilingPassed:
+        stats.averageSpriteLoadMs <= AVERAGE_SPRITE_LOAD_MS_CEILING,
+      slowestGeometryLoadMsCeiling: SLOWEST_GEOMETRY_LOAD_MS_CEILING,
+      slowestGeometryLoadMsCeilingPassed:
+        stats.slowestGeometryLoadMs <= SLOWEST_GEOMETRY_LOAD_MS_CEILING,
+      slowestSpriteLoadMsCeiling: SLOWEST_SPRITE_LOAD_MS_CEILING,
+      slowestSpriteLoadMsCeilingPassed:
+        stats.slowestSpriteLoadMs <= SLOWEST_SPRITE_LOAD_MS_CEILING,
       controlSubmissionCeiling: controlCeiling,
       controlSubmissionCeilingPassed:
         controlCeiling == null
@@ -262,12 +320,72 @@ export function buildRenderRouteMeasurementReport(
   generatedAtUnixMs = Date.now(),
 ): RenderRouteMeasurementReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAtUnixMs,
     baseUrl,
     routes,
     comparison: buildRenderRouteComparison(routes),
   };
+}
+
+export function collectRenderRouteMeasurementFailures(
+  report: RenderRouteMeasurementReport,
+): string[] {
+  const failures: string[] = [];
+
+  for (const route of report.routes) {
+    if (!route.gates.stableFramePercentFloorPassed) {
+      failures.push(
+        `${route.label} route stable-frame percent ${route.runtimePerf.stableFramePercent} fell below ${route.gates.stableFramePercentFloor}`,
+      );
+    }
+    if (!route.gates.completedAssetLoadsFloorPassed) {
+      failures.push(
+        `${route.label} route completed only ${route.loadsCompleted} asset loads; expected at least ${route.gates.completedAssetLoadsFloor}`,
+      );
+    }
+    if (!route.gates.averageGeometryLoadMsCeilingPassed) {
+      failures.push(
+        `${route.label} route average geometry load ${route.assetLoadPerf.averageGeometryLoadMs}ms exceeded ${route.gates.averageGeometryLoadMsCeiling}ms`,
+      );
+    }
+    if (!route.gates.averageSpriteLoadMsCeilingPassed) {
+      failures.push(
+        `${route.label} route average sprite load ${route.assetLoadPerf.averageSpriteLoadMs}ms exceeded ${route.gates.averageSpriteLoadMsCeiling}ms`,
+      );
+    }
+    if (!route.gates.slowestGeometryLoadMsCeilingPassed) {
+      failures.push(
+        `${route.label} route slowest geometry load ${route.assetLoadPerf.slowestGeometryLoadMs}ms exceeded ${route.gates.slowestGeometryLoadMsCeiling}ms`,
+      );
+    }
+    if (!route.gates.slowestSpriteLoadMsCeilingPassed) {
+      failures.push(
+        `${route.label} route slowest sprite load ${route.assetLoadPerf.slowestSpriteLoadMs}ms exceeded ${route.gates.slowestSpriteLoadMsCeiling}ms`,
+      );
+    }
+    if (route.gates.controlSubmissionCeilingPassed === false) {
+      failures.push(
+        `${route.label} route control submissions exceeded ${route.gates.controlSubmissionCeiling}`,
+      );
+    }
+    if (route.gates.resizeSubmissionCeilingPassed === false) {
+      failures.push(
+        `${route.label} route resize submissions exceeded ${route.gates.resizeSubmissionCeiling}`,
+      );
+    }
+  }
+
+  return failures;
+}
+
+export function assertRenderRouteMeasurementReportGates(
+  report: RenderRouteMeasurementReport,
+): void {
+  const failures = collectRenderRouteMeasurementFailures(report);
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n"));
+  }
 }
 
 async function isServerReady(baseUrl: string): Promise<boolean> {
@@ -325,6 +443,17 @@ async function waitForGameplayReady(page: import("@playwright/test").Page): Prom
   });
 }
 
+async function waitForRuntimeAssets(page: import("@playwright/test").Page): Promise<void> {
+  await page.waitForFunction((minimumCompletedAssetLoads) => {
+    const runtime = window as WindowWithPodRender;
+    const stats = runtime.podRender.getStats();
+    return (
+      stats.pendingGeometryAssets + stats.pendingSpriteAssets === 0 &&
+      stats.geometryLoadsCompleted + stats.spriteLoadsCompleted >= minimumCompletedAssetLoads
+    );
+  }, MIN_COMPLETED_ASSET_LOADS);
+}
+
 async function collectRouteMeasurement(
   browser: import("@playwright/test").Browser,
   baseUrl: string,
@@ -341,6 +470,8 @@ async function collectRouteMeasurement(
   try {
     await page.goto(url);
     await waitForGameplayReady(page);
+    await waitForRuntimeAssets(page);
+    await page.evaluate(() => (window as WindowWithPodRender).podRender.resetPerfMetrics());
     await page.evaluate(() => (window as WindowWithPodRender).podRender.requestGameplayFocus());
     await page.keyboard.down("w");
     await page.evaluate(() => (window as WindowWithPodRender).advanceTime(700));
@@ -379,6 +510,9 @@ async function main() {
       }
       const report = buildRenderRouteMeasurementReport(options.baseUrl, routes);
       await Bun.write(outputPath, JSON.stringify(report, null, 2));
+      if (options.failOnGates) {
+        assertRenderRouteMeasurementReportGates(report);
+      }
       console.log(JSON.stringify(report, null, 2));
     } finally {
       await browser.close();

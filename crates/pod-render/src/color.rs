@@ -307,7 +307,13 @@ impl From<[u8; 3]> for Color {
 
 // Helper for HSL conversion
 fn hue_to_rgb(p: f32, q: f32, t: f32) -> f32 {
-    let t = if t < 0.0 { t + 1.0 } else if t > 1.0 { t - 1.0 } else { t };
+    let t = if t < 0.0 {
+        t + 1.0
+    } else if t > 1.0 {
+        t - 1.0
+    } else {
+        t
+    };
 
     if t < 1.0 / 6.0 {
         p + (q - p) * 6.0 * t

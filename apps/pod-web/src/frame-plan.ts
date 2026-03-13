@@ -144,7 +144,7 @@ export function buildCameraPose(
   const pitch = camera.pitch ?? options.pitch ?? 0.34;
   const followDistance = camera.followDistance ?? options.baseDistance ?? 13.5;
   const minDistance = options.minDistance ?? 9.5;
-  const maxDistance = options.maxDistance ?? 26;
+  const maxDistance = Math.max(options.maxDistance ?? 26, followDistance * 1.08);
   const distance = clamp(followDistance / Math.max(camera.zoom, 0.15), minDistance, maxDistance);
   const focusHeight = camera.focusHeight ?? options.height ?? 2.2;
   const terrainHeight = sampleSurfaceHeight(camera.x, camera.y);
@@ -461,15 +461,15 @@ export function sampleAnimatedInstanceTransform(
     const glide = Math.cos(elapsedSeconds * (1.2 + motion * 1.8) + phase * 0.7);
     const surge = Math.max(0, Math.sin(elapsedSeconds * (1.3 + motion * 2.2) + phase * 0.9));
     const lateralSway = Math.sin(elapsedSeconds * (1.8 + motion * 2.1) + phase * 1.2);
-    yOffset += 0.055 + hoverWave * 0.045 + Math.max(motion, 0.18) * 0.03;
-    xOffset += lateralSway * (0.04 + motion * 0.03);
-    zOffset += surge * (0.07 + motion * 0.06);
-    scaleX *= 1 + Math.abs(stroke) * 0.02;
-    scaleY *= 0.95 - Math.max(motion, 0.2) * 0.028;
-    scaleZ *= 1 + Math.abs(glide) * 0.025;
-    pitchOffset += 0.075 + Math.abs(stroke) * 0.035;
-    yawOffset += glide * 0.025;
-    rollOffset += stroke * 0.045;
+    yOffset += 0.032 + hoverWave * 0.024 + Math.max(motion, 0.18) * 0.018;
+    xOffset += lateralSway * (0.02 + motion * 0.018);
+    zOffset += surge * (0.04 + motion * 0.04);
+    scaleX *= 1 + Math.abs(stroke) * 0.012;
+    scaleY *= 0.97 - Math.max(motion, 0.2) * 0.016;
+    scaleZ *= 1 + Math.abs(glide) * 0.014;
+    pitchOffset += 0.042 + Math.abs(stroke) * 0.018;
+    yawOffset += glide * 0.014;
+    rollOffset += stroke * 0.022;
     if (animationSetId.includes("companion")) {
       yOffset += 0.07;
       zOffset += surge * 0.03;
@@ -483,22 +483,22 @@ export function sampleAnimatedInstanceTransform(
     }
   } else if (animationSetId.includes("companion") || animationSetId.includes("hover")) {
     const driftWave = Math.sin(elapsedSeconds * 1.15 + phase * 0.6);
-    yOffset += 0.18 + hoverWave * 0.14 + driftWave * 0.03;
-    scaleX *= 1 + hoverWave * 0.025;
-    scaleY *= 1 - hoverWave * 0.05;
-    scaleZ *= 1 + hoverWave * 0.025;
-    yawOffset += driftWave * 0.03;
-    rollOffset += hoverWave * 0.045;
+    yOffset += 0.12 + hoverWave * 0.08 + driftWave * 0.02;
+    scaleX *= 1 + hoverWave * 0.015;
+    scaleY *= 1 - hoverWave * 0.03;
+    scaleZ *= 1 + hoverWave * 0.015;
+    yawOffset += driftWave * 0.018;
+    rollOffset += hoverWave * 0.026;
   } else if (animationSetId.includes("beast")) {
     const stalk = Math.sin(elapsedSeconds * (1.4 + motion * 2.4) + phase * 0.8);
     const stomp = Math.abs(strideWave) * Math.max(0.2, motion);
-    yOffset += idleWave * 0.03 + stomp * 0.16;
-    scaleX *= 1 + stomp * 0.04;
-    scaleY *= 0.94 - motion * 0.04;
-    scaleZ *= 1 + stomp * 0.05;
-    pitchOffset += strideWave * 0.05 * Math.max(motion, 0.25) - 0.03;
-    yawOffset += stalk * 0.028;
-    rollOffset += stalk * 0.03 * Math.max(motion, 0.3);
+    yOffset += idleWave * 0.02 + stomp * 0.08;
+    scaleX *= 1 + stomp * 0.024;
+    scaleY *= 0.97 - motion * 0.022;
+    scaleZ *= 1 + stomp * 0.03;
+    pitchOffset += strideWave * 0.026 * Math.max(motion, 0.25) - 0.015;
+    yawOffset += stalk * 0.016;
+    rollOffset += stalk * 0.018 * Math.max(motion, 0.3);
   } else if (
     animationSetId.includes("humanoid-idle") ||
     animationSetId.includes("npc-idle") ||
@@ -518,22 +518,22 @@ export function sampleAnimatedInstanceTransform(
     const gait = clamp(motion / 0.32, 0, 1);
     const footfall = Math.abs(strideWave) * Math.max(0.16, gait);
     const torsoWave = Math.sin(elapsedSeconds * (1.8 + motion * 3.4) + phase);
-    yOffset += idleWave * 0.02 + footfall * 0.14;
-    scaleX *= 1 + footfall * 0.014;
-    scaleY *= 1 - footfall * 0.035;
-    scaleZ *= 1 + footfall * 0.014;
-    pitchOffset += strideWave * 0.024 * Math.max(gait, 0.25) - gait * 0.018;
-    yawOffset += torsoWave * 0.014 * Math.max(gait, 0.35);
-    rollOffset += Math.sin(elapsedSeconds * 1.9 + phase) * 0.02 * Math.max(gait, 0.2);
+    yOffset += idleWave * 0.015 + footfall * 0.075;
+    scaleX *= 1 + footfall * 0.009;
+    scaleY *= 1 - footfall * 0.02;
+    scaleZ *= 1 + footfall * 0.009;
+    pitchOffset += strideWave * 0.015 * Math.max(gait, 0.25) - gait * 0.01;
+    yawOffset += torsoWave * 0.008 * Math.max(gait, 0.35);
+    rollOffset += Math.sin(elapsedSeconds * 1.9 + phase) * 0.012 * Math.max(gait, 0.2);
   } else if (!animationSetId.includes("static")) {
     const gait = Math.abs(strideWave) * Math.max(0.18, motion);
-    yOffset += idleWave * 0.03 + gait * 0.12;
-    scaleX *= 1 + gait * 0.018;
-    scaleY *= 1 - gait * 0.04;
-    scaleZ *= 1 + gait * 0.018;
-    pitchOffset += strideWave * 0.028 * Math.max(motion, 0.2);
-    yawOffset += Math.sin(elapsedSeconds * 1.6 + phase) * 0.014 * Math.max(motion, 0.25);
-    rollOffset += Math.sin(elapsedSeconds * 1.8 + phase) * 0.012;
+    yOffset += idleWave * 0.02 + gait * 0.07;
+    scaleX *= 1 + gait * 0.01;
+    scaleY *= 1 - gait * 0.024;
+    scaleZ *= 1 + gait * 0.01;
+    pitchOffset += strideWave * 0.016 * Math.max(motion, 0.2);
+    yawOffset += Math.sin(elapsedSeconds * 1.6 + phase) * 0.008 * Math.max(motion, 0.25);
+    rollOffset += Math.sin(elapsedSeconds * 1.8 + phase) * 0.008;
   }
 
   if (health < 0.35) {
@@ -543,7 +543,7 @@ export function sampleAnimatedInstanceTransform(
   }
 
   if (instance.controlled) {
-    yOffset += Math.abs(strideWave) * motion * 0.03;
+    yOffset += Math.abs(strideWave) * motion * 0.012;
   }
 
   if (pulseAmount > 0.001) {

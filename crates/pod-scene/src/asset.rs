@@ -110,7 +110,9 @@ impl<T> AssetStore<T> {
 
     /// Retrieve an asset
     pub fn get(&self, handle: &AssetHandle<T>) -> Option<Arc<T>> {
-        self.assets.get(&handle.id()).map(|entry| Arc::clone(&entry.data))
+        self.assets
+            .get(&handle.id())
+            .map(|entry| Arc::clone(&entry.data))
     }
 
     /// Get the state of an asset
@@ -237,8 +239,7 @@ impl AssetManager {
 
     /// Load a JSON asset from a string
     pub fn load_json_string(&self, json: &str) -> Result<serde_json::Value, String> {
-        serde_json::from_str(json)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {}", e))
     }
 
     /// Get the JSON loader

@@ -80,7 +80,10 @@ fn main() -> ExitCode {
         {
             Some(spec) => Some(spec),
             None => {
-                eprintln!("stage_import failed: could not read bundle spec at {}", path.display());
+                eprintln!(
+                    "stage_import failed: could not read bundle spec at {}",
+                    path.display()
+                );
                 return ExitCode::FAILURE;
             }
         },

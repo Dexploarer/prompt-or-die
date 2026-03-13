@@ -203,17 +203,19 @@ impl PhysicsWorld {
                 radius,
             } => ColliderBuilder::capsule_y(half_height, radius),
         }
-            .friction(rigid_body.friction)
-            .restitution(rigid_body.restitution)
-            .sensor(collider.is_trigger)
-            .active_events(ActiveEvents::COLLISION_EVENTS);
+        .friction(rigid_body.friction)
+        .restitution(rigid_body.restitution)
+        .sensor(collider.is_trigger)
+        .active_events(ActiveEvents::COLLISION_EVENTS);
 
         // Convert collision groups/masks
         let group = collision_group_from_u32(collider.collision_group);
         let mask = collision_group_from_u32(collider.collision_mask);
         col = col.collision_groups(InteractionGroups::new(group, mask));
 
-        let collider_handle = self.colliders.insert_with_parent(col.build(), body_handle, &mut self.bodies);
+        let collider_handle =
+            self.colliders
+                .insert_with_parent(col.build(), body_handle, &mut self.bodies);
 
         // Store the handle and reverse mapping
         let physics_handle = PhysicsHandle {
@@ -242,8 +244,10 @@ impl PhysicsWorld {
         // Update body position and rotation
         if let Some(body) = self.bodies.get_mut(handle.body_handle) {
             // Only update position if it's kinematic or static (dynamic bodies are moved by physics)
-            if matches!(body.body_type(), RigidBodyType::Fixed | RigidBodyType::KinematicPositionBased)
-            {
+            if matches!(
+                body.body_type(),
+                RigidBodyType::Fixed | RigidBodyType::KinematicPositionBased
+            ) {
                 body.set_position(
                     Isometry::new(
                         vector![transform.position.x, transform.position.y],
@@ -302,7 +306,8 @@ impl PhysicsWorld {
 
             if let (Some(a), Some(b)) = (entity_a, entity_b) {
                 let key = if a.0 < b.0 { (a, b) } else { (b, a) };
-                self.current_contacts.insert(key, contact_pair.has_any_active_contact);
+                self.current_contacts
+                    .insert(key, contact_pair.has_any_active_contact);
             }
         }
 
@@ -357,7 +362,9 @@ impl PhysicsWorld {
                         .and_then(|c| c.parent())
                         .and_then(|h| self.bodies.get(h));
 
-                    let (collision_point, collision_normal) = if let (Some(a), Some(b)) = (body_a, body_b) {
+                    let (collision_point, collision_normal) = if let (Some(a), Some(b)) =
+                        (body_a, body_b)
+                    {
                         let a_pos = a.translation();
                         let b_pos = b.translation();
                         let point = Vec2::new((a_pos.x + b_pos.x) * 0.5, (a_pos.y + b_pos.y) * 0.5);
@@ -373,11 +380,13 @@ impl PhysicsWorld {
                     };
 
                     // Check if either collider is a trigger
-                    let is_a_trigger = self.colliders
+                    let is_a_trigger = self
+                        .colliders
                         .get(contact_pair.collider1)
                         .map(|c| c.is_sensor())
                         .unwrap_or(false);
-                    let is_b_trigger = self.colliders
+                    let is_b_trigger = self
+                        .colliders
                         .get(contact_pair.collider2)
                         .map(|c| c.is_sensor())
                         .unwrap_or(false);
@@ -418,7 +427,8 @@ impl PhysicsWorld {
             let key = if a.0 < b.0 { (*a, *b) } else { (*b, *a) };
             if !self.current_contacts.contains_key(&key) {
                 // This contact existed last frame but not this frame
-                let is_a_trigger = self.entity_handles
+                let is_a_trigger = self
+                    .entity_handles
                     .get(a)
                     .and_then(|h| self.colliders.get(h.collider_handle))
                     .map(|c| c.is_sensor())
@@ -484,7 +494,11 @@ impl PhysicsWorld {
     }
 
     /// Sets the angular velocity of a body
-    pub fn set_angular_velocity(&mut self, entity_id: EntityId, angular_velocity: f32) -> Result<(), String> {
+    pub fn set_angular_velocity(
+        &mut self,
+        entity_id: EntityId,
+        angular_velocity: f32,
+    ) -> Result<(), String> {
         if let Some(handle) = self.entity_handles.get(&entity_id) {
             if let Some(body) = self.bodies.get_mut(handle.body_handle) {
                 body.set_angvel(angular_velocity, true);

@@ -8,8 +8,8 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use log::info;
 use std::mem;
 use std::sync::Arc;
-use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 use wgpu::{BindGroupLayoutDescriptor, BindingType, BufferUsages, ShaderStages};
+use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -170,7 +170,8 @@ pub struct NativeRenderer {
 
 impl NativeRenderer {
     pub async fn new(config: WindowConfig) -> Result<(Self, EventLoop<()>), String> {
-        let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {e}"))?;
+        let event_loop =
+            EventLoop::new().map_err(|e| format!("Failed to create event loop: {e}"))?;
 
         let window = {
             #[allow(deprecated)]
@@ -365,19 +366,20 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
             cache: None,
         });
 
-        let camera_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("3D Camera Bind Group Layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("3D Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
 
         let pipeline_layout_3d = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("3D Pipeline Layout"),
@@ -470,7 +472,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&camera_uniform_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
+        queue.write_buffer(
+            &camera_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("3D Camera Bind Group"),
@@ -484,7 +490,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         let (depth_texture, depth_view) =
             Self::create_depth_texture(&device, config.width, config.height);
 
-        info!("Native renderer initialized ({}x{})", config.width, config.height);
+        info!(
+            "Native renderer initialized ({}x{})",
+            config.width, config.height
+        );
 
         Ok((
             Self {
@@ -512,7 +521,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         ))
     }
 
-    fn create_depth_texture(device: &Device, width: u32, height: u32) -> (wgpu::Texture, wgpu::TextureView) {
+    fn create_depth_texture(
+        device: &Device,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
             size: wgpu::Extent3d {
@@ -555,7 +568,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
 
         let fov = (60.0f32 / camera.zoom.max(0.001)).to_radians();
         let proj = Mat4::perspective_rh_gl(fov, aspect, 0.05, 10_000.0);
-        let camera_pos = Vec3::new(camera.position.x, camera.position.y, 8.0 / camera.zoom.max(0.001));
+        let camera_pos = Vec3::new(
+            camera.position.x,
+            camera.position.y,
+            8.0 / camera.zoom.max(0.001),
+        );
         let target = Vec3::new(camera.position.x, camera.position.y, 0.0);
         let view = Mat4::look_at_rh(camera_pos, target, Vec3::Y);
         let view_proj = proj * view;
@@ -574,9 +591,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     }
 
     fn cube_instance_color(&self, mesh: &str, material: &str) -> [f32; 4] {
-        let mix = mesh.bytes().chain(material.bytes()).fold(0u64, |acc, byte| {
-            acc.wrapping_mul(167).wrapping_add(u64::from(byte))
-        });
+        let mix = mesh
+            .bytes()
+            .chain(material.bytes())
+            .fold(0u64, |acc, byte| {
+                acc.wrapping_mul(167).wrapping_add(u64::from(byte))
+            });
         let r = ((mix & 0xFF) as f32) / 255.0;
         let g = (((mix >> 8) & 0xFF) as f32) / 255.0;
         let b = (((mix >> 16) & 0xFF) as f32) / 255.0;
@@ -591,12 +611,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         }
     }
 
-    fn frustum_cull_sphere(
-        world_position: Vec3,
-        radius: f32,
-        view_proj: &Mat4,
-    ) -> bool {
-        let clip = *view_proj * Vec4::new(world_position.x, world_position.y, world_position.z, 1.0);
+    fn frustum_cull_sphere(world_position: Vec3, radius: f32, view_proj: &Mat4) -> bool {
+        let clip =
+            *view_proj * Vec4::new(world_position.x, world_position.y, world_position.z, 1.0);
         if clip.w <= 0.0 {
             return false;
         }
@@ -638,7 +655,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         }
     }
 
-    pub fn render(&mut self, state: &RenderState, camera: &Camera) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(
+        &mut self,
+        state: &RenderState,
+        camera: &Camera,
+    ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -652,17 +673,30 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
             self.build_geometry_3d(state, &view_matrix, &view_proj_matrix);
 
         if !vertices_2d.is_empty() && !indices_2d.is_empty() {
-            self.queue.write_buffer(&self.vertex_buffer_2d, 0, bytemuck::cast_slice(&vertices_2d));
-            self.queue.write_buffer(&self.index_buffer_2d, 0, bytemuck::cast_slice(&indices_2d));
+            self.queue.write_buffer(
+                &self.vertex_buffer_2d,
+                0,
+                bytemuck::cast_slice(&vertices_2d),
+            );
+            self.queue
+                .write_buffer(&self.index_buffer_2d, 0, bytemuck::cast_slice(&indices_2d));
         }
 
         if !vertices_3d.is_empty() && !indices_3d.is_empty() {
-            self.queue.write_buffer(&self.vertex_buffer_3d, 0, bytemuck::cast_slice(&vertices_3d));
-            self.queue.write_buffer(&self.index_buffer_3d, 0, bytemuck::cast_slice(&indices_3d));
+            self.queue.write_buffer(
+                &self.vertex_buffer_3d,
+                0,
+                bytemuck::cast_slice(&vertices_3d),
+            );
+            self.queue
+                .write_buffer(&self.index_buffer_3d, 0, bytemuck::cast_slice(&indices_3d));
         }
 
-        self.queue
-            .write_buffer(&self.camera_uniform_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
+        self.queue.write_buffer(
+            &self.camera_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
 
         let mut encoder = self
             .device
@@ -807,14 +841,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
                 continue;
             }
 
-            if vertices.len() + 4 > self.max_vertices_2d || indices.len() + 6 > self.max_indices_2d {
+            if vertices.len() + 4 > self.max_vertices_2d || indices.len() + 6 > self.max_indices_2d
+            {
                 break;
             }
 
             let base_index = vertices.len() as u32;
 
             match &item.draw_type {
-                DrawType::Rect { width, height, color } => {
+                DrawType::Rect {
+                    width,
+                    height,
+                    color,
+                } => {
                     let hw = width * item.scale.x / 2.0;
                     let hh = height * item.scale.y / 2.0;
                     let cos_r = item.rotation.cos();
@@ -916,7 +955,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
                 } => {
                     let position = Vec3::from(transform.position);
                     let scale = Vec3::from(transform.scale);
-                    let radius = Self::estimate_primitive_radius(&ThreeDPrimitiveKind::Mesh3D, scale);
+                    let radius =
+                        Self::estimate_primitive_radius(&ThreeDPrimitiveKind::Mesh3D, scale);
                     if !Self::frustum_cull_sphere(position, radius, view_proj_matrix) {
                         continue;
                     }
@@ -974,7 +1014,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         for primitive in primitives {
             let (template_vertices, template_indices) = match primitive.kind {
                 ThreeDPrimitiveKind::Mesh3D => (CUBE_VERTICES.as_ref(), CUBE_INDICES.as_ref()),
-                ThreeDPrimitiveKind::Sprite3D => (SPRITE3D_VERTICES.as_ref(), SPRITE3D_INDICES.as_ref()),
+                ThreeDPrimitiveKind::Sprite3D => {
+                    (SPRITE3D_VERTICES.as_ref(), SPRITE3D_INDICES.as_ref())
+                }
             };
 
             if vertices.len() + template_vertices.len() > self.max_vertices_3d
@@ -1118,7 +1160,8 @@ impl ApplicationHandler for RenderApp {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size);
                 }
-                self.camera.set_viewport(size.width as f32, size.height as f32);
+                self.camera
+                    .set_viewport(size.width as f32, size.height as f32);
             }
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = &mut self.renderer {

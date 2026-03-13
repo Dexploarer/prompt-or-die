@@ -1,8 +1,8 @@
 //! Animation state machine with transitions and conditions
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::keyframe::AnimationClip;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A state in the animation state machine
 #[derive(Debug, Clone)]
@@ -45,12 +45,14 @@ impl TransitionCondition {
             TransitionCondition::BoolParam { name, value } => {
                 parameters.get_bool(name) == Some(*value)
             }
-            TransitionCondition::FloatGreater { name, threshold } => {
-                parameters.get_float(name).map(|v| v > *threshold).unwrap_or(false)
-            }
-            TransitionCondition::FloatLess { name, threshold } => {
-                parameters.get_float(name).map(|v| v < *threshold).unwrap_or(false)
-            }
+            TransitionCondition::FloatGreater { name, threshold } => parameters
+                .get_float(name)
+                .map(|v| v > *threshold)
+                .unwrap_or(false),
+            TransitionCondition::FloatLess { name, threshold } => parameters
+                .get_float(name)
+                .map(|v| v < *threshold)
+                .unwrap_or(false),
             TransitionCondition::Trigger(name) => {
                 let was_triggered = triggered.get(name).copied().unwrap_or(false);
                 if was_triggered {
@@ -134,7 +136,10 @@ impl AnimStateParameters {
     }
 
     pub fn get_trigger(&self, name: &str) -> bool {
-        self.bools.get(&format!("_trigger_{}", name)).copied().unwrap_or(false)
+        self.bools
+            .get(&format!("_trigger_{}", name))
+            .copied()
+            .unwrap_or(false)
     }
 
     pub fn clear_trigger(&mut self, name: &str) {
@@ -206,7 +211,11 @@ impl AnimStateMachine {
                         }
                     }
 
-                    if transition.condition.evaluate(&self.parameters, self.current_state_time, &mut self.triggered) {
+                    if transition.condition.evaluate(
+                        &self.parameters,
+                        self.current_state_time,
+                        &mut self.triggered,
+                    ) {
                         next_state = Some(transition.to_state.clone());
                         break;
                     }

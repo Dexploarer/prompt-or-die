@@ -10,11 +10,146 @@
 use glam::Vec2;
 use log::debug;
 use pod_core::action::{Action, AgentConstraints};
-use pod_core::agent::{Agent, AgentType};
+use pod_core::agent::{Agent, AgentIntrospection, AgentType};
 use pod_core::id::AgentId;
 use pod_core::observation::{Observation, Relationship};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::fmt;
+
+pub const NEURAL_INTERFACE_VERSION: u32 = 1;
+pub const NEURAL_FEATURE_COUNT: usize = 32;
+pub const NEURAL_ACTION_COUNT: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeuralRuntimeSchema {
+    pub interface_version: u32,
+    pub feature_count: usize,
+    pub action_count: usize,
+}
+
+impl NeuralRuntimeSchema {
+    pub const fn current() -> Self {
+        Self {
+            interface_version: NEURAL_INTERFACE_VERSION,
+            feature_count: NEURAL_FEATURE_COUNT,
+            action_count: NEURAL_ACTION_COUNT,
+        }
+    }
+
+    pub fn validate_model_metadata(
+        &self,
+        metadata: &NeuralModelMetadata,
+    ) -> Result<(), NeuralSchemaError> {
+        if metadata.runtime_schema.interface_version != self.interface_version {
+            return Err(NeuralSchemaError::InterfaceVersionMismatch {
+                expected: self.interface_version,
+                got: metadata.runtime_schema.interface_version,
+            });
+        }
+        if metadata.runtime_schema.feature_count != self.feature_count {
+            return Err(NeuralSchemaError::FeatureCountMismatch {
+                expected: self.feature_count,
+                got: metadata.runtime_schema.feature_count,
+            });
+        }
+        if metadata.runtime_schema.action_count != self.action_count {
+            return Err(NeuralSchemaError::ActionCountMismatch {
+                expected: self.action_count,
+                got: metadata.runtime_schema.action_count,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeuralModelMetadata {
+    pub model_name: String,
+    pub runtime_schema: NeuralRuntimeSchema,
+}
+
+impl NeuralModelMetadata {
+    pub fn current(model_name: impl Into<String>) -> Self {
+        Self {
+            model_name: model_name.into(),
+            runtime_schema: NeuralRuntimeSchema::current(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NeuralSchemaError {
+    InterfaceVersionMismatch { expected: u32, got: u32 },
+    FeatureCountMismatch { expected: usize, got: usize },
+    ActionCountMismatch { expected: usize, got: usize },
+}
+
+impl fmt::Display for NeuralSchemaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NeuralSchemaError::InterfaceVersionMismatch { expected, got } => {
+                write!(
+                    f,
+                    "neural interface version mismatch: expected {expected}, got {got}"
+                )
+            }
+            NeuralSchemaError::FeatureCountMismatch { expected, got } => {
+                write!(
+                    f,
+                    "neural feature count mismatch: expected {expected}, got {got}"
+                )
+            }
+            NeuralSchemaError::ActionCountMismatch { expected, got } => {
+                write!(
+                    f,
+                    "neural action count mismatch: expected {expected}, got {got}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for NeuralSchemaError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NeuralCompatibilityStatus {
+    Compatible,
+    FallbackOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NeuralInferenceStatus {
+    Ready,
+    Fallback { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeuralPolicyRuntimeStatus {
+    pub model_name: String,
+    pub runtime_schema: NeuralRuntimeSchema,
+    pub compatibility: NeuralCompatibilityStatus,
+    pub last_inference: NeuralInferenceStatus,
+}
+
+impl NeuralPolicyRuntimeStatus {
+    pub fn ready(model_name: impl Into<String>) -> Self {
+        Self {
+            model_name: model_name.into(),
+            runtime_schema: NeuralRuntimeSchema::current(),
+            compatibility: NeuralCompatibilityStatus::Compatible,
+            last_inference: NeuralInferenceStatus::Ready,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct NeuralActionSchemaEntry {
+    pub index: usize,
+    pub key: &'static str,
+    pub label: &'static str,
+    pub build_action: fn() -> Action,
+}
 
 /// Experience transition for training
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +171,11 @@ pub trait PolicyNetwork: Send {
     fn get_logits(&self, features: &[f32]) -> Vec<f32> {
         self.forward(features)
     }
+
+    /// Runtime-facing status for compatibility and fallback inspection.
+    fn runtime_status(&self) -> NeuralPolicyRuntimeStatus {
+        NeuralPolicyRuntimeStatus::ready("custom-policy")
+    }
 }
 
 /// Default policy network: simple uniform distribution
@@ -43,7 +183,18 @@ pub struct UniformPolicyNetwork;
 
 impl PolicyNetwork for UniformPolicyNetwork {
     fn forward(&self, _features: &[f32]) -> Vec<f32> {
-        vec![1.0 / ACTION_COUNT as f32; ACTION_COUNT]
+        vec![1.0 / NEURAL_ACTION_COUNT as f32; NEURAL_ACTION_COUNT]
+    }
+
+    fn runtime_status(&self) -> NeuralPolicyRuntimeStatus {
+        NeuralPolicyRuntimeStatus {
+            model_name: "uniform-policy".to_string(),
+            runtime_schema: NeuralRuntimeSchema::current(),
+            compatibility: NeuralCompatibilityStatus::FallbackOnly,
+            last_inference: NeuralInferenceStatus::Fallback {
+                reason: "builtin uniform fallback policy".to_string(),
+            },
+        }
     }
 }
 
@@ -62,7 +213,7 @@ impl ActionSelector for RandomActionSelector {
         // Simple hash-based pseudo-random selection
         let sum: f32 = features.iter().sum();
         let seed = sum.abs() as u64;
-        (seed.wrapping_mul(1103515245).wrapping_add(12345) as usize) % ACTION_COUNT
+        (seed.wrapping_mul(1103515245).wrapping_add(12345) as usize) % NEURAL_ACTION_COUNT
     }
 }
 
@@ -77,38 +228,88 @@ impl ActionSelector for GreedyActionSelector {
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0)
-            .min(ACTION_COUNT - 1)
+            .min(NEURAL_ACTION_COUNT - 1)
     }
 }
 
 /// Action index to Action mapping
-const ACTION_COUNT: usize = 10;
-const ACTION_SPACE: &[fn() -> Action] = &[
-    || Action::Idle,
-    || Action::Move {
-        direction: Vec2::new(0.0, -1.0),
-    }, // up
-    || Action::Move {
-        direction: Vec2::new(0.0, 1.0),
-    }, // down
-    || Action::Move {
-        direction: Vec2::new(-1.0, 0.0),
-    }, // left
-    || Action::Move {
-        direction: Vec2::new(1.0, 0.0),
-    }, // right
-    || Action::Stop,
-    || Action::Attack,
-    || Action::Interact,
-    || Action::Drop { slot: 0 },
-    || Action::Rotate {
-        angle: std::f32::consts::PI / 4.0,
-    }, // turn 45°
+pub const NEURAL_ACTION_SCHEMA: &[NeuralActionSchemaEntry] = &[
+    NeuralActionSchemaEntry {
+        index: 0,
+        key: "idle",
+        label: "Idle",
+        build_action: || Action::Idle,
+    },
+    NeuralActionSchemaEntry {
+        index: 1,
+        key: "move_up",
+        label: "Move Up",
+        build_action: || Action::Move {
+            direction: Vec2::new(0.0, -1.0),
+        },
+    },
+    NeuralActionSchemaEntry {
+        index: 2,
+        key: "move_down",
+        label: "Move Down",
+        build_action: || Action::Move {
+            direction: Vec2::new(0.0, 1.0),
+        },
+    },
+    NeuralActionSchemaEntry {
+        index: 3,
+        key: "move_left",
+        label: "Move Left",
+        build_action: || Action::Move {
+            direction: Vec2::new(-1.0, 0.0),
+        },
+    },
+    NeuralActionSchemaEntry {
+        index: 4,
+        key: "move_right",
+        label: "Move Right",
+        build_action: || Action::Move {
+            direction: Vec2::new(1.0, 0.0),
+        },
+    },
+    NeuralActionSchemaEntry {
+        index: 5,
+        key: "stop",
+        label: "Stop",
+        build_action: || Action::Stop,
+    },
+    NeuralActionSchemaEntry {
+        index: 6,
+        key: "attack",
+        label: "Attack",
+        build_action: || Action::Attack,
+    },
+    NeuralActionSchemaEntry {
+        index: 7,
+        key: "interact",
+        label: "Interact",
+        build_action: || Action::Interact,
+    },
+    NeuralActionSchemaEntry {
+        index: 8,
+        key: "drop_slot_0",
+        label: "Drop Slot 0",
+        build_action: || Action::Drop { slot: 0 },
+    },
+    NeuralActionSchemaEntry {
+        index: 9,
+        key: "rotate_quarter_pi",
+        label: "Rotate 45 Degrees",
+        build_action: || Action::Rotate {
+            angle: std::f32::consts::PI / 4.0,
+        },
+    },
 ];
 
 fn index_to_action(index: usize) -> Action {
-    let idx = index % ACTION_COUNT;
-    ACTION_SPACE[idx]()
+    debug_assert_eq!(NEURAL_ACTION_SCHEMA.len(), NEURAL_ACTION_COUNT);
+    let idx = index % NEURAL_ACTION_COUNT;
+    (NEURAL_ACTION_SCHEMA[idx].build_action)()
 }
 
 /// Neural network policy agent with experience replay
@@ -181,6 +382,14 @@ impl NeuralAgent {
     /// Get experience buffer
     pub fn experience_buffer(&self) -> &VecDeque<Experience> {
         &self.experience_buffer
+    }
+
+    pub fn runtime_schema() -> NeuralRuntimeSchema {
+        NeuralRuntimeSchema::current()
+    }
+
+    pub fn action_schema() -> &'static [NeuralActionSchemaEntry] {
+        NEURAL_ACTION_SCHEMA
     }
 
     /// Extract authoritative training samples for a specific agent from a replay.
@@ -316,11 +525,11 @@ impl NeuralAgent {
         features.push((obs.tick as f32) / 1000.0); // normalized tick
         features.push((obs.elapsed_secs / 60.0).clamp(0.0, 1.0)); // normalized elapsed time
 
-        // Pad to exactly 32 features
-        while features.len() < 32 {
+        // Pad to exactly the current schema width.
+        while features.len() < NEURAL_FEATURE_COUNT {
             features.push(0.0);
         }
-        features.truncate(32);
+        features.truncate(NEURAL_FEATURE_COUNT);
 
         // Ensure all features are finite
         for f in &mut features {
@@ -409,6 +618,41 @@ impl Agent for NeuralAgent {
     fn constraints_mut(&mut self) -> &mut AgentConstraints {
         &mut self.constraints
     }
+
+    fn introspect(&self) -> AgentIntrospection {
+        let policy_status = self.policy.runtime_status();
+        let last_action = self
+            .last_action
+            .and_then(|index| Self::action_schema().get(index))
+            .map(|entry| entry.key)
+            .unwrap_or("none");
+        let last_inference = match &policy_status.last_inference {
+            NeuralInferenceStatus::Ready => "ready".to_string(),
+            NeuralInferenceStatus::Fallback { reason } => format!("fallback({reason})"),
+        };
+        let compatibility = match policy_status.compatibility {
+            NeuralCompatibilityStatus::Compatible => "compatible",
+            NeuralCompatibilityStatus::FallbackOnly => "fallback-only",
+        };
+
+        AgentIntrospection {
+            agent_id: self.id,
+            agent_type: AgentType::NeuralAgent,
+            constraints: self.constraints.clone(),
+            state_description: format!(
+                "policy={} schema=v{} features={} actions={} compatibility={} inference={} last_action={} experience_buffer={} timestep={}",
+                policy_status.model_name,
+                policy_status.runtime_schema.interface_version,
+                policy_status.runtime_schema.feature_count,
+                policy_status.runtime_schema.action_count,
+                compatibility,
+                last_inference,
+                last_action,
+                self.experience_buffer.len(),
+                self.timestep,
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +661,33 @@ mod tests {
     use pod_core::component::Team;
     use pod_core::contract::{AgentCapabilities, AgentRole, AgentRuntimeProfile};
     use pod_core::observation::{SelfState, VisibleEntity};
+
+    struct FixedActionSelector(usize);
+
+    impl ActionSelector for FixedActionSelector {
+        fn select_action(&self, _features: &[f32]) -> usize {
+            self.0
+        }
+    }
+
+    struct InspectableFallbackPolicy;
+
+    impl PolicyNetwork for InspectableFallbackPolicy {
+        fn forward(&self, _features: &[f32]) -> Vec<f32> {
+            vec![1.0 / NEURAL_ACTION_COUNT as f32; NEURAL_ACTION_COUNT]
+        }
+
+        fn runtime_status(&self) -> NeuralPolicyRuntimeStatus {
+            NeuralPolicyRuntimeStatus {
+                model_name: "inspectable-fallback".to_string(),
+                runtime_schema: NeuralRuntimeSchema::current(),
+                compatibility: NeuralCompatibilityStatus::FallbackOnly,
+                last_inference: NeuralInferenceStatus::Fallback {
+                    reason: "synthetic test fallback".to_string(),
+                },
+            }
+        }
+    }
 
     fn make_test_observation() -> Observation {
         Observation {
@@ -457,7 +728,7 @@ mod tests {
         let obs = make_test_observation();
         let features = NeuralAgent::observation_to_features(&obs);
 
-        assert_eq!(features.len(), 32);
+        assert_eq!(features.len(), NEURAL_FEATURE_COUNT);
         assert!(!features.is_empty());
         // All features should be finite numbers
         for f in features {
@@ -470,7 +741,7 @@ mod tests {
         let selector = RandomActionSelector;
         let features = vec![0.5; 20];
         let action_idx = selector.select_action(&features);
-        assert!(action_idx < ACTION_COUNT);
+        assert!(action_idx < NEURAL_ACTION_COUNT);
     }
 
     #[test]
@@ -514,8 +785,66 @@ mod tests {
 
         let action_large = index_to_action(100);
         // Should wrap around
-        let wrapped = index_to_action(100 % ACTION_COUNT);
+        let wrapped = index_to_action(100 % NEURAL_ACTION_COUNT);
         assert_eq!(format!("{:?}", action_large), format!("{:?}", wrapped));
+    }
+
+    #[test]
+    fn neural_runtime_schema_matches_encoder_and_action_space() {
+        let schema = NeuralAgent::runtime_schema();
+        let features = NeuralAgent::observation_to_features(&make_test_observation());
+
+        assert_eq!(schema.interface_version, NEURAL_INTERFACE_VERSION);
+        assert_eq!(schema.feature_count, features.len());
+        assert_eq!(schema.action_count, NEURAL_ACTION_SCHEMA.len());
+    }
+
+    #[test]
+    fn neural_runtime_schema_rejects_mismatched_metadata() {
+        let schema = NeuralRuntimeSchema::current();
+        let metadata = NeuralModelMetadata {
+            model_name: "bad-model".to_string(),
+            runtime_schema: NeuralRuntimeSchema {
+                interface_version: schema.interface_version,
+                feature_count: schema.feature_count + 1,
+                action_count: schema.action_count,
+            },
+        };
+
+        let error = schema.validate_model_metadata(&metadata).unwrap_err();
+        assert!(matches!(
+            error,
+            NeuralSchemaError::FeatureCountMismatch {
+                expected: NEURAL_FEATURE_COUNT,
+                got: 33
+            }
+        ));
+    }
+
+    #[test]
+    fn neural_action_schema_is_indexed_and_named() {
+        let schema = NeuralAgent::action_schema();
+        assert_eq!(schema.len(), NEURAL_ACTION_COUNT);
+        assert_eq!(schema[0].index, 0);
+        assert_eq!(schema[0].key, "idle");
+        assert_eq!(schema[6].key, "attack");
+        assert_eq!(schema[9].label, "Rotate 45 Degrees");
+    }
+
+    #[test]
+    fn neural_agent_introspection_reports_policy_runtime_status() {
+        let mut agent = NeuralAgent::with_selector_and_network(
+            Box::new(FixedActionSelector(0)),
+            Box::new(InspectableFallbackPolicy),
+        );
+        agent.observe(make_test_observation());
+        let _ = agent.decide();
+
+        let info = agent.introspect();
+        assert!(info.state_description.contains("policy=inspectable-fallback"));
+        assert!(info.state_description.contains("compatibility=fallback-only"));
+        assert!(info.state_description.contains("inference=fallback(synthetic test fallback)"));
+        assert!(info.state_description.contains("last_action=idle"));
     }
 
     #[test]

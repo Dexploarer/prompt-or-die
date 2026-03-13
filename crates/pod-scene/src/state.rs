@@ -215,9 +215,7 @@ pub struct MainMenuState {
 
 impl MainMenuState {
     pub fn new() -> Self {
-        Self {
-            selected_option: 0,
-        }
+        Self { selected_option: 0 }
     }
 
     pub fn select_option(&mut self, index: usize) {

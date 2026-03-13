@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 type Options = {
   profile: "ci-smoke" | "shard-target";
@@ -38,6 +39,100 @@ type BrowserRouteMeasurementsReport = {
   comparison: unknown;
 };
 
+type TransportMeasurementsReport = {
+  schema_version: number;
+  generated_at_unix_ms: number;
+  profile: string;
+  scenarios: unknown[];
+  aggregate: {
+    all_checks_passed: boolean;
+  };
+};
+
+type HeadlessTopologyParityReport = {
+  consistent: boolean;
+  teams_match: boolean;
+  worlds_match: boolean;
+  links_match: boolean;
+  quest_graphs_match: boolean;
+  world_quest_bindings_match: boolean;
+  applied_world_states_match: boolean;
+  evaluation_match: boolean;
+  missing_world_quest_binding_ids: string[];
+  unexpected_world_quest_binding_ids: string[];
+  missing_applied_world_ids: string[];
+  unexpected_applied_world_ids: string[];
+  missing_evaluation_world_ids: string[];
+  unexpected_evaluation_world_ids: string[];
+};
+
+type HeadlessTopologySourceReport = {
+  schema_version: number;
+  scenario: string;
+  profile: string;
+  teams: Array<{ team_id: string }>;
+  worlds: Array<{ world_id: string }>;
+  links: Array<{ link_id: string }>;
+  world_quest_bindings: Array<{ world_id: string; quest_graph_ids: string[] }>;
+  applied_world_states: Array<{ world_id: string }>;
+  evaluation: {
+    worlds: Array<{ world_id: string }>;
+  };
+  topology_parity: HeadlessTopologyParityReport;
+};
+
+type HeadlessTopologyCheck = {
+  metric: string;
+  passed: boolean;
+  expected: string;
+  observed: string;
+};
+
+type HeadlessTopologyMeasurementsReport = {
+  sourceSchemaVersion: number;
+  scenario: string;
+  profile: string;
+  teamCount: number;
+  worldCount: number;
+  linkCount: number;
+  worldQuestBindingCount: number;
+  appliedWorldStateCount: number;
+  evaluationWorldCount: number;
+  topologyParity: HeadlessTopologyParityReport;
+  checks: HeadlessTopologyCheck[];
+  allChecksPassed: boolean;
+};
+
+type TopologyFeedCheck = {
+  metric: string;
+  passed: boolean;
+  expected: string;
+  observed: string;
+};
+
+type TopologyFeedWorldPathReport = {
+  resolved_world_id: string | null;
+  resolved_world_matches: boolean;
+  quest_binding_matches: boolean;
+  applied_world_state_matches: boolean;
+  evaluation_matches: boolean;
+};
+
+type TopologyFeedWorldReport = {
+  world_id: string;
+  authority_row: TopologyFeedWorldPathReport;
+  generated_runtime: TopologyFeedWorldPathReport;
+};
+
+type TopologyFeedMeasurementsReport = {
+  schema_version: number;
+  scenario_id: string;
+  profile_id: string;
+  world_count: number;
+  worlds: TopologyFeedWorldReport[];
+  checks: TopologyFeedCheck[];
+};
+
 type CreatorTimeReport =
   | {
       status: "manual_pending";
@@ -55,10 +150,85 @@ type CombinedReport = {
   generatedAtUnixMs: number;
   profile: Options["profile"];
   core: unknown;
+  transportMeasurements: TransportMeasurementsReport;
+  headlessTopology: HeadlessTopologyMeasurementsReport;
+  topologyFeedMeasurements: TopologyFeedMeasurementsReport;
   browserNativeParity: BrowserParityReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
   creatorTimeToFirstAgentWorld: CreatorTimeReport;
 };
+
+function buildBooleanCheck(
+  metric: string,
+  observed: boolean,
+): HeadlessTopologyCheck {
+  return {
+    metric,
+    passed: observed,
+    expected: "true",
+    observed: String(observed),
+  };
+}
+
+export function buildHeadlessTopologyMeasurements(
+  report: HeadlessTopologySourceReport,
+): HeadlessTopologyMeasurementsReport {
+  const checks = [
+    buildBooleanCheck(
+      "topology_parity.consistent",
+      report.topology_parity.consistent,
+    ),
+    buildBooleanCheck(
+      "topology_parity.teams_match",
+      report.topology_parity.teams_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.worlds_match",
+      report.topology_parity.worlds_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.links_match",
+      report.topology_parity.links_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.quest_graphs_match",
+      report.topology_parity.quest_graphs_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.world_quest_bindings_match",
+      report.topology_parity.world_quest_bindings_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.applied_world_states_match",
+      report.topology_parity.applied_world_states_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.evaluation_match",
+      report.topology_parity.evaluation_match,
+    ),
+  ];
+
+  return {
+    sourceSchemaVersion: report.schema_version,
+    scenario: report.scenario,
+    profile: report.profile,
+    teamCount: report.teams.length,
+    worldCount: report.worlds.length,
+    linkCount: report.links.length,
+    worldQuestBindingCount: report.world_quest_bindings.length,
+    appliedWorldStateCount: report.applied_world_states.length,
+    evaluationWorldCount: report.evaluation.worlds.length,
+    topologyParity: report.topology_parity,
+    allChecksPassed: checks.every((check) => check.passed),
+    checks,
+  };
+}
+
+export function topologyFeedChecksPassed(
+  report: TopologyFeedMeasurementsReport,
+): boolean {
+  return report.checks.every((check) => check.passed);
+}
 
 function parseArgs(argv: string[]): Options {
   const options: Options = {
@@ -250,90 +420,204 @@ function buildCreatorReport(repoRoot: string, options: Options): CreatorTimeRepo
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const repoRoot = resolve(import.meta.dir, "..");
+  const tempDir = mkdtempSync(join(tmpdir(), "pod-moat-"));
+  const topologyOutputPath = resolve(
+    tempDir,
+    `pod-headless-topology-${options.profile}.json`,
+  );
 
-  const coreArgs = [
-    "cargo",
-    "run",
-    "-p",
-    "pod-core",
-    "--example",
-    "moat_benchmark_suite",
-    "--release",
-    "--",
-    "--profile",
-    options.profile,
-  ];
-  if (typeof options.monthlyHostCostUsd === "number") {
-    coreArgs.push("--monthly-host-cost-usd", String(options.monthlyHostCostUsd));
-  }
-
-  const coreCommand = runCommand("core-moat-benchmark", coreArgs, repoRoot);
-  if (!coreCommand.summary.ok) {
-    throw new Error(
-      `core benchmark failed:\n${coreCommand.summary.stderrSnippet ?? "no stderr captured"}`,
-    );
-  }
-
-  const core = JSON.parse(coreCommand.stdout);
-  let browserNativeParity: BrowserParityReport | null = null;
-  let browserRouteMeasurements: BrowserRouteMeasurementsReport | null = null;
-  if (!options.skipBrowser) {
-    const routeMeasurementCommand = runCommand(
-      "pod-web-render-route-measurements",
-      ["bun", "run", "measure:render-routes"],
-      `${repoRoot}/apps/pod-web`,
-    );
-    const checks = [
-      runCommand("native-render-tests", ["cargo", "test", "-p", "pod-render", "--lib"], repoRoot)
-        .summary,
-      runCommand(
-        "pod-web-typecheck",
-        ["bun", "run", "typecheck"],
-        `${repoRoot}/apps/pod-web`,
-      ).summary,
-      runCommand(
-        "pod-web-unit-tests",
-        ["bun", "test"],
-        `${repoRoot}/apps/pod-web`,
-      ).summary,
-      runCommand(
-        "pod-web-smoke-tests",
-        ["bun", "run", "test:smoke"],
-        `${repoRoot}/apps/pod-web`,
-      ).summary,
-      routeMeasurementCommand.summary,
+  try {
+    const coreArgs = [
+      "cargo",
+      "run",
+      "-p",
+      "pod-core",
+      "--example",
+      "moat_benchmark_suite",
+      "--release",
+      "--",
+      "--profile",
+      options.profile,
     ];
-    const passedChecks = checks.filter((check) => check.ok).length;
-    browserNativeParity = {
-      totalChecks: checks.length,
-      passedChecks,
-      parityScore: checks.length === 0 ? 0 : passedChecks / checks.length,
-      checks,
-    };
-    if (routeMeasurementCommand.summary.ok) {
-      browserRouteMeasurements = JSON.parse(
-        routeMeasurementCommand.stdout,
-      ) as BrowserRouteMeasurementsReport;
+    if (typeof options.monthlyHostCostUsd === "number") {
+      coreArgs.push("--monthly-host-cost-usd", String(options.monthlyHostCostUsd));
     }
+
+    const coreCommand = runCommand("core-moat-benchmark", coreArgs, repoRoot);
+    if (!coreCommand.summary.ok) {
+      throw new Error(
+        `core benchmark failed:\n${coreCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+
+    const core = JSON.parse(coreCommand.stdout);
+    const transportCommand = runCommand(
+      "transport-benchmark",
+      [
+        "cargo",
+        "run",
+        "-p",
+        "pod-net",
+        "--example",
+        "transport_benchmark_suite",
+        "--",
+        "--profile",
+        options.profile,
+        "--fail-on-checks",
+      ],
+      repoRoot,
+    );
+    if (!transportCommand.summary.ok) {
+      throw new Error(
+        `transport benchmark failed:\n${transportCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+    const transportMeasurements = JSON.parse(
+      transportCommand.stdout,
+    ) as TransportMeasurementsReport;
+    const headlessCommand = runCommand(
+      "headless-topology-benchmark",
+      [
+        "cargo",
+        "run",
+        "-p",
+        "pod-headless",
+        "--",
+        "--profile",
+        options.profile,
+        "--topology-output",
+        topologyOutputPath,
+      ],
+      repoRoot,
+    );
+    if (!headlessCommand.summary.ok) {
+      throw new Error(
+        `headless topology benchmark failed:\n${headlessCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+    const headlessTopology = buildHeadlessTopologyMeasurements(
+      JSON.parse(headlessCommand.stdout) as HeadlessTopologySourceReport,
+    );
+    if (!headlessTopology.allChecksPassed) {
+      const failedChecks = headlessTopology.checks
+        .filter((check) => !check.passed)
+        .map(
+          (check) =>
+            `${check.metric} expected ${check.expected} observed ${check.observed}`,
+        )
+        .join("\n");
+      throw new Error(`headless topology parity checks failed:\n${failedChecks}`);
+    }
+
+    const topologyFeedCommand = runCommand(
+      "topology-feed-benchmark",
+      [
+        "cargo",
+        "run",
+        "-p",
+        "pod-net",
+        "--features",
+        "spacetimedb",
+        "--example",
+        "topology_feed_benchmark_suite",
+        "--",
+        "--topology-input",
+        topologyOutputPath,
+        "--fail-on-checks",
+      ],
+      repoRoot,
+    );
+    if (!topologyFeedCommand.summary.ok) {
+      throw new Error(
+        `topology feed benchmark failed:\n${topologyFeedCommand.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+    const topologyFeedMeasurements = JSON.parse(
+      topologyFeedCommand.stdout,
+    ) as TopologyFeedMeasurementsReport;
+    if (!topologyFeedChecksPassed(topologyFeedMeasurements)) {
+      const failedChecks = topologyFeedMeasurements.checks
+        .filter((check) => !check.passed)
+        .map(
+          (check) =>
+            `${check.metric} expected ${check.expected} observed ${check.observed}`,
+        )
+        .join("\n");
+      throw new Error(`topology feed parity checks failed:\n${failedChecks}`);
+    }
+
+    let browserNativeParity: BrowserParityReport | null = null;
+    let browserRouteMeasurements: BrowserRouteMeasurementsReport | null = null;
+    if (!options.skipBrowser) {
+      const routeMeasurementCommand = runCommand(
+        "pod-web-render-route-measurements",
+        ["bun", "run", "measure:render-routes:check"],
+        `${repoRoot}/apps/pod-web`,
+      );
+      const checks = [
+        runCommand("native-render-tests", ["cargo", "test", "-p", "pod-render", "--lib"], repoRoot)
+          .summary,
+        runCommand(
+          "pod-web-verify-assets",
+          ["bun", "run", "verify:assets"],
+          `${repoRoot}/apps/pod-web`,
+        ).summary,
+        runCommand(
+          "pod-web-typecheck",
+          ["bun", "run", "typecheck"],
+          `${repoRoot}/apps/pod-web`,
+        ).summary,
+        runCommand(
+          "pod-web-unit-tests",
+          ["bun", "test"],
+          `${repoRoot}/apps/pod-web`,
+        ).summary,
+        runCommand(
+          "pod-web-smoke-tests",
+          ["bun", "run", "test:smoke"],
+          `${repoRoot}/apps/pod-web`,
+        ).summary,
+        routeMeasurementCommand.summary,
+      ];
+      const passedChecks = checks.filter((check) => check.ok).length;
+      browserNativeParity = {
+        totalChecks: checks.length,
+        passedChecks,
+        parityScore: checks.length === 0 ? 0 : passedChecks / checks.length,
+        checks,
+      };
+      if (routeMeasurementCommand.summary.ok) {
+        browserRouteMeasurements = JSON.parse(
+          routeMeasurementCommand.stdout,
+        ) as BrowserRouteMeasurementsReport;
+      }
+    }
+
+    const report: CombinedReport = {
+      schemaVersion: 4,
+      generatedAtUnixMs: Date.now(),
+      profile: options.profile,
+      core,
+      transportMeasurements,
+      headlessTopology,
+      topologyFeedMeasurements,
+      browserNativeParity,
+      browserRouteMeasurements,
+      creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),
+    };
+
+    const outputPath = resolve(repoRoot, options.output);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(report, null, 2));
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
-
-  const report: CombinedReport = {
-    schemaVersion: 1,
-    generatedAtUnixMs: Date.now(),
-    profile: options.profile,
-    core,
-    browserNativeParity,
-    browserRouteMeasurements,
-    creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),
-  };
-
-  const outputPath = resolve(repoRoot, options.output);
-  mkdirSync(dirname(outputPath), { recursive: true });
-  writeFileSync(outputPath, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify(report, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

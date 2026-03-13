@@ -73,12 +73,16 @@ pub use snapshot::{
     compose_presentation_snapshot, CatchUpDiagnostics, EntityDrift, EntityInteractionHints,
     EntityKind, EntityMetadataSnapshot, EntitySnapshot, InterpolatedSnapshot, InterpolationConfig,
     PredictedActionBatch, ReconciliationReport, RecoveryRequestState, RenderClock, RollbackPreview,
-    SnapshotInterest, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError, StateDelta,
-    WorldSnapshot,
+    SnapshotInterest, SnapshotInterpolationBuffer, SnapshotSampleMode, SnapshotUpdateError,
+    StateDelta, WorldSnapshot,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use server::{GameServer, ServerError};
+pub use server::{
+    run_transport_benchmark_suite, GameServer, ServerError, TransportBenchmarkAggregate,
+    TransportBenchmarkCheck, TransportBenchmarkProfile, TransportBenchmarkReport,
+    TransportBenchmarkScenarioReport,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use client_native::{ClientError, NativeClient};
@@ -87,7 +91,11 @@ pub use client_native::{ClientError, NativeClient};
 pub use client_web::{ClientError, WebClient};
 
 #[cfg(feature = "spacetimedb")]
-pub use client_stdb::{SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError};
+pub use client_stdb::{
+    build_topology_feed_measurements, SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError,
+    TopologyFeedCheck, TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport,
+    TopologyFeedWorldReport,
+};
 
 /// Default web runtime client type.
 ///

@@ -1087,7 +1087,7 @@ describe("TOON contract parsing", () => {
 
     expect(lakeSurface.isSwimmable).toBe(true);
     expect(heroInstance?.animationSetId).toBe("humanoid-swim");
-    expect(heroInstance?.position[1]).toBeGreaterThan((crateInstance?.position[1] ?? -999) + 8);
+    expect(heroInstance?.position[1]).toBeGreaterThan((crateInstance?.position[1] ?? -999) + 3);
   });
 
   test("adds point-click and target selection markers without mutating the base frame", () => {
@@ -1660,12 +1660,27 @@ describe("TOON contract parsing", () => {
     expect(pineBatch).toMatchObject({
       mesh: "canopy-tree",
       material: "shore-pine:windward-pine",
-      tint: [0.3, 0.54, 0.38, 1]
+      tint: [0.22, 0.5, 0.24, 1]
     });
     expect(cairnBatch).toMatchObject({
       mesh: "weathered-boulder",
       material: "shore-cairn:shore-cairn",
       tint: [0.68, 0.6, 0.5, 1]
     });
+  });
+
+  test("uses an authored showcase camera envelope on resonant shore", () => {
+    const world = new PodWebLocalWorld("Scout", "bootstrap-showcase");
+    world.connect();
+
+    const frame = buildAuthoritativeWorldFrame(world.snapshotState(), {
+      controlledEntity: world.controlledEntityId()
+    });
+
+    expect(frame.environment.biomeId).toBe("resonant-shore");
+    expect(frame.camera.rotation).toBeCloseTo(-0.54, 3);
+    expect(frame.camera.pitch).toBeGreaterThan(0.31);
+    expect(frame.camera.followDistance).toBeLessThan(13.1);
+    expect(frame.camera.shoulderOffset).toBeLessThan(0.2);
   });
 });

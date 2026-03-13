@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import {
   createManifestBackedAssetRegistry,
@@ -41,11 +42,14 @@ import {
   describeEnvironmentPreset,
   fractalNoise,
   mixVec3,
+  sampleBackcountryMask,
   sampleLakeMask,
   sampleTerrainHeight,
   sampleTerrainMaterial,
   sampleTerrainSlope,
   sampleTimeLapseEnvironment,
+  sampleRiverChannelMask,
+  sampleValleyFloorMask,
   sampleWaterSurfaceStyle,
   smoothstep
 } from "./landscape";
@@ -79,6 +83,17 @@ interface SmoothedInstanceTransform {
   rotation: THREE.Quaternion;
   scale: THREE.Vector3;
   updatedAt: number;
+}
+
+interface ResolvedMeshBatchResources {
+  planned: PlannedMeshBatch;
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+}
+
+interface ResolvedSpriteBatchResources {
+  planned: PlannedSpriteBatch;
+  resolved: Awaited<ReturnType<PodThreeAssetRegistry["resolveSpriteTexture"]>>;
 }
 
 const INLINE_TSL_FN_WARNING =
@@ -161,10 +176,38 @@ function paintTerrainTexture(
       const worldX = (x / Math.max(width - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
       const worldZ = (y / Math.max(height - 1, 1) - 0.5) * LANDSCAPE_WORLD_SIZE;
       const material = sampleTerrainMaterial(environment, worldX, worldZ);
+      const microNoise = fractalNoise(worldX * 0.22 + 17, worldZ * 0.22 - 9) - 0.5;
+      const macroNoise = fractalNoise(worldX * 0.055 - 21, worldZ * 0.055 + 13) - 0.5;
+      const dx = sampleTerrainHeight(worldX + 0.8, worldZ) - sampleTerrainHeight(worldX - 0.8, worldZ);
+      const dz = sampleTerrainHeight(worldX, worldZ + 0.8) - sampleTerrainHeight(worldX, worldZ - 0.8);
+      const normalX = -dx;
+      const normalY = 1.6;
+      const normalZ = -dz;
+      const normalLength = Math.hypot(normalX, normalY, normalZ) || 1;
+      const lightX = 0.48;
+      const lightY = 0.8;
+      const lightZ = 0.34;
+      const lambert = clamp(
+        (normalX * lightX + normalY * lightY + normalZ * lightZ) / normalLength,
+        0.18,
+        1
+      );
+      const contourShade =
+        0.84 +
+        lambert * 0.22 +
+        microNoise * 0.08 +
+        macroNoise * 0.05 -
+        material.cliffMask * 0.08 +
+        material.foamMask * 0.04;
+      const shadedBrightness = clamp(
+        material.brightness * contourShade,
+        0.4,
+        1.24
+      );
       const index = (y * width + x) * 4;
-      imageData.data[index] = Math.round(material.tint[0] * material.brightness * 255);
-      imageData.data[index + 1] = Math.round(material.tint[1] * material.brightness * 255);
-      imageData.data[index + 2] = Math.round(material.tint[2] * material.brightness * 255);
+      imageData.data[index] = Math.round(material.tint[0] * shadedBrightness * 255);
+      imageData.data[index + 1] = Math.round(material.tint[1] * shadedBrightness * 255);
+      imageData.data[index + 2] = Math.round(material.tint[2] * shadedBrightness * 255);
       imageData.data[index + 3] = 255;
     }
   }
@@ -217,20 +260,45 @@ function paintWaterTexture(
   context.fillStyle = radial;
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = `rgba(255, 255, 255, ${(0.08 + style.waveStrength * 0.1).toFixed(3)})`;
-  context.lineWidth = 2.5;
-  for (let stripe = 0; stripe < 22; stripe += 1) {
-    const offsetY = (stripe / 22) * height;
+  const reflectionBand = context.createLinearGradient(
+    width * 0.08,
+    height * 0.16,
+    width * 0.92,
+    height * 0.84
+  );
+  reflectionBand.addColorStop(0, "rgba(255,255,255,0)");
+  reflectionBand.addColorStop(
+    0.34,
+    `rgba(236, 248, 255, ${(0.08 + style.waveStrength * 0.08).toFixed(3)})`
+  );
+  reflectionBand.addColorStop(
+    0.58,
+    `rgba(178, 228, 242, ${(0.06 + style.waveStrength * 0.06).toFixed(3)})`
+  );
+  reflectionBand.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = reflectionBand;
+  context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = `rgba(255, 255, 255, ${(0.05 + style.waveStrength * 0.06).toFixed(3)})`;
+  for (let stripe = 0; stripe < 6; stripe += 1) {
+    const offsetY = height * (0.18 + stripe * 0.12);
+    context.lineWidth = 1.4 + stripe * 0.18;
     context.beginPath();
-    for (let x = 0; x <= width; x += 16) {
+    for (let x = 0; x <= width; x += 20) {
       const waveY =
         offsetY +
         Math.sin(
-          (x / width) * Math.PI * 4 +
+          (x / width) * Math.PI * (2.1 + stripe * 0.22) +
             stripe * 0.9 +
-            elapsedSeconds * (0.8 + style.waveStrength * 0.35)
+            elapsedSeconds * (0.38 + style.waveStrength * 0.16)
         ) *
-          (5 + (stripe % 3) * 1.6 + style.waveStrength * 2.6);
+          (2.8 + stripe * 0.35 + style.waveStrength * 1.1) +
+        Math.cos(
+          (x / width) * Math.PI * 1.35 +
+            stripe * 0.44 +
+            elapsedSeconds * 0.22
+        ) *
+          1.1;
       if (x === 0) {
         context.moveTo(x, waveY);
       } else {
@@ -240,12 +308,20 @@ function paintWaterTexture(
     context.stroke();
   }
 
-  context.strokeStyle = `rgba(210, 246, 255, ${(0.16 + style.waveStrength * 0.12).toFixed(3)})`;
-  context.lineWidth = 1.5;
-  for (let ring = 0; ring < 5; ring += 1) {
-    const radius = width * (0.16 + ring * 0.11);
+  context.strokeStyle = `rgba(214, 245, 255, ${(0.1 + style.waveStrength * 0.08).toFixed(3)})`;
+  for (let streak = 0; streak < 4; streak += 1) {
+    const radius = width * (0.12 + streak * 0.1);
+    context.lineWidth = 0.9 + streak * 0.22;
     context.beginPath();
-    context.ellipse(width * 0.52, height * 0.5, radius, radius * 0.62, 0, 0, Math.PI * 2);
+    context.ellipse(
+      width * (0.32 + streak * 0.14),
+      height * (0.46 - streak * 0.04),
+      radius * 1.22,
+      radius * 0.26,
+      -0.32,
+      0,
+      Math.PI * 2
+    );
     context.stroke();
   }
 }
@@ -311,31 +387,150 @@ function createShorelineGeometry(pointCount = 56): THREE.ShapeGeometry {
   return geometry;
 }
 
+function buildRiverProfile(pointCount = 44): Array<{ x: number; z: number; width: number }> {
+  const points = new Array<{ x: number; z: number; width: number }>();
+
+  for (let index = 0; index <= pointCount; index += 1) {
+    const t = index / pointCount;
+    const x =
+      76 -
+      t * 52 +
+      Math.sin(t * Math.PI * 1.35 + 0.28) * 10 +
+      (fractalNoise(t * 9.5 + 11, t * 7.1 - 3) - 0.5) * 8;
+    const z =
+      74 -
+      t * 176 +
+      Math.cos(t * Math.PI * 2.15 - 0.44) * 6 +
+      (fractalNoise(t * 8.3 - 7, t * 6.4 + 15) - 0.5) * 6;
+    const width =
+      10.5 -
+      t * 4.4 +
+      Math.sin(t * Math.PI * 3.2 + 0.6) * 0.8 +
+      (fractalNoise(t * 10.2 + 23, t * 4.8 - 17) - 0.5) * 0.9;
+    points.push({
+      x,
+      z,
+      width: Math.max(width, 4.6)
+    });
+  }
+
+  return points;
+}
+
+function createRiverRibbonGeometry(widthScale = 1): THREE.BufferGeometry {
+  const profile = buildRiverProfile();
+  const positions = new Float32Array(profile.length * 2 * 3);
+  const uvs = new Float32Array(profile.length * 2 * 2);
+  const indices = new Array<number>();
+
+  for (let index = 0; index < profile.length; index += 1) {
+    const current = profile[index];
+    const previous = profile[Math.max(index - 1, 0)] ?? current;
+    const next = profile[Math.min(index + 1, profile.length - 1)] ?? current;
+    const tangentX = next.x - previous.x;
+    const tangentZ = next.z - previous.z;
+    const tangentLength = Math.hypot(tangentX, tangentZ) || 1;
+    const normalX = -tangentZ / tangentLength;
+    const normalZ = tangentX / tangentLength;
+    const width = current.width * widthScale;
+    const leftX = current.x + normalX * width;
+    const leftZ = current.z + normalZ * width;
+    const rightX = current.x - normalX * width;
+    const rightZ = current.z - normalZ * width;
+    const positionOffset = index * 6;
+    const uvOffset = index * 4;
+
+    positions[positionOffset] = leftX;
+    positions[positionOffset + 1] = 0;
+    positions[positionOffset + 2] = leftZ;
+    positions[positionOffset + 3] = rightX;
+    positions[positionOffset + 4] = 0;
+    positions[positionOffset + 5] = rightZ;
+
+    uvs[uvOffset] = 0;
+    uvs[uvOffset + 1] = index / Math.max(profile.length - 1, 1);
+    uvs[uvOffset + 2] = 1;
+    uvs[uvOffset + 3] = index / Math.max(profile.length - 1, 1);
+
+    if (index < profile.length - 1) {
+      const base = index * 2;
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function wrappedAngleDistance(left: number, right: number): number {
+  return Math.abs(Math.atan2(Math.sin(left - right), Math.cos(left - right)));
+}
+
 function createMountainBackdropGeometry(
-  radius = LANDSCAPE_WORLD_SIZE * 0.68,
-  width = 42,
+  radius = LANDSCAPE_WORLD_SIZE * 0.58,
+  width = 56,
   segments = 88
 ): THREE.BufferGeometry {
   const positions = new Float32Array((segments + 1) * 2 * 3);
+  const colors = new Float32Array((segments + 1) * 2 * 3);
   const indices = new Array<number>();
 
   for (let index = 0; index <= segments; index += 1) {
     const angle = (index / segments) * Math.PI * 2;
     const ridgeNoise = fractalNoise(Math.cos(angle) * 7 + 4, Math.sin(angle) * 7 - 9);
-    const peakHeight = 28 + ridgeNoise * 42;
-    const innerRadius = radius;
-    const outerRadius = radius + width + ridgeNoise * 18;
+    const sharpNoise = Math.pow(fractalNoise(Math.cos(angle) * 11 - 3, Math.sin(angle) * 11 + 5), 1.6);
+    const backdropMask =
+      1 - smoothstep(0.22, 1.18, wrappedAngleDistance(angle, Math.PI * 1.5));
+    const westPeakMask =
+      1 - smoothstep(0.12, 0.46, wrappedAngleDistance(angle, Math.PI * 1.34));
+    const eastPeakMask =
+      1 - smoothstep(0.12, 0.42, wrappedAngleDistance(angle, Math.PI * 1.73));
+    const foregroundOpening =
+      1 - smoothstep(0.14, 0.54, wrappedAngleDistance(angle, Math.PI * 0.5));
+    const scenicBias = backdropMask * 0.9 + westPeakMask * 0.55 + eastPeakMask * 0.48;
+    const peakHeight =
+      34 +
+      ridgeNoise * 42 +
+      sharpNoise * 34 +
+      backdropMask * 72 +
+      westPeakMask * 54 +
+      eastPeakMask * 48 -
+      foregroundOpening * 22;
+    const innerRadius = radius - foregroundOpening * 18 + backdropMask * 8;
+    const outerRadius =
+      radius +
+      width +
+      ridgeNoise * 18 +
+      sharpNoise * 8 +
+      scenicBias * 24 -
+      foregroundOpening * 10;
     const sin = Math.sin(angle);
     const cos = Math.cos(angle);
     const offset = index * 6;
+    const snowBlend = clamp((peakHeight - 76) / 46, 0, 1);
+    const ridgeBlend = clamp((peakHeight - 44) / 52, 0, 1);
+    const lowerColor = mixVec3([0.28, 0.24, 0.2], [0.38, 0.34, 0.28], backdropMask * 0.42);
+    const upperRock = mixVec3([0.66, 0.58, 0.42], [0.84, 0.76, 0.56], ridgeBlend * 0.72);
+    const upperColor = mixVec3(upperRock, [0.98, 0.96, 0.92], snowBlend * 0.9);
 
     positions[offset] = cos * innerRadius;
-    positions[offset + 1] = -6;
+    positions[offset + 1] = -12;
     positions[offset + 2] = sin * innerRadius;
 
     positions[offset + 3] = cos * outerRadius;
     positions[offset + 4] = peakHeight;
     positions[offset + 5] = sin * outerRadius;
+
+    colors[offset] = lowerColor[0];
+    colors[offset + 1] = lowerColor[1];
+    colors[offset + 2] = lowerColor[2];
+    colors[offset + 3] = upperColor[0];
+    colors[offset + 4] = upperColor[1];
+    colors[offset + 5] = upperColor[2];
 
     if (index < segments) {
       const base = index * 2;
@@ -345,9 +540,44 @@ function createMountainBackdropGeometry(
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function createCloudLayerGeometry(
+  radius = LANDSCAPE_WORLD_SIZE * 0.74,
+  clusterCount = 52
+): THREE.BufferGeometry {
+  const pieces = new Array<THREE.BufferGeometry>();
+
+  for (let clusterIndex = 0; clusterIndex < clusterCount; clusterIndex += 1) {
+    const angle = (clusterIndex / clusterCount) * Math.PI * 2;
+    const ringNoise = fractalNoise(Math.cos(angle) * 5.4 + 7, Math.sin(angle) * 5.4 - 3);
+    const centerRadius = radius + ringNoise * 18;
+    const centerX = Math.cos(angle) * centerRadius;
+    const centerZ = Math.sin(angle) * centerRadius;
+    const centerY = 68 + ringNoise * 14;
+    const puffCount = 4 + (clusterIndex % 4);
+
+    for (let puffIndex = 0; puffIndex < puffCount; puffIndex += 1) {
+      const puffNoise = fractalNoise(
+        clusterIndex * 0.8 + puffIndex * 1.7,
+        clusterIndex * 1.1 - puffIndex * 0.6
+      );
+      const puff = new THREE.IcosahedronGeometry(6.2 + puffNoise * 5.4, 1);
+      puff.scale(2.05 + puffNoise * 1.24, 0.74 + puffNoise * 0.24, 1.18 + puffNoise * 0.48);
+      puff.translate(
+        centerX + (puffIndex - puffCount * 0.5) * (5.8 + puffNoise * 2.4),
+        centerY + Math.sin(puffIndex * 1.7 + angle) * 2.8,
+        centerZ + Math.cos(puffIndex * 1.9 - angle) * 4.6
+      );
+      pieces.push(puff);
+    }
+  }
+
+  return mergeGeometries(pieces, false) ?? new THREE.IcosahedronGeometry(6, 1);
 }
 
 function paintSkyTexture(surface: PaintSurface, environment: ThreeJsEnvironment): void {
@@ -496,6 +726,20 @@ export function recordPodThreeMainThreadSubmission(
   }
 }
 
+export function resetPodThreeMainThreadPerfTracker(
+  tracker: PodThreeMainThreadPerfTracker,
+  startedAtMs = 0
+): void {
+  tracker.startedAtMs = Math.max(startedAtMs, 0);
+  tracker.warmupMs = null;
+  tracker.submissionsCompleted = 0;
+  tracker.totalSubmissionMs = 0;
+  tracker.slowestSubmissionMs = 0;
+  tracker.byKind.frame = createPodThreeMainThreadPerfBucketTracker();
+  tracker.byKind.control = createPodThreeMainThreadPerfBucketTracker();
+  tracker.byKind.resize = createPodThreeMainThreadPerfBucketTracker();
+}
+
 export function snapshotPodThreeMainThreadPerfStats(
   tracker: PodThreeMainThreadPerfTracker
 ): PodThreeMainThreadPerfStats {
@@ -594,6 +838,18 @@ export function recordPodThreeRuntimePerfFrame(
   }
 }
 
+export function resetPodThreeRuntimePerfTracker(
+  tracker: PodThreeRuntimePerfTracker,
+  startedAtMs = 0
+): void {
+  tracker.startedAtMs = Math.max(startedAtMs, 0);
+  tracker.warmupMs = null;
+  tracker.framesRendered = 0;
+  tracker.stableFrames = 0;
+  tracker.slowFrames = 0;
+  tracker.slowestFrameMs = 0;
+}
+
 export function snapshotPodThreeRuntimePerfStats(
   tracker: PodThreeRuntimePerfTracker,
   frameBudgetMs = POD_THREE_FRAME_STABILITY_BUDGET_MS
@@ -653,7 +909,9 @@ export class PodThreeWorldRenderer {
       options.assetRegistry ??
       (await createManifestBackedAssetRegistry({
         renderer,
-        fallbackRegistry: new DefaultPodThreeAssetRegistry()
+        fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+        preferNonBlockingFallbacks: true,
+        lazyManifestLoad: true
       }));
     return new PodThreeWorldRenderer(canvas, renderer, backend, {
       ...options,
@@ -686,11 +944,14 @@ export class PodThreeWorldRenderer {
     null;
   private terrainTexture: THREE.Texture | null = null;
   private terrainTextureSurface: PaintSurface | null = null;
-  private waterMesh: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> | null = null;
-  private shorelineMesh: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> | null = null;
+  private waterMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
+  private shorelineMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private waterTexture: THREE.Texture | null = null;
   private waterTextureSurface: PaintSurface | null = null;
   private mountainBackdrop:
+    | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
+    | null = null;
+  private cloudLayer:
     | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
     | null = null;
   private skyDome: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial> | null = null;
@@ -712,6 +973,11 @@ export class PodThreeWorldRenderer {
   private readonly smoothedCameraTarget = new THREE.Vector3();
   private cameraPoseInitialized = false;
   private lastCameraUpdateAt = 0;
+  private waterGeometryMode: "lake" | "river" = "lake";
+  private lakeWaterGeometry: THREE.BufferGeometry | null = null;
+  private riverWaterGeometry: THREE.BufferGeometry | null = null;
+  private lakeShorelineGeometry: THREE.BufferGeometry | null = null;
+  private riverShorelineGeometry: THREE.BufferGeometry | null = null;
   private readonly runtimePerf = createPodThreeRuntimePerfTracker(monotonicPerfNowMs());
   private telemetryTrail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null =
     null;
@@ -794,7 +1060,9 @@ export class PodThreeWorldRenderer {
     });
     this.ambientInstances = ambientPlan.totalInstances;
     this.applyCamera(planned.camera, frame.camera);
-    await this.prewarmPlannedAssets(planned, ambientPlan);
+    void this.prewarmPlannedAssets(planned, ambientPlan).catch((error) => {
+      console.warn("Continuing without blocking on asset prewarm", error);
+    });
     await this.syncMeshBatches(planned.meshBatches);
     await this.syncAmbientMeshBatches(ambientPlan.meshBatches);
     await this.syncSpriteBatches(planned.spriteBatches);
@@ -893,6 +1161,10 @@ export class PodThreeWorldRenderer {
     sun.shadow.camera.right = 60;
     sun.shadow.camera.top = 60;
     sun.shadow.camera.bottom = -60;
+    sun.shadow.bias = 0.00008;
+    sun.shadow.normalBias = 0.5;
+    sun.shadow.blurSamples = 6;
+    sun.shadow.radius = 1.4;
     this.scene.add(sun);
     this.sunLight = sun;
 
@@ -950,7 +1222,9 @@ export class PodThreeWorldRenderer {
       color: 0xffffff,
       map: terrainTexture,
       roughness: 0.9,
-      metalness: 0.03
+      metalness: 0.03,
+      emissive: new THREE.Color(0.09, 0.11, 0.1),
+      emissiveIntensity: 0.18
     });
     this.groundMaterial = groundMaterial;
     const ground = new THREE.Mesh(createTerrainGeometry(), groundMaterial);
@@ -992,7 +1266,9 @@ export class PodThreeWorldRenderer {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    const water = new THREE.Mesh(createLakeGeometry(), waterMaterial);
+    this.lakeWaterGeometry = createLakeGeometry();
+    this.riverWaterGeometry = createRiverRibbonGeometry(1);
+    const water = new THREE.Mesh(this.lakeWaterGeometry, waterMaterial);
     water.position.y = WATER_LEVEL + 0.06;
     water.receiveShadow = true;
     water.renderOrder = 2;
@@ -1010,7 +1286,9 @@ export class PodThreeWorldRenderer {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    const shoreline = new THREE.Mesh(createShorelineGeometry(), shorelineMaterial);
+    this.lakeShorelineGeometry = createShorelineGeometry();
+    this.riverShorelineGeometry = createRiverRibbonGeometry(1.18);
+    const shoreline = new THREE.Mesh(this.lakeShorelineGeometry, shorelineMaterial);
     shoreline.position.y = WATER_LEVEL + 0.08;
     shoreline.receiveShadow = true;
     shoreline.renderOrder = 3;
@@ -1020,9 +1298,11 @@ export class PodThreeWorldRenderer {
     const mountainBackdrop = new THREE.Mesh(
       createMountainBackdropGeometry(),
       new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0.17, 0.24, 0.32),
+        color: new THREE.Color(1, 1, 1),
         roughness: 1,
         metalness: 0,
+        flatShading: true,
+        vertexColors: true,
         fog: true
       })
     );
@@ -1031,6 +1311,23 @@ export class PodThreeWorldRenderer {
     mountainBackdrop.castShadow = false;
     this.scene.add(mountainBackdrop);
     this.mountainBackdrop = mountainBackdrop;
+
+    const cloudLayer = new THREE.Mesh(
+      createCloudLayerGeometry(),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0.96, 0.96, 0.94),
+        roughness: 0.98,
+        metalness: 0,
+        emissive: new THREE.Color(0.06, 0.06, 0.06),
+        emissiveIntensity: 0.22,
+        flatShading: true,
+        fog: false
+      })
+    );
+    cloudLayer.receiveShadow = false;
+    cloudLayer.castShadow = false;
+    this.scene.add(cloudLayer);
+    this.cloudLayer = cloudLayer;
 
     if (this.quality.showGrid) {
       const grid = new THREE.GridHelper(180, 60, 0x5fa7ff, 0x173049);
@@ -1086,12 +1383,35 @@ export class PodThreeWorldRenderer {
     );
   }
 
+  private ensureWaterGeometryMode(mode: "lake" | "river"): void {
+    if (this.waterGeometryMode === mode) {
+      return;
+    }
+    const waterGeometry =
+      mode === "river" ? this.riverWaterGeometry : this.lakeWaterGeometry;
+    const shorelineGeometry =
+      mode === "river" ? this.riverShorelineGeometry : this.lakeShorelineGeometry;
+    if (!waterGeometry || !shorelineGeometry) {
+      return;
+    }
+    if (this.waterMesh) {
+      this.waterMesh.geometry = waterGeometry;
+    }
+    if (this.shorelineMesh) {
+      this.shorelineMesh.geometry = shorelineGeometry;
+    }
+    this.waterGeometryMode = mode;
+  }
+
   private applyDynamicEnvironment(
     environment: ThreeJsEnvironment,
     elapsedSeconds: number
   ): void {
     this.environmentPreset = describeEnvironmentPreset(environment);
     const waterStyle = sampleWaterSurfaceStyle(environment, elapsedSeconds);
+    this.ensureWaterGeometryMode(
+      environment.biomeId === "resonant-shore" ? "river" : "lake"
+    );
 
     this.scene.background = new THREE.Color(...environment.skyColor.slice(0, 3));
     const fog = this.scene.fog;
@@ -1181,15 +1501,23 @@ export class PodThreeWorldRenderer {
       );
     }
     if (this.mountainBackdrop) {
-      this.mountainBackdrop.material.color.setRGB(
-        environment.fogColor[0] * 0.5,
-        environment.fogColor[1] * 0.48,
-        environment.fogColor[2] * 0.58
-      );
+      this.mountainBackdrop.material.color.setRGB(1, 1, 1);
       this.mountainBackdrop.material.emissive.setRGB(
-        environment.fillColor[0] * 0.05,
-        environment.fillColor[1] * 0.05,
-        environment.fillColor[2] * 0.06
+        environment.sunColor[0] * 0.04,
+        environment.sunColor[1] * 0.035,
+        environment.sunColor[2] * 0.025
+      );
+    }
+    if (this.cloudLayer) {
+      this.cloudLayer.material.color.setRGB(
+        0.92 + environment.sunColor[0] * 0.04,
+        0.92 + environment.sunColor[1] * 0.035,
+        0.93 + environment.fillColor[2] * 0.025
+      );
+      this.cloudLayer.material.emissive.setRGB(
+        environment.sunColor[0] * 0.06,
+        environment.sunColor[1] * 0.05,
+        environment.sunColor[2] * 0.04
       );
     }
     if (this.sunOrb) {
@@ -1257,24 +1585,14 @@ export class PodThreeWorldRenderer {
     const now = this.sceneTimeMs();
     const elapsedSeconds = now / 1000;
     pruneExpiredPulses(this.entityPulseUntilMs, now);
+    const resolvedBatches = await resolveVisibleMeshBatchResources(
+      batches,
+      this.assetRegistry,
+      this.quality
+    );
 
-    for (const planned of batches) {
-      if (planned.visibleCount === 0) {
-        continue;
-      }
-
+    for (const { planned, geometry, material } of resolvedBatches) {
       activeKeys.add(planned.key);
-      const geometry = await this.assetRegistry.resolveGeometry(
-        planned.batch,
-        planned.lodLevel
-      );
-      const material =
-        (await this.assetRegistry.resolveMeshMaterial?.(
-          planned.batch,
-          planned.lodLevel,
-          this.quality
-        )) ??
-        this.getOrCreateMeshMaterial(planned);
       const existing = this.meshEntries.get(planned.key);
       const entry = ensureInstancedEntry(
         this.scene,
@@ -1325,17 +1643,14 @@ export class PodThreeWorldRenderer {
     const activeTransformKeys = new Set<string>();
     const now = this.sceneTimeMs();
     const elapsedSeconds = now / 1000;
+    const resolvedBatches = await resolveVisibleSpriteBatchResources(
+      batches,
+      this.assetRegistry,
+      this.quality.anisotropy
+    );
 
-    for (const planned of batches) {
-      if (planned.visibleCount === 0) {
-        continue;
-      }
-
+    for (const { planned, resolved } of resolvedBatches) {
       activeKeys.add(planned.key);
-      const resolved = await this.assetRegistry.resolveSpriteTexture({
-        texture: planned.batch.texture,
-        frame: planned.batch.frame
-      }, this.quality.anisotropy);
       const material = this.getOrCreateSpriteMaterial(planned, resolved);
 
       const existing = this.spriteEntries.get(planned.key);
@@ -1385,14 +1700,17 @@ export class PodThreeWorldRenderer {
 
   private async syncAmbientMeshBatches(batches: PlannedMeshBatch[]): Promise<void> {
     const activeKeys = new Set<string>();
+    const resolvedBatches = await Promise.all(
+      batches
+        .filter((planned) => planned.visibleCount > 0)
+        .map(async (planned) => ({
+          planned,
+          geometry: await this.assetRegistry.resolveGeometry(planned.batch, planned.lodLevel)
+        }))
+    );
 
-    for (const planned of batches) {
-      if (planned.visibleCount === 0) {
-        continue;
-      }
-
+    for (const { planned, geometry } of resolvedBatches) {
       activeKeys.add(planned.key);
-      const geometry = await this.assetRegistry.resolveGeometry(planned.batch, planned.lodLevel);
       const existing = this.ambientMeshEntries.get(planned.key);
       const material =
         existing?.material ??
@@ -1430,6 +1748,9 @@ export class PodThreeWorldRenderer {
 
   private async syncOverlay(commands: RenderCommand[]): Promise<void> {
     this.clearOverlay();
+    if (commands.length === 0) {
+      return;
+    }
 
     for (const command of commands) {
       if (!command.visible) {
@@ -1676,6 +1997,10 @@ export class PodThreeWorldRenderer {
     };
   }
 
+  resetPerfMetrics(nowMs = monotonicPerfNowMs()): void {
+    resetPodThreeRuntimePerfTracker(this.runtimePerf, nowMs);
+  }
+
   private async prewarmPlannedAssets(
     planned: ReturnType<typeof buildFramePlan>,
     ambientPlan: AmbientChunkDressingPlan
@@ -1809,6 +2134,18 @@ interface AmbientChunkDressingInput {
   mediumDetailDistance: number;
 }
 
+interface AmbientChunkPlacementSample {
+  x: number;
+  z: number;
+  radialDistance: number;
+  lakeMask: number;
+  slope: number;
+  height: number;
+  chunkX: number;
+  chunkZ: number;
+  slotIndex: number;
+}
+
 interface AmbientChunkArchetype {
   id: string;
   mesh: string;
@@ -1829,6 +2166,7 @@ interface AmbientChunkArchetype {
   maxHeight: number;
   minRadiusFromOrigin: number;
   regionBias?: (chunkX: number, chunkZ: number) => boolean;
+  placementBias?: (sample: AmbientChunkPlacementSample) => number;
 }
 
 const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
@@ -1836,32 +2174,81 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     id: "canopy-tree",
     mesh: "canopy-tree",
     material: "foliage-canopy",
-    tint: [0.82, 0.92, 0.8, 1],
-    emissive: [0.03, 0.06, 0.03],
+    tint: [0.22, 0.52, 0.2, 1],
+    emissive: [0.015, 0.035, 0.015],
     roughness: 0.96,
     metallic: 0,
     castShadows: true,
     receiveShadows: true,
     renderOrder: 4,
-    baseScale: [1.9, 2.5, 1.9],
+    baseScale: [1.9, 4.4, 1.9],
     densities: {
-      ultra: 4,
-      high: 3,
-      balanced: 2,
-      performance: 1
+      ultra: 15,
+      high: 11,
+      balanced: 7,
+      performance: 3
     },
     lakeMaskMax: 0.14,
     minSlope: 0,
     maxSlope: 0.58,
     minHeight: -20,
-    maxHeight: 19,
-    minRadiusFromOrigin: 18
+    maxHeight: 36,
+    minRadiusFromOrigin: 10,
+    placementBias: ({ x, z, height, slope, lakeMask }) =>
+      clamp(
+        0.08 +
+          sampleValleyFloorMask(x, z) * 0.78 -
+          sampleRiverChannelMask(x, z) * 0.34 -
+          sampleBackcountryMask(x, z) * 0.14 -
+          slope * 0.22 -
+          lakeMask * 0.18 +
+          clamp((12 - height) / 24, 0, 1) * 0.14,
+        0.05,
+        0.88
+      )
+  },
+  {
+    id: "pine-sapling",
+    mesh: "canopy-tree",
+    material: "foliage-canopy",
+    tint: [0.34, 0.64, 0.28, 1],
+    emissive: [0.012, 0.026, 0.01],
+    roughness: 0.98,
+    metallic: 0,
+    castShadows: true,
+    receiveShadows: true,
+    renderOrder: 3,
+    baseScale: [0.62, 1.18, 0.62],
+    densities: {
+      ultra: 26,
+      high: 18,
+      balanced: 12,
+      performance: 4
+    },
+    lakeMaskMax: 0.12,
+    minSlope: 0,
+    maxSlope: 0.48,
+    minHeight: -20,
+    maxHeight: 40,
+    minRadiusFromOrigin: 14,
+    placementBias: ({ x, z, height, slope, lakeMask }) =>
+      clamp(
+        0.16 +
+          sampleValleyFloorMask(x, z) * 0.92 -
+          sampleRiverChannelMask(x, z) * 0.28 -
+          sampleBackcountryMask(x, z) * 0.08 -
+          slope * 0.2 -
+          lakeMask * 0.14 +
+          clamp((16 - height) / 26, 0, 1) * 0.2,
+        0.08,
+        0.96
+      )
   },
   {
     id: "weathered-boulder",
     mesh: "weathered-boulder",
     material: "weathered-stone",
-    tint: [0.88, 0.9, 0.94, 1],
+    tint: [0.66, 0.58, 0.46, 1],
     emissive: [0.01, 0.015, 0.02],
     roughness: 1,
     metallic: 0.02,
@@ -1880,13 +2267,22 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     maxSlope: 1.12,
     minHeight: -20,
     maxHeight: 28,
-    minRadiusFromOrigin: 12
+    minRadiusFromOrigin: 12,
+    placementBias: ({ x, z, slope }) =>
+      clamp(
+        0.18 +
+          slope * 0.28 +
+          sampleValleyFloorMask(x, z) * 0.22 +
+          sampleRiverChannelMask(x, z) * 0.18,
+        0.12,
+        0.78
+      )
   },
   {
     id: "basalt-column",
     mesh: "basalt-column",
     material: "basalt",
-    tint: [0.72, 0.76, 0.84, 1],
+    tint: [0.72, 0.72, 0.76, 1],
     emissive: [0.015, 0.02, 0.03],
     roughness: 0.9,
     metallic: 0.04,
@@ -1906,7 +2302,16 @@ const AMBIENT_CHUNK_ARCHETYPES: AmbientChunkArchetype[] = [
     minHeight: -18,
     maxHeight: 38,
     minRadiusFromOrigin: 22,
-    regionBias: (chunkX, chunkZ) => chunkX >= 0 || chunkZ <= -1
+    regionBias: (chunkX, chunkZ) => chunkX >= 0 || chunkZ <= -1,
+    placementBias: ({ x, z, height, slope }) =>
+      clamp(
+        0.12 +
+          sampleBackcountryMask(x, z) * 0.56 +
+          slope * 0.22 +
+          clamp((height - 8) / 22, 0, 1) * 0.2,
+        0.08,
+        0.84
+      )
   },
   {
     id: "glass-spire",
@@ -2095,6 +2500,26 @@ function sampleAmbientChunkInstances(
       if (height < archetype.minHeight || height > archetype.maxHeight) {
         continue;
       }
+      if (archetype.placementBias) {
+        const probability = clamp(
+          archetype.placementBias({
+            x,
+            z,
+            radialDistance,
+            lakeMask,
+            slope,
+            height,
+            chunkX,
+            chunkZ,
+            slotIndex
+          }),
+          0,
+          1
+        );
+        if (ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:p`) > probability) {
+          continue;
+        }
+      }
 
       const scaleVariance = 0.82 + ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:s`) * 0.58;
       const yaw = ambientNoise(chunkX, chunkZ, slotIndex, `${archetype.id}:r`) * Math.PI * 2;
@@ -2150,6 +2575,46 @@ function dedupeMeshPrefetchRequests(
   }
 
   return Array.from(unique.values());
+}
+
+export async function resolveVisibleMeshBatchResources(
+  batches: PlannedMeshBatch[],
+  assetRegistry: PodThreeAssetRegistry,
+  quality: PodThreeQualityProfile
+): Promise<ResolvedMeshBatchResources[]> {
+  const visibleBatches = batches.filter((planned) => planned.visibleCount > 0);
+  return await Promise.all(
+    visibleBatches.map(async (planned) => ({
+      planned,
+      geometry: await assetRegistry.resolveGeometry(planned.batch, planned.lodLevel),
+      material:
+        (await assetRegistry.resolveMeshMaterial?.(
+          planned.batch,
+          planned.lodLevel,
+          quality
+        )) ?? createMeshMaterial(planned.batch, planned.lodLevel, quality)
+    }))
+  );
+}
+
+export async function resolveVisibleSpriteBatchResources(
+  batches: PlannedSpriteBatch[],
+  assetRegistry: PodThreeAssetRegistry,
+  anisotropy: number
+): Promise<ResolvedSpriteBatchResources[]> {
+  const visibleBatches = batches.filter((planned) => planned.visibleCount > 0);
+  return await Promise.all(
+    visibleBatches.map(async (planned) => ({
+      planned,
+      resolved: await assetRegistry.resolveSpriteTexture(
+        {
+          texture: planned.batch.texture,
+          frame: planned.batch.frame
+        },
+        anisotropy
+      )
+    }))
+  );
 }
 
 async function createRenderer(

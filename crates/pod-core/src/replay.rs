@@ -17,7 +17,7 @@ use crate::component::{EncounterKind, EncounterState};
 use crate::id::AgentId;
 use crate::observation::Observation;
 use crate::telemetry::{
-    ActionLifecycleStage, AgentToolCallTrace, TickTelemetryFrame, ToolCallStatus,
+    ActionLifecycleStage, AgentRewardSignal, AgentToolCallTrace, TickTelemetryFrame, ToolCallStatus,
 };
 use crate::toon::encode_toon_document;
 use serde::{Deserialize, Serialize};
@@ -105,11 +105,48 @@ pub struct ReplayTrainingSample {
     pub encounter_transition: Option<EncounterTransition>,
     pub tool_call_latency_ms: u32,
     pub tool_call_error_count: usize,
+    pub reward_summary: RewardAttributionSummary,
 }
 
 impl ReplayTrainingSample {
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("replay_training_sample", self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RewardAttributionSummary {
+    pub signal_count: usize,
+    pub total: f32,
+    pub positive_total: f32,
+    pub negative_total: f32,
+    pub terminal: bool,
+}
+
+impl RewardAttributionSummary {
+    pub fn from_signals(signals: &[AgentRewardSignal]) -> Self {
+        let mut total = 0.0f32;
+        let mut positive_total = 0.0f32;
+        let mut negative_total = 0.0f32;
+        let mut terminal = false;
+
+        for signal in signals {
+            total += signal.value;
+            if signal.value >= 0.0 {
+                positive_total += signal.value;
+            } else {
+                negative_total += signal.value;
+            }
+            terminal |= signal.terminal;
+        }
+
+        Self {
+            signal_count: signals.len(),
+            total,
+            positive_total,
+            negative_total,
+            terminal,
+        }
     }
 }
 
@@ -155,6 +192,7 @@ impl ReplayFile {
                         )
                     })
                     .count();
+                let reward_summary = RewardAttributionSummary::from_signals(&agent.reward_signals);
 
                 samples.push(ReplayTrainingSample {
                     tick: window.tick,
@@ -168,6 +206,7 @@ impl ReplayFile {
                     encounter_transition,
                     tool_call_latency_ms,
                     tool_call_error_count,
+                    reward_summary,
                 });
             }
         }
@@ -435,7 +474,8 @@ mod tests {
     use super::*;
     use crate::contract::{AgentCapabilities, AgentRole, AgentRuntimeProfile};
     use crate::telemetry::{
-        ActionLifecycleStage, ActionSource, AgentTelemetryFrame, TrajectorySample,
+        ActionLifecycleStage, ActionSource, AgentRewardSignal, AgentTelemetryFrame, RewardReason,
+        RewardSource, TrajectorySample,
     };
     use crate::toon::decode_toon_value;
     use glam::Vec2;
@@ -586,6 +626,22 @@ mod tests {
             0,
             Some("bad json".into()),
         ));
+        first.record_reward(AgentRewardSignal::new(
+            0,
+            RewardSource::ActionOutcome,
+            RewardReason::ActionExecuted,
+            0.05,
+            false,
+            None,
+        ));
+        first.record_reward(AgentRewardSignal::new(
+            0,
+            RewardSource::WorldEvent,
+            RewardReason::DamageDealt,
+            1.0,
+            false,
+            None,
+        ));
 
         let mut second = AgentTelemetryFrame::new(
             1,
@@ -630,6 +686,22 @@ mod tests {
             },
             Some("too healthy".into()),
         );
+        second.record_reward(AgentRewardSignal::new(
+            1,
+            RewardSource::ActionOutcome,
+            RewardReason::ActionRejected,
+            -0.1,
+            false,
+            None,
+        ));
+        second.record_reward(AgentRewardSignal::new(
+            1,
+            RewardSource::WorldEvent,
+            RewardReason::DeathTaken,
+            -5.0,
+            true,
+            None,
+        ));
 
         let file = ReplayFile {
             header: ReplayHeader {
@@ -658,6 +730,8 @@ mod tests {
         assert!((samples[0].path_distance - 5.0).abs() < f32::EPSILON);
         assert_eq!(samples[0].action_outcomes.executed, 1);
         assert_eq!(samples[0].tool_call_error_count, 1);
+        assert!((samples[0].reward_summary.total - 1.05).abs() < f32::EPSILON);
+        assert!(!samples[0].reward_summary.terminal);
         assert!(matches!(
             samples[0].encounter_transition,
             Some(EncounterTransition::Joined {
@@ -672,6 +746,8 @@ mod tests {
                 in_combat: false
             })
         ));
+        assert!((samples[1].reward_summary.total + 5.1).abs() < f32::EPSILON);
+        assert!(samples[1].reward_summary.terminal);
     }
 
     #[test]
@@ -703,7 +779,37 @@ mod tests {
                 )],
                 latency_ms: 25,
             }]],
-            telemetry_windows: vec![TickTelemetryFrame::empty(0)],
+            telemetry_windows: vec![TickTelemetryFrame {
+                tick: 0,
+                agents: vec![{
+                    let mut frame = AgentTelemetryFrame::new(
+                        0,
+                        agent_id,
+                        None,
+                        AgentRuntimeProfile {
+                            role: AgentRole::Player,
+                            agent_type: crate::agent::AgentType::NeuralAgent,
+                            capabilities: AgentCapabilities::player_default(),
+                        },
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        None,
+                        None,
+                    );
+                    frame.record_reward(AgentRewardSignal::new(
+                        0,
+                        RewardSource::WorldEvent,
+                        RewardReason::DamageDealt,
+                        1.5,
+                        false,
+                        None,
+                    ));
+                    frame
+                }],
+            }],
         };
 
         let replay_document = file.to_toon_document();
@@ -717,5 +823,6 @@ mod tests {
         let training_value =
             decode_toon_value(&training_document).expect("training document should decode");
         assert_eq!(training_value["document_type"], "replay_training_samples");
+        assert_eq!(training_value["payload"][0]["reward_summary"]["total"], 1.5);
     }
 }

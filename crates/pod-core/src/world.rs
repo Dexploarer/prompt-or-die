@@ -293,11 +293,15 @@ impl WorldStreamingMetadata {
     }
 
     fn chunk_definition(&self, chunk_key: &str) -> Option<&WorldChunkDefinition> {
-        self.chunks.iter().find(|chunk| chunk.chunk_key == chunk_key)
+        self.chunks
+            .iter()
+            .find(|chunk| chunk.chunk_key == chunk_key)
     }
 
     fn region_definition(&self, region_id: &str) -> Option<&WorldRegionDefinition> {
-        self.regions.iter().find(|region| region.region_id == region_id)
+        self.regions
+            .iter()
+            .find(|region| region.region_id == region_id)
     }
 
     fn encounter_table(&self, table_id: &str) -> Option<&RegionEncounterTable> {
@@ -454,8 +458,9 @@ impl World {
             if chunk_state.encounter_table_ids.is_empty() {
                 if let Some(encounter_table_id) = streaming.encounter_table_id.clone() {
                     chunk_state.encounter_table_ids.push(encounter_table_id);
-                    chunk_state.ambient_population_cap =
-                        self.streaming.ambient_cap_for_tables(&chunk_state.encounter_table_ids);
+                    chunk_state.ambient_population_cap = self
+                        .streaming
+                        .ambient_cap_for_tables(&chunk_state.encounter_table_ids);
                 }
             }
             chunk_state.counts.increment(kind);
@@ -483,45 +488,44 @@ impl World {
         let mut chunks = chunk_states.into_values().collect::<Vec<_>>();
         chunks.sort_by(|left, right| left.chunk_key.cmp(&right.chunk_key));
 
-        let mut regions = self
-            .streaming
-            .regions
-            .iter()
-            .map(|region| {
-                let mut state = RegionPopulationState {
-                    region_id: region.region_id.clone(),
-                    region_name: region.display_name.clone(),
-                    primary_biome_id: region.primary_biome_id.clone(),
-                    chunk_keys: region.chunk_keys.clone(),
-                    active_quest_graph_ids: region.active_quest_graph_ids.clone(),
-                    dominant_faction_track_id: (!region.dominant_faction_track_id.is_empty())
-                        .then(|| region.dominant_faction_track_id.clone()),
-                    encounter_table_ids: region.encounter_table_ids.clone(),
-                    ambient_population_cap: self
-                        .streaming
-                        .ambient_cap_for_tables(&region.encounter_table_ids),
-                    ..Default::default()
-                };
-                for chunk in chunks
-                    .iter()
-                    .filter(|chunk| chunk.region_id.as_deref() == Some(region.region_id.as_str()))
-                {
-                    if chunk.active_entity_count > 0 {
-                        state.active_chunk_count += 1;
-                    }
-                    state.counts.merge(chunk.counts);
-                    state.pending_respawns += chunk.pending_respawns;
-                    state.next_respawn_tick = match (state.next_respawn_tick, chunk.next_respawn_tick)
-                    {
-                        (Some(current), Some(next)) => Some(current.min(next)),
-                        (None, Some(next)) => Some(next),
-                        (current, None) => current,
+        let mut regions =
+            self.streaming
+                .regions
+                .iter()
+                .map(|region| {
+                    let mut state = RegionPopulationState {
+                        region_id: region.region_id.clone(),
+                        region_name: region.display_name.clone(),
+                        primary_biome_id: region.primary_biome_id.clone(),
+                        chunk_keys: region.chunk_keys.clone(),
+                        active_quest_graph_ids: region.active_quest_graph_ids.clone(),
+                        dominant_faction_track_id: (!region.dominant_faction_track_id.is_empty())
+                            .then(|| region.dominant_faction_track_id.clone()),
+                        encounter_table_ids: region.encounter_table_ids.clone(),
+                        ambient_population_cap: self
+                            .streaming
+                            .ambient_cap_for_tables(&region.encounter_table_ids),
+                        ..Default::default()
                     };
-                }
-                state.refresh_metrics();
-                state
-            })
-            .collect::<Vec<_>>();
+                    for chunk in chunks.iter().filter(|chunk| {
+                        chunk.region_id.as_deref() == Some(region.region_id.as_str())
+                    }) {
+                        if chunk.active_entity_count > 0 {
+                            state.active_chunk_count += 1;
+                        }
+                        state.counts.merge(chunk.counts);
+                        state.pending_respawns += chunk.pending_respawns;
+                        state.next_respawn_tick =
+                            match (state.next_respawn_tick, chunk.next_respawn_tick) {
+                                (Some(current), Some(next)) => Some(current.min(next)),
+                                (None, Some(next)) => Some(next),
+                                (current, None) => current,
+                            };
+                    }
+                    state.refresh_metrics();
+                    state
+                })
+                .collect::<Vec<_>>();
         regions.sort_by(|left, right| left.region_id.cmp(&right.region_id));
 
         WorldPopulationState {
@@ -1131,7 +1135,11 @@ fn streaming_resource_node(archetype_id: &str) -> ResourceNode {
 
 fn streaming_loot_container(archetype_id: &str) -> LootContainer {
     LootContainer {
-        coins: if archetype_id.contains("expedition") { 64 } else { 18 },
+        coins: if archetype_id.contains("expedition") {
+            64
+        } else {
+            18
+        },
         items: vec![ItemStack {
             item_id: format!("{archetype_id}-salvage"),
             display_name: format!("{} Salvage", archetype_display_name(archetype_id)),
@@ -1194,12 +1202,7 @@ mod tests {
                     "wildlife",
                     vec![],
                 ),
-                RegionEncounterTable::new(
-                    "spirewatch-encounters",
-                    "spirewatch",
-                    "spire",
-                    vec![],
-                ),
+                RegionEncounterTable::new("spirewatch-encounters", "spirewatch", "spire", vec![]),
             ],
         );
 
@@ -1256,8 +1259,7 @@ mod tests {
             .encounter_table_ids
             .push("verdant-heart-wildlife".into());
 
-        let mut spire_region =
-            WorldRegionDefinition::new("spirewatch", "Spirewatch", "spirewatch");
+        let mut spire_region = WorldRegionDefinition::new("spirewatch", "Spirewatch", "spirewatch");
         spire_region.chunk_keys.push("0:1".into());
         spire_region.dominant_faction_track_id = "ancient-spirekeepers".into();
         spire_region
@@ -1290,7 +1292,10 @@ mod tests {
             ],
         );
 
-        let _tree = world.spawn_at(1.0, 1.0).with_label("Tree", Team::None).build();
+        let _tree = world
+            .spawn_at(1.0, 1.0)
+            .with_label("Tree", Team::None)
+            .build();
         let _ore = world
             .spawn_at(2.0, 1.0)
             .with_label("Ore Vein", Team::None)
@@ -1479,7 +1484,9 @@ mod tests {
         let mut world = World::new(7);
 
         let mut chunk = WorldChunkDefinition::new("0:0", "verdant-heart", "verdant-hollow");
-        chunk.encounter_table_ids.push("verdant-heart-wildlife".into());
+        chunk
+            .encounter_table_ids
+            .push("verdant-heart-wildlife".into());
         let mut region =
             WorldRegionDefinition::new("verdant-heart", "Verdant Heart", "verdant-hollow");
         region.chunk_keys.push("0:0".into());

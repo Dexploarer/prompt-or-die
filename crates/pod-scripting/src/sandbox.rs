@@ -14,8 +14,8 @@ pub struct SandboxConfig {
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            memory_limit: 1024 * 1024,           // 1MB
-            instruction_limit: 10000,             // 10k instructions
+            memory_limit: 1024 * 1024, // 1MB
+            instruction_limit: 10000,  // 10k instructions
         }
     }
 }
@@ -60,10 +60,7 @@ mod tests {
         apply_sandbox(&lua).unwrap();
 
         // Verify os is removed
-        assert!(lua
-            .load("return os")
-            .eval::<Option<mlua::Table>>()
-            .is_ok());
+        assert!(lua.load("return os").eval::<Option<mlua::Table>>().is_ok());
         let result: mlua::Value = lua.load("return os").eval().unwrap();
         assert!(result.is_nil());
     }

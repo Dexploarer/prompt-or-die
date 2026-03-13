@@ -15,6 +15,7 @@ import {
   PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
+  SphereGeometry,
   Texture,
   TextureLoader
 } from "three";
@@ -71,10 +72,9 @@ export function shouldUseProceduralSpriteTexture(assetPath: string): boolean {
   return (
     normalized.includes("combat-banner") ||
     normalized.includes("health-bar") ||
-    (assetPath.trim().toLowerCase().endsWith(".svg") &&
-      (normalized.includes("selection-ring") ||
-        normalized.includes("danger-ring") ||
-        normalized.includes("mist-ring")))
+    normalized.includes("selection-ring") ||
+    normalized.includes("danger-ring") ||
+    normalized.includes("mist-ring")
   );
 }
 
@@ -161,6 +161,8 @@ export interface ManifestBackedPodThreeAssetRegistryOptions {
   geometryLoader: PodThreeGeometryLoader;
   textureLoader: PodThreeTextureLoader;
   compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
+  preferCompressedMeshVariants?: boolean;
+  preferNonBlockingFallbacks?: boolean;
 }
 
 export interface RuntimePodThreeAssetRegistryOptions {
@@ -172,6 +174,9 @@ export interface RuntimePodThreeAssetRegistryOptions {
   geometryLoader?: PodThreeGeometryLoader;
   textureLoader?: PodThreeTextureLoader;
   compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
+  preferCompressedMeshVariants?: boolean;
+  preferNonBlockingFallbacks?: boolean;
+  lazyManifestLoad?: boolean;
 }
 
 export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
@@ -188,7 +193,15 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
     const meshName = batch.mesh.toLowerCase();
     let geometry: BufferGeometry;
 
-    if (meshName.includes("spire") || meshName.includes("obelisk") || meshName.includes("spike")) {
+    if (meshName.includes("adventurer") || meshName.includes("avatar") || meshName.includes("hero")) {
+      geometry = createHumanoidFallbackGeometry(lodLevel);
+    } else if (meshName.includes("beast")) {
+      geometry = createBeastFallbackGeometry(lodLevel);
+    } else if (meshName.includes("companion") || meshName.includes("spirit")) {
+      geometry = createCompanionFallbackGeometry(lodLevel);
+    } else if (meshName.includes("crate") || meshName.includes("cache")) {
+      geometry = createCrateFallbackGeometry(lodLevel);
+    } else if (meshName.includes("spire") || meshName.includes("obelisk") || meshName.includes("spike")) {
       geometry = new ConeGeometry(1.2, 4.8, lodSegments([20, 12, 6], lodLevel));
     } else if (meshName.includes("rock") || meshName.includes("boulder")) {
       geometry =
@@ -209,9 +222,9 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
         lodSegments([20, 12, 8], lodLevel)
       );
     } else if (meshName.includes("tree") || meshName.includes("pine")) {
-      geometry = new ConeGeometry(1.4, 3.4, lodSegments([18, 10, 6], lodLevel));
+      geometry = createTreeFallbackGeometry(lodLevel);
     } else {
-      geometry = new BoxGeometry(2, 2, 2);
+      geometry = new BoxGeometry(1.35, 1.35, 1.35);
     }
 
     this.geometryCache.set(cacheKey, geometry);
@@ -238,16 +251,77 @@ export class DefaultPodThreeAssetRegistry implements PodThreeAssetRegistry {
   }
 }
 
+function createHumanoidFallbackGeometry(lodLevel: 0 | 1 | 2): BufferGeometry {
+  const radialSegments = lodSegments([12, 8, 6], lodLevel);
+  const body = new CylinderGeometry(0.3, 0.38, 1.08, radialSegments);
+  body.translate(0, 0.04, 0);
+  const head = new SphereGeometry(0.28, radialSegments, Math.max(radialSegments - 2, 4));
+  head.translate(0, 0.86, 0);
+  const feet = new BoxGeometry(0.62, 0.18, 0.34);
+  feet.translate(0, -0.58, 0);
+  return mergeGeometries([body, head, feet], false) ?? body;
+}
+
+function createBeastFallbackGeometry(lodLevel: 0 | 1 | 2): BufferGeometry {
+  const radialSegments = lodSegments([12, 8, 6], lodLevel);
+  const body = new BoxGeometry(1.24, 0.72, 2);
+  body.translate(0, 0.18, 0);
+  const head = new SphereGeometry(0.34, radialSegments, Math.max(radialSegments - 2, 4));
+  head.translate(0, 0.42, 1.08);
+  const tail = new ConeGeometry(0.18, 0.72, Math.max(radialSegments - 2, 4));
+  tail.rotateX(Math.PI / 2);
+  tail.translate(0, 0.28, -1.18);
+  return mergeGeometries([body, head, tail], false) ?? body;
+}
+
+function createCompanionFallbackGeometry(lodLevel: 0 | 1 | 2): BufferGeometry {
+  return new SphereGeometry(
+    0.52,
+    lodSegments([10, 8, 6], lodLevel),
+    lodSegments([8, 6, 4], lodLevel)
+  );
+}
+
+function createCrateFallbackGeometry(lodLevel: 0 | 1 | 2): BufferGeometry {
+  const base = new BoxGeometry(1.08, 0.82, 1.08);
+  const lid = new BoxGeometry(1.18, 0.16, 1.18);
+  lid.translate(0, 0.5, 0);
+  const braceThickness = lodLevel === 2 ? 0.08 : 0.1;
+  const braceA = new BoxGeometry(1.2, braceThickness, braceThickness);
+  braceA.rotateZ(Math.PI / 4);
+  braceA.translate(0, 0.02, 0.56);
+  const braceB = new BoxGeometry(1.2, braceThickness, braceThickness);
+  braceB.rotateZ(-Math.PI / 4);
+  braceB.translate(0, 0.02, -0.56);
+  return mergeGeometries([base, lid, braceA, braceB], false) ?? base;
+}
+
+function createTreeFallbackGeometry(lodLevel: 0 | 1 | 2): BufferGeometry {
+  const radialSegments = lodSegments([12, 8, 6], lodLevel);
+  const trunk = new CylinderGeometry(0.16, 0.22, 1.5, Math.max(radialSegments - 2, 4));
+  trunk.translate(0, -0.22, 0);
+  const lowerCanopy = new ConeGeometry(0.92, 1.42, radialSegments);
+  lowerCanopy.translate(0, 0.68, 0);
+  const upperCanopy = new ConeGeometry(0.66, 1.04, radialSegments);
+  upperCanopy.translate(0, 1.34, 0);
+  return mergeGeometries([trunk, lowerCanopy, upperCanopy], false) ?? trunk;
+}
+
 export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistry {
   private readonly fallbackRegistry: PodThreeAssetRegistry;
   private readonly geometryCache = new Map<string, Promise<BufferGeometry>>();
   private readonly textureCache = new Map<string, Promise<ResolvedSpriteTexture>>();
+  private readonly loadedGeometryCache = new Map<string, BufferGeometry>();
+  private readonly loadedTextureCache = new Map<string, ResolvedSpriteTexture>();
+  private readonly nonBlockingFallbackGeometryCache = new Map<string, BufferGeometry>();
+  private readonly nonBlockingFallbackTextureCache = new Map<string, ResolvedSpriteTexture>();
   private readonly meshDescriptorCache = new Map<string, PodThreeMeshAssetDescriptor | null>();
   private readonly spriteDescriptorCache = new Map<string, PodThreeSpriteAssetDescriptor | null>();
   private readonly residentGeometryAssets = new Set<string>();
   private readonly residentSpriteAssets = new Set<string>();
   private readonly warnedGeometryFallbacks = new Set<string>();
   private readonly warnedSpriteFallbacks = new Set<string>();
+  private readonly immediateFallbackRegistry = new DefaultPodThreeAssetRegistry();
   private geometryLoadsCompleted = 0;
   private spriteLoadsCompleted = 0;
   private totalGeometryLoadMs = 0;
@@ -268,10 +342,21 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
       return this.fallbackRegistry.resolveGeometry(batch, lodLevel);
     }
 
-    const assetPath = resolveMeshRuntimePath(descriptor, lodLevel);
+    const assetPath = resolveMeshRuntimePath(
+      descriptor,
+      lodLevel,
+      this.options.preferCompressedMeshVariants ?? true
+    );
     const cacheKey = `${assetPath}|lod:${lodLevel}`;
+    const loaded = this.loadedGeometryCache.get(cacheKey);
+    if (loaded) {
+      return loaded;
+    }
     const cached = this.geometryCache.get(cacheKey);
     if (cached) {
+      if ((this.options.preferNonBlockingFallbacks ?? false) && !this.residentGeometryAssets.has(cacheKey)) {
+        return this.resolveImmediateFallbackGeometry(cacheKey, batch, lodLevel);
+      }
       return cached;
     }
 
@@ -282,12 +367,18 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
         console.warn(`Falling back to procedural mesh asset for ${batch.mesh}`, error);
       }
       return await Promise.resolve(this.fallbackRegistry.resolveGeometry(batch, lodLevel));
+    }).then((geometry) => {
+      this.loadedGeometryCache.set(cacheKey, geometry);
+      return geometry;
     });
     void pending.then(() => {
       this.residentGeometryAssets.add(cacheKey);
       this.recordGeometryLoad(monotonicNowMs() - loadStartedAt);
     });
     this.geometryCache.set(cacheKey, pending);
+    if (this.options.preferNonBlockingFallbacks ?? false) {
+      return this.resolveImmediateFallbackGeometry(cacheKey, batch, lodLevel);
+    }
     return pending;
   }
 
@@ -305,8 +396,16 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
       Boolean(this.options.compressedTextureLoader)
     );
     const cacheKey = `${assetPath}|anisotropy:${anisotropy}`;
+    const loaded = this.loadedTextureCache.get(cacheKey);
+    if (loaded) {
+      loaded.texture.anisotropy = anisotropy;
+      return loaded;
+    }
     const cached = this.textureCache.get(cacheKey);
     if (cached) {
+      if ((this.options.preferNonBlockingFallbacks ?? false) && !this.residentSpriteAssets.has(cacheKey)) {
+        return this.resolveImmediateFallbackSprite(cacheKey, batch, anisotropy);
+      }
       return cached;
     }
 
@@ -317,12 +416,19 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
         console.warn(`Falling back to procedural sprite asset for ${batch.texture}`, error);
       }
       return await Promise.resolve(this.fallbackRegistry.resolveSpriteTexture(batch, anisotropy));
+    }).then((resolved) => {
+      resolved.texture.anisotropy = anisotropy;
+      this.loadedTextureCache.set(cacheKey, resolved);
+      return resolved;
     });
     void pending.then(() => {
       this.residentSpriteAssets.add(cacheKey);
       this.recordSpriteLoad(monotonicNowMs() - loadStartedAt);
     });
     this.textureCache.set(cacheKey, pending);
+    if (this.options.preferNonBlockingFallbacks ?? false) {
+      return this.resolveImmediateFallbackSprite(cacheKey, batch, anisotropy);
+    }
     return pending;
   }
 
@@ -394,6 +500,39 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
     this.slowestSpriteLoadMs = Math.max(this.slowestSpriteLoadMs, normalized);
   }
 
+  private resolveImmediateFallbackGeometry(
+    cacheKey: string,
+    batch: ThreeJsMeshBatch,
+    lodLevel: 0 | 1 | 2
+  ): BufferGeometry {
+    const cached = this.nonBlockingFallbackGeometryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const geometry = this.immediateFallbackRegistry.resolveGeometry(batch, lodLevel);
+    this.nonBlockingFallbackGeometryCache.set(cacheKey, geometry as BufferGeometry);
+    return geometry as BufferGeometry;
+  }
+
+  private resolveImmediateFallbackSprite(
+    cacheKey: string,
+    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
+    anisotropy: number
+  ): ResolvedSpriteTexture {
+    const cached = this.nonBlockingFallbackTextureCache.get(cacheKey);
+    if (cached) {
+      cached.texture.anisotropy = anisotropy;
+      return cached;
+    }
+
+    const resolved = this.immediateFallbackRegistry.resolveSpriteTexture(batch, anisotropy);
+    const normalized = resolved as ResolvedSpriteTexture;
+    normalized.texture.anisotropy = anisotropy;
+    this.nonBlockingFallbackTextureCache.set(cacheKey, normalized);
+    return normalized;
+  }
+
   private async loadSpriteTexture(
     descriptor: PodThreeSpriteAssetDescriptor,
     assetPath: string,
@@ -440,7 +579,13 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
 
   private meshCachePath(requested: string, lodLevel: 0 | 1 | 2): string | null {
     const descriptor = this.resolveMeshDescriptor(requested);
-    return descriptor ? resolveMeshRuntimePath(descriptor, lodLevel) : null;
+    return descriptor
+      ? resolveMeshRuntimePath(
+          descriptor,
+          lodLevel,
+          this.options.preferCompressedMeshVariants ?? true
+        )
+      : null;
   }
 
   private spriteCachePath(requested: string, anisotropy: number): string | null {
@@ -454,10 +599,92 @@ export class ManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistr
   }
 }
 
+class LazyManifestBackedPodThreeAssetRegistry implements PodThreeAssetRegistry {
+  private currentRegistry: PodThreeAssetRegistry;
+
+  constructor(
+    fallbackRegistry: PodThreeAssetRegistry,
+    manifestRegistryPromise: Promise<PodThreeAssetRegistry>
+  ) {
+    this.currentRegistry = fallbackRegistry;
+    void manifestRegistryPromise.then(
+      (registry) => {
+        this.currentRegistry = registry;
+      },
+      (error) => {
+        console.warn("Continuing with fallback pod-web assets", error);
+      }
+    );
+  }
+
+  resolveGeometry(
+    batch: ThreeJsMeshBatch,
+    lodLevel: 0 | 1 | 2 = 0
+  ): BufferGeometry | Promise<BufferGeometry> {
+    return this.currentRegistry.resolveGeometry(batch, lodLevel);
+  }
+
+  resolveMeshMaterial?(
+    batch: ThreeJsMeshBatch,
+    lodLevel?: 0 | 1 | 2,
+    quality?: PodThreeQualityProfile
+  ): Material | Promise<Material> {
+    return this.currentRegistry.resolveMeshMaterial?.(batch, lodLevel, quality) ??
+      createMeshMaterial(batch, lodLevel ?? 0, quality ?? { environmentIntensity: 1 });
+  }
+
+  resolveSpriteTexture(
+    batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">,
+    anisotropy?: number
+  ): ResolvedSpriteTexture | Promise<ResolvedSpriteTexture> {
+    return this.currentRegistry.resolveSpriteTexture(batch, anisotropy);
+  }
+
+  async prefetchMeshes(
+    requests: Array<{ batch: ThreeJsMeshBatch; lodLevel: 0 | 1 | 2 }>
+  ): Promise<void> {
+    await this.currentRegistry.prefetchMeshes?.(requests);
+  }
+
+  async prefetchSprites(
+    requests: Array<{ batch: Pick<ThreeJsSpriteBatch, "texture" | "frame">; anisotropy: number }>
+  ): Promise<void> {
+    await this.currentRegistry.prefetchSprites?.(requests);
+  }
+
+  getResidencyStats(): PodThreeAssetResidencyStats {
+    return this.currentRegistry.getResidencyStats?.() ?? {
+      residentGeometryAssets: 0,
+      residentSpriteAssets: 0,
+      pendingGeometryAssets: 0,
+      pendingSpriteAssets: 0,
+      geometryLoadsCompleted: 0,
+      spriteLoadsCompleted: 0,
+      averageGeometryLoadMs: 0,
+      averageSpriteLoadMs: 0,
+      slowestGeometryLoadMs: 0,
+      slowestSpriteLoadMs: 0
+    };
+  }
+}
+
 export async function createManifestBackedAssetRegistry(
   options: RuntimePodThreeAssetRegistryOptions
 ): Promise<PodThreeAssetRegistry> {
   const fallbackRegistry = options.fallbackRegistry ?? new DefaultPodThreeAssetRegistry();
+  if (options.lazyManifestLoad) {
+    return new LazyManifestBackedPodThreeAssetRegistry(
+      fallbackRegistry,
+      loadManifestBackedAssetRegistry(options, fallbackRegistry)
+    );
+  }
+  return await loadManifestBackedAssetRegistry(options, fallbackRegistry);
+}
+
+async function loadManifestBackedAssetRegistry(
+  options: RuntimePodThreeAssetRegistryOptions,
+  fallbackRegistry: PodThreeAssetRegistry
+): Promise<PodThreeAssetRegistry> {
   const fetchImpl =
     options.fetchImpl ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
   if (!fetchImpl) {
@@ -470,10 +697,13 @@ export async function createManifestBackedAssetRegistry(
       throw new Error(`HTTP ${response.status}`);
     }
 
+    const preferCompressedRuntimeVariants =
+      options.preferCompressedMeshVariants ?? typeof document === "object";
     const manifest = parsePodThreeAssetManifest(await response.json());
     const runtimeLoaders = await createRuntimeAssetLoaders({
       renderer: options.renderer,
-      basisTranscoderPath: options.basisTranscoderPath ?? "/assets/basis/"
+      basisTranscoderPath: options.basisTranscoderPath ?? "/assets/basis/",
+      enableCompressedRuntimeVariants: preferCompressedRuntimeVariants
     });
 
     return new ManifestBackedPodThreeAssetRegistry({
@@ -482,7 +712,10 @@ export async function createManifestBackedAssetRegistry(
       geometryLoader: options.geometryLoader ?? runtimeLoaders.geometryLoader,
       textureLoader: options.textureLoader ?? runtimeLoaders.textureLoader,
       compressedTextureLoader:
-        options.compressedTextureLoader ?? runtimeLoaders.compressedTextureLoader
+        options.compressedTextureLoader ??
+        (preferCompressedRuntimeVariants ? runtimeLoaders.compressedTextureLoader : null),
+      preferCompressedMeshVariants: preferCompressedRuntimeVariants,
+      preferNonBlockingFallbacks: options.preferNonBlockingFallbacks ?? false
     });
   } catch (error) {
     console.warn("Falling back to procedural pod-web assets", error);
@@ -931,12 +1164,13 @@ function parseRuntimeVariantDescriptor(input: unknown): PodThreeRuntimeVariantDe
 
 export function resolveMeshRuntimePath(
   descriptor: PodThreeMeshAssetDescriptor,
-  lodLevel: 0 | 1 | 2
+  lodLevel: 0 | 1 | 2,
+  preferCompressedMeshVariants = true
 ): string {
   const selection = descriptor.runtime?.selection ?? (descriptor.lods ? "explicit-lod" : "base");
   const sourcePath =
     selection === "explicit-lod" ? descriptor.lods?.[lodLevel] ?? descriptor.path : descriptor.path;
-  if (descriptor.runtime?.preferredEncoding === "meshopt") {
+  if (preferCompressedMeshVariants && descriptor.runtime?.preferredEncoding === "meshopt") {
     const compressedPath =
       selection === "explicit-lod"
         ? lodLevel === 0
@@ -1071,25 +1305,36 @@ function scoreAssetDescriptor(
 async function createRuntimeAssetLoaders(options: {
   renderer: unknown;
   basisTranscoderPath: string;
+  enableCompressedRuntimeVariants: boolean;
 }): Promise<{
   geometryLoader: PodThreeGeometryLoader;
   textureLoader: PodThreeTextureLoader;
   compressedTextureLoader: PodThreeCompressedTextureLoader | null;
 }> {
-  const [{ GLTFLoader }, { KTX2Loader }, { MeshoptDecoder }] = await Promise.all([
+  const [{ GLTFLoader }, ktx2Module, meshoptModule] = await Promise.all([
     import("three/examples/jsm/loaders/GLTFLoader.js"),
-    import("three/examples/jsm/loaders/KTX2Loader.js"),
-    import("three/examples/jsm/libs/meshopt_decoder.module.js")
+    options.enableCompressedRuntimeVariants
+      ? import("three/examples/jsm/loaders/KTX2Loader.js")
+      : Promise.resolve(null),
+    options.enableCompressedRuntimeVariants
+      ? import("three/examples/jsm/libs/meshopt_decoder.module.js")
+      : Promise.resolve(null)
   ]);
 
   const textureLoader = new TextureLoader();
-  const ktx2Loader = new KTX2Loader();
-  ktx2Loader.setTranscoderPath(options.basisTranscoderPath);
-  ktx2Loader.detectSupport(options.renderer as never);
+  const ktx2Loader = ktx2Module ? new ktx2Module.KTX2Loader() : null;
+  if (ktx2Loader) {
+    ktx2Loader.setTranscoderPath(options.basisTranscoderPath);
+    ktx2Loader.detectSupport(options.renderer as never);
+  }
 
   const geometryLoader = new GLTFLoader();
-  geometryLoader.setMeshoptDecoder(MeshoptDecoder);
-  geometryLoader.setKTX2Loader(ktx2Loader);
+  if (meshoptModule) {
+    geometryLoader.setMeshoptDecoder(meshoptModule.MeshoptDecoder);
+  }
+  if (ktx2Loader) {
+    geometryLoader.setKTX2Loader(ktx2Loader);
+  }
 
   return {
     geometryLoader: {
@@ -1118,15 +1363,17 @@ async function createRuntimeAssetLoaders(options: {
         return texture;
       }
     },
-    compressedTextureLoader: {
-      async load(path: string, anisotropy: number): Promise<Texture> {
-        const texture = await ktx2Loader.loadAsync(path);
-        texture.colorSpace = SRGBColorSpace;
-        texture.anisotropy = anisotropy;
-        texture.name = `pod-runtime-ktx2:${path}`;
-        return texture;
-      }
-    }
+    compressedTextureLoader: ktx2Loader
+      ? {
+          async load(path: string, anisotropy: number): Promise<Texture> {
+            const texture = await ktx2Loader.loadAsync(path);
+            texture.colorSpace = SRGBColorSpace;
+            texture.anisotropy = anisotropy;
+            texture.name = `pod-runtime-ktx2:${path}`;
+            return texture;
+          }
+        }
+      : null
   };
 }
 

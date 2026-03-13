@@ -1,8 +1,8 @@
 //! Keyframe system for animation tracks and clips
 
+use crate::easing::EasingFunction;
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::easing::EasingFunction;
 
 /// A keyframe at a specific time with a value and easing function
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +35,13 @@ impl KeyframeValue {
         match self {
             KeyframeValue::Float(v) => *v,
             KeyframeValue::Int(v) => *v as f32,
-            KeyframeValue::Bool(v) => if *v { 1.0 } else { 0.0 },
+            KeyframeValue::Bool(v) => {
+                if *v {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
         }
     }
 
@@ -71,7 +77,8 @@ impl<T: Clone> AnimationTrack<T> {
 
     pub fn add_keyframe(&mut self, keyframe: Keyframe<T>) {
         self.keyframes.push(keyframe);
-        self.keyframes.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        self.keyframes
+            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
     }
 
     pub fn keyframes(&self) -> &[Keyframe<T>] {
@@ -79,10 +86,7 @@ impl<T: Clone> AnimationTrack<T> {
     }
 
     pub fn duration(&self) -> f32 {
-        self.keyframes
-            .last()
-            .map(|kf| kf.time)
-            .unwrap_or(0.0)
+        self.keyframes.last().map(|kf| kf.time).unwrap_or(0.0)
     }
 }
 
@@ -413,7 +417,10 @@ impl AnimationPlayer {
     }
 
     pub fn get_duration(&self) -> f32 {
-        self.current_clip.as_ref().map(|c| c.duration()).unwrap_or(0.0)
+        self.current_clip
+            .as_ref()
+            .map(|c| c.duration())
+            .unwrap_or(0.0)
     }
 }
 

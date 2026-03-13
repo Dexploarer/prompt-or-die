@@ -1602,5 +1602,293 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net handle_connections -- --nocapture`
   - `cd apps/pod-web && bun test src/direct-connect.test.ts src/contracts.test.ts src/hud.test.ts`
 
-**Last updated**: Iteration 151
-**Current focus**: Iteration 152 start Phase 8 by wiring asset and benchmark validation into routine local/CI command surfaces
+### Iteration 152
+- [x] Added `apps/pod-web/scripts/verify-generated-assets.ts` plus `bun run verify:assets`, which reruns `sync:assets` and fails if the committed generated source/staged/runtime asset trees drift.
+- [x] Extended the shared browser gate surface in `apps/pod-web/src/render-runtime-gates.ts`, `apps/pod-web/tests/worker-input.e2e.ts`, and `apps/pod-web/scripts/measure-render-routes.ts` with minimum completed-asset-load counts plus average/slowest geometry and sprite load ceilings.
+- [x] Added `bun run measure:render-routes:check`, so the route sampler now records `artifacts/render-route-measurements.json` and fails when browser frame-quality, worker-chatter, or asset-load thresholds regress.
+- [x] Wired both gates into `.github/workflows/ci.yml` and `scripts/run_moat_benchmarks.ts`, and the `pod-web` CI job now uploads `apps/pod-web/artifacts/render-route-measurements.json` plus `apps/pod-web/artifacts/staged-assets/pod-runtime-budget-report.json`.
+- [x] Revalidated touched targets:
+  - `cd apps/pod-web && bun test scripts/measure-render-routes.test.ts scripts/verify-generated-assets.test.ts`
+  - `cd apps/pod-web && bun run verify:assets`
+  - `cd apps/pod-web && bun run typecheck`
+  - `cd apps/pod-web && bun run build`
+  - `cd apps/pod-web && bun run measure:render-routes:check`
+  - `cd apps/pod-web && bun run test:smoke`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+### Iteration 153
+- [x] Added `crates/pod-net/examples/transport_benchmark_suite.rs`, a deterministic in-process transport benchmark that exercises steady delta delivery, recovery success, recovery failure, reconnect-token resume, and queue-pressure/timeout paths.
+- [x] Added structured `TransportBenchmarkReport` surfaces in `crates/pod-net/src/server.rs`, including per-scenario `ShardTransportSummary` payloads plus explicit pass/fail checks, and covered them with deterministic Rust tests.
+- [x] Threaded the new report into `scripts/run_moat_benchmarks.ts` as `transportMeasurements`, bumped the combined moat artifact schema to `2`, and used `--fail-on-checks` so the moat runner now fails if the direct-connect transport benchmark regresses.
+- [x] Documented the new transport benchmark command and the combined moat artifact shape in `docs/benchmark-suite.md` and `README.md`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net transport_benchmark_suite -- --nocapture`
+  - `cargo check -p pod-net --example transport_benchmark_suite`
+  - `cargo run -p pod-net --example transport_benchmark_suite -- --profile ci-smoke --fail-on-checks`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+### Iteration 154
+- [x] Added published shard-target transport baselines directly to `crates/pod-net/src/server.rs`, so the deterministic transport benchmark now checks exact byte and queue-depth envelopes instead of only generic scenario invariants.
+- [x] Extended the transport report aggregate with baseline metadata/checks, bumped the transport report schema to `2`, and documented the shard-target envelope values in `docs/benchmark-suite.md` and `README.md`.
+- [x] Covered the new baseline checks in the deterministic Rust benchmark tests and revalidated the shard-target transport/moat commands.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net transport_benchmark_suite -- --nocapture`
+  - `cargo check -p pod-net --example transport_benchmark_suite`
+  - `cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
+  - `git diff --check`
+
+### Iteration 155
+- [x] Pivoted the active roadmap away from browser/asset infrastructure and back onto the agent stack, based on the live `pod-core` and `pod-agents` source of truth rather than the previous Phase 8 benchmark queue.
+- [x] Added `docs/agent-runtime-audit.md`, documenting how the shared `Agent` runtime, authoritative tick loop, LLM controller, hybrid controller, neural controller, replay surfaces, and ONNX path actually work today.
+- [x] Updated `docs/agent-integration-contract.md` so the public contract matches the real runtime surface (`runtime_profile`, `drain_tool_calls`, telemetry expectations, and the current neural-policy shape).
+- [x] Repointed `IMPLEMENTATION_PHASES.md` and `SESSION.md` to the new active track: neural runtime hardening, reward/replay dataset contracts, evaluation harnesses, and remote agent topology on SpacetimeDB.
+- [x] Revalidated touched targets:
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 156
+- [x] Added explicit neural runtime schema/version metadata in `crates/pod-agents/src/neural_agent.rs`, including `NEURAL_INTERFACE_VERSION`, `NEURAL_FEATURE_COUNT`, `NEURAL_ACTION_COUNT`, `NeuralRuntimeSchema`, `NeuralModelMetadata`, and compatibility validation errors.
+- [x] Replaced scattered neural magic numbers with shared schema constants in the encoder and action-selection path, and re-exported the new schema surface from `crates/pod-agents/src/lib.rs`.
+- [x] Extended `crates/pod-agents/src/onnx_network.rs` so the ONNX path validates caller-supplied model metadata against the shared neural runtime schema instead of relying only on implicit `32 -> 10` assumptions.
+- [x] Added deterministic neural/ONNX tests for schema consistency and metadata mismatch handling, then revalidated the `pod-agents` library test surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 157
+- [x] Replaced the neural action table with an explicit named action schema registry in `crates/pod-agents/src/neural_agent.rs`, so policy outputs are no longer only implied by raw positional constants.
+- [x] Extended the `PolicyNetwork` trait with runtime-status reporting and taught `NeuralAgent::introspect()` to surface policy identity, schema version, compatibility mode, fallback state, last chosen action, and experience-buffer depth.
+- [x] Extended the ONNX policy implementation with runtime-status tracking for last inference fallback and model identity, while preserving the existing uniform-output safety fallback on inference failure.
+- [x] Added deterministic tests for named action-schema contents and neural introspection output, then revalidated the `pod-agents` library test surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-agents --lib`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 158
+- [x] Added first-pass multi-world runtime contracts to `crates/pod-core/src/contract.rs` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`, so developer-controlled squads, Deadman-style worlds, and alternate-reality links have native engine vocabulary.
+- [x] Exported the new topology surface from `crates/pod-core/src/lib.rs` and covered the TOON/document contract with deterministic unit tests.
+- [x] Added `docs/multi-world-agent-topology.md` and updated `docs/architecture.md`, `docs/agent-integration-contract.md`, `IMPLEMENTATION_PHASES.md`, and `SESSION.md` so the repo now explicitly treats headless multi-world team orchestration as a first-class future runtime surface.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents`
+  - `git diff --check`
+
+### Iteration 159
+- [x] Added authoritative reward telemetry to `crates/pod-core/src/telemetry.rs` via `AgentRewardSignal`, `RewardSource`, and `RewardReason`, and threaded reward traces into `AgentTelemetryFrame`.
+- [x] Added canonical reward attribution in `crates/pod-core/src/tick.rs`, mapping action outcomes plus authoritative world events like damage, kills, capture, gathering, loot, summons, and skill XP into per-agent reward signals.
+- [x] Extended `crates/pod-core/src/replay.rs` so replay-derived `ReplayTrainingSample` rows now include `RewardAttributionSummary` with total reward, polarity totals, signal counts, and terminal-state flags.
+- [x] Updated the agent/runtime docs and live planning state to reflect that reward attribution is now authoritative and replay-derived training rows carry reward summaries.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core replay_training_samples_capture_path_action_and_encounter_transitions -- --nocapture`
+  - `cargo test -p pod-core reward_signal_exports_to_toon_document -- --nocapture`
+  - `cargo test -p pod-core combat_events_generate_authoritative_reward_signals -- --nocapture`
+  - `cargo check -p pod-core -p pod-agents -p pod-net`
+  - `git diff --check`
+
+### Iteration 160
+- [x] Added `apps/pod-headless` as a new workspace app and first non-UI entrypoint for deterministic multi-world agent/team evaluation.
+- [x] Implemented the built-in `deadman-neural-cup` scenario on top of `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`, with deterministic per-world seed derivation and per-world `run_flagship_mmo_acceptance(...)` execution.
+- [x] Added authoritative report assembly for world runtime metrics, replay-derived reward totals/reason counts, cross-world trigger matching, projected effect envelopes, and team standings.
+- [x] Added deterministic unit coverage for seed derivation, topology wiring, propagation math, trigger tagging, effect projection, and standing accumulation.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
+  - `git diff --check`
+
+### Iteration 161
+- [x] Extended `apps/pod-headless` with `--dataset-output`, so the new app can emit a reward-aware dataset artifact in addition to the scenario summary report.
+- [x] Added replay-derived dataset rows that carry world metadata, runtime profile metadata, `ReplayTrainingSample`, and authoritative reward-reason breakdowns for each agent/tick row.
+- [x] Added dataset summary aggregation to the main `pod-headless` report so reward totals and reason counts are visible even when only the scenario report is consumed.
+- [x] Added deterministic coverage for reward-reason aggregation and dataset summary totals, then revalidated the live app path with both `--output` and `--dataset-output`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+### Iteration 162
+- [x] Added deterministic roster admission in `apps/pod-headless`, binding authoritative runtime agents to admitted teams per world based on `active_team_ids`, `allowed_world_ids`, and `max_agents`.
+- [x] Threaded that admission metadata into reward-aware dataset rows so each exported training row now carries `team_id` and `team_slot` in addition to world metadata and runtime profile.
+- [x] Reworked team standings to use admission-aware assigned-agent counts, dataset-row counts, and world reward totals, then layered applied cross-world score/death-mark state on top.
+- [x] Added `applied_world_states` to the main scenario report, aggregating projected cross-world effects into target-world team/resource/faction/objective state summaries.
+- [x] Added deterministic unit coverage for roster admission, applied target-world state aggregation, and the new standings shape.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+### Iteration 163
+- [x] Added canonical `QuestStateGraph` definitions to the `deadman-neural-cup` scenario in `apps/pod-headless`, plus per-world quest bindings so the headless runner has authored quest-line state instead of treating `ObjectiveStateShift` as an anonymous counter.
+- [x] Extended `apps/pod-headless` reports with `quest_graphs`, `applied_world_states[].quest_lines`, and `unresolved_objective_state_shifts`, so alternate-reality objective links now resolve into explicit start/current/completed/pending quest progression per world.
+- [x] Tightened cross-world application semantics in `apps/pod-headless` so zero-application projections no longer mutate applied team/resource/quest state, and covered the new quest progression path with deterministic unit tests.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+### Iteration 164
+- [x] Added `evaluation` to the `apps/pod-headless` scenario report, summarizing controller mix across the full run and per world using the same replay-derived dataset rows already exported by `--dataset-output`.
+- [x] Added per-world evaluation metrics for quest-line progress and applied cross-world effects, so linked-world runs now expose objective progression, score pressure, death-mark pressure, and world-level controller mix without requiring downstream ad hoc analysis.
+- [x] Added deterministic unit coverage for the evaluation aggregator and revalidated the live headless scenario artifact with the widened report schema.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+### Iteration 165
+- [x] Added shared remote-topology summary contracts to `crates/pod-core/src/contract.rs`, including `WorldQuestBinding`, `AppliedWorldStateSummary`, `ScenarioEvaluationSummary`, and the top-level `RemoteTopologyBundle`.
+- [x] Exported that shared topology bundle surface from `crates/pod-core/src/lib.rs` and covered the TOON/document contract with deterministic unit tests.
+- [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner now emits a reusable remote-topology artifact alongside the scenario report and reward-aware dataset export.
+- [x] Replaced the app-local quest/evaluation report structs in `apps/pod-headless` with the shared `pod-core` summary contracts and added deterministic unit coverage for the new CLI path plus bundle assembly.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-core -p pod-headless`
+  - `git diff --check`
+
+### Iteration 166
+- [x] Added shared remote-topology caching and resolution helpers to `crates/pod-stdb/src/client.rs`, so the client cache can resolve active world identity, admitted team keys, world quest bindings, applied world state, and world evaluation summaries from a `RemoteTopologyBundle`.
+- [x] Added `StdbEvent::RemoteTopologyUpdated` and used it in `crates/pod-net/src/client_stdb.rs` to rebuild a full snapshot when remote topology changes after welcome/subscription handoff.
+- [x] Extended `crates/pod-net/src/snapshot.rs` and `crates/pod-net/src/client_stdb.rs` so entity snapshots now carry remote world/team metadata (`team_key`, `world_id`, `world_role`, `world_active_quest_graph_ids`) instead of leaving those relationships trapped in app-local report JSON.
+- [x] Added deterministic unit/integration coverage in `crates/pod-stdb` and `crates/pod-net` for topology resolution, widened `StdbEvent` surface construction, and topology-triggered snapshot refresh behavior.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 167
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with public remote-topology accessors (`remote_topology`, `remote_world_id`, `remote_applied_world_state`, `remote_world_evaluation`) so remote consumers can inspect linked-world quest/evaluation state without reaching into the raw `StdbClient`.
+- [x] Added multi-world linked-world / neural-swarm coverage in `apps/pod-headless/src/main.rs`, proving `RemoteTopologyBundle` preserves quest-line progress, cross-world application counts, and world-level neural evaluation for shadow-world tournament flows.
+- [x] Added remote-client coverage in both `crates/pod-net/src/client_stdb.rs` and `crates/pod-net/tests/networking_integration.rs`, proving the public SpacetimeDB client resolves linked-world quest/evaluation state and still projects the correct team/world quest metadata into snapshots.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+### Iteration 168
+- [x] Added a TOON-document ingest path to `crates/pod-stdb/src/client.rs`, so `RemoteTopologyBundle` can be decoded and applied from an authority-style `remote_topology_bundle` document instead of only as an injected Rust struct.
+- [x] Added `StdbEvent::RemoteTopologyDocumentReceived` plus a typed `StdbError::DocumentError`, so remote-topology source documents are preserved for inspection and document decode failures stop collapsing into generic state errors.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with `apply_remote_topology_document(...)`, forwarded the source document through `ServerMessage::DebugDocument`, and added deterministic unit/integration coverage proving the decoded topology still resolves world/evaluation state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 169
+- [x] Added a generic `receive_debug_document(...)` ingress to `crates/pod-stdb/src/client.rs`, so `remote_topology_bundle`, `versioned_tick_telemetry`, `agent_tool_call_event`, `agent_tick_rollup`, and `focused_entity_debug_summary` TOON documents now share one authority-document dispatch path.
+- [x] Added deterministic `pod-stdb` coverage for the new generic path, including remote-topology decode, tool-call dispatch plus focused-summary synthesis, and rejection of unsupported debug document kinds.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with `apply_debug_document(...)`, moved the remote-topology document unit/integration coverage onto that generic path, and kept `apply_remote_topology_document(...)` as a compatibility alias instead of the primary remote ingress seam.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+### Iteration 170
+- [x] Added a public `remote_topology_document` event row in `crates/pod-stdb/src/events.rs` plus a `publish_remote_topology_document` reducer in `crates/pod-stdb/src/reducers.rs`, so authority tooling has a real SpacetimeDB table/reducer surface for `remote_topology_bundle` publication instead of depending on client-local injection.
+- [x] Added reducer-side topology publish summarization coverage in `crates/pod-stdb/src/reducers.rs`, validating the canonical TOON document type and extracted publish metadata (`generated_at_unix_ms`, scenario/profile id, world/team counts).
+- [x] Extended `crates/pod-stdb/src/client.rs` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and updated subscription query sets so spectator/player/editor surfaces all subscribe to `remote_topology_document`.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` and `crates/pod-net/tests/networking_integration.rs` to use the row-based remote-topology feed path, proving the public SpacetimeDB client now resolves world/evaluation state from an authority-published row instead of only from direct document injection.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
+  - `git diff --check`
+
+### Iteration 171
+- [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` in `crates/pod-stdb/src/client.rs`, giving generated mode a minimal runtime seam for connect/disconnect, subscription application, and authority-fed `remote_topology_document` row delivery.
+- [x] Extended `crates/pod-stdb/src/client.rs` so `StdbConnectionMode::Generated` now uses the injected runtime adapter instead of hard-failing immediately, while preserving the explicit error path when no runtime is wired.
+- [x] Added deterministic generated-mode coverage in `crates/pod-stdb/src/client.rs`, `crates/pod-stdb/tests/client_integration.rs`, and `crates/pod-net/src/client_stdb.rs`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through `ServerMessage::DebugDocument`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client --lib`
+  - `cargo test -p pod-stdb --no-default-features --features client --test client_integration`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 172
+- [x] Added `integration_remote_topology_feed_rows_handle_world_switch_and_stale_churn` in `crates/pod-net/tests/networking_integration.rs`, proving the public authority-fed row path can switch the resolved world/quest metadata on a newer `remote_topology_document` and ignore an older stale row without rolling back state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+### Iteration 173
+- [x] Extended `apps/pod-headless/src/main.rs` so the main report now carries `world_quest_bindings` plus a `topology_parity` summary that verifies the exported `RemoteTopologyBundle` matches the teams/worlds/links/quest graphs, applied world states, and evaluation data already published by the headless scenario runner.
+- [x] Added deterministic `pod-headless` coverage proving the topology parity report passes for matching bundles and flags missing evaluation/binding state when the topology artifact drifts.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `git diff --check`
+
+### Iteration 174
+- [x] Extended `scripts/run_moat_benchmarks.ts` so the combined moat artifact now runs `pod-headless`, records `headlessTopology`, and fails if `topology_parity` drifts from the exported `RemoteTopologyBundle`.
+- [x] Added deterministic Bun coverage in `scripts/run_moat_benchmarks.test.ts` for passing and failing headless topology parity projection.
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so committed shard-target moat snapshots preserve the new headless topology parity summary instead of dropping it.
+- [x] Revalidated touched targets:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+### Iteration 175
+- [x] Added `pod-stdb` coverage proving a newer `remote_topology_document` row can update quest bindings, applied world state, and evaluation inside the same resolved world without requiring a world switch.
+- [x] Added matching public `pod-net` integration coverage proving the authority-fed row path rebuilds snapshot metadata for same-world quest binding churn and preserves the newer quest/effect state when a stale older row arrives afterward.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client test_receive_remote_topology_document_row_updates_quest_and_effect_state_within_same_world -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration integration_remote_topology_feed_rows_update_quest_and_effect_state_within_same_world -- --nocapture`
+  - `git diff --check`
+
+### Iteration 176
+- [x] Replaced the ad hoc generated-runtime test fakes with a reusable `GeneratedRuntimeBridge` plus `GeneratedRuntimeHandle` in `crates/pod-stdb/src/client.rs`, so generated-mode callbacks now flow through the same queue/event drain path in both `pod-stdb` and `pod-net`.
+- [x] Ported `pod-stdb` generated integration coverage onto that bridge in `crates/pod-stdb/tests/client_integration.rs`, proving generated-mode topology rows still update resolved state and preserve the expected subscription flow without per-test runtime implementations.
+- [x] Added matching generated-path same-world quest/effect churn coverage in `crates/pod-stdb/src/client.rs` and `crates/pod-net/src/client_stdb.rs`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored.
+- [x] Removed the last leftover `FakeGeneratedRuntime` unit-test helper from `crates/pod-stdb/src/client.rs`, so all in-tree generated-mode tests now exercise the shared bridge/handle path instead of split fake-runtime implementations.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client generated -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 176
+**Current focus**: Iteration 177 benchmark the authority-row and generated-bridge topology feed paths against exported `RemoteTopologyBundle` artifacts, then move that harness into the moat suite
+
+### Iteration 177
+- [x] Added `build_topology_feed_measurements(...)` plus serialized `TopologyFeedMeasurementsReport` contracts in `crates/pod-net/src/client_stdb.rs`, so `pod-net` can replay an exported `RemoteTopologyBundle` through both direct authority-row ingestion and generated-bridge ingestion and check world-by-world quest/applied-state/evaluation parity.
+- [x] Added the runnable `cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input ... --fail-on-checks` surface in `crates/pod-net/examples/topology_feed_benchmark_suite.rs`.
+- [x] Added deterministic `pod-net` coverage proving the benchmark report passes on a canonical multi-world topology bundle and that both ingestion paths resolve the same world/quest/effect/evaluation state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --features spacetimedb test_build_topology_feed_measurements_matches_authority_and_generated_paths -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb --example topology_feed_benchmark_suite`
+  - `cargo run -q -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`
+  - `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`
+  - `git diff --check`
+
+**Last updated**: Iteration 177
+**Current focus**: Iteration 178 integrate `topology_feed_benchmark_suite` into the combined moat suite, then replace its generated-bridge hook path with real generated SpacetimeDB callback wiring when the binding layer is available
+
+### Iteration 178
+- [x] Extended `scripts/run_moat_benchmarks.ts` so the combined moat artifact now runs `topology_feed_benchmark_suite`, emits `topologyFeedMeasurements`, fails on topology feed parity drift, and bumps the combined artifact schema to `4`.
+- [x] Added deterministic Bun coverage in `scripts/run_moat_benchmarks.test.ts` for passing and failing `topologyFeedMeasurements` parity checks.
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so committed shard-target moat snapshots preserve the remote topology feed benchmark under `topologyFeed` and bump the published snapshot schema to `3`.
+- [x] Revalidated touched targets:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 178
+**Current focus**: Iteration 179 wire real generated SpacetimeDB callback bindings into `GeneratedRuntimeBridge`, then extend the live generated path from same-world churn to linked-world quest/effect updates

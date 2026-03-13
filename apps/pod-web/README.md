@@ -86,9 +86,11 @@ The local shard includes:
 
 ```bash
 cd apps/pod-web
+bun run verify:assets
 bun run typecheck
 bun test
 bun run build
+bun run measure:render-routes:check
 bun run test:smoke
 ```
 
@@ -157,6 +159,7 @@ Current selection policy:
 Current runtime perf surface:
 
 - `window.podRender.getStats().runtimePerf` reports `warmupMs`, frame budget, rendered-frame count, stable/slow frame counts, stable-frame percentage, and slowest frame time
+- `window.podRender.getStats()` also reports `averageGeometryLoadMs`, `averageSpriteLoadMs`, `slowestGeometryLoadMs`, and `slowestSpriteLoadMs`, and both the local-sandbox smoke route and render-route measurement gate now enforce conservative ceilings on those values so asset-load regressions fail automatically instead of only showing up in ad hoc profiling
 - `window.podRender.getStats().mainThreadPerf` reports `warmupMs`, submission count, average submission time, and slowest submission time so worker routes can be compared as actual main-thread relief instead of render-thread timing alone
 - `window.podRender.getStats().mainThreadPerf.byKind` now breaks that submission traffic into `frame`, `control`, and `resize` buckets for worker-route attribution
 - worker render routes now post only the newest pending frame while a prior worker render is still in flight, batch same-turn telemetry/world-event updates into one combined control message, and no longer send a duplicate `resize` message immediately after `init` when the surface metrics have not changed
@@ -164,7 +167,13 @@ Current runtime perf surface:
 - the local-sandbox smoke route now also enforces explicit frame-stability floors through `runtimePerf`, requiring the main-thread route to hold at least `90%` stable frames and the worker route to hold at least `50%` stable frames with more stable than slow frames
 - `window.podRender.getStats()` also reports `requestedRenderThread` and `renderThreadFallbackReason`, so worker fallback behavior is inspectable when OffscreenCanvas, worker construction, or canvas transfer support is missing
 - `tests/worker-input.e2e.ts` now asserts both `runtimePerf` and `mainThreadPerf` on main-thread and worker routes after deterministic local-sandbox movement, so render-thread and submission-path regressions surface as data instead of only pass/fail input checks
-- `bun run measure:render-routes` now emits `artifacts/render-route-measurements.json` with main-vs-worker `local-sandbox` measurements and gate results, and the root moat benchmark command includes the same payload under `browserRouteMeasurements`
+- `bun run measure:render-routes` now emits `artifacts/render-route-measurements.json` with main-vs-worker `local-sandbox` measurements and gate results, `bun run measure:render-routes:check` turns those same thresholds into a failing local/CI command, and the root moat benchmark command includes the same payload under `browserRouteMeasurements`
+
+Current CI/local gate surface:
+
+- `bun run verify:assets` reruns `sync:assets` and fails if the generated source/staged/runtime asset trees drift from the committed outputs
+- `bun run measure:render-routes:check` records the browser route artifact and fails when the shared frame-quality, chatter, or asset-load ceilings regress
+- GitHub Actions now uploads both `artifacts/render-route-measurements.json` and `artifacts/staged-assets/pod-runtime-budget-report.json` from the `pod-web` job so browser-route and asset-budget regressions stay inspectable after CI runs
 
 Current transport debug surface:
 

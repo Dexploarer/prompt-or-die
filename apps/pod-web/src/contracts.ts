@@ -2786,9 +2786,9 @@ function entityRenderProfile(
     return finalizeEntityRenderProfile({
       mesh: "canopy-tree",
       material: "shore-pine",
-      tint: [0.3, 0.54, 0.38, 1],
-      emissive: [0.02, 0.04, 0.025],
-      scale: [2.18, 4.36, 2.18],
+      tint: [0.22, 0.5, 0.24, 1],
+      emissive: [0.015, 0.03, 0.015],
+      scale: [2.34, 4.8, 2.34],
       groundOffset: 0.18,
       layer: 1,
       renderOrder: 1,
@@ -2872,9 +2872,9 @@ function entityRenderProfile(
     return finalizeEntityRenderProfile({
       mesh: "canopy-tree",
       material: "forest-canopy",
-      tint: [0.34, 0.66, 0.4, 1],
-      emissive: [0.02, 0.05, 0.02],
-      scale: [2.1, 4.3, 2.1],
+      tint: [0.24, 0.58, 0.28, 1],
+      emissive: [0.018, 0.04, 0.018],
+      scale: [2.16, 4.6, 2.16],
       groundOffset: 0.18,
       layer: 1,
       renderOrder: 1,
@@ -3029,10 +3029,13 @@ export function buildAuthoritativeWorldFrame(
       : cameraDistances[
           Math.min(cameraDistances.length - 1, Math.floor(cameraDistances.length * 0.75))
         ] ?? 8;
+  const isResonantShowcase = environment.biomeId === "resonant-shore";
   const cameraZoom = clamp(
-    1.22 - cameraReferenceDistance * 0.016 + focusSpeedFactor * 0.04,
-    0.98,
-    1.2
+    (isResonantShowcase ? 1.0 : 1.22) -
+      cameraReferenceDistance * (isResonantShowcase ? 0.007 : 0.016) +
+      focusSpeedFactor * (isResonantShowcase ? 0.012 : 0.04),
+    isResonantShowcase ? 0.92 : 0.98,
+    isResonantShowcase ? 1.02 : 1.2
   );
 
   const meshBatches = new Map<string, ThreeJsMeshBatch>();
@@ -3175,14 +3178,14 @@ export function buildAuthoritativeWorldFrame(
       x: focusPosition[0],
       y: focusPosition[1],
       zoom: cameraZoom,
-      rotation: focus?.rotation ?? 0.48,
-      fov: 52 + focusSpeedFactor * 4,
-      pitch: 0.34 - focusSpeedFactor * 0.02,
-      focusHeight: 2.2 + focusSpeedFactor * 0.18,
-      followDistance: 13.5 + focusSpeedFactor * 1.4,
-      shoulderOffset: 0.9,
-      leadX: focus ? focus.velocity[0] * (0.34 + focusSpeedFactor * 0.12) : 0,
-      leadY: focus ? focus.velocity[1] * (0.34 + focusSpeedFactor * 0.12) : 0,
+      rotation: isResonantShowcase ? -0.54 : focus?.rotation ?? 0.48,
+      fov: (isResonantShowcase ? 51.2 : 52) + focusSpeedFactor * (isResonantShowcase ? 2.2 : 4),
+      pitch: (isResonantShowcase ? 0.33 : 0.34) - focusSpeedFactor * (isResonantShowcase ? 0.01 : 0.02),
+      focusHeight: (isResonantShowcase ? 2.18 : 2.2) + focusSpeedFactor * (isResonantShowcase ? 0.08 : 0.18),
+      followDistance: (isResonantShowcase ? 12.8 : 13.5) + focusSpeedFactor * (isResonantShowcase ? 0.7 : 1.4),
+      shoulderOffset: isResonantShowcase ? 0.18 : 0.9,
+      leadX: focus ? focus.velocity[0] * (isResonantShowcase ? 0.14 + focusSpeedFactor * 0.05 : 0.34 + focusSpeedFactor * 0.12) : 0,
+      leadY: focus ? focus.velocity[1] * (isResonantShowcase ? 0.14 + focusSpeedFactor * 0.05 : 0.34 + focusSpeedFactor * 0.12) : 0,
       viewportWidth: options.viewportWidth ?? defaultViewportWidth(),
       viewportHeight: options.viewportHeight ?? defaultViewportHeight()
     },

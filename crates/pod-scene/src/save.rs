@@ -191,8 +191,7 @@ impl SaveManager {
                 .into_bytes()
         };
 
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Failed to write save file: {}", e))?;
+        std::fs::write(&path, content).map_err(|e| format!("Failed to write save file: {}", e))?;
 
         log::info!("Saved game to {:?}", path);
         Ok(path)
@@ -268,8 +267,7 @@ impl SaveManager {
     pub fn delete(&self, filename: &str) -> Result<(), String> {
         let filename = self.validate_filename(filename)?;
         let path = self.save_directory.join(filename);
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete save file: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete save file: {}", e))?;
         log::info!("Deleted save file: {:?}", path);
         Ok(())
     }
@@ -319,8 +317,10 @@ impl SaveManager {
         match (components.next(), components.next()) {
             (Some(std::path::Component::Normal(_)), None) => {}
             _ => {
-                return Err("Save filename must not contain path separators or traversal segments"
-                    .to_string())
+                return Err(
+                    "Save filename must not contain path separators or traversal segments"
+                        .to_string(),
+                )
             }
         }
 

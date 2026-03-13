@@ -1,6 +1,6 @@
 //! 2D camera with smooth following and coordinate transformations
 
-use glam::{Vec2, Mat3};
+use glam::{Mat3, Vec2};
 
 /// 2D camera for viewport management
 #[derive(Debug, Clone)]

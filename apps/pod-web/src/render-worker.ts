@@ -44,6 +44,18 @@ async function handleMessage(message: RenderWorkerRequest): Promise<void> {
       case "clearTelemetryTrail":
         renderer?.clearTelemetryTrail();
         return;
+      case "resetPerfMetrics":
+        renderer?.resetPerfMetrics();
+        if (renderer) {
+          scope.postMessage({
+            type: "perfMetricsReset",
+            stats: {
+              ...renderer.getStats(),
+              renderThread: "worker"
+            }
+          });
+        }
+        return;
       case "applyControlState":
         if (message.telemetry?.mode === "set") {
           renderer?.setTelemetryTrail(message.telemetry.samples);

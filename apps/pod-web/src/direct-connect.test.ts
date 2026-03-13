@@ -454,7 +454,7 @@ describe("direct-connect runtime config", () => {
           scheduledReconnects.push(handler as () => void);
         }
         return scheduledReconnects.length as unknown as ReturnType<typeof setTimeout>;
-      }) as typeof setTimeout;
+      }) as unknown as typeof setTimeout;
       globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
       const client = new PodWebDirectConnectClient(
         {
@@ -551,7 +551,7 @@ describe("direct-connect runtime config", () => {
           scheduledReconnects.push(handler as () => void);
         }
         return scheduledReconnects.length as unknown as ReturnType<typeof setTimeout>;
-      }) as typeof setTimeout;
+      }) as unknown as typeof setTimeout;
       globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
 
       const client = new PodWebDirectConnectClient(

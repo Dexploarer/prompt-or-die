@@ -1,7 +1,7 @@
 //! Tween system — fire-and-forget animations with fluent builder API
 
-use serde::{Deserialize, Serialize};
 use crate::easing::EasingFunction;
+use serde::{Deserialize, Serialize};
 
 /// Target property that can be tweened
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -33,12 +33,7 @@ pub struct Tween {
 }
 
 impl Tween {
-    pub fn new(
-        target: TweenTarget,
-        start_value: f32,
-        end_value: f32,
-        duration: f32,
-    ) -> Self {
+    pub fn new(target: TweenTarget, start_value: f32, end_value: f32, duration: f32) -> Self {
         Self {
             target,
             start_value,
@@ -180,30 +175,22 @@ impl Default for TweenBuilder {
 
 /// Create a tweened position animation
 pub fn tween_position(from: f32, to: f32, duration: f32) -> TweenBuilder {
-    TweenBuilder::new()
-        .position(from, to)
-        .duration(duration)
+    TweenBuilder::new().position(from, to).duration(duration)
 }
 
 /// Create a tweened rotation animation
 pub fn tween_rotation(from: f32, to: f32, duration: f32) -> TweenBuilder {
-    TweenBuilder::new()
-        .rotation(from, to)
-        .duration(duration)
+    TweenBuilder::new().rotation(from, to).duration(duration)
 }
 
 /// Create a tweened scale animation
 pub fn tween_scale(from: f32, to: f32, duration: f32) -> TweenBuilder {
-    TweenBuilder::new()
-        .scale(from, to)
-        .duration(duration)
+    TweenBuilder::new().scale(from, to).duration(duration)
 }
 
 /// Create a tweened alpha animation
 pub fn tween_alpha(from: f32, to: f32, duration: f32) -> TweenBuilder {
-    TweenBuilder::new()
-        .alpha(from, to)
-        .duration(duration)
+    TweenBuilder::new().alpha(from, to).duration(duration)
 }
 
 #[cfg(test)]
@@ -240,9 +227,7 @@ mod tests {
 
     #[test]
     fn test_missing_target() {
-        let tween = TweenBuilder::new()
-            .duration(0.5)
-            .build();
+        let tween = TweenBuilder::new().duration(0.5).build();
 
         assert!(tween.is_none());
     }

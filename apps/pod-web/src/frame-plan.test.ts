@@ -523,7 +523,7 @@ describe("sampleAnimatedInstanceTransform", () => {
     );
 
     expect(staticProp.position).toEqual([12, 4, -6]);
-    expect(hoveringCompanion.position[1]).toBeGreaterThan(4.12);
+    expect(hoveringCompanion.position[1]).toBeGreaterThan(4.09);
     expect(hoveringCompanion.scale[1]).not.toBeCloseTo(1.2, 4);
   });
 

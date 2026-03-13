@@ -3,8 +3,8 @@
 //! All easing functions work with normalized time t in range [0, 1]
 //! where 0 is start and 1 is end of the animation.
 
-use std::f32::consts::PI;
 use serde::{Deserialize, Serialize};
+use std::f32::consts::PI;
 
 /// Easing function types for animation interpolation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -62,10 +62,14 @@ pub fn ease(t: f32, easing: &EasingFunction) -> f32 {
 
     match easing {
         EasingFunction::Linear => t,
-        EasingFunction::Step => if t < 0.5 { 0.0 } else { 1.0 },
-        EasingFunction::CubicBezier { p0, p1, p2, p3 } => {
-            cubic_bezier(t, *p0, *p1, *p2, *p3)
+        EasingFunction::Step => {
+            if t < 0.5 {
+                0.0
+            } else {
+                1.0
+            }
         }
+        EasingFunction::CubicBezier { p0, p1, p2, p3 } => cubic_bezier(t, *p0, *p1, *p2, *p3),
 
         // Quad
         EasingFunction::EaseInQuad => ease_in_quad(t),

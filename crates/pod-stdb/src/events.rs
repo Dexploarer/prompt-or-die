@@ -194,3 +194,20 @@ pub struct AgentTickRollupRow {
     pub tool_error_count: u32,
     pub rollup_json: String,
 }
+
+/// Shared multi-world topology document published by authority-side tooling.
+///
+/// `topology_json` stores the canonical `remote_topology_bundle` TOON document
+/// so remote clients can ingest the same authority payload directly.
+#[spacetimedb::table(name = remote_topology_document, public)]
+pub struct RemoteTopologyDocumentRow {
+    #[primary_key]
+    #[auto_inc]
+    pub row_id: u64,
+    pub generated_at_unix_ms: u64,
+    pub scenario_id: String,
+    pub profile_id: String,
+    pub world_count: u32,
+    pub team_count: u32,
+    pub topology_json: String,
+}

@@ -99,6 +99,66 @@ pub enum ActionLifecycleStage {
     Queued,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RewardSource {
+    ActionOutcome,
+    WorldEvent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RewardReason {
+    ActionExecuted,
+    ActionRejected,
+    ActionQueued,
+    DamageDealt,
+    DamageTaken,
+    KillSecured,
+    DeathTaken,
+    SkillExperienceGained,
+    CreatureCaptured,
+    CompanionSummoned,
+    CompanionCommandIssued,
+    ResourceGathered,
+    LootClaimed,
+}
+
+/// Authoritative reward signal attributed by the runtime from action outcomes
+/// and emitted world events. This is the canonical source for replay-derived
+/// training rewards.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentRewardSignal {
+    pub tick: u64,
+    pub source: RewardSource,
+    pub reason: RewardReason,
+    pub value: f32,
+    pub terminal: bool,
+    pub tag: Option<String>,
+}
+
+impl AgentRewardSignal {
+    pub fn new(
+        tick: u64,
+        source: RewardSource,
+        reason: RewardReason,
+        value: f32,
+        terminal: bool,
+        tag: Option<String>,
+    ) -> Self {
+        Self {
+            tick,
+            source,
+            reason,
+            value,
+            terminal,
+            tag,
+        }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("agent_reward_signal", self)
+    }
+}
+
 /// Action event recorded for parity/debug telemetry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentActionTrace {
@@ -262,6 +322,8 @@ pub struct AgentTelemetryFrame {
     pub trajectory: Option<AgentTrajectoryFrame>,
     pub action_trace: Vec<AgentActionTrace>,
     pub tool_calls: Vec<AgentToolCallTrace>,
+    #[serde(default)]
+    pub reward_signals: Vec<AgentRewardSignal>,
 }
 
 impl AgentTelemetryFrame {
@@ -293,6 +355,7 @@ impl AgentTelemetryFrame {
             trajectory: trajectory_start.map(|start| AgentTrajectoryFrame::new(start, start)),
             action_trace: Vec::new(),
             tool_calls: Vec::new(),
+            reward_signals: Vec::new(),
         }
     }
 
@@ -313,6 +376,10 @@ impl AgentTelemetryFrame {
 
     pub fn record_tool_call(&mut self, trace: AgentToolCallTrace) {
         self.tool_calls.push(trace);
+    }
+
+    pub fn record_reward(&mut self, signal: AgentRewardSignal) {
+        self.reward_signals.push(signal);
     }
 
     pub fn update_trajectory_end(&mut self, end: TrajectorySample) {
@@ -540,9 +607,9 @@ mod tests {
     use crate::toon::decode_toon_value;
 
     use super::{
-        ActionLifecycleStage, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
-        AgentToolCallTrace, TelemetryArchive, TelemetryConfig, TickTelemetryFrame, ToolCallStatus,
-        TrajectorySample,
+        ActionLifecycleStage, AgentRewardSignal, AgentTelemetryFrame, AgentTickRollup,
+        AgentToolCallEvent, AgentToolCallTrace, RewardReason, RewardSource, TelemetryArchive,
+        TelemetryConfig, TickTelemetryFrame, ToolCallStatus, TrajectorySample,
     };
 
     #[test]
@@ -591,6 +658,14 @@ mod tests {
         );
         first.update_trajectory_end(mid);
         first.record_tool_call(AgentToolCallTrace::success(0, "observe", "demo", 4, 12, 20));
+        first.record_reward(AgentRewardSignal::new(
+            0,
+            RewardSource::ActionOutcome,
+            RewardReason::ActionExecuted,
+            0.05,
+            false,
+            None,
+        ));
         archive.record_tick(TickTelemetryFrame {
             tick: 0,
             agents: vec![first],
@@ -631,6 +706,12 @@ mod tests {
         assert_eq!(
             archive.latest().expect("latest frame").agents[0].tool_calls[0].status,
             ToolCallStatus::TimedOut
+        );
+        assert_eq!(
+            archive.latest().expect("latest frame").agents[0]
+                .reward_signals
+                .len(),
+            0
         );
     }
 
@@ -726,5 +807,22 @@ mod tests {
         assert_eq!(rollup_value["payload"]["agent_entity_id"], 144);
         assert_eq!(rollup_value["payload"]["tool_call_count"], 1);
         assert_eq!(rollup_value["payload"]["visible_entity_count"], 5);
+    }
+
+    #[test]
+    fn reward_signal_exports_to_toon_document() {
+        let reward = AgentRewardSignal::new(
+            12,
+            RewardSource::WorldEvent,
+            RewardReason::CreatureCaptured,
+            4.0,
+            false,
+            Some("spark-mouse".into()),
+        );
+        let document = reward.to_toon_document();
+        let value = decode_toon_value(&document).expect("reward document should decode");
+        assert_eq!(value["document_type"], "agent_reward_signal");
+        assert_eq!(value["payload"]["tick"], 12);
+        assert_eq!(value["payload"]["tag"], "spark-mouse");
     }
 }

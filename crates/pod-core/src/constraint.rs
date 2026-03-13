@@ -268,7 +268,8 @@ pub struct ValidationPipeline {
     /// Pre-filters (can we even consider this?)
     pre_filters: Vec<Box<dyn Fn(&Action, &AgentConstraints) -> Option<ConstraintViolation> + Send>>,
     /// Constraint checks (resource/cooldown/budget)
-    constraint_checks: Vec<Box<dyn Fn(&Action, &AgentConstraints) -> Option<ConstraintViolation> + Send>>,
+    constraint_checks:
+        Vec<Box<dyn Fn(&Action, &AgentConstraints) -> Option<ConstraintViolation> + Send>>,
     /// World state verification (would this action be valid in world?)
     world_checks: Vec<Box<dyn Fn(&Action) -> Option<ConstraintViolation> + Send>>,
 }

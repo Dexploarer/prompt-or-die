@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  AVERAGE_GEOMETRY_LOAD_MS_CEILING,
+  AVERAGE_SPRITE_LOAD_MS_CEILING,
   MAIN_STABLE_FRAME_PERCENT_FLOOR,
+  MIN_COMPLETED_ASSET_LOADS,
+  SLOWEST_GEOMETRY_LOAD_MS_CEILING,
+  SLOWEST_SPRITE_LOAD_MS_CEILING,
   WORKER_CONTROL_SUBMISSION_CEILING,
   WORKER_RESIZE_SUBMISSION_CEILING,
   WORKER_STABLE_FRAME_PERCENT_FLOOR,
@@ -30,6 +35,10 @@ type RendererStats = {
   spriteLoadsCompleted: number;
   pendingGeometryAssets: number;
   pendingSpriteAssets: number;
+  averageGeometryLoadMs: number;
+  averageSpriteLoadMs: number;
+  slowestGeometryLoadMs: number;
+  slowestSpriteLoadMs: number;
   mainThreadPerf: {
     warmupMs: number | null;
     submissionsCompleted: number;
@@ -69,6 +78,7 @@ declare global {
     advanceTime: (ms: number) => Promise<void>;
     podRender: {
       requestGameplayFocus: () => boolean;
+      resetPerfMetrics: () => void | Promise<void>;
       getGameplayState: () => GameplayState;
       getStats: () => RendererStats;
     };
@@ -85,6 +95,16 @@ async function waitForGameplayReady(page: Page) {
       window.podRender.getStats().runtimePerf.framesRendered > 0
     );
   });
+}
+
+async function waitForRuntimeAssets(page: Page) {
+  await page.waitForFunction((minimumCompletedAssetLoads) => {
+    const stats = window.podRender.getStats();
+    return (
+      stats.pendingGeometryAssets + stats.pendingSpriteAssets === 0 &&
+      stats.geometryLoadsCompleted + stats.spriteLoadsCompleted >= minimumCompletedAssetLoads
+    );
+  }, MIN_COMPLETED_ASSET_LOADS);
 }
 
 async function moveForward(
@@ -144,6 +164,14 @@ async function moveForward(
       WORKER_RESIZE_SUBMISSION_CEILING
     );
   }
+  expect(stats.averageGeometryLoadMs).toBeGreaterThanOrEqual(0);
+  expect(stats.averageGeometryLoadMs).toBeLessThanOrEqual(AVERAGE_GEOMETRY_LOAD_MS_CEILING);
+  expect(stats.averageSpriteLoadMs).toBeGreaterThanOrEqual(0);
+  expect(stats.averageSpriteLoadMs).toBeLessThanOrEqual(AVERAGE_SPRITE_LOAD_MS_CEILING);
+  expect(stats.slowestGeometryLoadMs).toBeGreaterThanOrEqual(stats.averageGeometryLoadMs);
+  expect(stats.slowestGeometryLoadMs).toBeLessThanOrEqual(SLOWEST_GEOMETRY_LOAD_MS_CEILING);
+  expect(stats.slowestSpriteLoadMs).toBeGreaterThanOrEqual(stats.averageSpriteLoadMs);
+  expect(stats.slowestSpriteLoadMs).toBeLessThanOrEqual(SLOWEST_SPRITE_LOAD_MS_CEILING);
   expect(stats.runtimePerf.warmupMs).not.toBeNull();
   expect(stats.runtimePerf.frameBudgetMs).toBeGreaterThan(0);
   expect(stats.runtimePerf.framesRendered).toBeGreaterThanOrEqual(2);
@@ -163,17 +191,23 @@ async function moveForward(
     );
     expect(stats.runtimePerf.stableFrames).toBeGreaterThan(stats.runtimePerf.slowFrames);
   }
-  expect(stats.geometryLoadsCompleted + stats.spriteLoadsCompleted).toBeGreaterThan(0);
+  expect(stats.geometryLoadsCompleted + stats.spriteLoadsCompleted).toBeGreaterThanOrEqual(
+    MIN_COMPLETED_ASSET_LOADS
+  );
 }
 
 test("main-thread local sandbox route accepts gameplay focus and movement input", async ({ page }) => {
   await page.goto("/?world=local-sandbox&backend=webgl2");
   await waitForGameplayReady(page);
+  await waitForRuntimeAssets(page);
+  await page.evaluate(() => window.podRender.resetPerfMetrics());
   await moveForward(page, "main", "auto");
 });
 
 test("worker local sandbox route accepts gameplay focus and movement input", async ({ page }) => {
   await page.goto("/?world=local-sandbox&renderThread=worker&backend=webgl2");
   await waitForGameplayReady(page);
+  await waitForRuntimeAssets(page);
+  await page.evaluate(() => window.podRender.resetPerfMetrics());
   await moveForward(page, "worker", "worker");
 });

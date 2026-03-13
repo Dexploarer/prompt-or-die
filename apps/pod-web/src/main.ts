@@ -210,6 +210,7 @@ declare global {
       resetTelemetry: () => void;
       resetDemo: () => void;
       requestGameplayFocus: () => boolean;
+      resetPerfMetrics: () => void | Promise<void>;
       getBackend: () => string;
       getStats: () => ReturnType<PodThreeRenderRuntime["getStats"]>;
       getTelemetryStats: () => PodTelemetryStats;
@@ -342,11 +343,27 @@ const telemetryPanelNode = telemetryPanel;
 const telemetryPrevButton = telemetryPrev;
 const telemetryNextButton = telemetryNext;
 const bootHudState = initialHudStateFromLocation(window.location);
+const runtimeConfig = runtimeConfigFromLocation(window.location);
+const localWorldPresentation = localWorldPresentationFromLocation(window.location);
 
 function shouldShowDebugGrid(search: string): boolean {
   const params = new URLSearchParams(search);
   const value = params.get("grid") ?? params.get("debugGrid");
   return value === "1" || value === "true";
+}
+
+function preferredRendererQualityPreset(): "high" | "performance" | undefined {
+  if (runtimeConfig) {
+    return undefined;
+  }
+  return localWorldPresentation.presetId === "bootstrap-showcase" ? "high" : "performance";
+}
+
+function shouldEnableRendererShadows(): boolean | undefined {
+  if (runtimeConfig) {
+    return undefined;
+  }
+  return localWorldPresentation.presetId === "bootstrap-showcase";
 }
 
 feedbackNode.textContent = bootHudState.feedback;
@@ -360,20 +377,25 @@ const { createPodRenderRuntime } = await import("./render-runtime");
 
 const renderer = await createPodRenderRuntime(renderCanvas, {
   showGrid: shouldShowDebugGrid(window.location.search),
-  fixedTimeMs: initialFixedTimeMs ?? undefined
+  fixedTimeMs: initialFixedTimeMs ?? undefined,
+  qualityPreset: preferredRendererQualityPreset(),
+  enableShadows: shouldEnableRendererShadows()
 });
 backendLabel.textContent = renderer.backend;
 qualityLabel.textContent = renderer.qualityPreset;
 const runtimeStatsLabel = statsLabel;
 const telemetryState = createInitialTelemetryState(300);
-const runtimeConfig = runtimeConfigFromLocation(window.location);
-const localWorldPresentation = localWorldPresentationFromLocation(window.location);
 const offlinePlayerName =
   new URLSearchParams(window.location.search).get("player")?.trim() || "WebPlayer";
 let localSandbox: PodWebLocalWorld | null = null;
+let showcaseIntroStartedAtMs: number | null = null;
 if (!runtimeConfig) {
   const { PodWebLocalWorld } = await import("./local-world");
   localSandbox = new PodWebLocalWorld(offlinePlayerName, localWorldPresentation.presetId);
+  showcaseIntroStartedAtMs =
+    localWorldPresentation.presetId === "bootstrap-showcase"
+      ? initialFixedTimeMs ?? systemNowMs()
+      : null;
 }
 
 let liveFrameSource: "demo" | "legacy" | "threejs" = "demo";
@@ -491,6 +513,22 @@ const cameraRig = {
   desiredZoom: 1.08
 };
 
+function cameraRigDefaultsForPresentation() {
+  const presetId = localSandbox?.presentation().presetId;
+  if (presetId === "bootstrap-showcase") {
+    return {
+      yaw: -Math.PI * 0.25,
+      pitch: 0.16,
+      zoom: 1
+    };
+  }
+  return {
+    yaw: 0,
+    pitch: 0.34,
+    zoom: 1.08
+  };
+}
+
 function clearPressedKeys(): void {
   pressedKeys.clear();
   lastMovementSignature = "stop";
@@ -508,6 +546,13 @@ function systemNowMs(): number {
 
 function currentRuntimeNowMs(): number {
   return runtimeNowOverrideMs ?? systemNowMs();
+}
+
+function resetShowcaseIntroClock(): void {
+  showcaseIntroStartedAtMs =
+    localSandbox?.presentation().presetId === "bootstrap-showcase"
+      ? currentRuntimeNowMs()
+      : null;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -647,13 +692,14 @@ function syncCameraRig(camera: CameraState | null): void {
   }
 
   if (!cameraRig.initialized) {
+    const defaults = cameraRigDefaultsForPresentation();
     cameraRig.initialized = true;
-    cameraRig.yaw = camera.rotation;
-    cameraRig.desiredYaw = camera.rotation;
-    cameraRig.pitch = camera.pitch ?? 0.34;
-    cameraRig.desiredPitch = camera.pitch ?? 0.34;
-    cameraRig.zoom = camera.zoom;
-    cameraRig.desiredZoom = camera.zoom;
+    cameraRig.yaw = camera.rotation ?? defaults.yaw;
+    cameraRig.desiredYaw = camera.rotation ?? defaults.yaw;
+    cameraRig.pitch = camera.pitch ?? defaults.pitch;
+    cameraRig.desiredPitch = camera.pitch ?? defaults.pitch;
+    cameraRig.zoom = camera.zoom ?? defaults.zoom;
+    cameraRig.desiredZoom = camera.zoom ?? defaults.zoom;
   }
 }
 
@@ -699,10 +745,12 @@ async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<Thre
   const controlled = controlledEntity();
   const target = selectedTarget();
   const nowSeconds = currentRuntimeNowMs() / 1000;
+  const isBootstrapShowcase = localPresentation?.presetId === "bootstrap-showcase";
   const speed = controlled
     ? Math.hypot(controlled.velocity[0], controlled.velocity[1])
     : 0;
-  const leadDistance = Math.min(1.4, speed * 0.16);
+  const showcaseLeadScale = isBootstrapShowcase ? 0.72 : 1;
+  const leadDistance = Math.min(0.92, speed * 0.1 * showcaseLeadScale);
   const combatCamera = computeCombatCameraPressure(
     controlled
       ? {
@@ -721,25 +769,29 @@ async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<Thre
   );
   const combatPressure = combatCamera.combatPressure;
   const closeRangeBlend = combatCamera.closeRangeBlend;
-  const leadScale = 1 + swimCameraBlend * 0.14 - combatPressure * 0.06;
+  const leadScale = 1 + swimCameraBlend * 0.08 - combatPressure * 0.04;
+  const idleShowcaseLeadX = isBootstrapShowcase ? 0.8 : 0;
+  const idleShowcaseLeadY = isBootstrapShowcase ? -5.2 : 0;
   const leadX =
     controlled && speed > 0.05
       ? (controlled.velocity[0] / speed) * leadDistance * leadScale
-      : 0;
+      : idleShowcaseLeadX;
   const leadY =
     controlled && speed > 0.05
       ? (controlled.velocity[1] / speed) * leadDistance * leadScale
-      : 0;
-  const shakeYaw = Math.sin(nowSeconds * 33 + 0.8) * cameraImpact * 0.022;
-  const shakePitch = Math.sin(nowSeconds * 27 + 1.7) * cameraImpact * 0.014;
+      : idleShowcaseLeadY;
+  const shakeYaw = Math.sin(nowSeconds * 33 + 0.8) * cameraImpact * 0.01;
+  const shakePitch = Math.sin(nowSeconds * 27 + 1.7) * cameraImpact * 0.006;
   const baseFocusHeight = baseFrame.camera.focusHeight ?? 2.2;
-  const baseFollowDistance = baseFrame.camera.followDistance ?? 13.5;
-  const baseShoulderOffset = baseFrame.camera.shoulderOffset ?? 0.9;
+  const baseFollowDistance = (baseFrame.camera.followDistance ?? 13.5) + (isBootstrapShowcase ? 1.5 : 0);
+  const baseShoulderOffset = isBootstrapShowcase
+    ? 0.06
+    : (baseFrame.camera.shoulderOffset ?? 0.9);
   const swimPitchOffset = swimCameraBlend * 0.068;
   const swimZoomOffset = swimCameraBlend * 0.082;
   const swimDistanceOffset = swimCameraBlend * 1.6;
   const swimShoulderOffset = baseShoulderOffset - swimCameraBlend * 0.42;
-  const combatFovKick = combatPressure * 2.4 + cameraImpact * 3 + closeRangeBlend * 0.9;
+  const combatFovKick = combatPressure * 1.6 + cameraImpact * 1.8 + closeRangeBlend * 0.55;
   const swimFocusHeight = baseFocusHeight + swimCameraBlend * 0.12 + closeRangeBlend * 0.08;
   const swimFollowDistance =
     baseFollowDistance +
@@ -750,19 +802,19 @@ async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<Thre
     baseShoulderOffset +
     (swimShoulderOffset - baseShoulderOffset) * swimCameraBlend +
     closeRangeBlend * 0.14;
+  const showcaseIntroElapsedMs =
+    showcaseIntroStartedAtMs == null ? Number.POSITIVE_INFINITY : Math.max(currentRuntimeNowMs() - showcaseIntroStartedAtMs, 0);
   const showcaseIntroBlend =
-    localPresentation?.presetId === "bootstrap-showcase" &&
-    !showcaseIntroDismissed &&
-    latestSnapshot != null &&
-    latestSnapshot.tick < 210
-      ? 1 - latestSnapshot.tick / 210
+    isBootstrapShowcase && !showcaseIntroDismissed
+      ? 1 - clampScalar(showcaseIntroElapsedMs / 5600, 0, 1)
       : 0;
-  const quietShake = 1 - showcaseIntroBlend * 0.85;
-  const introLeadX = leadX + 1.6;
-  const introLeadY = leadY + 0.65;
+  const quietShake = 1 - showcaseIntroBlend * 0.94;
+  const introLeadX = leadX + 32;
+  const introLeadY = leadY - 74;
   const baseRotation = cameraRig.yaw + shakeYaw * quietShake;
   const basePitch = clampScalar(
     cameraRig.pitch +
+      (isBootstrapShowcase ? -0.045 : 0) +
       swimPitchOffset +
       shakePitch * quietShake -
       combatPressure * 0.012 -
@@ -772,6 +824,7 @@ async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<Thre
   );
   const baseZoom = clampScalar(
     cameraRig.zoom -
+      (isBootstrapShowcase ? 0.08 : 0) -
       swimZoomOffset -
       combatPressure * 0.035 -
       closeRangeBlend * 0.045 +
@@ -785,25 +838,25 @@ async function renderableThreeFrame(baseFrame: ThreeJsWebGpuFrame): Promise<Thre
       ...baseFrame,
       camera: {
         ...baseFrame.camera,
-        rotation: blendAngle(baseRotation, 0.24, showcaseIntroBlend),
+        rotation: blendAngle(baseRotation, -Math.PI * 0.25, showcaseIntroBlend),
         pitch: clampScalar(
-          basePitch * (1 - showcaseIntroBlend) + 0.44 * showcaseIntroBlend,
-          0.18,
+          basePitch * (1 - showcaseIntroBlend) + 0.14 * showcaseIntroBlend,
+          0.12,
           0.76
         ),
         zoom: clampScalar(
-          baseZoom * (1 - showcaseIntroBlend) + 0.9 * showcaseIntroBlend,
-          0.72,
+          baseZoom * (1 - showcaseIntroBlend) + 0.94 * showcaseIntroBlend,
+          0.68,
           1.65
         ),
         fov: clampScalar(
-          (baseFrame.camera.fov ?? 52) + combatFovKick * (1 - showcaseIntroBlend) + 1.8 * showcaseIntroBlend,
+          (baseFrame.camera.fov ?? 52) + combatFovKick * (1 - showcaseIntroBlend) + 6.5 * showcaseIntroBlend,
           50,
-          62
+          64
         ),
-        focusHeight: swimFocusHeight * (1 - showcaseIntroBlend) + 2.72 * showcaseIntroBlend,
-        followDistance: swimFollowDistance * (1 - showcaseIntroBlend) + 10.8 * showcaseIntroBlend,
-        shoulderOffset: blendedShoulderOffset * (1 - showcaseIntroBlend) + 0.34 * showcaseIntroBlend,
+        focusHeight: swimFocusHeight * (1 - showcaseIntroBlend) + 3.2 * showcaseIntroBlend,
+        followDistance: swimFollowDistance * (1 - showcaseIntroBlend) + 34 * showcaseIntroBlend,
+        shoulderOffset: blendedShoulderOffset * (1 - showcaseIntroBlend) + 0.22 * showcaseIntroBlend,
         leadX: leadX * (1 - showcaseIntroBlend) + introLeadX * showcaseIntroBlend,
         leadY: leadY * (1 - showcaseIntroBlend) + introLeadY * showcaseIntroBlend
       }
@@ -1394,16 +1447,18 @@ window.podRender = {
       liveDebugState.focusedSummariesByEntity.clear();
     }
     if (localSandbox) {
+      const defaults = cameraRigDefaultsForPresentation();
       localSandbox.reset();
       showcaseIntroDismissed = false;
       runtimeNowOverrideMs = initialFixedTimeMs;
+      resetShowcaseIntroClock();
       cameraRig.initialized = false;
-      cameraRig.yaw = 0;
-      cameraRig.desiredYaw = 0;
-      cameraRig.pitch = 0.34;
-      cameraRig.desiredPitch = 0.34;
-      cameraRig.zoom = 1.08;
-      cameraRig.desiredZoom = 1.08;
+      cameraRig.yaw = defaults.yaw;
+      cameraRig.desiredYaw = defaults.yaw;
+      cameraRig.pitch = defaults.pitch;
+      cameraRig.desiredPitch = defaults.pitch;
+      cameraRig.zoom = defaults.zoom;
+      cameraRig.desiredZoom = defaults.zoom;
       latestFeedback = localSandbox.presentation().readyFeedback;
       clickMoveTarget = null;
       currentRenderedCamera = null;
@@ -1419,6 +1474,9 @@ window.podRender = {
   },
   requestGameplayFocus() {
     return focusGameplaySurface(renderCanvas);
+  },
+  resetPerfMetrics() {
+    return renderer.resetPerfMetrics();
   },
   getBackend() {
     return renderer.backend;

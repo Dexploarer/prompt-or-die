@@ -192,13 +192,13 @@ function buildCompressedMeshRuntimePath(path, lodLevel) {
 }
 
 const meshLodSizeBudgets = {
-  character: { 0: 40_960, 1: 28_672, 2: 16_384 },
+  character: { 0: 57_344, 1: 28_672, 2: 16_384 },
   companion: { 0: 32_768, 1: 20_480, 2: 12_288 },
   creature: { 0: 32_768, 1: 20_480, 2: 12_288 },
-  flora: { 0: 12_288, 1: 8_192, 2: 6_144 },
-  loot: { 0: 10_240, 1: 7_168, 2: 5_120 },
+  flora: { 0: 20_480, 1: 8_192, 2: 6_144 },
+  loot: { 0: 12_288, 1: 7_168, 2: 5_120 },
   resource: { 0: 18_432, 1: 12_288, 2: 7_168 },
-  structure: { 0: 16_384, 1: 11_264, 2: 7_168 }
+  structure: { 0: 24_576, 1: 11_264, 2: 7_168 }
 };
 
 const spriteSizeBudgets = {
@@ -328,6 +328,47 @@ async function createMeshArtifacts(assetId, createGeometry, runtimePath) {
     lodSourcePaths,
     lodStats
   };
+}
+
+async function copyAuthoredMeshFixtures(meshLodStats, meshLodVariantSources, manifest) {
+  await mkdir(fixtureMeshesRoot, { recursive: true });
+
+  const authoredMeshOverrideIds = new Set();
+
+  await Promise.all(
+    Object.keys(manifest.meshes).map(async (assetId) => {
+      const runtimePath = manifest.meshes[assetId]?.path;
+      if (typeof runtimePath !== "string") {
+        return;
+      }
+
+      for (const level of ["0", "1", "2"]) {
+        const fixtureName = level === "0" ? `${assetId}.glb` : `${assetId}.lod${level}.glb`;
+        const fixturePath = join(fixtureMeshesRoot, fixtureName);
+        try {
+          await access(fixturePath);
+        } catch {
+          continue;
+        }
+
+        const sourcePath = join(sourceMeshesRoot, fixtureName);
+        await copyFile(fixturePath, sourcePath);
+        const metadata = await stat(sourcePath);
+        meshLodVariantSources[assetId] ??= {};
+        meshLodVariantSources[assetId][level] = sourcePath;
+        meshLodStats[assetId] ??= {};
+        meshLodStats[assetId][level] = {
+          runtimePath: buildMeshLodRuntimePath(runtimePath, Number(level)),
+          sizeBytes: metadata.size,
+          triangleCount: meshLodStats[assetId]?.[level]?.triangleCount ?? 0,
+          estimatedTransferMs: estimateTransferMs(metadata.size)
+        };
+        authoredMeshOverrideIds.add(assetId);
+      }
+    })
+  );
+
+  return authoredMeshOverrideIds;
 }
 
 async function writeTextureArtifact(assetId, contents, stagedPaths) {
@@ -560,6 +601,12 @@ export function applyCompressedMeshVariantsToManifest(manifest, stagedManifest) 
   };
 }
 
+export function filterCompressedMeshVariantRecords(records, excludedAssetIds = new Set()) {
+  return Object.fromEntries(
+    Object.entries(records).filter(([assetId]) => !excludedAssetIds.has(assetId))
+  );
+}
+
 function meshVariantSizeBudget(category, lodLevel) {
   return meshLodSizeBudgets[category]?.[lodLevel] ?? 49_152;
 }
@@ -738,8 +785,23 @@ export async function synchronizeSampleAssets() {
       meshLodVariantSources[assetId] = artifacts.lodSourcePaths;
       meshLodStats[assetId] = artifacts.lodStats;
     }
-    const { compressedMeshVariantSources, compressedMeshLodStats } =
-      await copyAuthoredCompressedMeshFixtures(meshLodStats, baseManifest);
+    const authoredMeshOverrideIds = await copyAuthoredMeshFixtures(
+      meshLodStats,
+      meshLodVariantSources,
+      baseManifest
+    );
+    const authoredCompressedMeshFixtures = await copyAuthoredCompressedMeshFixtures(
+      meshLodStats,
+      baseManifest
+    );
+    const compressedMeshVariantSources = filterCompressedMeshVariantRecords(
+      authoredCompressedMeshFixtures.compressedMeshVariantSources,
+      authoredMeshOverrideIds
+    );
+    const compressedMeshLodStats = filterCompressedMeshVariantRecords(
+      authoredCompressedMeshFixtures.compressedMeshLodStats,
+      authoredMeshOverrideIds
+    );
     sourceMeshPaths.push(
       ...Object.values(compressedMeshVariantSources).flatMap((variants) =>
         Object.values(variants)
@@ -1123,20 +1185,26 @@ function createBasaltColumnGeometry() {
 
 function createCanopyTreeGeometry() {
   return mergeParts([
-    transformGeometry(new THREE.CylinderGeometry(0.1, 0.15, 0.95, 6), {
-      position: [0, -0.35, 0]
+    transformGeometry(new THREE.CylinderGeometry(0.08, 0.12, 1.28, 6), {
+      position: [0, -0.18, 0]
     }),
-    transformGeometry(new THREE.CylinderGeometry(0.18, 0.12, 0.24, 6), {
-      position: [0, -0.76, 0]
+    transformGeometry(new THREE.CylinderGeometry(0.16, 0.11, 0.22, 6), {
+      position: [0, -0.72, 0]
     }),
-    transformGeometry(new THREE.ConeGeometry(0.62, 0.72, 7), {
-      position: [0, 0.02, 0]
+    transformGeometry(new THREE.ConeGeometry(0.92, 0.72, 7), {
+      position: [0.02, -0.04, 0]
     }),
-    transformGeometry(new THREE.ConeGeometry(0.48, 0.62, 7), {
-      position: [0.04, 0.34, -0.02]
+    transformGeometry(new THREE.ConeGeometry(0.76, 0.66, 7), {
+      position: [-0.02, 0.24, 0.02]
     }),
-    transformGeometry(new THREE.ConeGeometry(0.32, 0.48, 7), {
-      position: [-0.03, 0.62, 0.04]
+    transformGeometry(new THREE.ConeGeometry(0.58, 0.58, 7), {
+      position: [0.03, 0.5, -0.02]
+    }),
+    transformGeometry(new THREE.ConeGeometry(0.42, 0.46, 7), {
+      position: [-0.02, 0.74, 0.03]
+    }),
+    transformGeometry(new THREE.ConeGeometry(0.24, 0.28, 7), {
+      position: [0, 0.96, 0]
     })
   ]);
 }

@@ -1,7 +1,7 @@
 //! Animation blending — smooth transitions between animations
 
-use serde::{Deserialize, Serialize};
 use crate::keyframe::AnimationClip;
+use serde::{Deserialize, Serialize};
 
 /// Blend two Transform values using linear interpolation
 pub fn blend_transforms(
@@ -61,11 +61,7 @@ pub struct CrossfadeBlend {
 }
 
 impl CrossfadeBlend {
-    pub fn new(
-        from_clip: AnimationClip,
-        to_clip: AnimationClip,
-        duration: f32,
-    ) -> Self {
+    pub fn new(from_clip: AnimationClip, to_clip: AnimationClip, duration: f32) -> Self {
         Self {
             from_clip,
             to_clip,
@@ -244,7 +240,7 @@ impl Blend2D {
         closest.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         if closest.len() == 1 {
-            return closest[0].1.2.sample(time);
+            return closest[0].1 .2.sample(time);
         }
 
         let (_, (x0, y0, clip0)) = &closest[0];

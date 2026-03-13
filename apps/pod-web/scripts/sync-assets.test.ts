@@ -6,7 +6,8 @@ import {
   assertRuntimeBudgetReport,
   buildRuntimeBundleSpec,
   createRasterRingTexturePng,
-  createRuntimeBudgetReport
+  createRuntimeBudgetReport,
+  filterCompressedMeshVariantRecords
 } from "./sync-assets.mjs";
 
 describe("buildRuntimeBundleSpec", () => {
@@ -227,6 +228,27 @@ describe("applyRuntimeVariantsToManifest", () => {
       runtimePath: "/assets/textures/selection-ring.ktx2",
       sizeBytes: 1821,
       sizeBudgetBytes: 2048
+    });
+  });
+});
+
+describe("filterCompressedMeshVariantRecords", () => {
+  test("drops placeholder compressed variants for assets with authored base mesh overrides", () => {
+    const records = {
+      "adventurer-avatar": {
+        "0": "/tmp/adventurer-avatar.meshopt.glb"
+      },
+      "glass-spire": {
+        "0": "/tmp/glass-spire.meshopt.glb"
+      }
+    };
+
+    expect(
+      filterCompressedMeshVariantRecords(records, new Set(["adventurer-avatar"]))
+    ).toEqual({
+      "glass-spire": {
+        "0": "/tmp/glass-spire.meshopt.glb"
+      }
     });
   });
 });

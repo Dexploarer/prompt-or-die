@@ -8,9 +8,9 @@
   "meshes": {
     "adventurer-avatar": {
       "source_path": "artifacts/source-assets/meshes/adventurer-avatar.glb",
-      "staged_id": "sha256:33bbf901e95b4c452e402cdbea7c66c913d09cc6ceb5b0c36ba0c2ed19ca3d29",
+      "staged_id": "sha256:4e5b6d81c4bd85b5d04e7357e3199bfe05e06542d5d72c7ed52466b6aca79690",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_33bbf901e95b4c452e402cdbea7c66c913d09cc6ceb5b0c36ba0c2ed19ca3d29.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_4e5b6d81c4bd85b5d04e7357e3199bfe05e06542d5d72c7ed52466b6aca79690.glb",
       "runtime_path": "/assets/meshes/adventurer-avatar.glb",
       "lod_variants": {
         "1": {
@@ -27,36 +27,13 @@
           "staged_path": "artifacts/staged-assets/gltf/sha256_2dbd5a3e6bd8433191727119caa78def49430c41872cb4bed95d30a1022f6f20.glb",
           "runtime_path": "/assets/meshes/adventurer-avatar.lod2.glb"
         }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.meshopt.glb",
-          "staged_id": "sha256:3a050b8fcdaa589bb3b4d779cb8e72b92d7ad4aa6b3c6b74870ecde9800be7bd",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_3a050b8fcdaa589bb3b4d779cb8e72b92d7ad4aa6b3c6b74870ecde9800be7bd.glb",
-          "runtime_path": "/assets/meshes/adventurer-avatar.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod1.meshopt.glb",
-          "staged_id": "sha256:3bfd19ee2775ca3a459aa3b32374468fd5bea4b9ac7b37af7557d8ec908402be",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_3bfd19ee2775ca3a459aa3b32374468fd5bea4b9ac7b37af7557d8ec908402be.glb",
-          "runtime_path": "/assets/meshes/adventurer-avatar.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-avatar.lod2.meshopt.glb",
-          "staged_id": "sha256:630257c75c15767c6f1a304db706cb600818fc6b647956967a4672940845d7f0",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_630257c75c15767c6f1a304db706cb600818fc6b647956967a4672940845d7f0.glb",
-          "runtime_path": "/assets/meshes/adventurer-avatar.lod2.meshopt.glb"
-        }
       }
     },
     "adventurer-hero": {
       "source_path": "artifacts/source-assets/meshes/adventurer-hero.glb",
-      "staged_id": "sha256:33059e71eeaef989c9f580e360e69a7c8013d40bad630b6ec223412f9deaf31b",
+      "staged_id": "sha256:ef759b6be01d215688a7a330ae6bc48a9664dcbd69e2f8749c6e7e5d7ca0f64c",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_33059e71eeaef989c9f580e360e69a7c8013d40bad630b6ec223412f9deaf31b.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_ef759b6be01d215688a7a330ae6bc48a9664dcbd69e2f8749c6e7e5d7ca0f64c.glb",
       "runtime_path": "/assets/meshes/adventurer-hero.glb",
       "lod_variants": {
         "1": {
@@ -73,36 +50,13 @@
           "staged_path": "artifacts/staged-assets/gltf/sha256_3d4d5d4caf51db7e8f9f5eeabcd2ab76a88f1eeec39a54eafe10377b3862a50c.glb",
           "runtime_path": "/assets/meshes/adventurer-hero.lod2.glb"
         }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-hero.meshopt.glb",
-          "staged_id": "sha256:86a012067f3d4b33087edac701f29582f12786c021bd1eed3d70b08029043afa",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_86a012067f3d4b33087edac701f29582f12786c021bd1eed3d70b08029043afa.glb",
-          "runtime_path": "/assets/meshes/adventurer-hero.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod1.meshopt.glb",
-          "staged_id": "sha256:a777bf6fd19ae0d038b9c730d69c33c4249a72081948e761192782babcdde469",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_a777bf6fd19ae0d038b9c730d69c33c4249a72081948e761192782babcdde469.glb",
-          "runtime_path": "/assets/meshes/adventurer-hero.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/adventurer-hero.lod2.meshopt.glb",
-          "staged_id": "sha256:41f04524e66453c512e0587454d9286e0c453e6a07ac53674634dc2ef1125596",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_41f04524e66453c512e0587454d9286e0c453e6a07ac53674634dc2ef1125596.glb",
-          "runtime_path": "/assets/meshes/adventurer-hero.lod2.meshopt.glb"
-        }
       }
     },
     "basalt-column": {
       "source_path": "artifacts/source-assets/meshes/basalt-column.glb",
-      "staged_id": "sha256:c5f39deebeb3022714f36a603732618c87c070846a33c06abd424fb5c887e373",
+      "staged_id": "sha256:5a5421b63181ad0e65d86b503222c3a22fa267e23e92115e946f7ab41fcec498",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_c5f39deebeb3022714f36a603732618c87c070846a33c06abd424fb5c887e373.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_5a5421b63181ad0e65d86b503222c3a22fa267e23e92115e946f7ab41fcec498.glb",
       "runtime_path": "/assets/meshes/basalt-column.glb",
       "lod_variants": {
         "1": {
@@ -119,82 +73,36 @@
           "staged_path": "artifacts/staged-assets/gltf/sha256_81474e2bc66c80633646cce2343d270a67d31745864c377576dc8336e96f0d05.glb",
           "runtime_path": "/assets/meshes/basalt-column.lod2.glb"
         }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/basalt-column.meshopt.glb",
-          "staged_id": "sha256:b0aebfaf31502cf66c699385543ffd7b81e82a31629b586136751bf9b4d7db8b",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_b0aebfaf31502cf66c699385543ffd7b81e82a31629b586136751bf9b4d7db8b.glb",
-          "runtime_path": "/assets/meshes/basalt-column.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/basalt-column.lod1.meshopt.glb",
-          "staged_id": "sha256:4de2e585e02f548d09f072b43f59c05ef2856d34899ac1b4347311a91285d1e9",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_4de2e585e02f548d09f072b43f59c05ef2856d34899ac1b4347311a91285d1e9.glb",
-          "runtime_path": "/assets/meshes/basalt-column.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/basalt-column.lod2.meshopt.glb",
-          "staged_id": "sha256:5ba2e3a53a211f76f42f4a362da71b9fdf2ccf0eeaf1da990c29034dd1bd47d2",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_5ba2e3a53a211f76f42f4a362da71b9fdf2ccf0eeaf1da990c29034dd1bd47d2.glb",
-          "runtime_path": "/assets/meshes/basalt-column.lod2.meshopt.glb"
-        }
       }
     },
     "canopy-tree": {
       "source_path": "artifacts/source-assets/meshes/canopy-tree.glb",
-      "staged_id": "sha256:c16dbcbdc841adda776a00a06edb76d6ccfc1fc33d04397526a07520c86df460",
+      "staged_id": "sha256:baa95991674f8a7f57e0584a8ea57870c5b7c3ea37b09ea1a35e03cd2f06ec93",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_c16dbcbdc841adda776a00a06edb76d6ccfc1fc33d04397526a07520c86df460.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_baa95991674f8a7f57e0584a8ea57870c5b7c3ea37b09ea1a35e03cd2f06ec93.glb",
       "runtime_path": "/assets/meshes/canopy-tree.glb",
       "lod_variants": {
         "1": {
           "source_path": "artifacts/source-assets/meshes/canopy-tree.lod1.glb",
-          "staged_id": "sha256:922ff1c77a23848650831e831e4609e3a74c5e63b1e441fc1da4b1bf8baf1fdd",
+          "staged_id": "sha256:932d72688196aba92784023e66f548fa373428f4e2b5666f79e08fcf049b33bb",
           "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_922ff1c77a23848650831e831e4609e3a74c5e63b1e441fc1da4b1bf8baf1fdd.glb",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_932d72688196aba92784023e66f548fa373428f4e2b5666f79e08fcf049b33bb.glb",
           "runtime_path": "/assets/meshes/canopy-tree.lod1.glb"
         },
         "2": {
           "source_path": "artifacts/source-assets/meshes/canopy-tree.lod2.glb",
-          "staged_id": "sha256:432926eebd2a9bacc881c71d792b7cc15cecf132dccead1257c84b8869d2cc6d",
+          "staged_id": "sha256:88d7fb9bbc54dbe491d4474144372d3bc5a7503999bc34ada08fc1559de0f4fd",
           "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_432926eebd2a9bacc881c71d792b7cc15cecf132dccead1257c84b8869d2cc6d.glb",
+          "staged_path": "artifacts/staged-assets/gltf/sha256_88d7fb9bbc54dbe491d4474144372d3bc5a7503999bc34ada08fc1559de0f4fd.glb",
           "runtime_path": "/assets/meshes/canopy-tree.lod2.glb"
-        }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/canopy-tree.meshopt.glb",
-          "staged_id": "sha256:4ea7453a75f6a2e9290920282618c4be2cc738175e2327efbeedaab0f9eaa088",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_4ea7453a75f6a2e9290920282618c4be2cc738175e2327efbeedaab0f9eaa088.glb",
-          "runtime_path": "/assets/meshes/canopy-tree.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod1.meshopt.glb",
-          "staged_id": "sha256:c332df56ff1a9329a3bcb9ab0dfc4e35016e22d7c4881bc578a828d818247d7c",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_c332df56ff1a9329a3bcb9ab0dfc4e35016e22d7c4881bc578a828d818247d7c.glb",
-          "runtime_path": "/assets/meshes/canopy-tree.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/canopy-tree.lod2.meshopt.glb",
-          "staged_id": "sha256:7d52ffffc611e4088b46a022f0e6c526a2c24ab0e0fcc286ccde5ab596a1196f",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_7d52ffffc611e4088b46a022f0e6c526a2c24ab0e0fcc286ccde5ab596a1196f.glb",
-          "runtime_path": "/assets/meshes/canopy-tree.lod2.meshopt.glb"
         }
       }
     },
     "glass-spire": {
       "source_path": "artifacts/source-assets/meshes/glass-spire.glb",
-      "staged_id": "sha256:2b9262ac2f6124e1e91c0456bffa33cda8e5d700df8abd66d2337b3e3438e290",
+      "staged_id": "sha256:1c8c43466e28084dd6da5c53d28b849652a1b9b4b558dd059402306b2a1ab051",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_2b9262ac2f6124e1e91c0456bffa33cda8e5d700df8abd66d2337b3e3438e290.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_1c8c43466e28084dd6da5c53d28b849652a1b9b4b558dd059402306b2a1ab051.glb",
       "runtime_path": "/assets/meshes/glass-spire.glb",
       "lod_variants": {
         "1": {
@@ -210,29 +118,6 @@
           "staged_format": "gltf",
           "staged_path": "artifacts/staged-assets/gltf/sha256_ff41f19ab1788924942e0be08bb92275a513dd0ab4a940bcf1b41a9478b60027.glb",
           "runtime_path": "/assets/meshes/glass-spire.lod2.glb"
-        }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/glass-spire.meshopt.glb",
-          "staged_id": "sha256:6b32f2f208f4dd36917e7b014c06fed73a1185494be17f845407cc1cd05f8b20",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_6b32f2f208f4dd36917e7b014c06fed73a1185494be17f845407cc1cd05f8b20.glb",
-          "runtime_path": "/assets/meshes/glass-spire.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/glass-spire.lod1.meshopt.glb",
-          "staged_id": "sha256:8ad26b289036e32bcb0e946715fbe5dfc9582c4da0ec823784373fcce77e0f84",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_8ad26b289036e32bcb0e946715fbe5dfc9582c4da0ec823784373fcce77e0f84.glb",
-          "runtime_path": "/assets/meshes/glass-spire.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/glass-spire.lod2.meshopt.glb",
-          "staged_id": "sha256:43654d540725d2e80e31408347e43cb396c0860639eae56706551522f80944a1",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_43654d540725d2e80e31408347e43cb396c0860639eae56706551522f80944a1.glb",
-          "runtime_path": "/assets/meshes/glass-spire.lod2.meshopt.glb"
         }
       }
     },
@@ -330,9 +215,9 @@
     },
     "supply-crate": {
       "source_path": "artifacts/source-assets/meshes/supply-crate.glb",
-      "staged_id": "sha256:586746acd4c1286314a40a1fd7978b7075579a374a89e4d55f2e0416f83c9b7b",
+      "staged_id": "sha256:265fa51aae47b3b9ed773b2acf74b84597ed5aa1107391151739e3f75869031f",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_586746acd4c1286314a40a1fd7978b7075579a374a89e4d55f2e0416f83c9b7b.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_265fa51aae47b3b9ed773b2acf74b84597ed5aa1107391151739e3f75869031f.glb",
       "runtime_path": "/assets/meshes/supply-crate.glb",
       "lod_variants": {
         "1": {
@@ -349,36 +234,13 @@
           "staged_path": "artifacts/staged-assets/gltf/sha256_7f16f827884abfd5e387eb9aac5680c550945a3163a12968d29851f70063da01.glb",
           "runtime_path": "/assets/meshes/supply-crate.lod2.glb"
         }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/supply-crate.meshopt.glb",
-          "staged_id": "sha256:bdd0b4b4f7f9d58b20b57526593d6bd836b19eeb26077142746a682471045aee",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_bdd0b4b4f7f9d58b20b57526593d6bd836b19eeb26077142746a682471045aee.glb",
-          "runtime_path": "/assets/meshes/supply-crate.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/supply-crate.lod1.meshopt.glb",
-          "staged_id": "sha256:bfc0400b702fb01e6cdccd17d319baaae2bfa283977e959024b1f3d78d02aa13",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_bfc0400b702fb01e6cdccd17d319baaae2bfa283977e959024b1f3d78d02aa13.glb",
-          "runtime_path": "/assets/meshes/supply-crate.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/supply-crate.lod2.meshopt.glb",
-          "staged_id": "sha256:7602af7ff945e2826c62f473d1831ba96702e9fbefce6b77090412485aaf3c92",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_7602af7ff945e2826c62f473d1831ba96702e9fbefce6b77090412485aaf3c92.glb",
-          "runtime_path": "/assets/meshes/supply-crate.lod2.meshopt.glb"
-        }
       }
     },
     "weathered-boulder": {
       "source_path": "artifacts/source-assets/meshes/weathered-boulder.glb",
-      "staged_id": "sha256:3f38dd6fb2f65a72d039757539b36fba352c470a6a56bc17d31e662308b9d9b6",
+      "staged_id": "sha256:25f44ce1af9b6e036c193b4b246a87ca5114534c4757c06ba8e5ba484b4621b4",
       "staged_format": "gltf",
-      "staged_path": "artifacts/staged-assets/gltf/sha256_3f38dd6fb2f65a72d039757539b36fba352c470a6a56bc17d31e662308b9d9b6.glb",
+      "staged_path": "artifacts/staged-assets/gltf/sha256_25f44ce1af9b6e036c193b4b246a87ca5114534c4757c06ba8e5ba484b4621b4.glb",
       "runtime_path": "/assets/meshes/weathered-boulder.glb",
       "lod_variants": {
         "1": {
@@ -394,29 +256,6 @@
           "staged_format": "gltf",
           "staged_path": "artifacts/staged-assets/gltf/sha256_21f39ddf5ab12e8efffdf7d313e78cd4130c33e14900a8d55fc655147473ed0b.glb",
           "runtime_path": "/assets/meshes/weathered-boulder.lod2.glb"
-        }
-      },
-      "compressed_lod_variants": {
-        "0": {
-          "source_path": "artifacts/source-assets/meshes/weathered-boulder.meshopt.glb",
-          "staged_id": "sha256:a80422e42377726660d13a9981cd15e743159513ffbf8e2225cddf6abf969caf",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_a80422e42377726660d13a9981cd15e743159513ffbf8e2225cddf6abf969caf.glb",
-          "runtime_path": "/assets/meshes/weathered-boulder.meshopt.glb"
-        },
-        "1": {
-          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod1.meshopt.glb",
-          "staged_id": "sha256:0e9e442cd1891266df661dc1fd56dce7f7b1e4d03672a8d24874431c5771e657",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_0e9e442cd1891266df661dc1fd56dce7f7b1e4d03672a8d24874431c5771e657.glb",
-          "runtime_path": "/assets/meshes/weathered-boulder.lod1.meshopt.glb"
-        },
-        "2": {
-          "source_path": "artifacts/source-assets/meshes/weathered-boulder.lod2.meshopt.glb",
-          "staged_id": "sha256:5b5fb346b0a1f6e2fedba3befa94d08818b1a8310b7b3787de9993bd0c5a71b7",
-          "staged_format": "gltf",
-          "staged_path": "artifacts/staged-assets/gltf/sha256_5b5fb346b0a1f6e2fedba3befa94d08818b1a8310b7b3787de9993bd0c5a71b7.glb",
-          "runtime_path": "/assets/meshes/weathered-boulder.lod2.meshopt.glb"
         }
       }
     }

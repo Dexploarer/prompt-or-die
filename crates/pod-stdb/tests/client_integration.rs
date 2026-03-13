@@ -221,6 +221,101 @@ fn connect_generated_mode_requires_runtime_bindings() {
 }
 
 #[test]
+fn generated_mode_runtime_adapter_processes_topology_rows() {
+    let mut client = StdbClient::new(StdbClientConfig {
+        db_name: "deadman-shadow".into(),
+        connection_mode: StdbConnectionMode::Generated,
+        ..StdbClientConfig::default()
+    });
+    let connect_calls = std::rc::Rc::new(std::cell::RefCell::new(0usize));
+    let subscriptions = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+    let connect_calls_for_bridge = connect_calls.clone();
+    let subscriptions_for_bridge = subscriptions.clone();
+    let (bridge, handle) = GeneratedRuntimeBridge::new(
+        move |_config, handle| {
+            *connect_calls_for_bridge.borrow_mut() += 1;
+            handle.connected(vec![1, 2, 3, 4], "tok-generated".into());
+            Ok(())
+        },
+        move |queries, handle| {
+            subscriptions_for_bridge.borrow_mut().push(queries.to_vec());
+            handle.subscription_applied();
+            Ok(())
+        },
+        || {},
+    );
+    client.set_generated_runtime_bridge(bridge);
+
+    client.connect().expect("generated runtime should connect");
+    assert_eq!(*connect_calls.borrow(), 1);
+    client.frame_tick();
+    assert!(client.is_connected());
+
+    client
+        .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
+        .expect("subscription should be routed to runtime");
+    assert_eq!(
+        *subscriptions.borrow(),
+        vec![vec!["SELECT * FROM remote_topology_document".to_string()]]
+    );
+
+    let document = pod_core::RemoteTopologyBundle {
+        version: pod_core::RuntimeContractVersion::V1,
+        scenario_id: "deadman-neural-cup".into(),
+        profile_id: "generated-test".into(),
+        generated_at_unix_ms: 99,
+        tournament: pod_core::WorldTournamentDefinition::new(
+            "deadman-neural-cup",
+            "Deadman Neural Cup",
+        ),
+        teams: vec![pod_core::AgentTeamDefinition::new(
+            "gloam-mesh",
+            "Gloam Mesh",
+            "deadman-shadow",
+        )],
+        worlds: vec![{
+            let mut world =
+                pod_core::WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+            world.role = pod_core::WorldRealityRole::Shadow;
+            world.active_team_ids = vec!["gloam-mesh".into()];
+            world
+        }],
+        links: vec![],
+        world_quest_bindings: vec![pod_core::WorldQuestBinding {
+            world_id: "deadman-shadow".into(),
+            quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+        }],
+        quest_graphs: vec![],
+        applied_world_states: vec![],
+        evaluation: pod_core::ScenarioEvaluationSummary {
+            controller_mix: vec![],
+            worlds: vec![],
+        },
+    }
+    .to_toon_document();
+
+    handle.remote_topology_document_row(
+        11,
+        99,
+        "deadman-neural-cup",
+        "generated-test",
+        document.clone(),
+    );
+    client.frame_tick();
+    assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));
+
+    let events = client.drain_events().collect::<Vec<_>>();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StdbEvent::SubscriptionApplied)));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        StdbEvent::RemoteTopologyDocumentReceived { document: current }
+            if current == &document
+    )));
+}
+
+#[test]
 fn disconnect_from_disconnected_is_noop() {
     let mut client = StdbClient::new(StdbClientConfig::default());
     // Should not panic
@@ -677,9 +772,9 @@ fn action_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn subscription_all_tables_has_28_queries() {
+fn subscription_all_tables_has_29_queries() {
     let queries = Subscriptions::all_tables();
-    assert_eq!(queries.len(), 28);
+    assert_eq!(queries.len(), 29);
 }
 
 #[test]
@@ -728,6 +823,7 @@ fn subscription_all_tables_covers_key_tables() {
         "combat_event",
         "speech_event",
         "world_event",
+        "remote_topology_document",
         "match_queue",
         "game_match",
         "match_participant",
@@ -759,6 +855,7 @@ fn subscription_player_agent_includes_core_tables() {
     assert!(all_text.contains("entity"));
     assert!(all_text.contains("transform"));
     assert!(all_text.contains("health"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
@@ -770,6 +867,7 @@ fn subscription_spectator_includes_events() {
     assert!(all_text.contains("world_event"));
     assert!(all_text.contains("world_state"));
     assert!(all_text.contains("entity"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
@@ -781,6 +879,7 @@ fn subscription_editor_includes_config_tables() {
     assert!(all_text.contains("movement"));
     assert!(all_text.contains("script"));
     assert!(all_text.contains("collider"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
@@ -830,6 +929,14 @@ fn stdb_error_display_subscription_error() {
 }
 
 #[test]
+fn stdb_error_display_document_error() {
+    let err = StdbError::DocumentError("bad toon".into());
+    let msg = format!("{err}");
+    assert!(msg.contains("Document error"));
+    assert!(msg.contains("bad toon"));
+}
+
+#[test]
 fn stdb_error_display_invalid_state() {
     let err = StdbError::InvalidState("already connected".into());
     let msg = format!("{err}");
@@ -858,7 +965,7 @@ fn stdb_error_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn stdb_event_all_18_variants_constructible() {
+fn stdb_event_all_21_variants_constructible() {
     // Verify all StdbEvent variants can be created without panicking.
     // This ensures the public API surface matches our expectations.
     let events: Vec<StdbEvent> = vec![
@@ -936,6 +1043,19 @@ fn stdb_event_all_18_variants_constructible() {
             agent_entity_id: 5,
             document: "{\"distance\":128.0}".into(),
         },
+        StdbEvent::FocusedEntityDebugSummaryReceived {
+            agent_entity_id: 5,
+            document: "{\"focus\":\"hero\"}".into(),
+        },
+        StdbEvent::RemoteTopologyDocumentReceived {
+            document: "{\"document_type\":\"remote_topology_bundle\"}".into(),
+        },
+        StdbEvent::RemoteTopologyUpdated {
+            scenario_id: "deadman-neural-cup".into(),
+            resolved_world_id: Some("deadman-prime".into()),
+            world_count: 2,
+            team_count: 4,
+        },
         // Reducer acknowledgments
         StdbEvent::ReducerCallSuccess {
             reducer_name: "create_world".into(),
@@ -946,7 +1066,7 @@ fn stdb_event_all_18_variants_constructible() {
         },
     ];
 
-    assert_eq!(events.len(), 18);
+    assert_eq!(events.len(), 21);
 }
 
 #[test]

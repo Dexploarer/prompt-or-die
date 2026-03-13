@@ -14,6 +14,7 @@ members = [
     "crates/pod-assets",
     "crates/pod-editor",
     "apps/pod-desktop",
+    "apps/pod-headless",
     "apps/pod-server",
 ]
 

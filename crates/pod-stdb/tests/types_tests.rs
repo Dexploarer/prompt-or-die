@@ -31,7 +31,10 @@ fn agent_type_all_variants_distinct() {
     // All variants are distinct
     for i in 0..variants.len() {
         for j in (i + 1)..variants.len() {
-            assert_ne!(variants[i], variants[j], "Variants at index {i} and {j} should differ");
+            assert_ne!(
+                variants[i], variants[j],
+                "Variants at index {i} and {j} should differ"
+            );
         }
     }
 }
@@ -108,7 +111,10 @@ fn action_kind_all_variants() {
     // All distinct
     for i in 0..variants.len() {
         for j in (i + 1)..variants.len() {
-            assert_ne!(variants[i], variants[j], "ActionKind at index {i} and {j} should differ");
+            assert_ne!(
+                variants[i], variants[j],
+                "ActionKind at index {i} and {j} should differ"
+            );
         }
     }
 }
@@ -186,6 +192,12 @@ fn world_event_kind_all_variants() {
 
 #[test]
 fn world_event_kind_debug() {
-    assert_eq!(format!("{:?}", WorldEventKind::EntitySpawned), "EntitySpawned");
-    assert_eq!(format!("{:?}", WorldEventKind::TickAdvanced), "TickAdvanced");
+    assert_eq!(
+        format!("{:?}", WorldEventKind::EntitySpawned),
+        "EntitySpawned"
+    );
+    assert_eq!(
+        format!("{:?}", WorldEventKind::TickAdvanced),
+        "TickAdvanced"
+    );
 }

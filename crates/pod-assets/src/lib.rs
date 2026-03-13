@@ -355,10 +355,19 @@ impl From<std::io::Error> for AssetImportError {
 #[derive(Debug)]
 pub enum RuntimeBundleError {
     InvalidSourcePath(PathBuf),
-    MissingImport { asset_id: String, source_path: PathBuf },
+    MissingImport {
+        asset_id: String,
+        source_path: PathBuf,
+    },
     InvalidRuntimePath(String),
-    UnsupportedCompressedTextureFormat { asset_id: String, format: AssetFormat },
-    UnsupportedCompressedMeshFormat { asset_id: String, format: AssetFormat },
+    UnsupportedCompressedTextureFormat {
+        asset_id: String,
+        format: AssetFormat,
+    },
+    UnsupportedCompressedMeshFormat {
+        asset_id: String,
+        format: AssetFormat,
+    },
     DuplicateRuntimePath {
         runtime_path: String,
         first_asset_id: String,
@@ -2992,7 +3001,10 @@ fn build_runtime_bundle_sprite_records(
                     source_path: display_path_relative_to(base_dir, &compressed_import.source_path),
                     staged_id: compressed_import.id.to_string(),
                     staged_format: compressed_import.format.to_string(),
-                    staged_path: display_path_relative_to(base_dir, &compressed_import.imported_path),
+                    staged_path: display_path_relative_to(
+                        base_dir,
+                        &compressed_import.imported_path,
+                    ),
                     runtime_path: compressed_variant.runtime_path.clone(),
                 });
             }
@@ -3008,8 +3020,13 @@ fn build_runtime_bundle_record(
     imports_by_source: &HashMap<PathBuf, &AssetImport>,
     base_dir: &Path,
 ) -> Result<RuntimeBundleAssetRecord, RuntimeBundleError> {
-    let variant =
-        build_runtime_bundle_variant_record(asset_id, source_path, runtime_path, imports_by_source, base_dir)?;
+    let variant = build_runtime_bundle_variant_record(
+        asset_id,
+        source_path,
+        runtime_path,
+        imports_by_source,
+        base_dir,
+    )?;
     Ok(RuntimeBundleAssetRecord {
         source_path: variant.source_path,
         staged_id: variant.staged_id,
@@ -3149,8 +3166,11 @@ fn materialize_runtime_bundle_records(
 ) -> Result<(), RuntimeBundleError> {
     for record in records.values() {
         let staged_path = base_dir.join(&record.staged_path);
-        let runtime_path =
-            runtime_bundle_output_path(base_dir, &output_roots.runtime_public, &record.runtime_path)?;
+        let runtime_path = runtime_bundle_output_path(
+            base_dir,
+            &output_roots.runtime_public,
+            &record.runtime_path,
+        )?;
         if let Some(parent) = runtime_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -3208,7 +3228,9 @@ fn runtime_bundle_output_path(
         .ok_or_else(|| RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()))?;
     let runtime_path = runtime_path.trim();
     if runtime_path.is_empty() {
-        return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()));
+        return Err(RuntimeBundleError::InvalidRuntimePath(
+            runtime_path.to_string(),
+        ));
     }
 
     let mut relative_path = PathBuf::new();
@@ -3224,12 +3246,18 @@ fn runtime_bundle_output_path(
                 skipped_public_prefix = true;
                 relative_path.push(value);
             }
-            _ => return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string())),
+            _ => {
+                return Err(RuntimeBundleError::InvalidRuntimePath(
+                    runtime_path.to_string(),
+                ))
+            }
         }
     }
 
     if relative_path.as_os_str().is_empty() {
-        return Err(RuntimeBundleError::InvalidRuntimePath(runtime_path.to_string()));
+        return Err(RuntimeBundleError::InvalidRuntimePath(
+            runtime_path.to_string(),
+        ));
     }
 
     Ok(runtime_public_root.join(relative_path))
@@ -3775,10 +3803,7 @@ mod tests {
 
             assert_eq!(import.format, AssetFormat::Gltf);
             assert!(import.imported_path.exists());
-            assert!(import
-                .imported_path
-                .to_string_lossy()
-                .contains("/gltf/"));
+            assert!(import.imported_path.to_string_lossy().contains("/gltf/"));
             assert!(import
                 .imported_path
                 .to_string_lossy()
@@ -3848,7 +3873,8 @@ mod tests {
         let mesh_compressed_import =
             import_asset(&mut cache, &mesh_compressed_source, &output_root).unwrap();
         let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
-        let sprite_ktx2_import = import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
+        let sprite_ktx2_import =
+            import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
 
         let manifest = build_runtime_bundle_manifest(
             &RuntimeBundleSpec {
@@ -4160,7 +4186,8 @@ mod tests {
         let mesh_compressed_import =
             import_asset(&mut cache, &mesh_compressed_source, &output_root).unwrap();
         let sprite_import = import_asset(&mut cache, &sprite_source, &output_root).unwrap();
-        let sprite_ktx2_import = import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
+        let sprite_ktx2_import =
+            import_asset(&mut cache, &sprite_ktx2_source, &output_root).unwrap();
 
         let manifest = build_runtime_bundle_manifest(
             &RuntimeBundleSpec {

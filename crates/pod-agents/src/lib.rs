@@ -19,8 +19,9 @@
 //!
 //! 3. **NeuralAgent** — Neural network policy agents with training support:
 //!    - Pluggable PolicyNetwork trait for ONNX/custom models
+//!    - Versioned runtime schema for observation/action compatibility
 //!    - Observation encoding: 32-element feature tensor from Observation
-//!    - Action decoding: action index → Action enum
+//!    - Action decoding: action index -> Action enum
 //!    - Experience buffer for offline training
 //!    - Both discrete and continuous control support
 //!
@@ -39,16 +40,16 @@
 #![allow(unused_imports)]
 
 mod llm_agent;
-mod scripted_agent;
 mod neural_agent;
 pub mod onnx_network;
+mod scripted_agent;
 pub mod utility_ai;
 
 // Phase 2: Enhanced Agent SDK modules
-pub mod llm_provider;
-pub mod prompt_template;
 pub mod action_parser;
 pub mod conversation_memory;
+pub mod llm_provider;
+pub mod prompt_template;
 
 // Decision logging and replay
 pub mod decision_log;
@@ -56,39 +57,39 @@ pub mod decision_log;
 // Phase 2: Hybrid agent (Task 2.11)
 pub mod hybrid_agent;
 
-pub use llm_agent::{LlmAgent, LlmAgentConfig, DecisionTrace};
-pub use scripted_agent::{
-    ScriptedAgent, BehaviorTree, BehaviorNode, BehaviorStatus, Blackboard,
-    FiniteStateMachine, FsmState, FsmTransition,
-    patrol, chase_target, chase_nearest_hostile, attack_nearest, flee_from, guard, wander,
-    patrol_and_chase_on_threat, guard_with_defense,
-};
+pub use llm_agent::{DecisionTrace, LlmAgent, LlmAgentConfig};
 pub use neural_agent::{
-    NeuralAgent, ActionSelector, PolicyNetwork, Experience,
-    RandomActionSelector, GreedyActionSelector, UniformPolicyNetwork,
+    ActionSelector, Experience, GreedyActionSelector, NeuralActionSchemaEntry, NeuralAgent,
+    NeuralCompatibilityStatus, NeuralInferenceStatus, NeuralModelMetadata,
+    NeuralPolicyRuntimeStatus, NeuralRuntimeSchema, PolicyNetwork, RandomActionSelector,
+    UniformPolicyNetwork, NEURAL_ACTION_COUNT, NEURAL_ACTION_SCHEMA, NEURAL_FEATURE_COUNT,
+    NEURAL_INTERFACE_VERSION,
+};
+pub use scripted_agent::{
+    attack_nearest, chase_nearest_hostile, chase_target, flee_from, guard, guard_with_defense,
+    patrol, patrol_and_chase_on_threat, wander, BehaviorNode, BehaviorStatus, BehaviorTree,
+    Blackboard, FiniteStateMachine, FsmState, FsmTransition, ScriptedAgent,
 };
 
 // Phase 2 re-exports
+pub use action_parser::{
+    ActionParseError, ActionParseResult, ActionParser, FallbackParser, JsonActionParser,
+    KeyValueParser, ToonActionParser,
+};
+pub use conversation_memory::{ConversationMemory, MemoryConfig, MemoryEntry};
 pub use llm_provider::{
-    LlmProvider, LlmError, CompletionRequest, CompletionResponse, TokenUsage,
-    TokenBudget, OpenAiProvider, MockProvider,
+    CompletionRequest, CompletionResponse, LlmError, LlmProvider, MockProvider, OpenAiProvider,
+    TokenBudget, TokenUsage,
 };
 pub use prompt_template::{
-    PromptTemplate, CompactTemplate, DetailedTemplate, TacticalTemplate,
-    JsonTemplate, ToonTemplate, TemplateRegistry,
-};
-pub use action_parser::{
-    ActionParser, ActionParseResult, ActionParseError,
-    JsonActionParser, KeyValueParser, ToonActionParser, FallbackParser,
-};
-pub use conversation_memory::{
-    ConversationMemory, MemoryEntry, MemoryConfig,
+    CompactTemplate, DetailedTemplate, JsonTemplate, PromptTemplate, TacticalTemplate,
+    TemplateRegistry, ToonTemplate,
 };
 
 // Phase 2: Hybrid agent re-exports (Task 2.11)
 pub use hybrid_agent::{
-    HybridAgent, HybridAgentConfig, StrategyDirective, StrategyTrigger,
-    aggressive_hybrid, defensive_hybrid,
+    aggressive_hybrid, defensive_hybrid, HybridAgent, HybridAgentConfig, StrategyDirective,
+    StrategyTrigger,
 };
 
 /// Initialize the pod-agents module

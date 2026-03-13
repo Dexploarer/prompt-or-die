@@ -127,6 +127,56 @@ The intended responsibilities are:
 - `pod-editor`: authoring UX
 - `pod-assets`: import and generation pipeline
 
+## Multi-world direction
+
+Prompt or Die should support more than one authoritative world at a time.
+The intended shape is:
+
+- one authoritative simulation per world or shard
+- first-class team definitions for developer-controlled squads and neural swarms
+- bounded cross-world links that turn outcomes in one reality into authored
+  effects in another
+- headless tournament and evaluation runners that sit above the worlds instead
+  of depending on the browser client
+
+The first concrete app surface for that direction is now
+[`apps/pod-headless`](/Users/home/Desktop/prompt-or-die/apps/pod-headless),
+which runs deterministic multi-world scenarios on top of `pod-core`,
+aggregates authoritative reward telemetry, and projects cross-world effects
+without depending on `apps/pod-web`.
+
+That runner now also emits a shared `RemoteTopologyBundle` contract from
+[`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs),
+and `pod-stdb` plus `pod-net::client_stdb` now consume that same
+world/team/link/quest/evaluation payload directly instead of reconstructing it
+from app-local report JSON. The newest path for that consumption is a
+generic authority-document ingress route in
+[`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs):
+`remote_topology_bundle`, telemetry, tool-call, rollup, and focused-summary
+TOON documents can now be dispatched into the shared client cache/event path,
+and
+[`crates/pod-net/src/client_stdb.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-net/src/client_stdb.rs)
+forwards that exact source document through the existing debug-document stream
+while still rebuilding snapshot metadata from the decoded topology.
+
+That topology now also has a real authority publication surface in
+[`crates/pod-stdb/src/events.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/events.rs)
+and
+[`crates/pod-stdb/src/reducers.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/reducers.rs):
+`remote_topology_document` rows plus the `publish_remote_topology_document`
+reducer let authority-side tooling publish `RemoteTopologyBundle` TOON payloads
+through SpacetimeDB itself, while the client wrappers ingest those rows with
+stale-row protection. [`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs)
+now also exposes a reusable `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
+path, so generated mode can consume those same rows through `frame_tick()`
+without bypassing the normal client event path or depending on per-test fake
+runtime implementations.
+
+The current contract surface for that direction lives in
+[`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
+and is documented in
+[`docs/multi-world-agent-topology.md`](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
 ## Current extension seam map
 
 The repo already has a few extension seams that are stronger than the rest of

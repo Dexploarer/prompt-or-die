@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 8 - CI and Regression Gates
-**Current Stage**: Implementation
-**Last Checkpoint**: `b790e13b`
+**Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
+**Current Stage**: In Progress
+**Last Checkpoint**: `e21bc6fc`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -123,7 +123,7 @@
 - [apps/pod-web/src/hud.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/hud.ts)
 
 **Known Issues**:
-- The transport counters are now inspectable and regression-tested, but they still live in targeted tests and debug summaries rather than a dedicated moat benchmark lane.
+- The moat suite now has published shard-target transport byte and queue-depth baselines, but it still lacks committed historical shard-target snapshots for transport/browser drift review across monthly runs.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -135,7 +135,105 @@
 - [x] Identified the remaining missing lifecycle/registration hooks that still force integrators into app bootstrap code
 
 **Next Action**:
-- Start Phase 8 by promoting the current asset-sync and benchmark checks into routine local/CI command surfaces.
+- Publish committed shard-target moat snapshots for `transportMeasurements` and `browserRouteMeasurements` so drift can be reviewed historically instead of only through pass/fail gates.
 
-## Phase 8: CI and Regression Gates 🔄
+## Phase 8: CI and Regression Gates ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Added `apps/pod-web/scripts/verify-generated-assets.ts` plus `bun run verify:assets`, so local/CI validation now reruns `sync:assets` and fails if the committed generated source/staged/runtime asset trees drift.
+- [x] Extended the shared render-route gate surface with minimum completed-asset-load counts plus average/slowest geometry and sprite load ceilings in `apps/pod-web/src/render-runtime-gates.ts`, and enforced them in both `apps/pod-web/tests/worker-input.e2e.ts` and `apps/pod-web/scripts/measure-render-routes.ts`.
+- [x] Added `bun run measure:render-routes:check`, which records `artifacts/render-route-measurements.json` and fails when shared frame-quality, worker-chatter, or asset-load thresholds regress.
+- [x] Promoted both new gates into standard command surfaces by wiring them into `.github/workflows/ci.yml` and `scripts/run_moat_benchmarks.ts`, and CI now uploads `apps/pod-web/artifacts/render-route-measurements.json` plus `apps/pod-web/artifacts/staged-assets/pod-runtime-budget-report.json`.
+
+**Key Files**:
+- [apps/pod-web/scripts/verify-generated-assets.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/scripts/verify-generated-assets.ts)
+- [apps/pod-web/scripts/measure-render-routes.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/scripts/measure-render-routes.ts)
+- [apps/pod-web/tests/worker-input.e2e.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/tests/worker-input.e2e.ts)
+- [apps/pod-web/src/render-runtime-gates.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/render-runtime-gates.ts)
+- [.github/workflows/ci.yml](/Users/home/Desktop/prompt-or-die/.github/workflows/ci.yml)
+- [scripts/run_moat_benchmarks.ts](/Users/home/Desktop/prompt-or-die/scripts/run_moat_benchmarks.ts)
+
+**Known Issues**:
+- The browser asset/render-route gates and transport baselines are now routine, but the repo still lacks committed shard-target benchmark snapshots for drift review across monthly runs.
+
+## Phase 9: Agent Runtime Audit and Contract Alignment ✅
+**Completed**: 2026-03-12
+**Summary**: Audited the live agent source of truth in `pod-core` and `pod-agents`, corrected the public agent integration contract to match the actual runtime surface, and published a grounded agent runtime audit that identifies the neural stack as the current weak point.
+
+**Key Files**:
+- [docs/agent-integration-contract.md](/Users/home/Desktop/prompt-or-die/docs/agent-integration-contract.md)
+- [docs/agent-runtime-audit.md](/Users/home/Desktop/prompt-or-die/docs/agent-runtime-audit.md)
+- [crates/pod-core/src/agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/agent.rs)
+- [crates/pod-core/src/tick.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/tick.rs)
+- [crates/pod-agents/src/neural_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/neural_agent.rs)
+- [crates/pod-agents/src/llm_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/llm_agent.rs)
+- [crates/pod-agents/src/hybrid_agent.rs](/Users/home/Desktop/prompt-or-die/crates/pod-agents/src/hybrid_agent.rs)
+
+## Phase 10: Neural Runtime Hardening ✅
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Extract the neural feature schema into an explicit versioned contract shared by encoder, ONNX loader, tests, and docs
+- [x] Extract the neural action schema into an explicit registry instead of hard-coded positional assumptions
+- [x] Add model metadata and compatibility checks so mismatched feature/action layouts fail loudly
+- [x] Add deterministic tests for schema mismatch and inference fallback behavior
+- [x] Surface neural-runtime compatibility and fallback status through introspection and telemetry
+
+**Next Action**:
+- Start the reward/replay contract by moving training outcomes away from caller-local `record_experience()` calls and toward authoritative action-outcome attribution.
+
+**Known Issues**:
+- The neural path is functional, but still mostly a thin inference scaffold compared with the LLM and hybrid agents.
+- Reward attribution, dataset export discipline, and scenario evaluation still depend on follow-up phases and are not yet first-class runtime contracts.
+
+## Phase 11: Reward, Experience, and Replay Dataset Contract ⏳
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Define authoritative reward/outcome attribution primitives instead of relying on caller-local `record_experience()` usage
+- [x] Derive replay training rows from action outcomes, encounter transitions, and telemetry windows with stable semantics
+- [x] Added reward-aware dataset export in `apps/pod-headless` via `--dataset-output`, emitting replay-derived training rows enriched with runtime profile metadata and authoritative reward reasons
+- [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
+
+**Next Action**:
+- Thread reward/evaluation outputs into the broader remote topology and parity harnesses now that admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner.
+
+**Discovered Follow-up**:
+- The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
+- The first-pass topology contracts for that direction now live in [crates/pod-core/src/contract.rs](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs) and are documented in [docs/multi-world-agent-topology.md](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
+## Phase 14: Multi-World Teams and Reality Links ✅
+**Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
+
+**Progress**:
+- [x] Added first-pass topology contracts in `pod-core` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`
+- [x] Documented the intended Deadman-style / neural-swarm architecture in `docs/multi-world-agent-topology.md`
+- [x] Added `apps/pod-headless`, a deterministic multi-world runner that executes the built-in `deadman-neural-cup` scenario, emits a JSON report, and projects cross-world effects from authoritative reward telemetry
+- [x] Added deterministic team admission in `apps/pod-headless`, so dataset rows and standings now carry admitted team identity per world instead of world-level aggregates only
+- [x] Added applied target-world state aggregation in `apps/pod-headless`, so cross-world effects are rolled into per-world team/resource/faction/objective state summaries instead of only link-local projections
+- [x] Added canonical quest graph definitions plus per-world quest-line state reporting in `apps/pod-headless`, so alternate-reality `ObjectiveStateShift` effects now resolve into explicit quest progression with start/current/completed/pending stages
+- [x] Added shared `RemoteTopologyBundle` contracts in `pod-core` for world quest bindings, applied world state, and scenario evaluation, so remote surfaces have one portable topology artifact instead of app-local JSON shapes
+- [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner can emit that portable remote-topology artifact alongside the existing report and dataset outputs
+- [x] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`, including `pod-stdb` cache resolution helpers plus `pod-net::client_stdb` snapshot metadata refresh on `RemoteTopologyUpdated`
+- [x] Added replay/evaluation coverage for linked-world tournaments and neural swarms across both `apps/pod-headless` and the public `pod-net::SpacetimeDBClient` topology surface
+- [x] Added a TOON-document ingest path for `RemoteTopologyBundle` in `pod-stdb`, preserving the source document via `StdbEvent::RemoteTopologyDocumentReceived` and decoding the authority-style `remote_topology_bundle` payload into the existing cache resolution path
+- [x] Added `pod-net::SpacetimeDBClient::apply_remote_topology_document(...)`, forwarded remote topology source documents through `ServerMessage::DebugDocument`, and covered the document-fed path with deterministic unit/integration tests
+- [x] Generalized the authority-document ingress in `pod-stdb` with `receive_debug_document(...)`, so topology, tool-call, rollup, focused-summary, and versioned telemetry TOON documents now share one dispatch path instead of growing more topology-only hooks
+- [x] Added `pod-net::SpacetimeDBClient::apply_debug_document(...)` and moved the remote-topology document coverage onto that generic path, keeping `apply_remote_topology_document(...)` as a thin compatibility alias
+- [x] Added a real `remote_topology_document` public row plus `publish_remote_topology_document` reducer in `pod-stdb`, so authority tooling has an actual SpacetimeDB publication surface for `RemoteTopologyBundle`
+- [x] Extended `pod-stdb` and `pod-net::SpacetimeDBClient` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and subscription query coverage so remote topology can now arrive as an authority-published feed row instead of only as direct document injection
+- [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` to `pod-stdb::StdbClient`, so generated mode can connect, subscribe, and consume authority-fed `remote_topology_document` rows through `frame_tick()` instead of hard-failing immediately
+- [x] Added generated-mode coverage in both `pod-stdb` and `pod-net::SpacetimeDBClient`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through the existing debug stream
+- [x] Added `pod-net` networking integration coverage for authority-fed topology churn and world switching, proving a newer `remote_topology_document` row rebuilds snapshot metadata while a stale older row cannot roll the active world/evaluation state back
+- [x] Added `topology_parity` plus `world_quest_bindings` to the `pod-headless` report, so the headless evaluation surface now verifies that the exported `RemoteTopologyBundle` exactly matches the applied world state and evaluation data it publishes
+- [x] Promoted the `pod-headless` topology parity surface into the moat benchmark path: `scripts/run_moat_benchmarks.ts` now runs `pod-headless`, records `headlessTopology`, fails on parity drift, and `scripts/publish_moat_snapshots.ts` now preserves the same headless topology data in committed shard-target snapshots
+- [x] Extended authority-fed churn coverage beyond world switching: `pod-stdb` and `pod-net` now both prove a newer `remote_topology_document` row can update quest bindings, applied world state, and evaluation within the same resolved world while a stale older row cannot roll those quest/effect updates back
+- [x] Replaced the generated-mode ad hoc test runtimes with `GeneratedRuntimeBridge` plus `GeneratedRuntimeHandle`, so `pod-stdb` and `pod-net` now share one reusable generated callback/event queue instead of duplicating fake runtime implementations in each test module
+- [x] Added generated-path same-world quest/effect churn coverage in both `pod-stdb` and `pod-net`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored
+- [x] Removed the last leftover `FakeGeneratedRuntime` helper from `pod-stdb` unit tests, so the in-tree generated-mode coverage now consistently exercises `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
+- [x] Added `pod-net` topology feed measurements plus the `topology_feed_benchmark_suite` example, so exported `RemoteTopologyBundle` artifacts can now be replayed through both direct authority-row ingestion and generated-bridge ingestion and checked for per-world quest/effect/evaluation parity outside unit tests
+- [x] Integrated `topology_feed_benchmark_suite` into `scripts/run_moat_benchmarks.ts`, so the combined moat artifact now emits `topologyFeedMeasurements`, fails on remote topology feed parity drift, and `scripts/publish_moat_snapshots.ts` now preserves the same topology feed benchmark in committed shard-target snapshots
+
+**Next Action**:
+- Replace the benchmark's generated-bridge hook path with real generated SpacetimeDB binding callbacks, then extend the live generated path from same-world churn to linked-world quest/effect updates.
