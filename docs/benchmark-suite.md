@@ -231,6 +231,21 @@ accepts `--generated-sdk-host`, `--generated-sdk-auth-token`, and
 module without changing the report format. The in-tree coverage now includes
 both same-world and linked-world quest/effect churn on the generated paths, plus
 deterministic closed-port coverage for the live SDK option.
+
+Local live SDK parity has now been proven end to end with this sequence:
+
+```bash
+cargo run -q -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json --topology-output /tmp/pod-headless-topology.json
+spacetime start --listen-addr 127.0.0.1:3100 --in-memory --non-interactive
+for world in deadman-prime deadman-shadow sanctuary-echo; do
+  spacetime publish "$world" --anonymous --server http://127.0.0.1:3100 --bin-path /Users/home/Desktop/prompt-or-die/.cargo-target/wasm32-unknown-unknown/release/pod_stdb.wasm -y
+done
+cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --output /Users/home/Desktop/prompt-or-die/artifacts/topology-feed-live-local.json --generated-sdk-host http://127.0.0.1:3100 --generated-sdk-timeout-ms 5000 --fail-on-checks
+```
+
+That local run produced `/Users/home/Desktop/prompt-or-die/artifacts/topology-feed-live-local.json`
+with `30/30` checks passing across `deadman-prime`, `deadman-shadow`, and
+`sanctuary-echo`.
 `pod-core` also owns the shared `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, and parity/binding builder helpers now, so
 headless and moat parity checks compare exported topology artifacts through one

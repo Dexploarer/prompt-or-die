@@ -246,6 +246,8 @@
 - [x] Added `install_generated_sdk_runtime(...)` to `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving the live generated SDK path is reachable and maps failures through the public error surface
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig`, so `pod-net` topology parity can now opt into the live generated SDK path without changing the deterministic moat default
 - [x] Extended `topology_feed_benchmark_suite` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests that cover flag parsing and closed-port live SDK failure propagation
+- [x] Exported a fresh `pod-headless` topology artifact, started a local in-memory SpacetimeDB on `127.0.0.1:3100`, published `pod_stdb.wasm` to `deadman-prime`, `deadman-shadow`, and `sanctuary-echo`, and ran the live generated SDK topology benchmark successfully
+- [x] Wrote the first live parity artifact to `artifacts/topology-feed-live-local.json`; all `30/30` checks passed across the three benchmark worlds
 
 **Next Action**:
-- Run `topology_feed_benchmark_suite` in live generated SDK mode against a real SpacetimeDB module and capture the first comparable parity artifact alongside the deterministic moat baseline.
+- Publish and review comparable shard-target topology feed history now that the live generated SDK parity artifact has been captured locally.

@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Run the new live generated SDK topology benchmark mode against a real SpacetimeDB module and capture the first comparable parity artifact.
-2. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history so topology-feed drift becomes historical, not just pass/fail.
-3. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.
+1. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history now that the first live SDK parity artifact exists.
+2. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.
+3. Promote the live generated SDK benchmark invocation into a reproducible local script/workflow instead of an ad hoc manual sequence.
