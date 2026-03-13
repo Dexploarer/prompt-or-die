@@ -689,6 +689,7 @@ fn run_scenario(
         &scenario.world_quest_graph_ids,
         &world_admissions,
         &world_control_planes,
+        &tournament_control_plane,
         &applied_world_states,
         &evaluation,
     );
@@ -700,6 +701,7 @@ fn run_scenario(
         &world_quest_bindings,
         &world_admissions,
         &world_control_planes,
+        &tournament_control_plane,
         &applied_world_states,
         &evaluation,
         &topology,
@@ -2667,6 +2669,7 @@ mod tests {
                     }],
                 }],
             }],
+            &TournamentControlPlaneSummary::default(),
             &[AppliedWorldStateReport {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -2878,6 +2881,7 @@ mod tests {
                     }],
                 },
             ],
+            &TournamentControlPlaneSummary::default(),
             &[
                 AppliedWorldStateReport {
                     world_id: "deadman-prime".into(),
@@ -3126,6 +3130,26 @@ mod tests {
                 }],
             }],
         }];
+        let tournament_control_plane = TournamentControlPlaneSummary {
+            tournament_id: "deadman-neural-cup".into(),
+            standings: vec![TeamStandingReport {
+                team_id: "iron-sigil".into(),
+                display_name: "Iron Sigil".into(),
+                control_mode: TeamControlMode::DeveloperCaptain,
+                home_world_id: "deadman-prime".into(),
+                participating_world_ids: vec!["deadman-prime".into()],
+                assigned_agent_count: 1,
+                controller_mix: vec![AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                }],
+                dataset_row_count: 1,
+                world_reward_total: 4.5,
+                applied_score_delta: 8,
+                active_death_marks: 0,
+                active_death_mark_ticks: 0,
+            }],
+        };
         let evaluation = ScenarioEvaluationReport {
             controller_mix: vec![ControllerEvaluationReport {
                 agent_type: "neural_agent".into(),
@@ -3168,6 +3192,7 @@ mod tests {
             &world_quest_graph_ids,
             &world_admissions,
             &world_control_planes,
+            &tournament_control_plane,
             &applied_world_states,
             &evaluation,
         );
@@ -3180,6 +3205,7 @@ mod tests {
             &build_world_quest_bindings(&world_quest_graph_ids),
             &world_admissions,
             &world_control_planes,
+            &tournament_control_plane,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3188,6 +3214,7 @@ mod tests {
         assert!(parity.consistent);
         assert!(parity.world_quest_bindings_match);
         assert!(parity.world_control_planes_match);
+        assert!(parity.tournament_control_plane_match);
         assert!(parity.applied_world_states_match);
         assert!(parity.evaluation_match);
         assert!(parity.missing_world_quest_binding_ids.is_empty());
@@ -3264,6 +3291,26 @@ mod tests {
                 }],
             }],
         }];
+        let tournament_control_plane = TournamentControlPlaneSummary {
+            tournament_id: "deadman-neural-cup".into(),
+            standings: vec![TeamStandingReport {
+                team_id: "iron-sigil".into(),
+                display_name: "Iron Sigil".into(),
+                control_mode: TeamControlMode::DeveloperCaptain,
+                home_world_id: "deadman-prime".into(),
+                participating_world_ids: vec!["deadman-prime".into()],
+                assigned_agent_count: 1,
+                controller_mix: vec![AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                }],
+                dataset_row_count: 0,
+                world_reward_total: 0.0,
+                applied_score_delta: 0,
+                active_death_marks: 0,
+                active_death_mark_ticks: 0,
+            }],
+        };
         let evaluation = ScenarioEvaluationReport {
             controller_mix: vec![],
             worlds: vec![WorldEvaluationReport {
@@ -3296,12 +3343,14 @@ mod tests {
             &world_quest_graph_ids,
             &world_admissions,
             &world_control_planes,
+            &tournament_control_plane,
             &applied_world_states,
             &evaluation,
         );
         topology.world_quest_bindings.clear();
         topology.world_admissions.clear();
         topology.world_control_planes.clear();
+        topology.tournament_control_plane = TournamentControlPlaneSummary::default();
         topology.evaluation.worlds.clear();
 
         let parity = build_remote_topology_parity_summary(
@@ -3312,6 +3361,7 @@ mod tests {
             &build_world_quest_bindings(&world_quest_graph_ids),
             &world_admissions,
             &world_control_planes,
+            &tournament_control_plane,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3321,6 +3371,7 @@ mod tests {
         assert!(!parity.world_quest_bindings_match);
         assert!(!parity.world_admissions_match);
         assert!(!parity.world_control_planes_match);
+        assert!(!parity.tournament_control_plane_match);
         assert!(!parity.evaluation_match);
         assert_eq!(
             parity.missing_world_quest_binding_ids,

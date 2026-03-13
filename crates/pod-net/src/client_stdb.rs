@@ -347,6 +347,7 @@ pub struct TopologyFeedWorldPathReport {
     pub quest_binding_matches: bool,
     pub applied_world_state_matches: bool,
     pub evaluation_matches: bool,
+    pub tournament_control_plane_matches: bool,
 }
 
 /// Combined authority-row and generated-runtime parity report for one world.
@@ -1321,6 +1322,13 @@ impl SpacetimeDBClient {
         self.inner.resolved_remote_world_control_plane()
     }
 
+    /// Resolve the tournament-wide standings/control summary from the active topology.
+    pub fn remote_tournament_control_plane(
+        &self,
+    ) -> Option<&pod_core::TournamentControlPlaneSummary> {
+        self.inner.resolved_remote_tournament_control_plane()
+    }
+
     /// Resolve the replay/evaluation summary for this client's active world.
     pub fn remote_world_evaluation(&self) -> Option<&WorldEvaluationSummary> {
         self.inner.resolved_remote_world_evaluation()
@@ -1741,6 +1749,8 @@ fn build_topology_feed_world_path_report(
             == expected_binding,
         applied_world_state_matches: client.remote_applied_world_state() == expected_applied_state,
         evaluation_matches: client.remote_world_evaluation() == expected_evaluation,
+        tournament_control_plane_matches: client.remote_tournament_control_plane()
+            == Some(&topology.tournament_control_plane),
     }
 }
 
@@ -1775,6 +1785,12 @@ fn collect_topology_feed_checks(
             path.evaluation_matches,
             "true",
             path.evaluation_matches.to_string(),
+        ),
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.tournament_control_plane_matches"),
+            path.tournament_control_plane_matches,
+            "true",
+            path.tournament_control_plane_matches.to_string(),
         ),
         build_topology_feed_check(
             format!("{path_name}.{world_id}.resolved_world_id"),
@@ -2168,6 +2184,7 @@ mod tests {
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2239,8 +2256,18 @@ mod tests {
         assert_eq!(report.worlds[0].world_id, "deadman-shadow");
         assert!(report.worlds[0].authority_row.quest_binding_matches);
         assert!(report.worlds[0].authority_row.applied_world_state_matches);
+        assert!(
+            report.worlds[0]
+                .authority_row
+                .tournament_control_plane_matches
+        );
         assert!(report.worlds[0].generated_runtime.quest_binding_matches);
         assert!(report.worlds[0].generated_runtime.evaluation_matches);
+        assert!(
+            report.worlds[0]
+                .generated_runtime
+                .tournament_control_plane_matches
+        );
     }
 
     #[test]
@@ -2265,6 +2292,7 @@ mod tests {
             world_quest_bindings: vec![],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2412,6 +2440,26 @@ mod tests {
                     }],
                 }],
             }],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary {
+                tournament_id: "deadman-neural-cup".into(),
+                standings: vec![pod_core::TournamentTeamStandingSummary {
+                    team_id: "iron-sigil".into(),
+                    display_name: "Iron Sigil".into(),
+                    control_mode: pod_core::TeamControlMode::DeveloperCaptain,
+                    home_world_id: "deadman-prime".into(),
+                    participating_world_ids: vec!["deadman-prime".into()],
+                    assigned_agent_count: 1,
+                    controller_mix: vec![pod_core::AgentTypeCountSummary {
+                        agent_type: "neural_agent".into(),
+                        count: 1,
+                    }],
+                    dataset_row_count: 0,
+                    world_reward_total: 0.0,
+                    applied_score_delta: 0,
+                    active_death_marks: 0,
+                    active_death_mark_ticks: 0,
+                }],
+            },
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2465,6 +2513,16 @@ mod tests {
             "neural_agent"
         );
         assert_eq!(control_plane.teams[0].controller_mix[0].count, 1);
+        let tournament_control_plane = client
+            .remote_tournament_control_plane()
+            .expect("resolved tournament control plane");
+        assert_eq!(tournament_control_plane.tournament_id, "deadman-neural-cup");
+        assert_eq!(tournament_control_plane.standings.len(), 1);
+        assert_eq!(tournament_control_plane.standings[0].team_id, "iron-sigil");
+        assert_eq!(
+            tournament_control_plane.standings[0].assigned_agent_count,
+            1
+        );
     }
 
     #[test]
@@ -2520,6 +2578,7 @@ mod tests {
             ],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2669,6 +2728,7 @@ mod tests {
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2770,6 +2830,7 @@ mod tests {
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2880,6 +2941,7 @@ mod tests {
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2961,6 +3023,7 @@ mod tests {
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3152,6 +3215,7 @@ mod tests {
             ],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3263,6 +3327,7 @@ mod tests {
             ],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),

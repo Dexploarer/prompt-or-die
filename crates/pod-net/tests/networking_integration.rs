@@ -44,6 +44,7 @@ fn topology_document_for_single_world(
         }],
         world_admissions: vec![],
         world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
         quest_graphs: vec![],
         applied_world_states: vec![AppliedWorldStateSummary {
             world_id: world_id.into(),
@@ -139,6 +140,7 @@ fn topology_document_for_single_world_with_state(
         }],
         world_admissions: vec![],
         world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
         quest_graphs: vec![],
         applied_world_states: vec![AppliedWorldStateSummary {
             world_id: world_id.into(),
@@ -306,6 +308,7 @@ fn integration_remote_topology_surfaces_linked_world_quest_and_evaluation_state(
             }],
             world_admissions: vec![],
             world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
             quest_graphs: vec![],
             applied_world_states: vec![AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -428,6 +431,7 @@ fn integration_remote_topology_feed_row_surfaces_debug_and_evaluation_state() {
         }],
         world_admissions: vec![],
         world_control_planes: vec![],
+            tournament_control_plane: pod_core::TournamentControlPlaneSummary::default(),
         quest_graphs: vec![],
         applied_world_states: vec![],
         evaluation: pod_core::ScenarioEvaluationSummary {

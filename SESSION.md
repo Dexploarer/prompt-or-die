@@ -215,6 +215,7 @@
 - [x] Moved world admission/team-slot assignment into `pod-core` via `assign_roster_to_world_teams(...)`, `build_world_admission_summary(...)`, and `RemoteTopologyBundle.world_admissions`, so `pod-headless`, `pod-stdb`, and `pod-net` now share one admission contract instead of carrying app-local roster logic
 - [x] Moved per-world admitted roster/controller composition into `pod-core` via `build_world_control_plane_summary(...)` and `RemoteTopologyBundle.world_control_planes`, so `pod-headless`, `pod-stdb`, and `pod-net` now share one control-plane contract instead of recomputing controller mix per app/runtime surface
 - [x] Moved tournament standings/control-plane aggregation into `pod-core` via `build_tournament_control_plane_summary(...)` and `TournamentControlPlaneSummary`, so `pod-headless` no longer owns that summary logic privately
+- [x] Carried `TournamentControlPlaneSummary` through `RemoteTopologyBundle`, `RemoteTopologyParitySummary`, `pod-stdb`, `pod-net`, and the topology-feed benchmark path, so tournament standings/control-plane drift now rides the same remote parity surface as admissions, quest bindings, applied world state, and evaluation
 - [x] Added applied target-world state aggregation in `apps/pod-headless`, so cross-world effects are rolled into per-world team/resource/faction/objective state summaries instead of only link-local projections
 - [x] Added canonical quest graph definitions plus per-world quest-line state reporting in `apps/pod-headless`, so alternate-reality `ObjectiveStateShift` effects now resolve into explicit quest progression with start/current/completed/pending stages
 - [x] Added shared `RemoteTopologyBundle` contracts in `pod-core` for world quest bindings, applied world state, and scenario evaluation, so remote surfaces have one portable topology artifact instead of app-local JSON shapes
@@ -257,7 +258,7 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- All audited backlog items are closed. The next runtime slice should carry the shared tournament/control-plane summaries through remote topology and benchmark surfaces.
+- All audited backlog items are closed. The next runtime slice should define shared tournament orchestration state on top of the now-remote tournament control-plane surface.
 
 ## Audit Backlog (2026-03-13)
 

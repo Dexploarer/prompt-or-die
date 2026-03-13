@@ -164,10 +164,10 @@ This lets us support:
 
 In order:
 
-1. Carry the shared tournament/control-plane state through `pod-stdb` and `pod-net`
-   the same way quest, evaluation, and applied-world state already flow.
-2. Add tournament- and swarm-level benchmarks using the same replay/evaluation
-   spine and shared topology artifacts.
+1. Build shared tournament orchestration state on top of the now-remote
+   `tournament_control_plane` surface in `pod-stdb` and `pod-net`.
+2. Add tournament- and swarm-level orchestration benchmarks using the same
+   replay/evaluation spine and shared topology artifacts.
 3. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 

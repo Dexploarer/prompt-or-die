@@ -993,6 +993,15 @@ impl TournamentControlPlaneSummary {
     }
 }
 
+impl Default for TournamentControlPlaneSummary {
+    fn default() -> Self {
+        Self {
+            tournament_id: String::new(),
+            standings: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct TournamentStandingAccumulator {
     assigned_agents: BTreeSet<String>,
@@ -1294,6 +1303,8 @@ pub struct RemoteTopologyBundle {
     pub world_admissions: Vec<WorldAdmissionSummary>,
     #[serde(default)]
     pub world_control_planes: Vec<WorldControlPlaneSummary>,
+    #[serde(default)]
+    pub tournament_control_plane: TournamentControlPlaneSummary,
     pub quest_graphs: Vec<QuestStateGraph>,
     pub applied_world_states: Vec<AppliedWorldStateSummary>,
     pub evaluation: ScenarioEvaluationSummary,
@@ -1317,6 +1328,7 @@ pub fn build_remote_topology_bundle(
     world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
     world_admissions: &[WorldAdmissionSummary],
     world_control_planes: &[WorldControlPlaneSummary],
+    tournament_control_plane: &TournamentControlPlaneSummary,
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
 ) -> RemoteTopologyBundle {
@@ -1332,6 +1344,7 @@ pub fn build_remote_topology_bundle(
         world_quest_bindings: build_world_quest_bindings(world_quest_graph_ids),
         world_admissions: world_admissions.to_vec(),
         world_control_planes: world_control_planes.to_vec(),
+        tournament_control_plane: tournament_control_plane.clone(),
         quest_graphs: quest_graphs.to_vec(),
         applied_world_states: applied_world_states.to_vec(),
         evaluation: evaluation.clone(),
@@ -1350,6 +1363,7 @@ pub struct RemoteTopologyParitySummary {
     pub world_quest_bindings_match: bool,
     pub world_admissions_match: bool,
     pub world_control_planes_match: bool,
+    pub tournament_control_plane_match: bool,
     pub applied_world_states_match: bool,
     pub evaluation_match: bool,
     pub missing_world_quest_binding_ids: Vec<String>,
@@ -1378,6 +1392,7 @@ pub fn build_remote_topology_parity_summary(
     world_quest_bindings: &[WorldQuestBinding],
     world_admissions: &[WorldAdmissionSummary],
     world_control_planes: &[WorldControlPlaneSummary],
+    tournament_control_plane: &TournamentControlPlaneSummary,
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
     topology: &RemoteTopologyBundle,
@@ -1478,6 +1493,8 @@ pub fn build_remote_topology_parity_summary(
     let world_quest_bindings_match = topology.world_quest_bindings == world_quest_bindings;
     let world_admissions_match = topology.world_admissions == world_admissions;
     let world_control_planes_match = topology.world_control_planes == world_control_planes;
+    let tournament_control_plane_match =
+        topology.tournament_control_plane == *tournament_control_plane;
     let applied_world_states_match = topology.applied_world_states == applied_world_states;
     let evaluation_match = topology.evaluation == *evaluation;
     let consistent = teams_match
@@ -1487,6 +1504,7 @@ pub fn build_remote_topology_parity_summary(
         && world_quest_bindings_match
         && world_admissions_match
         && world_control_planes_match
+        && tournament_control_plane_match
         && applied_world_states_match
         && evaluation_match;
 
@@ -1499,6 +1517,7 @@ pub fn build_remote_topology_parity_summary(
         world_quest_bindings_match,
         world_admissions_match,
         world_control_planes_match,
+        tournament_control_plane_match,
         applied_world_states_match,
         evaluation_match,
         missing_world_quest_binding_ids,
@@ -1973,6 +1992,26 @@ mod tests {
                 reward_tags: vec!["season-open".into()],
             }],
         );
+        let tournament_control_plane = TournamentControlPlaneSummary {
+            tournament_id: "deadman-neural-cup".into(),
+            standings: vec![TournamentTeamStandingSummary {
+                team_id: "iron-sigil".into(),
+                display_name: "Iron Sigil".into(),
+                control_mode: TeamControlMode::DeveloperCaptain,
+                home_world_id: "deadman-prime".into(),
+                participating_world_ids: vec!["deadman-prime".into()],
+                assigned_agent_count: 1,
+                controller_mix: vec![AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                }],
+                dataset_row_count: 1,
+                world_reward_total: 4.5,
+                applied_score_delta: 8,
+                active_death_marks: 1,
+                active_death_mark_ticks: 600,
+            }],
+        };
 
         let bundle = build_remote_topology_bundle(
             "deadman-neural-cup",
@@ -2017,6 +2056,7 @@ mod tests {
                     }],
                 }],
             }],
+            &tournament_control_plane,
             &[AppliedWorldStateSummary {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -2109,6 +2149,10 @@ mod tests {
         assert_eq!(
             value["payload"]["evaluation"]["worlds"][0]["applied_score_delta_total"],
             8
+        );
+        assert_eq!(
+            value["payload"]["tournament_control_plane"]["standings"][0]["team_id"],
+            "iron-sigil"
         );
     }
 
@@ -2486,6 +2530,26 @@ mod tests {
                 }],
             }],
         }];
+        let tournament_control_plane = TournamentControlPlaneSummary {
+            tournament_id: "deadman-neural-cup".into(),
+            standings: vec![TournamentTeamStandingSummary {
+                team_id: "iron-sigil".into(),
+                display_name: "Iron Sigil".into(),
+                control_mode: TeamControlMode::DeveloperCaptain,
+                home_world_id: "deadman-prime".into(),
+                participating_world_ids: vec!["deadman-prime".into()],
+                assigned_agent_count: 1,
+                controller_mix: vec![AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                }],
+                dataset_row_count: 0,
+                world_reward_total: 0.0,
+                applied_score_delta: 0,
+                active_death_marks: 0,
+                active_death_mark_ticks: 0,
+            }],
+        };
         let applied_world_states = vec![AppliedWorldStateSummary {
             world_id: "deadman-prime".into(),
             display_name: "Deadman Prime".into(),
@@ -2531,6 +2595,7 @@ mod tests {
             world_quest_bindings: world_quest_bindings.clone(),
             world_admissions: world_admissions.clone(),
             world_control_planes: world_control_planes.clone(),
+            tournament_control_plane: tournament_control_plane.clone(),
             quest_graphs: quest_graphs.clone(),
             applied_world_states: applied_world_states.clone(),
             evaluation: evaluation.clone(),
@@ -2538,6 +2603,7 @@ mod tests {
         topology.world_quest_bindings.clear();
         topology.world_admissions.clear();
         topology.world_control_planes.clear();
+        topology.tournament_control_plane = TournamentControlPlaneSummary::default();
         topology.evaluation.worlds.clear();
 
         let parity = build_remote_topology_parity_summary(
@@ -2548,6 +2614,7 @@ mod tests {
             &world_quest_bindings,
             &world_admissions,
             &world_control_planes,
+            &tournament_control_plane,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -2557,6 +2624,7 @@ mod tests {
         assert!(!parity.world_quest_bindings_match);
         assert!(!parity.world_admissions_match);
         assert!(!parity.world_control_planes_match);
+        assert!(!parity.tournament_control_plane_match);
         assert!(!parity.evaluation_match);
         assert_eq!(
             parity.missing_world_quest_binding_ids,
