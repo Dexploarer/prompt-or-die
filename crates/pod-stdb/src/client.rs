@@ -2653,55 +2653,6 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    #[derive(Debug, Default)]
-    struct FakeGeneratedRuntimeState {
-        connect_calls: usize,
-        disconnect_calls: usize,
-        subscriptions: Vec<Vec<String>>,
-        connect_error: Option<String>,
-        subscribe_error: Option<String>,
-        events: Vec<GeneratedRuntimeEvent>,
-    }
-
-    #[derive(Debug, Clone)]
-    struct FakeGeneratedRuntime {
-        state: Rc<RefCell<FakeGeneratedRuntimeState>>,
-    }
-
-    impl FakeGeneratedRuntime {
-        fn new(state: Rc<RefCell<FakeGeneratedRuntimeState>>) -> Self {
-            Self { state }
-        }
-    }
-
-    impl GeneratedRuntimeAdapter for FakeGeneratedRuntime {
-        fn connect(&mut self, _config: &StdbClientConfig) -> Result<(), String> {
-            let mut state = self.state.borrow_mut();
-            state.connect_calls += 1;
-            if let Some(error) = state.connect_error.clone() {
-                return Err(error);
-            }
-            Ok(())
-        }
-
-        fn disconnect(&mut self) {
-            self.state.borrow_mut().disconnect_calls += 1;
-        }
-
-        fn subscribe(&mut self, queries: &[String]) -> Result<(), String> {
-            let mut state = self.state.borrow_mut();
-            state.subscriptions.push(queries.to_vec());
-            if let Some(error) = state.subscribe_error.clone() {
-                return Err(error);
-            }
-            Ok(())
-        }
-
-        fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
-            std::mem::take(&mut self.state.borrow_mut().events)
-        }
-    }
-
     #[test]
     fn test_client_new() {
         let client = StdbClient::new(StdbClientConfig::default());
@@ -2750,27 +2701,37 @@ mod tests {
 
     #[test]
     fn test_generated_mode_connect_and_subscription_use_runtime_adapter() {
-        let runtime_state = Rc::new(RefCell::new(FakeGeneratedRuntimeState::default()));
+        let connect_calls = Rc::new(RefCell::new(0usize));
+        let subscribe_queries = Rc::new(RefCell::new(Vec::<Vec<String>>::new()));
+        let connect_calls_for_bridge = connect_calls.clone();
+        let subscribe_queries_for_bridge = subscribe_queries.clone();
         let mut client = StdbClient::new(StdbClientConfig {
             connection_mode: StdbConnectionMode::Generated,
             ..StdbClientConfig::default()
         });
-        client.set_generated_runtime(Box::new(FakeGeneratedRuntime::new(runtime_state.clone())));
+        let (bridge, handle) = GeneratedRuntimeBridge::new(
+            move |_config, handle| {
+                *connect_calls_for_bridge.borrow_mut() += 1;
+                handle.connected(vec![1, 2, 3, 4], "tok-generated".into());
+                Ok(())
+            },
+            move |queries, handle| {
+                subscribe_queries_for_bridge
+                    .borrow_mut()
+                    .push(queries.to_vec());
+                handle.subscription_applied();
+                Ok(())
+            },
+            || {},
+        );
+        client.set_generated_runtime_bridge(bridge);
 
         client.connect().expect("generated runtime should connect");
         assert!(matches!(
             client.connection_state(),
             ConnectionState::Connecting
         ));
-        assert_eq!(runtime_state.borrow().connect_calls, 1);
-
-        runtime_state
-            .borrow_mut()
-            .events
-            .push(GeneratedRuntimeEvent::Connected {
-                identity: vec![1, 2, 3, 4],
-                token: "tok-generated".into(),
-            });
+        assert_eq!(*connect_calls.borrow(), 1);
         client.frame_tick();
         assert!(client.is_connected());
 
@@ -2778,14 +2739,12 @@ mod tests {
             .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
             .expect("generated runtime should accept subscriptions");
         assert_eq!(
-            runtime_state.borrow().subscriptions,
+            subscribe_queries.borrow().as_slice(),
             vec![vec!["SELECT * FROM remote_topology_document".to_string()]]
         );
+        client.frame_tick();
 
-        runtime_state
-            .borrow_mut()
-            .events
-            .push(GeneratedRuntimeEvent::SubscriptionApplied);
+        handle.disconnected("test teardown");
         client.frame_tick();
 
         let events = client.drain_events().collect::<Vec<_>>();
@@ -2800,14 +2759,28 @@ mod tests {
 
     #[test]
     fn test_generated_runtime_remote_topology_row_updates_client_state() {
-        let runtime_state = Rc::new(RefCell::new(FakeGeneratedRuntimeState::default()));
         let mut client = StdbClient::new(StdbClientConfig {
             connection_mode: StdbConnectionMode::Generated,
             db_name: "deadman-shadow".into(),
             ..StdbClientConfig::default()
         });
-        client.set_generated_runtime(Box::new(FakeGeneratedRuntime::new(runtime_state.clone())));
+        let (bridge, handle) = GeneratedRuntimeBridge::new(
+            |_config, handle| {
+                handle.connected(vec![9; 16], "tok-generated".into());
+                Ok(())
+            },
+            |_queries, handle| {
+                handle.subscription_applied();
+                Ok(())
+            },
+            || {},
+        );
+        client.set_generated_runtime_bridge(bridge);
         client.connect().expect("generated runtime should connect");
+        client.frame_tick();
+        client
+            .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
+            .expect("generated runtime should accept subscriptions");
 
         let document = pod_core::RemoteTopologyBundle {
             version: pod_core::RuntimeContractVersion::V1,
@@ -2868,21 +2841,13 @@ mod tests {
         }
         .to_toon_document();
 
-        runtime_state.borrow_mut().events = vec![
-            GeneratedRuntimeEvent::Connected {
-                identity: vec![9; 16],
-                token: "tok-generated".into(),
-            },
-            GeneratedRuntimeEvent::SubscriptionApplied,
-            GeneratedRuntimeEvent::RemoteTopologyDocumentRow {
-                row_id: 7,
-                generated_at_unix_ms: 42,
-                scenario_id: "deadman-neural-cup".into(),
-                profile_id: "generated-test".into(),
-                topology_json: document.clone(),
-            },
-        ];
-
+        handle.remote_topology_document_row(
+            7,
+            42,
+            "deadman-neural-cup",
+            "generated-test",
+            document.clone(),
+        );
         client.frame_tick();
 
         assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));

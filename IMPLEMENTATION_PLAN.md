@@ -1857,8 +1857,9 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Replaced the ad hoc generated-runtime test fakes with a reusable `GeneratedRuntimeBridge` plus `GeneratedRuntimeHandle` in `crates/pod-stdb/src/client.rs`, so generated-mode callbacks now flow through the same queue/event drain path in both `pod-stdb` and `pod-net`.
 - [x] Ported `pod-stdb` generated integration coverage onto that bridge in `crates/pod-stdb/tests/client_integration.rs`, proving generated-mode topology rows still update resolved state and preserve the expected subscription flow without per-test runtime implementations.
 - [x] Added matching generated-path same-world quest/effect churn coverage in `crates/pod-stdb/src/client.rs` and `crates/pod-net/src/client_stdb.rs`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored.
+- [x] Removed the last leftover `FakeGeneratedRuntime` unit-test helper from `crates/pod-stdb/src/client.rs`, so all in-tree generated-mode tests now exercise the shared bridge/handle path instead of split fake-runtime implementations.
 - [x] Revalidated touched targets:
-  - `cargo test -p pod-stdb --no-default-features --features client generated_runtime -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client generated -- --nocapture`
   - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
   - `git diff --check`
