@@ -1865,4 +1865,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Last updated**: Iteration 176
-**Current focus**: Iteration 177 wire real generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge`, then thread that live generated row feed into the parity/evaluation harnesses
+**Current focus**: Iteration 177 benchmark the authority-row and generated-bridge topology feed paths against exported `RemoteTopologyBundle` artifacts, then move that harness into the moat suite
+
+### Iteration 177
+- [x] Added `build_topology_feed_measurements(...)` plus serialized `TopologyFeedMeasurementsReport` contracts in `crates/pod-net/src/client_stdb.rs`, so `pod-net` can replay an exported `RemoteTopologyBundle` through both direct authority-row ingestion and generated-bridge ingestion and check world-by-world quest/applied-state/evaluation parity.
+- [x] Added the runnable `cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input ... --fail-on-checks` surface in `crates/pod-net/examples/topology_feed_benchmark_suite.rs`.
+- [x] Added deterministic `pod-net` coverage proving the benchmark report passes on a canonical multi-world topology bundle and that both ingestion paths resolve the same world/quest/effect/evaluation state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-net --features spacetimedb test_build_topology_feed_measurements_matches_authority_and_generated_paths -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb --example topology_feed_benchmark_suite`
+  - `cargo run -q -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`
+  - `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`
+  - `git diff --check`
+
+**Last updated**: Iteration 177
+**Current focus**: Iteration 178 integrate `topology_feed_benchmark_suite` into the combined moat suite, then replace its generated-bridge hook path with real generated SpacetimeDB callback wiring when the binding layer is available

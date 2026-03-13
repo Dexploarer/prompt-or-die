@@ -91,7 +91,11 @@ pub use client_native::{ClientError, NativeClient};
 pub use client_web::{ClientError, WebClient};
 
 #[cfg(feature = "spacetimedb")]
-pub use client_stdb::{SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError};
+pub use client_stdb::{
+    build_topology_feed_measurements, SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError,
+    TopologyFeedCheck, TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport,
+    TopologyFeedWorldReport,
+};
 
 /// Default web runtime client type.
 ///

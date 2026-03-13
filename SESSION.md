@@ -232,6 +232,7 @@
 - [x] Replaced the generated-mode ad hoc test runtimes with `GeneratedRuntimeBridge` plus `GeneratedRuntimeHandle`, so `pod-stdb` and `pod-net` now share one reusable generated callback/event queue instead of duplicating fake runtime implementations in each test module
 - [x] Added generated-path same-world quest/effect churn coverage in both `pod-stdb` and `pod-net`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored
 - [x] Removed the last leftover `FakeGeneratedRuntime` helper from `pod-stdb` unit tests, so the in-tree generated-mode coverage now consistently exercises `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
+- [x] Added `pod-net` topology feed measurements plus the `topology_feed_benchmark_suite` example, so exported `RemoteTopologyBundle` artifacts can now be replayed through both direct authority-row ingestion and generated-bridge ingestion and checked for per-world quest/effect/evaluation parity outside unit tests
 
 **Next Action**:
-- Wire real generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge`, then thread that live generated row feed into the parity/evaluation harnesses.
+- Integrate `topology_feed_benchmark_suite` into the combined moat benchmark path, then replace its generated-bridge hook path with real generated SpacetimeDB binding callbacks when the binding layer is available.

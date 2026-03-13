@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Wire actual generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge` so `remote_topology_document` rows arrive through the live generated transport instead of only through test-produced handles.
-2. Thread that live generated topology feed into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.
+1. Integrate `topology_feed_benchmark_suite` into the combined moat benchmark path so remote topology feed parity stops living as a standalone command.
+2. Wire actual generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge` and replace the benchmark's generated-hook path with the live generated transport.
 3. Extend the generated-path churn coverage from same-world quest/effect updates to linked-world quest/effect updates once the live binding path exists.

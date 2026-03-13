@@ -43,6 +43,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use glam::Vec2;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
@@ -51,8 +52,8 @@ use pod_core::id::{AgentId, EntityId};
 use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
 
 use pod_stdb::client::{
-    CachedEntity, StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent,
-    SubmittedAction, Subscriptions,
+    CachedEntity, GeneratedRuntimeBridge, StdbClient, StdbClientConfig, StdbConnectionMode,
+    StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
 use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
@@ -316,6 +317,50 @@ impl From<SpacetimeDBClientConfig> for StdbClientConfig {
             player_name: cfg.player_name,
             connection_mode: cfg.connection_mode,
         }
+    }
+}
+
+/// One boolean benchmark check for authority-fed topology ingestion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologyFeedCheck {
+    pub metric: String,
+    pub passed: bool,
+    pub expected: String,
+    pub observed: String,
+}
+
+/// Per-path topology parity report for one resolved world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologyFeedWorldPathReport {
+    pub resolved_world_id: Option<String>,
+    pub resolved_world_matches: bool,
+    pub quest_binding_matches: bool,
+    pub applied_world_state_matches: bool,
+    pub evaluation_matches: bool,
+}
+
+/// Combined authority-row and generated-runtime parity report for one world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologyFeedWorldReport {
+    pub world_id: String,
+    pub authority_row: TopologyFeedWorldPathReport,
+    pub generated_runtime: TopologyFeedWorldPathReport,
+}
+
+/// Benchmark artifact for replaying a topology bundle through pod-net ingestion paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologyFeedMeasurementsReport {
+    pub schema_version: u32,
+    pub scenario_id: String,
+    pub profile_id: String,
+    pub world_count: usize,
+    pub worlds: Vec<TopologyFeedWorldReport>,
+    pub checks: Vec<TopologyFeedCheck>,
+}
+
+impl TopologyFeedMeasurementsReport {
+    pub fn all_checks_passed(&self) -> bool {
+        self.checks.iter().all(|check| check.passed)
     }
 }
 
@@ -1428,6 +1473,182 @@ fn convert_world_event(
     })
 }
 
+fn build_topology_feed_check(
+    metric: impl Into<String>,
+    passed: bool,
+    expected: impl Into<String>,
+    observed: impl Into<String>,
+) -> TopologyFeedCheck {
+    TopologyFeedCheck {
+        metric: metric.into(),
+        passed,
+        expected: expected.into(),
+        observed: observed.into(),
+    }
+}
+
+fn build_topology_feed_world_path_report(
+    client: &SpacetimeDBClient,
+    topology: &RemoteTopologyBundle,
+    world_id: &str,
+) -> TopologyFeedWorldPathReport {
+    let expected_binding = topology
+        .world_quest_bindings
+        .iter()
+        .find(|binding| binding.world_id == world_id);
+    let expected_applied_state = topology
+        .applied_world_states
+        .iter()
+        .find(|state| state.world_id == world_id);
+    let expected_evaluation = topology
+        .evaluation
+        .worlds
+        .iter()
+        .find(|state| state.world_id == world_id);
+
+    TopologyFeedWorldPathReport {
+        resolved_world_id: client.remote_world_id().map(str::to_owned),
+        resolved_world_matches: client.remote_world_id() == Some(world_id),
+        quest_binding_matches: client.inner().resolved_remote_world_quest_binding()
+            == expected_binding,
+        applied_world_state_matches: client.remote_applied_world_state() == expected_applied_state,
+        evaluation_matches: client.remote_world_evaluation() == expected_evaluation,
+    }
+}
+
+fn collect_topology_feed_checks(
+    world_id: &str,
+    path_name: &str,
+    path: &TopologyFeedWorldPathReport,
+) -> Vec<TopologyFeedCheck> {
+    let expected_world_id = world_id.to_string();
+    vec![
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.resolved_world_matches"),
+            path.resolved_world_matches,
+            "true",
+            serde_json::to_string(&path.resolved_world_id)
+                .unwrap_or_else(|_| format!("{:?}", path.resolved_world_id)),
+        ),
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.quest_binding_matches"),
+            path.quest_binding_matches,
+            "true",
+            path.quest_binding_matches.to_string(),
+        ),
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.applied_world_state_matches"),
+            path.applied_world_state_matches,
+            "true",
+            path.applied_world_state_matches.to_string(),
+        ),
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.evaluation_matches"),
+            path.evaluation_matches,
+            "true",
+            path.evaluation_matches.to_string(),
+        ),
+        build_topology_feed_check(
+            format!("{path_name}.{world_id}.resolved_world_id"),
+            path.resolved_world_id.as_deref() == Some(world_id),
+            expected_world_id,
+            path.resolved_world_id
+                .clone()
+                .unwrap_or_else(|| "null".into()),
+        ),
+    ]
+}
+
+/// Replay a shared topology bundle through both authority-row and generated-mode ingestion paths.
+pub fn build_topology_feed_measurements(
+    topology: &RemoteTopologyBundle,
+) -> Result<TopologyFeedMeasurementsReport, StdbClientError> {
+    let topology_json = topology.to_toon_document();
+    let generated_at_unix_ms = u64::try_from(topology.generated_at_unix_ms)
+        .map_err(|_| StdbClientError::Subscription("topology timestamp exceeds u64".into()))?;
+    let mut worlds = Vec::with_capacity(topology.worlds.len());
+    let mut checks = Vec::new();
+
+    for (index, world) in topology.worlds.iter().enumerate() {
+        let world_id = world.world_id.clone();
+
+        let mut authority_client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: world_id.clone(),
+            connection_mode: StdbConnectionMode::Emulated,
+            ..Default::default()
+        });
+        authority_client.receive_remote_topology_document_row(
+            index as u64 + 1,
+            generated_at_unix_ms,
+            topology.scenario_id.clone(),
+            topology.profile_id.clone(),
+            topology_json.clone(),
+        )?;
+        let authority_row =
+            build_topology_feed_world_path_report(&authority_client, topology, &world_id);
+
+        let mut generated_client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: world_id.clone(),
+            connection_mode: StdbConnectionMode::Generated,
+            ..Default::default()
+        });
+        let (bridge, handle) = GeneratedRuntimeBridge::new(
+            |_config, handle| {
+                handle.connected(vec![7; 16], "tok-generated".into());
+                Ok(())
+            },
+            |_queries, handle| {
+                handle.subscription_applied();
+                Ok(())
+            },
+            || {},
+        );
+        generated_client
+            .inner_mut()
+            .set_generated_runtime_bridge(bridge);
+        generated_client.connect()?;
+        generated_client.inner_mut().frame_tick();
+        generated_client.subscribe_custom(vec!["SELECT * FROM remote_topology_document".into()])?;
+        generated_client.inner_mut().frame_tick();
+        handle.remote_topology_document_row(
+            index as u64 + 1,
+            generated_at_unix_ms,
+            topology.scenario_id.clone(),
+            topology.profile_id.clone(),
+            topology_json.clone(),
+        );
+        generated_client.inner_mut().frame_tick();
+        let generated_runtime =
+            build_topology_feed_world_path_report(&generated_client, topology, &world_id);
+
+        checks.extend(collect_topology_feed_checks(
+            &world_id,
+            "authority_row",
+            &authority_row,
+        ));
+        checks.extend(collect_topology_feed_checks(
+            &world_id,
+            "generated_runtime",
+            &generated_runtime,
+        ));
+
+        worlds.push(TopologyFeedWorldReport {
+            world_id,
+            authority_row,
+            generated_runtime,
+        });
+    }
+
+    Ok(TopologyFeedMeasurementsReport {
+        schema_version: 1,
+        scenario_id: topology.scenario_id.clone(),
+        profile_id: topology.profile_id.clone(),
+        world_count: topology.worlds.len(),
+        worlds,
+        checks,
+    })
+}
+
 // ============================================================
 // TESTS
 // ============================================================
@@ -1442,6 +1663,105 @@ mod tests {
         WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
     };
     use pod_stdb::client::GeneratedRuntimeBridge;
+
+    #[test]
+    fn test_build_topology_feed_measurements_matches_authority_and_generated_paths() {
+        let mut world = WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+        world.role = WorldRealityRole::Shadow;
+        world.active_team_ids = vec!["gloam-mesh".into()];
+
+        let topology = RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
+            teams: vec![pod_core::AgentTeamDefinition::new(
+                "gloam-mesh",
+                "Gloam Mesh",
+                "deadman-shadow",
+            )],
+            worlds: vec![world],
+            links: vec![],
+            world_quest_bindings: vec![WorldQuestBinding {
+                world_id: "deadman-shadow".into(),
+                quest_graph_ids: vec!["deadman-shadow-collapse".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![pod_core::AppliedWorldStateSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                team_scores: vec![pod_core::TeamDeltaSummary {
+                    team_id: "gloam-mesh".into(),
+                    total_delta: 5,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![pod_core::ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-collapse".into(),
+                    stage_tag: "collapse-signaled".into(),
+                    applications: 2,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![pod_core::QuestLineStateSummary {
+                    quest_graph_id: "deadman-shadow-collapse".into(),
+                    display_name: "Shadow Collapse".into(),
+                    current_stage_ids: vec!["collapse-signaled".into()],
+                    completed_stage_ids: vec![],
+                    pending_stage_ids: vec!["collapse-resolved".into()],
+                    next_stage_ids: vec!["collapse-resolved".into()],
+                    progress_basis_points: 5000,
+                    terminal: false,
+                    stage_applications: vec![pod_core::QuestStageApplicationSummary {
+                        stage_id: "collapse-signaled".into(),
+                        title: "Collapse Signaled".into(),
+                        applications: 2,
+                    }],
+                }],
+            }],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: WorldRealityRole::Shadow,
+                    average_reward_per_row: 6.25,
+                    controller_mix: vec![pod_core::ControllerEvaluationSummary {
+                        agent_type: "neural_agent".into(),
+                        row_count: 4,
+                        reward_total: 25.0,
+                        average_reward_per_row: 6.25,
+                    }],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 5000,
+                    applied_score_delta_total: 5,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 2,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        };
+
+        let report =
+            build_topology_feed_measurements(&topology).expect("topology feed benchmark builds");
+
+        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.world_count, 1);
+        assert!(report.all_checks_passed());
+        assert_eq!(report.worlds[0].world_id, "deadman-shadow");
+        assert!(report.worlds[0].authority_row.quest_binding_matches);
+        assert!(report.worlds[0].authority_row.applied_world_state_matches);
+        assert!(report.worlds[0].generated_runtime.quest_binding_matches);
+        assert!(report.worlds[0].generated_runtime.evaluation_matches);
+    }
+
     #[test]
     fn test_entity_to_snapshot_defaults() {
         let cached = CachedEntity::from_entity(42, None, true);

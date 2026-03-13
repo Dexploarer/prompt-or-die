@@ -16,6 +16,7 @@ AI-agent-native worlds.
 | Agent action acceptance/rejection transparency | Proves creators and operators can explain runtime decisions | `pod-core` telemetry | Automated |
 | Browser/native parity | Proves web is a first-class runtime, not an afterthought | `pod-render` tests plus `pod-web` checks | Automated |
 | Multi-world topology parity | Proves the exported remote-topology contract matches quest/effect/evaluation truth | `pod-headless` scenario runner via moat suite | Automated |
+| Remote topology feed parity | Proves `pod-net` resolves the same world/quest/effect/evaluation state from both authority rows and generated-mode topology ingress | `pod-net` topology feed benchmark | Automated |
 | Creator time-to-first-agent-world | Measures creator adoption friction | Reference bootstrap flow | Scripted |
 | Cost per 100/1000 active agents | Measures operational competitiveness | Acceptance scale target plus host-cost normalization | Semi-automated |
 
@@ -40,6 +41,13 @@ Headless multi-world topology parity report:
 ```bash
 cd /Users/home/Desktop/prompt-or-die
 cargo run -p pod-headless -- --profile shard-target --output artifacts/pod-headless-shard.json --topology-output artifacts/pod-headless-topology-shard.json
+```
+
+Remote topology feed parity report:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input artifacts/pod-headless-topology-shard.json --fail-on-checks --output artifacts/topology-feed-benchmark-shard.json
 ```
 
 Combined moat benchmark suite:
@@ -187,6 +195,22 @@ The moat runner now fails immediately if any of those parity checks regress,
 which means multi-world quest/effect progress is benchmarked through the same
 artifact path as core, transport, and browser surfaces instead of being
 inspectable only through raw headless report JSON.
+
+### Remote topology feed parity report
+
+Produced by `crates/pod-net/examples/topology_feed_benchmark_suite.rs`.
+
+It records:
+
+- scenario/profile identity for the input topology bundle
+- one report per world for both authority-row and generated-runtime ingestion
+- explicit pass/fail checks for resolved world id, quest binding parity,
+  applied-world-state parity, and evaluation parity on both ingestion paths
+
+This keeps the remote ingestion layer honest independently of the headless
+scenario report: if `pod-net` stops resolving world/quest/effect state the same
+way from authority rows and generated-mode ingress, the benchmark fails even if
+`pod-headless` still exports a valid topology bundle.
 
 ### Transport benchmark report
 
