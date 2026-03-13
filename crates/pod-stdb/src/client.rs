@@ -292,6 +292,12 @@ pub struct CachedWorldState {
     pub paused: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RemoteTopologyDocumentCursor {
+    row_id: u64,
+    generated_at_unix_ms: u64,
+}
+
 /// Cached entity with all available components.
 ///
 /// Components are `Option` because not every entity has every component.
@@ -621,6 +627,7 @@ impl Subscriptions {
             "SELECT * FROM agent_telemetry_tick",
             "SELECT * FROM agent_tool_call_event",
             "SELECT * FROM agent_tick_rollup",
+            "SELECT * FROM remote_topology_document",
             "SELECT * FROM match_queue",
             "SELECT * FROM game_match",
             "SELECT * FROM match_participant",
@@ -645,6 +652,7 @@ impl Subscriptions {
             "SELECT * FROM combat_event".to_string(),
             "SELECT * FROM speech_event".to_string(),
             "SELECT * FROM world_event".to_string(),
+            "SELECT * FROM remote_topology_document".to_string(),
             // Own agent connection
             format!("SELECT * FROM connected_agent WHERE entity_id = {entity_id}"),
         ]
@@ -665,6 +673,7 @@ impl Subscriptions {
             "SELECT * FROM combat_event",
             "SELECT * FROM speech_event",
             "SELECT * FROM world_event",
+            "SELECT * FROM remote_topology_document",
         ]
     }
 
@@ -687,6 +696,7 @@ impl Subscriptions {
             "SELECT * FROM rigid_body",
             "SELECT * FROM script",
             "SELECT * FROM connected_agent",
+            "SELECT * FROM remote_topology_document",
         ]
     }
 
@@ -802,6 +812,8 @@ pub struct StdbClient {
     focused_debug_summaries: HashMap<u64, FocusedEntityDebugSummary>,
     /// Latest shared multi-world topology artifact applied to this client.
     remote_topology: Option<RemoteTopologyBundle>,
+    /// Latest authority-published topology row accepted by the client.
+    latest_remote_topology_document_cursor: Option<RemoteTopologyDocumentCursor>,
 
     // ── Metrics ──
     frames_processed: u64,
@@ -824,6 +836,7 @@ impl StdbClient {
             next_entity_id: 1,
             focused_debug_summaries: HashMap::new(),
             remote_topology: None,
+            latest_remote_topology_document_cursor: None,
             frames_processed: 0,
             reducers_called: 0,
             events_received: 0,
@@ -1379,6 +1392,34 @@ impl StdbClient {
     /// Apply a shared remote topology bundle to the client-side cache.
     pub fn apply_remote_topology(&mut self, topology: RemoteTopologyBundle) {
         self.apply_remote_topology_resolved(topology, None);
+    }
+
+    /// Store a received authority-published remote-topology row.
+    ///
+    /// Rows are monotonic by `(generated_at_unix_ms, row_id)`. Older rows are
+    /// ignored so out-of-order delivery cannot roll back the active topology.
+    pub fn receive_remote_topology_document_row(
+        &mut self,
+        row_id: u64,
+        generated_at_unix_ms: u64,
+        _scenario_id: String,
+        _profile_id: String,
+        topology_json: String,
+    ) -> Result<(), StdbError> {
+        if let Some(cursor) = self.latest_remote_topology_document_cursor {
+            let stale = generated_at_unix_ms < cursor.generated_at_unix_ms
+                || (generated_at_unix_ms == cursor.generated_at_unix_ms && row_id <= cursor.row_id);
+            if stale {
+                return Ok(());
+            }
+        }
+
+        self.receive_debug_document(topology_json)?;
+        self.latest_remote_topology_document_cursor = Some(RemoteTopologyDocumentCursor {
+            row_id,
+            generated_at_unix_ms,
+        });
+        Ok(())
     }
 
     /// Apply a shared remote topology bundle received as an authority TOON document.
@@ -2665,6 +2706,96 @@ mod tests {
     }
 
     #[test]
+    fn test_receive_remote_topology_document_row_ignores_stale_rows() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            db_name: "deadman-shadow".into(),
+            ..StdbClientConfig::default()
+        });
+        let mut current_world =
+            pod_core::WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+        current_world.role = pod_core::WorldRealityRole::Shadow;
+        let current = pod_core::RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 200,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![],
+            worlds: vec![current_world],
+            links: vec![],
+            world_quest_bindings: vec![],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        }
+        .to_toon_document();
+        let mut stale_world =
+            pod_core::WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "tournament");
+        stale_world.role = pod_core::WorldRealityRole::Tournament;
+        let stale = pod_core::RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 150,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![],
+            worlds: vec![stale_world],
+            links: vec![],
+            world_quest_bindings: vec![],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        }
+        .to_toon_document();
+
+        client
+            .receive_remote_topology_document_row(
+                10,
+                200,
+                "deadman-neural-cup".into(),
+                "ci-smoke".into(),
+                current.clone(),
+            )
+            .expect("current row should apply");
+        client
+            .receive_remote_topology_document_row(
+                9,
+                150,
+                "deadman-neural-cup".into(),
+                "ci-smoke".into(),
+                stale,
+            )
+            .expect("stale row should be ignored");
+
+        assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));
+        let events = client.drain_events().collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, StdbEvent::RemoteTopologyUpdated { .. }))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StdbEvent::RemoteTopologyDocumentReceived { document }
+                if document == &current
+        )));
+    }
+
+    #[test]
     fn test_receive_debug_document_dispatches_tool_call_event() {
         use pod_core::{AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary};
 
@@ -2789,12 +2920,17 @@ mod tests {
         let player = Subscriptions::player_agent(42);
         assert!(player.iter().any(|q| q.contains("observation_event")));
         assert!(player.iter().any(|q| q.contains("42")));
+        assert!(player.iter().any(|q| q.contains("remote_topology_document")));
 
         let spectator = Subscriptions::spectator();
         assert!(spectator.iter().any(|q| q.contains("combat_event")));
+        assert!(spectator
+            .iter()
+            .any(|q| q.contains("remote_topology_document")));
 
         let editor = Subscriptions::editor();
         assert!(editor.iter().any(|q| q.contains("agent_constraints")));
+        assert!(editor.iter().any(|q| q.contains("remote_topology_document")));
 
         let editor_debug = Subscriptions::editor_with_debug_telemetry();
         assert!(editor_debug
@@ -2804,6 +2940,9 @@ mod tests {
             .iter()
             .any(|q| q.contains("agent_tool_call_event")));
         assert!(editor_debug.iter().any(|q| q.contains("agent_tick_rollup")));
+        assert!(editor_debug
+            .iter()
+            .any(|q| q.contains("remote_topology_document")));
 
         let entity_scoped_debug = Subscriptions::debug_telemetry_for_entities(&[44, 77, 44]);
         assert_eq!(entity_scoped_debug.len(), 6);

@@ -1043,6 +1043,25 @@ impl SpacetimeDBClient {
         Ok(())
     }
 
+    /// Apply an authority-published remote-topology feed row from SpacetimeDB.
+    pub fn receive_remote_topology_document_row(
+        &mut self,
+        row_id: u64,
+        generated_at_unix_ms: u64,
+        scenario_id: impl Into<String>,
+        profile_id: impl Into<String>,
+        topology_json: impl Into<String>,
+    ) -> Result<(), StdbClientError> {
+        self.inner.receive_remote_topology_document_row(
+            row_id,
+            generated_at_unix_ms,
+            scenario_id.into(),
+            profile_id.into(),
+            topology_json.into(),
+        )?;
+        Ok(())
+    }
+
     /// Apply an authority TOON document through the underlying SpacetimeDB client.
     pub fn apply_debug_document(
         &mut self,
@@ -1722,7 +1741,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_debug_document_emits_debug_document_and_updates_state() {
+    fn test_receive_remote_topology_document_row_emits_debug_document_and_updates_state() {
         let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
             db_name: "deadman-shadow".into(),
             connection_mode: StdbConnectionMode::Emulated,
@@ -1796,8 +1815,14 @@ mod tests {
         .to_toon_document();
 
         client
-            .apply_debug_document(document.clone())
-            .expect("document applies");
+            .receive_remote_topology_document_row(
+                7,
+                42,
+                "deadman-neural-cup",
+                "ci-smoke",
+                document.clone(),
+            )
+            .expect("document row applies");
 
         let messages = client.poll_updates();
         assert!(messages.iter().any(|message| matches!(
@@ -2137,6 +2162,9 @@ mod tests {
         assert!(queries
             .iter()
             .any(|query| query.contains("agent_tick_rollup")));
+        assert!(queries
+            .iter()
+            .any(|query| query.contains("remote_topology_document")));
     }
 
     #[test]
@@ -2159,6 +2187,9 @@ mod tests {
         assert!(queries
             .iter()
             .any(|query| query == "SELECT * FROM agent_tick_rollup WHERE agent_entity_id = 44"));
+        assert!(queries
+            .iter()
+            .any(|query| query == "SELECT * FROM remote_topology_document"));
         assert!(!queries
             .iter()
             .any(|query| query == "SELECT * FROM agent_telemetry_tick"));

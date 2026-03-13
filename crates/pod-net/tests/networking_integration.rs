@@ -206,7 +206,7 @@ fn integration_remote_topology_surfaces_linked_world_quest_and_evaluation_state(
 }
 
 #[test]
-fn integration_debug_document_surfaces_remote_topology_and_evaluation_state() {
+fn integration_remote_topology_feed_row_surfaces_debug_and_evaluation_state() {
     let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
         db_name: "deadman-shadow".into(),
         connection_mode: StdbConnectionMode::Emulated,
@@ -270,8 +270,14 @@ fn integration_debug_document_surfaces_remote_topology_and_evaluation_state() {
     .to_toon_document();
 
     client
-        .apply_debug_document(document.clone())
-        .expect("document applies");
+        .receive_remote_topology_document_row(
+            7,
+            42,
+            "deadman-neural-cup",
+            "ci-smoke",
+            document.clone(),
+        )
+        .expect("document row applies");
 
     let messages = client.poll_updates();
     assert!(messages.iter().any(|message| matches!(

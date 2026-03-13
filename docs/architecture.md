@@ -159,6 +159,15 @@ and
 forwards that exact source document through the existing debug-document stream
 while still rebuilding snapshot metadata from the decoded topology.
 
+That topology now also has a real authority publication surface in
+[`crates/pod-stdb/src/events.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/events.rs)
+and
+[`crates/pod-stdb/src/reducers.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/reducers.rs):
+`remote_topology_document` rows plus the `publish_remote_topology_document`
+reducer let authority-side tooling publish `RemoteTopologyBundle` TOON payloads
+through SpacetimeDB itself, while the client wrappers ingest those rows with
+stale-row protection.
+
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
 and is documented in

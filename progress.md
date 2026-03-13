@@ -418,6 +418,15 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
+- Added a public `remote_topology_document` row in `crates/pod-stdb/src/events.rs` plus a `publish_remote_topology_document` reducer in `crates/pod-stdb/src/reducers.rs`, giving `RemoteTopologyBundle` a real authority publication surface inside SpacetimeDB instead of depending on client-only injection helpers.
+- Extended `crates/pod-stdb/src/client.rs` and `crates/pod-net/src/client_stdb.rs` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and widened spectator/player/editor subscription coverage for `remote_topology_document`.
+- Revalidated the row-fed topology slice with:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
+  - `git diff --check`
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`

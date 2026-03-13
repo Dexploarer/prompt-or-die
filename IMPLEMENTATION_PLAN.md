@@ -1797,5 +1797,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
 
-**Last updated**: Iteration 169
-**Current focus**: Iteration 170 replace local `apply_debug_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that source through the parity and evaluation harnesses
+### Iteration 170
+- [x] Added a public `remote_topology_document` event row in `crates/pod-stdb/src/events.rs` plus a `publish_remote_topology_document` reducer in `crates/pod-stdb/src/reducers.rs`, so authority tooling has a real SpacetimeDB table/reducer surface for `remote_topology_bundle` publication instead of depending on client-local injection.
+- [x] Added reducer-side topology publish summarization coverage in `crates/pod-stdb/src/reducers.rs`, validating the canonical TOON document type and extracted publish metadata (`generated_at_unix_ms`, scenario/profile id, world/team counts).
+- [x] Extended `crates/pod-stdb/src/client.rs` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and updated subscription query sets so spectator/player/editor surfaces all subscribe to `remote_topology_document`.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` and `crates/pod-net/tests/networking_integration.rs` to use the row-based remote-topology feed path, proving the public SpacetimeDB client now resolves world/evaluation state from an authority-published row instead of only from direct document injection.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
+  - `git diff --check`
+
+**Last updated**: Iteration 170
+**Current focus**: Iteration 171 hook the generated SpacetimeDB subscription/runtime path to `remote_topology_document` rows so the feed is received automatically, then thread that authority path into parity and evaluation harnesses

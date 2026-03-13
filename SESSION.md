@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `53f9c205`
+**Last Checkpoint**: `e21bc6fc`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -221,6 +221,8 @@
 - [x] Added `pod-net::SpacetimeDBClient::apply_remote_topology_document(...)`, forwarded remote topology source documents through `ServerMessage::DebugDocument`, and covered the document-fed path with deterministic unit/integration tests
 - [x] Generalized the authority-document ingress in `pod-stdb` with `receive_debug_document(...)`, so topology, tool-call, rollup, focused-summary, and versioned telemetry TOON documents now share one dispatch path instead of growing more topology-only hooks
 - [x] Added `pod-net::SpacetimeDBClient::apply_debug_document(...)` and moved the remote-topology document coverage onto that generic path, keeping `apply_remote_topology_document(...)` as a thin compatibility alias
+- [x] Added a real `remote_topology_document` public row plus `publish_remote_topology_document` reducer in `pod-stdb`, so authority tooling has an actual SpacetimeDB publication surface for `RemoteTopologyBundle`
+- [x] Extended `pod-stdb` and `pod-net::SpacetimeDBClient` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and subscription query coverage so remote topology can now arrive as an authority-published feed row instead of only as direct document injection
 
 **Next Action**:
-- Replace local `apply_debug_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that feed into the parity and evaluation harnesses.
+- Hook the generated SpacetimeDB subscription/runtime path to `remote_topology_document` rows, then thread that authority-fed path into the parity and evaluation harnesses.

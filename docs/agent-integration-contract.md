@@ -203,6 +203,13 @@ topology source document through the debug-document stream, so remote consumers
 do not have to reconstruct topology state out-of-band or lose the original
 authority payload during inspection.
 
+The authority-facing publication surface is now explicit too: SpacetimeDB
+publishes `RemoteTopologyBundle` payloads through the public
+`remote_topology_document` row and the `publish_remote_topology_document`
+reducer, and the native client wrappers can ingest those rows directly with
+stale-row protection. The remaining gap is automatic generated-binding hookup,
+not the contract or publication format itself.
+
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many
 worlds, teams, and evaluation runners."

@@ -25,7 +25,7 @@ use pod_core::telemetry::{
     ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
     TickTelemetryFrame, TrajectorySample,
 };
-use pod_core::{decode_toon_document, VersionedTickTelemetry};
+use pod_core::{decode_toon_document, RemoteTopologyBundle, VersionedTickTelemetry};
 use serde_json::{json, Value};
 use spacetimedb::{Identity, ReducerContext, Table};
 use std::collections::HashMap;
@@ -35,6 +35,15 @@ const TELEMETRY_RETENTION_TICKS: u64 = 600;
 const TOOL_EVENT_RETENTION_TICKS: u64 = 36_000;
 const ROLLUP_RETENTION_TICKS: u64 = 36_000;
 const ROLLUP_WINDOW_TICKS: u64 = 60;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteTopologyDocumentPublishSummary {
+    generated_at_unix_ms: u64,
+    scenario_id: String,
+    profile_id: String,
+    world_count: u32,
+    team_count: u32,
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 struct ObservationCounts {
@@ -61,6 +70,31 @@ fn reject_reducer(ctx: &ReducerContext, reason: impl Into<String>) {
             .to_string(),
         });
     }
+}
+
+fn summarize_remote_topology_document(
+    topology_json: &str,
+) -> Result<RemoteTopologyDocumentPublishSummary, String> {
+    let topology: RemoteTopologyBundle =
+        decode_toon_document(topology_json, "remote_topology_bundle")?;
+    let generated_at_unix_ms = u64::try_from(topology.generated_at_unix_ms).map_err(|_| {
+        format!(
+            "remote_topology_bundle generated_at_unix_ms {} exceeds u64",
+            topology.generated_at_unix_ms
+        )
+    })?;
+    let world_count = u32::try_from(topology.worlds.len())
+        .map_err(|_| format!("world count {} exceeds u32", topology.worlds.len()))?;
+    let team_count = u32::try_from(topology.teams.len())
+        .map_err(|_| format!("team count {} exceeds u32", topology.teams.len()))?;
+
+    Ok(RemoteTopologyDocumentPublishSummary {
+        generated_at_unix_ms,
+        scenario_id: topology.scenario_id,
+        profile_id: topology.profile_id,
+        world_count,
+        team_count,
+    })
 }
 
 // ============================================================
@@ -147,6 +181,46 @@ pub fn create_world(ctx: &ReducerContext, seed: u64, width: f32, height: f32, tp
         });
         log::info!("[pod-stdb] World created: seed={seed}, size={width}x{height}, tps={tps}");
     }
+}
+
+/// Publish the latest shared multi-world topology document for remote clients.
+#[spacetimedb::reducer]
+pub fn publish_remote_topology_document(ctx: &ReducerContext, topology_json: String) {
+    let summary = match summarize_remote_topology_document(&topology_json) {
+        Ok(summary) => summary,
+        Err(error) => {
+            reject_reducer(
+                ctx,
+                format!("publish_remote_topology_document rejected: {error}"),
+            );
+            return;
+        }
+    };
+
+    let stale_row_ids = ctx
+        .db
+        .remote_topology_document()
+        .iter()
+        .filter(|row| {
+            row.scenario_id == summary.scenario_id && row.profile_id == summary.profile_id
+        })
+        .map(|row| row.row_id)
+        .collect::<Vec<_>>();
+    for row_id in stale_row_ids {
+        ctx.db.remote_topology_document().row_id().delete(row_id);
+    }
+
+    ctx.db
+        .remote_topology_document()
+        .insert(RemoteTopologyDocumentRow {
+            row_id: 0,
+            generated_at_unix_ms: summary.generated_at_unix_ms,
+            scenario_id: summary.scenario_id,
+            profile_id: summary.profile_id,
+            world_count: summary.world_count,
+            team_count: summary.team_count,
+            topology_json,
+        });
 }
 
 /// Pause or unpause the world simulation.
@@ -1704,7 +1778,7 @@ fn core_agent_type(agent_type: &AgentType) -> CoreAgentType {
 mod tests {
     use super::*;
     use pod_core::telemetry::{AgentToolCallTrace, ToolCallStatus};
-    use pod_core::{decode_toon_document, AgentType};
+    use pod_core::{decode_toon_document, AgentType, RuntimeContractVersion};
 
     #[test]
     fn collect_agent_tool_call_events_exports_toon_ready_rows() {
@@ -1756,6 +1830,55 @@ mod tests {
         assert_eq!(exported.trace.tool_name, "llm.complete");
         assert_eq!(exported.trace.provider, "qwen");
         assert_eq!(exported.trace.status, ToolCallStatus::TimedOut);
+    }
+
+    #[test]
+    fn summarize_remote_topology_document_extracts_publish_metadata() {
+        let document = RemoteTopologyBundle {
+            version: RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![
+                pod_core::AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
+                pod_core::AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow"),
+            ],
+            worlds: vec![pod_core::WorldRealityDefinition::new(
+                "deadman-shadow",
+                "Deadman Shadow",
+                "shadow",
+            )],
+            links: vec![],
+            world_quest_bindings: vec![],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        }
+        .to_toon_document();
+
+        let summary =
+            summarize_remote_topology_document(&document).expect("topology document should decode");
+        assert_eq!(summary.generated_at_unix_ms, 42);
+        assert_eq!(summary.scenario_id, "deadman-neural-cup");
+        assert_eq!(summary.profile_id, "ci-smoke");
+        assert_eq!(summary.world_count, 1);
+        assert_eq!(summary.team_count, 2);
+    }
+
+    #[test]
+    fn summarize_remote_topology_document_rejects_wrong_document_type() {
+        let document = VersionedTickTelemetry::new(TickTelemetryFrame::empty(7)).to_toon_document();
+
+        let error =
+            summarize_remote_topology_document(&document).expect_err("wrong document should fail");
+        assert!(error.contains("Expected TOON document type `remote_topology_bundle`"));
     }
 }
 

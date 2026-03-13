@@ -677,9 +677,9 @@ fn action_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn subscription_all_tables_has_28_queries() {
+fn subscription_all_tables_has_29_queries() {
     let queries = Subscriptions::all_tables();
-    assert_eq!(queries.len(), 28);
+    assert_eq!(queries.len(), 29);
 }
 
 #[test]
@@ -728,6 +728,7 @@ fn subscription_all_tables_covers_key_tables() {
         "combat_event",
         "speech_event",
         "world_event",
+        "remote_topology_document",
         "match_queue",
         "game_match",
         "match_participant",
@@ -759,6 +760,7 @@ fn subscription_player_agent_includes_core_tables() {
     assert!(all_text.contains("entity"));
     assert!(all_text.contains("transform"));
     assert!(all_text.contains("health"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
@@ -770,6 +772,7 @@ fn subscription_spectator_includes_events() {
     assert!(all_text.contains("world_event"));
     assert!(all_text.contains("world_state"));
     assert!(all_text.contains("entity"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
@@ -781,6 +784,7 @@ fn subscription_editor_includes_config_tables() {
     assert!(all_text.contains("movement"));
     assert!(all_text.contains("script"));
     assert!(all_text.contains("collider"));
+    assert!(all_text.contains("remote_topology_document"));
 }
 
 #[test]
