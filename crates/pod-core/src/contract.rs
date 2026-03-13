@@ -808,6 +808,35 @@ impl RemoteTopologyBundle {
     }
 }
 
+pub fn build_remote_topology_bundle(
+    scenario_id: &str,
+    profile_id: &str,
+    generated_at_unix_ms: u128,
+    tournament: &WorldTournamentDefinition,
+    teams: &[AgentTeamDefinition],
+    worlds: &[WorldRealityDefinition],
+    links: &[CrossWorldLinkDefinition],
+    quest_graphs: &[QuestStateGraph],
+    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
+    applied_world_states: &[AppliedWorldStateSummary],
+    evaluation: &ScenarioEvaluationSummary,
+) -> RemoteTopologyBundle {
+    RemoteTopologyBundle {
+        version: RuntimeContractVersion::V1,
+        scenario_id: scenario_id.into(),
+        profile_id: profile_id.into(),
+        generated_at_unix_ms,
+        tournament: tournament.clone(),
+        teams: teams.to_vec(),
+        worlds: worlds.to_vec(),
+        links: links.to_vec(),
+        world_quest_bindings: build_world_quest_bindings(world_quest_graph_ids),
+        quest_graphs: quest_graphs.to_vec(),
+        applied_world_states: applied_world_states.to_vec(),
+        evaluation: evaluation.clone(),
+    }
+}
+
 /// Shared parity report for topology artifacts emitted by headless runners and
 /// consumed by remote benchmark/runtime paths.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1061,18 +1090,19 @@ mod tests {
     use crate::toon::decode_toon_value;
 
     use super::{
-        build_remote_topology_parity_summary, build_world_quest_bindings, AgentCapabilities,
-        AgentRole, AgentRuntimeProfile, AgentTeamDefinition, AppliedWorldStateSummary,
-        ControllerEvaluationSummary, CrossWorldEffect, CrossWorldLinkDefinition,
-        CrossWorldPropagation, EncounterSpawnEntry, FactionReputationTier, FactionReputationTrack,
-        NamedDeltaSummary, ObjectiveShiftSummary, QuestLineStateSummary,
-        QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
-        RemoteTopologyBundle, RuntimeContractVersion, ScenarioEvaluationSummary, TeamControlMode,
-        TeamDeathMarkSummary, TeamDeltaSummary, ToolBudget, ToolCatalog, ToolDefinition,
-        ToolInvocationRequest, ToolInvocationResult, ToolPolicy, TournamentEliminationMode,
-        VersionedAgentAction, VersionedObservation, VersionedTickTelemetry, WorldChunkDefinition,
-        WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
-        WorldRegionDefinition, WorldTournamentDefinition, RUNTIME_CONTRACT_VERSION_V1,
+        build_remote_topology_bundle, build_remote_topology_parity_summary,
+        build_world_quest_bindings, AgentCapabilities, AgentRole, AgentRuntimeProfile,
+        AgentTeamDefinition, AppliedWorldStateSummary, ControllerEvaluationSummary,
+        CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
+        FactionReputationTier, FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary,
+        QuestLineStateSummary, QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph,
+        RegionEncounterTable, RemoteTopologyBundle, RuntimeContractVersion,
+        ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary, TeamDeltaSummary,
+        ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
+        ToolPolicy, TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
+        VersionedTickTelemetry, WorldChunkDefinition, WorldEvaluationSummary,
+        WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
+        RUNTIME_CONTRACT_VERSION_V1,
     };
 
     #[test]
@@ -1358,29 +1388,25 @@ mod tests {
             }],
         );
 
-        let bundle = RemoteTopologyBundle {
-            version: RuntimeContractVersion::V1,
-            scenario_id: "deadman-neural-cup".into(),
-            profile_id: "ci-smoke".into(),
-            generated_at_unix_ms: 42,
-            tournament,
-            teams: vec![AgentTeamDefinition::new(
+        let bundle = build_remote_topology_bundle(
+            "deadman-neural-cup",
+            "ci-smoke",
+            42,
+            &tournament,
+            &[AgentTeamDefinition::new(
                 "iron-sigil",
                 "Iron Sigil",
                 "deadman-prime",
             )],
-            worlds: vec![world],
-            links: vec![CrossWorldLinkDefinition::new(
+            &[world],
+            &[CrossWorldLinkDefinition::new(
                 "prime-to-shadow",
                 "deadman-prime",
                 "deadman-shadow",
             )],
-            world_quest_bindings: vec![WorldQuestBinding {
-                world_id: "deadman-prime".into(),
-                quest_graph_ids: vec!["deadman-prime-season".into()],
-            }],
-            quest_graphs: vec![quest_graph],
-            applied_world_states: vec![AppliedWorldStateSummary {
+            &[quest_graph],
+            &BTreeMap::from([("deadman-prime".into(), vec!["deadman-prime-season".into()])]),
+            &[AppliedWorldStateSummary {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
                 role: WorldRealityRole::Tournament,
@@ -1421,7 +1447,7 @@ mod tests {
                     }],
                 }],
             }],
-            evaluation: ScenarioEvaluationSummary {
+            &ScenarioEvaluationSummary {
                 controller_mix: vec![ControllerEvaluationSummary {
                     agent_type: "neural_agent".into(),
                     row_count: 1,
@@ -1451,7 +1477,7 @@ mod tests {
                     applied_resource_delta_total: 0,
                 }],
             },
-        };
+        );
 
         let value = decode_toon_value(&bundle.to_toon_document())
             .expect("remote topology bundle should decode");

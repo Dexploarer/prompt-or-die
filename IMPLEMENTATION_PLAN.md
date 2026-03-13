@@ -1924,3 +1924,4 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 **Last updated**: Iteration 180
 **Current focus**: Iteration 181 swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the binding layer exists, then push that live feed into parity/evaluation harnesses
 - [x] Extracted `build_world_quest_bindings(...)`, `RemoteTopologyParitySummary`, and `build_remote_topology_parity_summary(...)` into `crates/pod-core/src/contract.rs`, so topology consistency checks are now shared engine contracts instead of `apps/pod-headless`-local report logic.
+- [x] Extracted `build_remote_topology_bundle(...)` into `crates/pod-core/src/contract.rs`, so `RemoteTopologyBundle` assembly now lives with the shared topology contract instead of `apps/pod-headless` local helpers.

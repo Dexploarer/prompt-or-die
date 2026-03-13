@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
-    build_remote_topology_parity_summary, build_world_quest_bindings, run_flagship_mmo_acceptance,
-    AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition, AgentType,
-    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+    build_remote_topology_bundle, build_remote_topology_parity_summary, build_world_quest_bindings,
+    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
+    AgentType, AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
     CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
     FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
     ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
@@ -729,37 +729,6 @@ fn run_scenario(
         },
         topology,
     })
-}
-
-fn build_remote_topology_bundle(
-    scenario_id: &str,
-    profile_id: &str,
-    generated_at_unix_ms: u128,
-    tournament: &WorldTournamentDefinition,
-    teams: &[AgentTeamDefinition],
-    worlds: &[WorldRealityDefinition],
-    links: &[CrossWorldLinkDefinition],
-    quest_graphs: &[QuestStateGraph],
-    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
-    applied_world_states: &[AppliedWorldStateReport],
-    evaluation: &ScenarioEvaluationReport,
-) -> RemoteTopologyBundle {
-    let world_quest_bindings = build_world_quest_bindings(world_quest_graph_ids);
-
-    RemoteTopologyBundle {
-        version: pod_core::RuntimeContractVersion::V1,
-        scenario_id: scenario_id.into(),
-        profile_id: profile_id.into(),
-        generated_at_unix_ms,
-        tournament: tournament.clone(),
-        teams: teams.to_vec(),
-        worlds: worlds.to_vec(),
-        links: links.to_vec(),
-        world_quest_bindings,
-        quest_graphs: quest_graphs.to_vec(),
-        applied_world_states: applied_world_states.to_vec(),
-        evaluation: evaluation.clone(),
-    }
 }
 
 fn world_config_for(
