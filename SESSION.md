@@ -197,7 +197,7 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Thread team/world identity through the new headless dataset/report path so standings and dataset rows stop being world-level aggregates and become admission-aware agent-team samples.
+- Extend the new headless dataset/report surface into remote topology so admission-aware team/world identity survives beyond the local runner.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -210,8 +210,9 @@
 - [x] Added first-pass topology contracts in `pod-core` for `AgentTeamDefinition`, `WorldRealityDefinition`, `CrossWorldLinkDefinition`, and `WorldTournamentDefinition`
 - [x] Documented the intended Deadman-style / neural-swarm architecture in `docs/multi-world-agent-topology.md`
 - [x] Added `apps/pod-headless`, a deterministic multi-world runner that executes the built-in `deadman-neural-cup` scenario, emits a JSON report, and projects cross-world effects from authoritative reward telemetry
-- [ ] Define deterministic cross-world effect application against authoritative world state
+- [x] Added deterministic team admission in `apps/pod-headless`, so dataset rows and standings now carry admitted team identity per world instead of world-level aggregates only
+- [x] Added applied target-world state aggregation in `apps/pod-headless`, so cross-world effects are rolled into per-world team/resource/faction/objective state summaries instead of only link-local projections
 - [ ] Thread world identity and team admission through remote topology and evaluation harnesses
 
 **Next Action**:
-- Upgrade `apps/pod-headless` from projection-only standings to admission-aware multi-world team execution and authority-side cross-world effect application.
+- Thread the new admission-aware team/world model into remote topology and add replay/evaluation coverage for linked-world tournaments and neural swarms.

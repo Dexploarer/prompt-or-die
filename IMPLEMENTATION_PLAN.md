@@ -1712,5 +1712,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
   - `git diff --check`
 
-**Last updated**: Iteration 161
-**Current focus**: Iteration 162 thread admission-aware team/world identity and deterministic authority-side cross-world effect application through `apps/pod-headless`
+### Iteration 162
+- [x] Added deterministic roster admission in `apps/pod-headless`, binding authoritative runtime agents to admitted teams per world based on `active_team_ids`, `allowed_world_ids`, and `max_agents`.
+- [x] Threaded that admission metadata into reward-aware dataset rows so each exported training row now carries `team_id` and `team_slot` in addition to world metadata and runtime profile.
+- [x] Reworked team standings to use admission-aware assigned-agent counts, dataset-row counts, and world reward totals, then layered applied cross-world score/death-mark state on top.
+- [x] Added `applied_world_states` to the main scenario report, aggregating projected cross-world effects into target-world team/resource/faction/objective state summaries.
+- [x] Added deterministic unit coverage for roster admission, applied target-world state aggregation, and the new standings shape.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 162
+**Current focus**: Iteration 163 thread the new team/world identity and applied-effect model into remote topology and add replay/evaluation coverage for linked-world tournaments and neural swarms

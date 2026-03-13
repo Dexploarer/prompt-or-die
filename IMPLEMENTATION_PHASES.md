@@ -368,6 +368,6 @@
 
 ## Immediate Next Actions
 
-1. Add reward-aware dataset export/report tooling on top of the authoritative replay samples so the neural pipeline has a first-class training surface.
-2. Thread team/world identity through the headless runner and remote topology so standings stop being projection-only aggregates.
-3. Replace projected cross-world effects with deterministic authority-side application rules backed by replay/evaluation coverage.
+1. Extend the same team/world identity and applied-effect model into remote topology instead of leaving it headless-only.
+2. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the new headless execution surface.
+3. Start comparing controller families on the same headless scenarios so neural swarms, hybrid captains, and scripted teams have a common evaluation surface.

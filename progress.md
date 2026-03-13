@@ -365,3 +365,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-headless`
   - `cargo check -p pod-headless`
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+- Upgraded `apps/pod-headless` from world-only aggregates to admission-aware execution: runtime agents are now deterministically bound to admitted teams per world, and exported dataset rows carry `team_id` plus `team_slot`.
+- Added `applied_world_states` to the main scenario report, rolling cross-world link outputs into target-world team score, death-mark, resource, faction, and objective summaries instead of leaving them as link-local projections only.
+- Reworked team standings to combine admission-aware assigned-agent counts, dataset-row counts, world reward totals, and applied cross-world score/death-mark state.
+- Revalidated the admission/effect-application slice with:
+  - `cargo test -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`

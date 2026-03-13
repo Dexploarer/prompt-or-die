@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -53,6 +53,7 @@ struct HeadlessAppReport {
     world_runs: Vec<WorldRunReport>,
     dataset_summary: RewardDatasetSummary,
     cross_world_projections: Vec<CrossWorldProjectionReport>,
+    applied_world_states: Vec<AppliedWorldStateReport>,
     standings: Vec<TeamStandingReport>,
     notes: Vec<String>,
 }
@@ -124,6 +125,8 @@ struct RewardDatasetRow {
     world_id: String,
     world_role: WorldRealityRole,
     world_seed: u64,
+    team_id: Option<String>,
+    team_slot: Option<u16>,
     runtime_profile: AgentRuntimeProfile,
     sample: ReplayTrainingSample,
     reward_reasons: Vec<RewardReasonStat>,
@@ -147,6 +150,45 @@ struct CrossWorldProjectionReport {
     application_count: usize,
     matched_tags: Vec<LinkTriggerMatch>,
     projected_effects: Vec<ProjectedCrossWorldEffect>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AppliedWorldStateReport {
+    world_id: String,
+    display_name: String,
+    role: WorldRealityRole,
+    team_scores: Vec<TeamDeltaReport>,
+    death_marks: Vec<TeamDeathMarkReport>,
+    faction_reputation_deltas: Vec<NamedDeltaReport>,
+    encounter_weight_deltas: Vec<NamedDeltaReport>,
+    resource_scarcity_deltas: Vec<NamedDeltaReport>,
+    objective_state_shifts: Vec<ObjectiveShiftReport>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct TeamDeltaReport {
+    team_id: String,
+    total_delta: i32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct TeamDeathMarkReport {
+    team_id: String,
+    applications: usize,
+    total_duration_ticks: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct NamedDeltaReport {
+    id: String,
+    total_delta: i32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ObjectiveShiftReport {
+    quest_graph_id: String,
+    stage_tag: String,
+    applications: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -198,16 +240,22 @@ struct TeamStandingReport {
     control_mode: TeamControlMode,
     home_world_id: String,
     participating_world_ids: Vec<String>,
-    projected_score: i32,
-    projected_death_marks: usize,
-    projected_death_mark_ticks: u64,
+    assigned_agent_count: usize,
+    dataset_row_count: usize,
+    world_reward_total: f32,
+    applied_score_delta: i32,
+    active_death_marks: usize,
+    active_death_mark_ticks: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct TeamStandingAccumulator {
-    projected_score: i32,
-    projected_death_marks: usize,
-    projected_death_mark_ticks: u64,
+    assigned_agents: BTreeSet<String>,
+    dataset_row_count: usize,
+    world_reward_total: f32,
+    applied_score_delta: i32,
+    active_death_marks: usize,
+    active_death_mark_ticks: u64,
 }
 
 #[derive(Debug)]
@@ -453,7 +501,7 @@ fn run_scenario(
 
     let dataset_worlds = executions
         .iter()
-        .map(build_world_dataset_export)
+        .map(|execution| build_world_dataset_export(execution, &scenario.teams))
         .collect::<Vec<_>>();
     let dataset_summary = summarize_dataset_rows(
         &dataset_worlds
@@ -466,9 +514,15 @@ fn run_scenario(
     for link in &scenario.links {
         cross_world_projections.push(build_projection_report(link, &executions)?);
     }
+    let applied_world_states =
+        build_applied_world_states(&scenario.worlds, &cross_world_projections);
 
-    let standings =
-        build_team_standings(&scenario.teams, &scenario.worlds, &cross_world_projections);
+    let standings = build_team_standings(
+        &scenario.teams,
+        &scenario.worlds,
+        &dataset_worlds,
+        &applied_world_states,
+    );
 
     let generated_at_unix_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -498,6 +552,7 @@ fn run_scenario(
                 .collect(),
             dataset_summary: dataset_summary.clone(),
             cross_world_projections,
+            applied_world_states,
             standings,
             notes: notes.clone(),
         },
@@ -598,8 +653,11 @@ fn build_world_reward_report(result: &FlagshipMmoAcceptanceResult) -> WorldRewar
     }
 }
 
-fn build_world_dataset_export(execution: &WorldExecution) -> WorldDatasetExport {
-    let rows = build_dataset_rows(&execution.world, &execution.result);
+fn build_world_dataset_export(
+    execution: &WorldExecution,
+    teams: &[AgentTeamDefinition],
+) -> WorldDatasetExport {
+    let rows = build_dataset_rows(&execution.world, &execution.result, teams);
     let summary = summarize_dataset_rows(&rows);
 
     WorldDatasetExport {
@@ -615,19 +673,24 @@ fn build_world_dataset_export(execution: &WorldExecution) -> WorldDatasetExport 
 fn build_dataset_rows(
     world: &WorldRealityDefinition,
     result: &FlagshipMmoAcceptanceResult,
+    teams: &[AgentTeamDefinition],
 ) -> Vec<RewardDatasetRow> {
     let samples = result.training_samples();
     let mut sample_index = 0usize;
     let mut rows = Vec::with_capacity(samples.len());
+    let admissions = build_world_admissions(world, result, teams);
 
     for window in result.telemetry_windows() {
         for agent in &window.agents {
             let sample = samples[sample_index].clone();
             sample_index += 1;
+            let admission = admissions.get(&agent.agent_id.0.to_string());
             rows.push(RewardDatasetRow {
                 world_id: world.world_id.clone(),
                 world_role: world.role,
                 world_seed: result.config.world_seed,
+                team_id: admission.map(|entry| entry.team_id.clone()),
+                team_slot: admission.map(|entry| entry.slot_index),
                 runtime_profile: agent.runtime_profile,
                 sample,
                 reward_reasons: collect_reward_reason_stats(agent.reward_signals.iter()),
@@ -680,6 +743,99 @@ fn summarize_dataset_rows(rows: &[RewardDatasetRow]) -> RewardDatasetSummary {
             })
             .collect(),
     }
+}
+
+#[derive(Debug, Clone)]
+struct TeamAdmissionAssignment {
+    team_id: String,
+    slot_index: u16,
+}
+
+fn build_world_admissions(
+    world: &WorldRealityDefinition,
+    result: &FlagshipMmoAcceptanceResult,
+    teams: &[AgentTeamDefinition],
+) -> BTreeMap<String, TeamAdmissionAssignment> {
+    let Some(first_window) = result.telemetry_windows().first() else {
+        return BTreeMap::new();
+    };
+
+    let mut roster = first_window
+        .agents
+        .iter()
+        .map(|agent| agent.agent_id.0.to_string())
+        .collect::<Vec<_>>();
+    roster.sort();
+
+    let team_lookup = teams
+        .iter()
+        .map(|team| (team.team_id.clone(), team))
+        .collect::<BTreeMap<_, _>>();
+
+    assign_roster_to_world_teams(&roster, world, &team_lookup)
+}
+
+fn assign_roster_to_world_teams(
+    roster: &[String],
+    world: &WorldRealityDefinition,
+    team_lookup: &BTreeMap<String, &AgentTeamDefinition>,
+) -> BTreeMap<String, TeamAdmissionAssignment> {
+    let active_teams = world
+        .active_team_ids
+        .iter()
+        .filter_map(|team_id| team_lookup.get(team_id).copied())
+        .filter(|team| {
+            team.allowed_world_ids
+                .iter()
+                .any(|world_id| world_id == &world.world_id)
+        })
+        .collect::<Vec<_>>();
+    if active_teams.is_empty() {
+        return BTreeMap::new();
+    }
+
+    let mut assignments = BTreeMap::new();
+    let mut team_slots = active_teams
+        .iter()
+        .map(|team| (team.team_id.clone(), 0u16))
+        .collect::<BTreeMap<_, _>>();
+    let mut team_index = 0usize;
+
+    for agent_id in roster {
+        let mut selected = None;
+        for offset in 0..active_teams.len() {
+            let candidate_index = (team_index + offset) % active_teams.len();
+            let candidate = active_teams[candidate_index];
+            let next_slot = *team_slots
+                .get(&candidate.team_id)
+                .expect("candidate team has slot entry");
+            if next_slot < candidate.max_agents {
+                selected = Some((candidate_index, candidate.team_id.clone(), next_slot));
+                break;
+            }
+        }
+
+        if let Some((selected_index, team_id, slot_index)) = selected {
+            assignments.insert(
+                agent_id.clone(),
+                TeamAdmissionAssignment {
+                    team_id,
+                    slot_index,
+                },
+            );
+            if let Some(slot) = team_slots.get_mut(
+                &assignments
+                    .get(agent_id)
+                    .expect("assignment inserted")
+                    .team_id,
+            ) {
+                *slot += 1;
+            }
+            team_index = (selected_index + 1) % active_teams.len();
+        }
+    }
+
+    assignments
 }
 
 fn build_projection_report(
@@ -834,34 +990,33 @@ fn project_effects(
 fn build_team_standings(
     teams: &[AgentTeamDefinition],
     worlds: &[WorldRealityDefinition],
-    projections: &[CrossWorldProjectionReport],
+    dataset_worlds: &[WorldDatasetExport],
+    applied_world_states: &[AppliedWorldStateReport],
 ) -> Vec<TeamStandingReport> {
     let mut by_team = BTreeMap::<String, TeamStandingAccumulator>::new();
-    for projection in projections {
-        for effect in &projection.projected_effects {
-            match effect {
-                ProjectedCrossWorldEffect::TeamScoreDelta {
-                    team_id,
-                    total_delta,
-                    ..
-                } => {
-                    by_team.entry(team_id.clone()).or_default().projected_score += *total_delta;
-                }
-                ProjectedCrossWorldEffect::DeathMark {
-                    team_id,
-                    applications,
-                    total_duration_ticks,
-                    ..
-                } => {
-                    let entry = by_team.entry(team_id.clone()).or_default();
-                    entry.projected_death_marks += *applications;
-                    entry.projected_death_mark_ticks += *total_duration_ticks;
-                }
-                ProjectedCrossWorldEffect::FactionReputationDelta { .. }
-                | ProjectedCrossWorldEffect::EncounterWeightDelta { .. }
-                | ProjectedCrossWorldEffect::ResourceScarcityDelta { .. }
-                | ProjectedCrossWorldEffect::ObjectiveStateShift { .. } => {}
+    for world in dataset_worlds {
+        for row in &world.rows {
+            if let Some(team_id) = &row.team_id {
+                let entry = by_team.entry(team_id.clone()).or_default();
+                entry.dataset_row_count += 1;
+                entry.world_reward_total += row.sample.reward_summary.total;
+                entry
+                    .assigned_agents
+                    .insert(row.sample.agent_id.0.to_string());
             }
+        }
+    }
+    for state in applied_world_states {
+        for team_score in &state.team_scores {
+            by_team
+                .entry(team_score.team_id.clone())
+                .or_default()
+                .applied_score_delta += team_score.total_delta;
+        }
+        for death_mark in &state.death_marks {
+            let entry = by_team.entry(death_mark.team_id.clone()).or_default();
+            entry.active_death_marks += death_mark.applications;
+            entry.active_death_mark_ticks += death_mark.total_duration_ticks;
         }
     }
 
@@ -886,9 +1041,132 @@ fn build_team_standings(
                 control_mode: team.control_mode,
                 home_world_id: team.home_world_id.clone(),
                 participating_world_ids,
-                projected_score: totals.projected_score,
-                projected_death_marks: totals.projected_death_marks,
-                projected_death_mark_ticks: totals.projected_death_mark_ticks,
+                assigned_agent_count: totals.assigned_agents.len(),
+                dataset_row_count: totals.dataset_row_count,
+                world_reward_total: totals.world_reward_total,
+                applied_score_delta: totals.applied_score_delta,
+                active_death_marks: totals.active_death_marks,
+                active_death_mark_ticks: totals.active_death_mark_ticks,
+            }
+        })
+        .collect()
+}
+
+fn build_applied_world_states(
+    worlds: &[WorldRealityDefinition],
+    projections: &[CrossWorldProjectionReport],
+) -> Vec<AppliedWorldStateReport> {
+    worlds
+        .iter()
+        .map(|world| {
+            let mut team_scores = BTreeMap::<String, i32>::new();
+            let mut death_marks = BTreeMap::<String, (usize, u64)>::new();
+            let mut faction_reputation = BTreeMap::<String, i32>::new();
+            let mut encounter_weights = BTreeMap::<String, i32>::new();
+            let mut resource_scarcity = BTreeMap::<String, i32>::new();
+            let mut objective_shifts = BTreeMap::<(String, String), usize>::new();
+
+            for projection in projections
+                .iter()
+                .filter(|projection| projection.target_world_id == world.world_id)
+            {
+                for effect in &projection.projected_effects {
+                    match effect {
+                        ProjectedCrossWorldEffect::FactionReputationDelta {
+                            faction_id,
+                            total_delta,
+                            ..
+                        } => {
+                            *faction_reputation.entry(faction_id.clone()).or_insert(0) +=
+                                *total_delta;
+                        }
+                        ProjectedCrossWorldEffect::EncounterWeightDelta {
+                            table_id,
+                            total_delta,
+                            ..
+                        } => {
+                            *encounter_weights.entry(table_id.clone()).or_insert(0) += *total_delta;
+                        }
+                        ProjectedCrossWorldEffect::ResourceScarcityDelta {
+                            biome_id,
+                            total_delta,
+                            ..
+                        } => {
+                            *resource_scarcity.entry(biome_id.clone()).or_insert(0) += *total_delta;
+                        }
+                        ProjectedCrossWorldEffect::TeamScoreDelta {
+                            team_id,
+                            total_delta,
+                            ..
+                        } => {
+                            *team_scores.entry(team_id.clone()).or_insert(0) += *total_delta;
+                        }
+                        ProjectedCrossWorldEffect::DeathMark {
+                            team_id,
+                            applications,
+                            total_duration_ticks,
+                            ..
+                        } => {
+                            let entry = death_marks.entry(team_id.clone()).or_insert((0usize, 0));
+                            entry.0 += *applications;
+                            entry.1 += *total_duration_ticks;
+                        }
+                        ProjectedCrossWorldEffect::ObjectiveStateShift {
+                            quest_graph_id,
+                            stage_tag,
+                            applications,
+                        } => {
+                            *objective_shifts
+                                .entry((quest_graph_id.clone(), stage_tag.clone()))
+                                .or_insert(0) += *applications;
+                        }
+                    }
+                }
+            }
+
+            AppliedWorldStateReport {
+                world_id: world.world_id.clone(),
+                display_name: world.display_name.clone(),
+                role: world.role,
+                team_scores: team_scores
+                    .into_iter()
+                    .map(|(team_id, total_delta)| TeamDeltaReport {
+                        team_id,
+                        total_delta,
+                    })
+                    .collect(),
+                death_marks: death_marks
+                    .into_iter()
+                    .map(
+                        |(team_id, (applications, total_duration_ticks))| TeamDeathMarkReport {
+                            team_id,
+                            applications,
+                            total_duration_ticks,
+                        },
+                    )
+                    .collect(),
+                faction_reputation_deltas: faction_reputation
+                    .into_iter()
+                    .map(|(id, total_delta)| NamedDeltaReport { id, total_delta })
+                    .collect(),
+                encounter_weight_deltas: encounter_weights
+                    .into_iter()
+                    .map(|(id, total_delta)| NamedDeltaReport { id, total_delta })
+                    .collect(),
+                resource_scarcity_deltas: resource_scarcity
+                    .into_iter()
+                    .map(|(id, total_delta)| NamedDeltaReport { id, total_delta })
+                    .collect(),
+                objective_state_shifts: objective_shifts
+                    .into_iter()
+                    .map(
+                        |((quest_graph_id, stage_tag), applications)| ObjectiveShiftReport {
+                            quest_graph_id,
+                            stage_tag,
+                            applications,
+                        },
+                    )
+                    .collect(),
             }
         })
         .collect()
@@ -1086,7 +1364,128 @@ mod tests {
     }
 
     #[test]
-    fn standings_accumulate_projection_totals_by_team() {
+    fn roster_assignment_round_robins_across_active_teams() {
+        let mut iron_sigil = AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime");
+        iron_sigil.allowed_world_ids = vec!["deadman-prime".into()];
+        let mut gloam_mesh = AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow");
+        gloam_mesh.allowed_world_ids = vec!["deadman-prime".into(), "deadman-shadow".into()];
+
+        let world = WorldRealityDefinition {
+            version: pod_core::RuntimeContractVersion::V1,
+            world_id: "deadman-prime".into(),
+            display_name: "Deadman Prime".into(),
+            ruleset_id: "deadman".into(),
+            role: WorldRealityRole::Tournament,
+            linked_world_ids: vec![],
+            active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+        };
+        let teams = vec![iron_sigil, gloam_mesh];
+        let team_lookup = teams
+            .iter()
+            .map(|team| (team.team_id.clone(), team))
+            .collect::<BTreeMap<_, _>>();
+        let roster = vec![
+            "agent-a".to_string(),
+            "agent-b".to_string(),
+            "agent-c".to_string(),
+            "agent-d".to_string(),
+        ];
+
+        let assignments = assign_roster_to_world_teams(&roster, &world, &team_lookup);
+
+        assert_eq!(assignments["agent-a"].team_id, "iron-sigil");
+        assert_eq!(assignments["agent-b"].team_id, "gloam-mesh");
+        assert_eq!(assignments["agent-c"].team_id, "iron-sigil");
+        assert_eq!(assignments["agent-d"].team_id, "gloam-mesh");
+        assert_eq!(assignments["agent-c"].slot_index, 1);
+        assert_eq!(assignments["agent-d"].slot_index, 1);
+    }
+
+    #[test]
+    fn applied_world_state_aggregates_target_effects() {
+        let worlds = vec![
+            WorldRealityDefinition {
+                version: pod_core::RuntimeContractVersion::V1,
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                ruleset_id: "shadow".into(),
+                role: WorldRealityRole::Shadow,
+                linked_world_ids: vec!["deadman-prime".into()],
+                active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+            },
+            WorldRealityDefinition {
+                version: pod_core::RuntimeContractVersion::V1,
+                world_id: "sanctuary-echo".into(),
+                display_name: "Sanctuary Echo".into(),
+                ruleset_id: "echo".into(),
+                role: WorldRealityRole::Sanctuary,
+                linked_world_ids: vec!["deadman-prime".into()],
+                active_team_ids: vec!["iron-sigil".into()],
+            },
+        ];
+
+        let projections = vec![
+            CrossWorldProjectionReport {
+                link_id: "prime-to-shadow".into(),
+                source_world_id: "deadman-prime".into(),
+                target_world_id: "deadman-shadow".into(),
+                trigger_tags: vec!["kill-secured".into()],
+                propagation: CrossWorldPropagation::Immediate,
+                trigger_count: 2,
+                application_count: 2,
+                matched_tags: vec![],
+                projected_effects: vec![
+                    ProjectedCrossWorldEffect::TeamScoreDelta {
+                        team_id: "iron-sigil".into(),
+                        per_application: 5,
+                        total_delta: 10,
+                    },
+                    ProjectedCrossWorldEffect::DeathMark {
+                        team_id: "gloam-mesh".into(),
+                        per_application_duration_ticks: 600,
+                        total_duration_ticks: 1200,
+                        applications: 2,
+                    },
+                ],
+            },
+            CrossWorldProjectionReport {
+                link_id: "prime-to-sanctuary".into(),
+                source_world_id: "deadman-prime".into(),
+                target_world_id: "sanctuary-echo".into(),
+                trigger_tags: vec!["skill-xp".into()],
+                propagation: CrossWorldPropagation::Threshold {
+                    required_triggers: 3,
+                },
+                trigger_count: 3,
+                application_count: 1,
+                matched_tags: vec![],
+                projected_effects: vec![
+                    ProjectedCrossWorldEffect::FactionReputationDelta {
+                        faction_id: "echo-order".into(),
+                        per_application: 2,
+                        total_delta: 2,
+                    },
+                    ProjectedCrossWorldEffect::ObjectiveStateShift {
+                        quest_graph_id: "sanctuary-echo-uplift".into(),
+                        stage_tag: "uplifted".into(),
+                        applications: 1,
+                    },
+                ],
+            },
+        ];
+
+        let applied = build_applied_world_states(&worlds, &projections);
+
+        assert_eq!(applied[0].team_scores[0].team_id, "iron-sigil");
+        assert_eq!(applied[0].team_scores[0].total_delta, 10);
+        assert_eq!(applied[0].death_marks[0].team_id, "gloam-mesh");
+        assert_eq!(applied[0].death_marks[0].applications, 2);
+        assert_eq!(applied[1].faction_reputation_deltas[0].id, "echo-order");
+        assert_eq!(applied[1].objective_state_shifts[0].applications, 1);
+    }
+
+    #[test]
+    fn standings_accumulate_admissions_rewards_and_applied_effects() {
         let mut iron_sigil = AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime");
         iron_sigil.control_mode = TeamControlMode::HybridCommand;
 
@@ -1114,65 +1513,135 @@ mod tests {
             },
         ];
 
-        let projections = vec![
-            CrossWorldProjectionReport {
-                link_id: "prime-to-shadow".into(),
-                source_world_id: "deadman-prime".into(),
-                target_world_id: "deadman-shadow".into(),
-                trigger_tags: vec!["kill-secured".into()],
-                propagation: CrossWorldPropagation::Immediate,
-                trigger_count: 3,
-                application_count: 3,
-                matched_tags: vec![LinkTriggerMatch {
-                    tag: "kill-secured".into(),
-                    matches: 3,
-                }],
-                projected_effects: vec![ProjectedCrossWorldEffect::TeamScoreDelta {
+        let dataset_worlds = vec![WorldDatasetExport {
+            world_id: "deadman-prime".into(),
+            display_name: "Deadman Prime".into(),
+            role: WorldRealityRole::Tournament,
+            world_seed: 11,
+            summary: RewardDatasetSummary {
+                row_count: 2,
+                terminal_row_count: 0,
+                total: 3.0,
+                positive_total: 3.0,
+                negative_total: 0.0,
+                reasons: vec![],
+            },
+            rows: vec![
+                RewardDatasetRow {
+                    world_id: "deadman-prime".into(),
+                    world_role: WorldRealityRole::Tournament,
+                    world_seed: 11,
+                    team_id: Some("iron-sigil".into()),
+                    team_slot: Some(0),
+                    runtime_profile: AgentRuntimeProfile {
+                        role: AgentRole::Player,
+                        agent_type: AgentType::NeuralAgent,
+                        ..Default::default()
+                    },
+                    sample: ReplayTrainingSample {
+                        tick: 1,
+                        agent_id: pod_core::AgentId::default(),
+                        path_distance: 0.5,
+                        action_outcomes: ActionOutcomeSummary::default(),
+                        encounter_transition: None,
+                        tool_call_latency_ms: 0,
+                        tool_call_error_count: 0,
+                        reward_summary: RewardAttributionSummary {
+                            signal_count: 1,
+                            total: 2.0,
+                            positive_total: 2.0,
+                            negative_total: 0.0,
+                            terminal: false,
+                        },
+                    },
+                    reward_reasons: vec![],
+                },
+                RewardDatasetRow {
+                    world_id: "deadman-prime".into(),
+                    world_role: WorldRealityRole::Tournament,
+                    world_seed: 11,
+                    team_id: Some("gloam-mesh".into()),
+                    team_slot: Some(0),
+                    runtime_profile: AgentRuntimeProfile {
+                        role: AgentRole::Player,
+                        agent_type: AgentType::LlmAgent,
+                        ..Default::default()
+                    },
+                    sample: ReplayTrainingSample {
+                        tick: 1,
+                        agent_id: pod_core::AgentId::default(),
+                        path_distance: 0.5,
+                        action_outcomes: ActionOutcomeSummary::default(),
+                        encounter_transition: None,
+                        tool_call_latency_ms: 0,
+                        tool_call_error_count: 0,
+                        reward_summary: RewardAttributionSummary {
+                            signal_count: 1,
+                            total: 1.0,
+                            positive_total: 1.0,
+                            negative_total: 0.0,
+                            terminal: false,
+                        },
+                    },
+                    reward_reasons: vec![],
+                },
+            ],
+        }];
+        let applied_world_states = vec![
+            AppliedWorldStateReport {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                team_scores: vec![TeamDeltaReport {
                     team_id: "iron-sigil".into(),
-                    per_application: 5,
                     total_delta: 15,
                 }],
-            },
-            CrossWorldProjectionReport {
-                link_id: "shadow-to-prime".into(),
-                source_world_id: "deadman-shadow".into(),
-                target_world_id: "deadman-prime".into(),
-                trigger_tags: vec!["death-taken".into()],
-                propagation: CrossWorldPropagation::Threshold {
-                    required_triggers: 2,
-                },
-                trigger_count: 4,
-                application_count: 2,
-                matched_tags: vec![LinkTriggerMatch {
-                    tag: "death-taken".into(),
-                    matches: 4,
+                death_marks: vec![TeamDeathMarkReport {
+                    team_id: "gloam-mesh".into(),
+                    applications: 2,
+                    total_duration_ticks: 1200,
                 }],
-                projected_effects: vec![
-                    ProjectedCrossWorldEffect::TeamScoreDelta {
-                        team_id: "gloam-mesh".into(),
-                        per_application: 4,
-                        total_delta: 8,
-                    },
-                    ProjectedCrossWorldEffect::DeathMark {
-                        team_id: "gloam-mesh".into(),
-                        per_application_duration_ticks: 600,
-                        total_duration_ticks: 1200,
-                        applications: 2,
-                    },
-                ],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![],
+            },
+            AppliedWorldStateReport {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                team_scores: vec![TeamDeltaReport {
+                    team_id: "gloam-mesh".into(),
+                    total_delta: 8,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![],
             },
         ];
 
-        let standings = build_team_standings(&[iron_sigil, gloam_mesh], &worlds, &projections);
+        let standings = build_team_standings(
+            &[iron_sigil, gloam_mesh],
+            &worlds,
+            &dataset_worlds,
+            &applied_world_states,
+        );
         let by_team = standings
             .into_iter()
             .map(|standing| (standing.team_id.clone(), standing))
             .collect::<BTreeMap<_, _>>();
 
-        assert_eq!(by_team["gloam-mesh"].projected_score, 8);
-        assert_eq!(by_team["gloam-mesh"].projected_death_marks, 2);
-        assert_eq!(by_team["iron-sigil"].projected_score, 15);
-        assert_eq!(by_team["iron-sigil"].projected_death_marks, 0);
+        assert_eq!(by_team["gloam-mesh"].assigned_agent_count, 1);
+        assert_eq!(by_team["gloam-mesh"].dataset_row_count, 1);
+        assert_eq!(by_team["gloam-mesh"].world_reward_total, 1.0);
+        assert_eq!(by_team["gloam-mesh"].applied_score_delta, 8);
+        assert_eq!(by_team["gloam-mesh"].active_death_marks, 2);
+        assert_eq!(by_team["iron-sigil"].assigned_agent_count, 1);
+        assert_eq!(by_team["iron-sigil"].world_reward_total, 2.0);
+        assert_eq!(by_team["iron-sigil"].applied_score_delta, 15);
+        assert_eq!(by_team["iron-sigil"].active_death_marks, 0);
     }
 
     #[test]
@@ -1209,6 +1678,8 @@ mod tests {
                 world_id: "deadman-prime".into(),
                 world_role: WorldRealityRole::Tournament,
                 world_seed: 11,
+                team_id: Some("iron-sigil".into()),
+                team_slot: Some(0),
                 runtime_profile: AgentRuntimeProfile {
                     role: AgentRole::Player,
                     agent_type: AgentType::NeuralAgent,
@@ -1245,6 +1716,8 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 world_role: WorldRealityRole::Shadow,
                 world_seed: 22,
+                team_id: Some("gloam-mesh".into()),
+                team_slot: Some(0),
                 runtime_profile: AgentRuntimeProfile {
                     role: AgentRole::Player,
                     agent_type: AgentType::LlmAgent,

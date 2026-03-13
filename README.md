@@ -99,4 +99,4 @@ docs/
 
 ## Current status
 
-The project has completed its deterministic core, networking, rendering baseline, editor scaffold, scene-system foundations, and the first real browser-side Three.js/WebGPU client. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle.
+The project has completed its deterministic core, networking, rendering baseline, editor scaffold, scene-system foundations, and the first real browser-side Three.js/WebGPU client. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle. `apps/pod-headless` is now the main non-UI proving ground for the agent roadmap: it can run deterministic multi-world scenarios, export reward-aware datasets, bind runtime agents to admitted teams per world, and roll projected cross-world effects into applied target-world state summaries.
