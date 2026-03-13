@@ -7,13 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pod_core::{
     run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
     CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
-    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, ReplayTrainingSample, RewardReason,
-    TeamControlMode, TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole,
-    WorldTournamentDefinition,
+    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, QuestStageDefinition,
+    QuestStateGraph, ReplayTrainingSample, RewardReason, TeamControlMode,
+    TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
 
-const REPORT_SCHEMA_VERSION: u32 = 1;
+const REPORT_SCHEMA_VERSION: u32 = 2;
 const DEFAULT_SCENARIO: &str = "deadman-neural-cup";
 
 #[derive(Debug)]
@@ -30,6 +30,8 @@ struct ScenarioDefinition {
     teams: Vec<AgentTeamDefinition>,
     worlds: Vec<WorldRealityDefinition>,
     links: Vec<CrossWorldLinkDefinition>,
+    quest_graphs: Vec<QuestStateGraph>,
+    world_quest_graph_ids: BTreeMap<String, Vec<String>>,
     base_config: FlagshipMmoAcceptanceConfig,
 }
 
@@ -50,6 +52,7 @@ struct HeadlessAppReport {
     teams: Vec<AgentTeamDefinition>,
     worlds: Vec<WorldRealityDefinition>,
     links: Vec<CrossWorldLinkDefinition>,
+    quest_graphs: Vec<QuestStateGraph>,
     world_runs: Vec<WorldRunReport>,
     dataset_summary: RewardDatasetSummary,
     cross_world_projections: Vec<CrossWorldProjectionReport>,
@@ -163,6 +166,8 @@ struct AppliedWorldStateReport {
     encounter_weight_deltas: Vec<NamedDeltaReport>,
     resource_scarcity_deltas: Vec<NamedDeltaReport>,
     objective_state_shifts: Vec<ObjectiveShiftReport>,
+    unresolved_objective_state_shifts: Vec<ObjectiveShiftReport>,
+    quest_lines: Vec<QuestLineStateReport>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -188,6 +193,26 @@ struct NamedDeltaReport {
 struct ObjectiveShiftReport {
     quest_graph_id: String,
     stage_tag: String,
+    applications: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct QuestLineStateReport {
+    quest_graph_id: String,
+    display_name: String,
+    current_stage_ids: Vec<String>,
+    completed_stage_ids: Vec<String>,
+    pending_stage_ids: Vec<String>,
+    next_stage_ids: Vec<String>,
+    progress_basis_points: u16,
+    terminal: bool,
+    stage_applications: Vec<QuestStageApplicationReport>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct QuestStageApplicationReport {
+    stage_id: String,
+    title: String,
     applications: usize,
 }
 
@@ -401,6 +426,8 @@ fn build_deadman_neural_cup(base_config: FlagshipMmoAcceptanceConfig) -> Scenari
     sanctuary_echo.linked_world_ids = vec!["deadman-prime".into()];
     sanctuary_echo.active_team_ids = vec!["iron-sigil".into()];
 
+    let (quest_graphs, world_quest_graph_ids) = build_deadman_quest_graphs();
+
     let mut prime_to_shadow =
         CrossWorldLinkDefinition::new("prime-to-shadow", "deadman-prime", "deadman-shadow");
     prime_to_shadow.trigger_tags = vec![
@@ -420,6 +447,10 @@ fn build_deadman_neural_cup(base_config: FlagshipMmoAcceptanceConfig) -> Scenari
             team_id: "gloam-mesh".into(),
             duration_ticks: 600,
         },
+        CrossWorldEffect::ObjectiveStateShift {
+            quest_graph_id: "deadman-shadow-hunt".into(),
+            stage_tag: "marked-by-kills".into(),
+        },
     ];
 
     let mut shadow_to_prime =
@@ -437,6 +468,10 @@ fn build_deadman_neural_cup(base_config: FlagshipMmoAcceptanceConfig) -> Scenari
         CrossWorldEffect::ResourceScarcityDelta {
             biome_id: "deadman-prime-wilds".into(),
             delta: 1,
+        },
+        CrossWorldEffect::ObjectiveStateShift {
+            quest_graph_id: "deadman-prime-season".into(),
+            stage_tag: "wilds-under-siege".into(),
         },
     ];
 
@@ -479,8 +514,116 @@ fn build_deadman_neural_cup(base_config: FlagshipMmoAcceptanceConfig) -> Scenari
         teams,
         worlds,
         links,
+        quest_graphs,
+        world_quest_graph_ids,
         base_config,
     }
+}
+
+fn build_deadman_quest_graphs() -> (Vec<QuestStateGraph>, BTreeMap<String, Vec<String>>) {
+    let quest_graphs = vec![
+        QuestStateGraph::new(
+            "deadman-prime-season",
+            "Deadman Prime: Blood Season",
+            "enter-bracket",
+            vec![
+                QuestStageDefinition {
+                    stage_id: "enter-bracket".into(),
+                    title: "Enter the Bracket".into(),
+                    objectives: vec!["Establish the team camp in Deadman Prime.".into()],
+                    next_stage_ids: vec!["wilds-under-siege".into()],
+                    reward_tags: vec!["season-open".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "wilds-under-siege".into(),
+                    title: "Wilds Under Siege".into(),
+                    objectives: vec!["Survive pressure from the shadow world.".into()],
+                    next_stage_ids: vec!["blood-round".into()],
+                    reward_tags: vec!["wilds-under-siege".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "blood-round".into(),
+                    title: "Blood Round".into(),
+                    objectives: vec!["Convert linked-world kills into a finals push.".into()],
+                    next_stage_ids: vec!["crown-push".into()],
+                    reward_tags: vec!["blood-round".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "crown-push".into(),
+                    title: "Crown Push".into(),
+                    objectives: vec!["Hold the world long enough to close the season.".into()],
+                    next_stage_ids: Vec::new(),
+                    reward_tags: vec!["crown-push".into()],
+                },
+            ],
+        ),
+        QuestStateGraph::new(
+            "deadman-shadow-hunt",
+            "Deadman Shadow: Mirror Hunt",
+            "shadow-observe",
+            vec![
+                QuestStageDefinition {
+                    stage_id: "shadow-observe".into(),
+                    title: "Observe the Prime World".into(),
+                    objectives: vec!["Track rival teams from the mirror layer.".into()],
+                    next_stage_ids: vec!["marked-by-kills".into()],
+                    reward_tags: vec!["shadow-observe".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "marked-by-kills".into(),
+                    title: "Marked by Kills".into(),
+                    objectives: vec!["Respond to kill pressure leaking in from Prime.".into()],
+                    next_stage_ids: vec!["rift-collapse".into()],
+                    reward_tags: vec!["marked-by-kills".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "rift-collapse".into(),
+                    title: "Rift Collapse".into(),
+                    objectives: vec!["Lock down the breach before the swarm overruns it.".into()],
+                    next_stage_ids: Vec::new(),
+                    reward_tags: vec!["rift-collapse".into()],
+                },
+            ],
+        ),
+        QuestStateGraph::new(
+            "sanctuary-echo-uplift",
+            "Sanctuary Echo: Uplift",
+            "attune-shrine",
+            vec![
+                QuestStageDefinition {
+                    stage_id: "attune-shrine".into(),
+                    title: "Attune the Shrine".into(),
+                    objectives: vec!["Stabilize the sanctuary attunement anchor.".into()],
+                    next_stage_ids: vec!["uplifted".into()],
+                    reward_tags: vec!["attune-shrine".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "uplifted".into(),
+                    title: "Uplifted".into(),
+                    objectives: vec!["Accept prosperity leaking in from Deadman Prime.".into()],
+                    next_stage_ids: vec!["echo-stabilized".into()],
+                    reward_tags: vec!["uplifted".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "echo-stabilized".into(),
+                    title: "Echo Stabilized".into(),
+                    objectives: vec!["Lock the uplift into a permanent sanctuary boon.".into()],
+                    next_stage_ids: Vec::new(),
+                    reward_tags: vec!["echo-stabilized".into()],
+                },
+            ],
+        ),
+    ];
+
+    let mut world_quest_graph_ids = BTreeMap::new();
+    world_quest_graph_ids.insert("deadman-prime".into(), vec!["deadman-prime-season".into()]);
+    world_quest_graph_ids.insert("deadman-shadow".into(), vec!["deadman-shadow-hunt".into()]);
+    world_quest_graph_ids.insert(
+        "sanctuary-echo".into(),
+        vec!["sanctuary-echo-uplift".into()],
+    );
+
+    (quest_graphs, world_quest_graph_ids)
 }
 
 fn run_scenario(
@@ -514,8 +657,12 @@ fn run_scenario(
     for link in &scenario.links {
         cross_world_projections.push(build_projection_report(link, &executions)?);
     }
-    let applied_world_states =
-        build_applied_world_states(&scenario.worlds, &cross_world_projections);
+    let applied_world_states = build_applied_world_states(
+        &scenario.worlds,
+        &cross_world_projections,
+        &scenario.quest_graphs,
+        &scenario.world_quest_graph_ids,
+    );
 
     let standings = build_team_standings(
         &scenario.teams,
@@ -546,6 +693,7 @@ fn run_scenario(
             teams: scenario.teams,
             worlds: scenario.worlds,
             links: scenario.links,
+            quest_graphs: scenario.quest_graphs,
             world_runs: executions
                 .into_iter()
                 .map(|execution| execution.report)
@@ -1055,7 +1203,14 @@ fn build_team_standings(
 fn build_applied_world_states(
     worlds: &[WorldRealityDefinition],
     projections: &[CrossWorldProjectionReport],
+    quest_graphs: &[QuestStateGraph],
+    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
 ) -> Vec<AppliedWorldStateReport> {
+    let quest_graph_lookup = quest_graphs
+        .iter()
+        .map(|graph| (graph.quest_id.clone(), graph))
+        .collect::<BTreeMap<_, _>>();
+
     worlds
         .iter()
         .map(|world| {
@@ -1077,29 +1232,39 @@ fn build_applied_world_states(
                             total_delta,
                             ..
                         } => {
-                            *faction_reputation.entry(faction_id.clone()).or_insert(0) +=
-                                *total_delta;
+                            if *total_delta != 0 {
+                                *faction_reputation.entry(faction_id.clone()).or_insert(0) +=
+                                    *total_delta;
+                            }
                         }
                         ProjectedCrossWorldEffect::EncounterWeightDelta {
                             table_id,
                             total_delta,
                             ..
                         } => {
-                            *encounter_weights.entry(table_id.clone()).or_insert(0) += *total_delta;
+                            if *total_delta != 0 {
+                                *encounter_weights.entry(table_id.clone()).or_insert(0) +=
+                                    *total_delta;
+                            }
                         }
                         ProjectedCrossWorldEffect::ResourceScarcityDelta {
                             biome_id,
                             total_delta,
                             ..
                         } => {
-                            *resource_scarcity.entry(biome_id.clone()).or_insert(0) += *total_delta;
+                            if *total_delta != 0 {
+                                *resource_scarcity.entry(biome_id.clone()).or_insert(0) +=
+                                    *total_delta;
+                            }
                         }
                         ProjectedCrossWorldEffect::TeamScoreDelta {
                             team_id,
                             total_delta,
                             ..
                         } => {
-                            *team_scores.entry(team_id.clone()).or_insert(0) += *total_delta;
+                            if *total_delta != 0 {
+                                *team_scores.entry(team_id.clone()).or_insert(0) += *total_delta;
+                            }
                         }
                         ProjectedCrossWorldEffect::DeathMark {
                             team_id,
@@ -1107,21 +1272,66 @@ fn build_applied_world_states(
                             total_duration_ticks,
                             ..
                         } => {
-                            let entry = death_marks.entry(team_id.clone()).or_insert((0usize, 0));
-                            entry.0 += *applications;
-                            entry.1 += *total_duration_ticks;
+                            if *applications > 0 && *total_duration_ticks > 0 {
+                                let entry =
+                                    death_marks.entry(team_id.clone()).or_insert((0usize, 0));
+                                entry.0 += *applications;
+                                entry.1 += *total_duration_ticks;
+                            }
                         }
                         ProjectedCrossWorldEffect::ObjectiveStateShift {
                             quest_graph_id,
                             stage_tag,
                             applications,
                         } => {
-                            *objective_shifts
-                                .entry((quest_graph_id.clone(), stage_tag.clone()))
-                                .or_insert(0) += *applications;
+                            if *applications > 0 {
+                                *objective_shifts
+                                    .entry((quest_graph_id.clone(), stage_tag.clone()))
+                                    .or_insert(0) += *applications;
+                            }
                         }
                     }
                 }
+            }
+
+            let objective_state_shifts = objective_shifts
+                .iter()
+                .map(
+                    |((quest_graph_id, stage_tag), applications)| ObjectiveShiftReport {
+                        quest_graph_id: quest_graph_id.clone(),
+                        stage_tag: stage_tag.clone(),
+                        applications: *applications,
+                    },
+                )
+                .collect::<Vec<_>>();
+            let mut unresolved_objective_state_shifts = objective_state_shifts
+                .iter()
+                .filter(|shift| {
+                    !world_quest_graph_ids
+                        .get(&world.world_id)
+                        .is_some_and(|quest_ids| quest_ids.contains(&shift.quest_graph_id))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut quest_lines = Vec::new();
+
+            for quest_graph_id in world_quest_graph_ids
+                .get(&world.world_id)
+                .into_iter()
+                .flat_map(|quest_ids| quest_ids.iter())
+            {
+                let Some(graph) = quest_graph_lookup.get(quest_graph_id) else {
+                    continue;
+                };
+                let shifts_for_graph = objective_state_shifts
+                    .iter()
+                    .filter(|shift| shift.quest_graph_id == graph.quest_id)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let (quest_line, unresolved_shifts) =
+                    build_quest_line_state(graph, &shifts_for_graph);
+                quest_lines.push(quest_line);
+                unresolved_objective_state_shifts.extend(unresolved_shifts);
             }
 
             AppliedWorldStateReport {
@@ -1157,19 +1367,209 @@ fn build_applied_world_states(
                     .into_iter()
                     .map(|(id, total_delta)| NamedDeltaReport { id, total_delta })
                     .collect(),
-                objective_state_shifts: objective_shifts
-                    .into_iter()
-                    .map(
-                        |((quest_graph_id, stage_tag), applications)| ObjectiveShiftReport {
-                            quest_graph_id,
-                            stage_tag,
-                            applications,
-                        },
-                    )
-                    .collect(),
+                objective_state_shifts,
+                unresolved_objective_state_shifts,
+                quest_lines,
             }
         })
         .collect()
+}
+
+fn build_quest_line_state(
+    graph: &QuestStateGraph,
+    shifts: &[ObjectiveShiftReport],
+) -> (QuestLineStateReport, Vec<ObjectiveShiftReport>) {
+    let mut stage_applications = BTreeMap::<String, usize>::new();
+    let mut unresolved = Vec::new();
+
+    for shift in shifts {
+        let matching_stage_ids = graph
+            .stages
+            .iter()
+            .filter(|stage| {
+                stage.stage_id == shift.stage_tag
+                    || stage
+                        .reward_tags
+                        .iter()
+                        .any(|reward_tag| reward_tag == &shift.stage_tag)
+            })
+            .map(|stage| stage.stage_id.clone())
+            .collect::<Vec<_>>();
+
+        if matching_stage_ids.is_empty() {
+            unresolved.push(shift.clone());
+            continue;
+        }
+
+        for stage_id in matching_stage_ids {
+            *stage_applications.entry(stage_id).or_insert(0) += shift.applications;
+        }
+    }
+
+    let mut reached_stage_ids = BTreeSet::new();
+    let mut current_stage_candidates = Vec::new();
+    if stage_applications.is_empty() {
+        reached_stage_ids.insert(graph.start_stage_id.clone());
+        current_stage_candidates.push(graph.start_stage_id.clone());
+    } else {
+        for stage_id in stage_applications.keys() {
+            if let Some(path) = quest_path_from_start(graph, stage_id) {
+                for path_stage_id in path {
+                    reached_stage_ids.insert(path_stage_id);
+                }
+                current_stage_candidates.push(stage_id.clone());
+            } else {
+                unresolved.push(ObjectiveShiftReport {
+                    quest_graph_id: graph.quest_id.clone(),
+                    stage_tag: stage_id.clone(),
+                    applications: *stage_applications
+                        .get(stage_id)
+                        .expect("stage application exists"),
+                });
+            }
+        }
+        if reached_stage_ids.is_empty() {
+            reached_stage_ids.insert(graph.start_stage_id.clone());
+            current_stage_candidates.push(graph.start_stage_id.clone());
+        }
+    }
+
+    let current_stage_ids = current_stage_candidates
+        .iter()
+        .filter(|candidate| {
+            !current_stage_candidates.iter().any(|other| {
+                *candidate != other && quest_stage_is_ancestor(graph, candidate, other)
+            })
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let all_stage_ids = graph
+        .stages
+        .iter()
+        .map(|stage| stage.stage_id.clone())
+        .collect::<BTreeSet<_>>();
+    let completed_stage_ids = reached_stage_ids
+        .iter()
+        .filter(|stage_id| !current_stage_ids.iter().any(|current| current == *stage_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let pending_stage_ids = all_stage_ids
+        .iter()
+        .filter(|stage_id| !reached_stage_ids.contains(*stage_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let next_stage_ids = current_stage_ids
+        .iter()
+        .flat_map(|stage_id| {
+            graph
+                .stages
+                .iter()
+                .find(|stage| &stage.stage_id == stage_id)
+                .into_iter()
+                .flat_map(|stage| stage.next_stage_ids.iter().cloned())
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let progress_basis_points = if graph.stages.is_empty() {
+        0
+    } else {
+        ((reached_stage_ids.len() as u32 * 10_000) / graph.stages.len() as u32) as u16
+    };
+    let stage_applications = graph
+        .stages
+        .iter()
+        .filter_map(|stage| {
+            stage_applications.get(&stage.stage_id).map(|applications| {
+                QuestStageApplicationReport {
+                    stage_id: stage.stage_id.clone(),
+                    title: stage.title.clone(),
+                    applications: *applications,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let terminal = !current_stage_ids.is_empty()
+        && current_stage_ids.iter().all(|stage_id| {
+            graph
+                .stages
+                .iter()
+                .find(|stage| &stage.stage_id == stage_id)
+                .is_some_and(|stage| stage.next_stage_ids.is_empty())
+        });
+
+    (
+        QuestLineStateReport {
+            quest_graph_id: graph.quest_id.clone(),
+            display_name: graph.display_name.clone(),
+            current_stage_ids,
+            completed_stage_ids,
+            pending_stage_ids,
+            next_stage_ids: next_stage_ids.clone(),
+            progress_basis_points,
+            terminal,
+            stage_applications,
+        },
+        unresolved,
+    )
+}
+
+fn quest_path_from_start(graph: &QuestStateGraph, target_stage_id: &str) -> Option<Vec<String>> {
+    fn visit(
+        graph: &QuestStateGraph,
+        current_stage_id: &str,
+        target_stage_id: &str,
+        path: &mut Vec<String>,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !visiting.insert(current_stage_id.to_string()) {
+            return false;
+        }
+
+        path.push(current_stage_id.to_string());
+        if current_stage_id == target_stage_id {
+            visiting.remove(current_stage_id);
+            return true;
+        }
+
+        let found = graph
+            .stages
+            .iter()
+            .find(|stage| stage.stage_id == current_stage_id)
+            .is_some_and(|stage| {
+                stage.next_stage_ids.iter().any(|next_stage_id| {
+                    visit(graph, next_stage_id, target_stage_id, path, visiting)
+                })
+            });
+
+        if found {
+            visiting.remove(current_stage_id);
+            true
+        } else {
+            path.pop();
+            visiting.remove(current_stage_id);
+            false
+        }
+    }
+
+    let mut path = Vec::new();
+    let mut visiting = BTreeSet::new();
+    visit(
+        graph,
+        &graph.start_stage_id,
+        target_stage_id,
+        &mut path,
+        &mut visiting,
+    )
+    .then_some(path)
+}
+
+fn quest_stage_is_ancestor(graph: &QuestStateGraph, stage_id: &str, other_stage_id: &str) -> bool {
+    quest_path_from_start(graph, other_stage_id).is_some_and(|path| {
+        path.iter().any(|path_stage_id| path_stage_id == stage_id) && stage_id != other_stage_id
+    })
 }
 
 fn collect_reward_reason_stats<'a, I>(signals: I) -> Vec<RewardReasonStat>
@@ -1273,10 +1673,15 @@ mod tests {
         assert_eq!(scenario.teams.len(), 2);
         assert_eq!(scenario.worlds.len(), 3);
         assert_eq!(scenario.links.len(), 3);
+        assert_eq!(scenario.quest_graphs.len(), 3);
         assert_eq!(scenario.tournament.tournament_id, "deadman-neural-cup");
         assert_eq!(scenario.tournament.world_ids.len(), 3);
         assert_eq!(scenario.tournament.team_ids.len(), 2);
         assert_eq!(scenario.tournament.cross_world_link_ids.len(), 3);
+        assert_eq!(
+            scenario.world_quest_graph_ids["deadman-prime"],
+            vec!["deadman-prime-season".to_string()]
+        );
     }
 
     #[test]
@@ -1406,6 +1811,15 @@ mod tests {
         let worlds = vec![
             WorldRealityDefinition {
                 version: pod_core::RuntimeContractVersion::V1,
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                ruleset_id: "deadman".into(),
+                role: WorldRealityRole::Tournament,
+                linked_world_ids: vec!["deadman-shadow".into(), "sanctuary-echo".into()],
+                active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
+            },
+            WorldRealityDefinition {
+                version: pod_core::RuntimeContractVersion::V1,
                 world_id: "deadman-shadow".into(),
                 display_name: "Deadman Shadow".into(),
                 ruleset_id: "shadow".into(),
@@ -1446,6 +1860,35 @@ mod tests {
                         total_duration_ticks: 1200,
                         applications: 2,
                     },
+                    ProjectedCrossWorldEffect::ObjectiveStateShift {
+                        quest_graph_id: "deadman-shadow-hunt".into(),
+                        stage_tag: "marked-by-kills".into(),
+                        applications: 2,
+                    },
+                ],
+            },
+            CrossWorldProjectionReport {
+                link_id: "shadow-to-prime".into(),
+                source_world_id: "deadman-shadow".into(),
+                target_world_id: "deadman-prime".into(),
+                trigger_tags: vec!["loot-claimed".into()],
+                propagation: CrossWorldPropagation::Threshold {
+                    required_triggers: 2,
+                },
+                trigger_count: 2,
+                application_count: 1,
+                matched_tags: vec![],
+                projected_effects: vec![
+                    ProjectedCrossWorldEffect::TeamScoreDelta {
+                        team_id: "gloam-mesh".into(),
+                        per_application: 4,
+                        total_delta: 4,
+                    },
+                    ProjectedCrossWorldEffect::ObjectiveStateShift {
+                        quest_graph_id: "deadman-prime-season".into(),
+                        stage_tag: "wilds-under-siege".into(),
+                        applications: 1,
+                    },
                 ],
             },
             CrossWorldProjectionReport {
@@ -1473,15 +1916,158 @@ mod tests {
                 ],
             },
         ];
+        let (quest_graphs, world_quest_graph_ids) = build_deadman_quest_graphs();
 
-        let applied = build_applied_world_states(&worlds, &projections);
+        let applied = build_applied_world_states(
+            &worlds,
+            &projections,
+            &quest_graphs,
+            &world_quest_graph_ids,
+        );
+        let by_world = applied
+            .into_iter()
+            .map(|state| (state.world_id.clone(), state))
+            .collect::<BTreeMap<_, _>>();
 
-        assert_eq!(applied[0].team_scores[0].team_id, "iron-sigil");
-        assert_eq!(applied[0].team_scores[0].total_delta, 10);
-        assert_eq!(applied[0].death_marks[0].team_id, "gloam-mesh");
-        assert_eq!(applied[0].death_marks[0].applications, 2);
-        assert_eq!(applied[1].faction_reputation_deltas[0].id, "echo-order");
-        assert_eq!(applied[1].objective_state_shifts[0].applications, 1);
+        assert_eq!(
+            by_world["deadman-prime"].team_scores[0].team_id,
+            "gloam-mesh"
+        );
+        assert_eq!(by_world["deadman-prime"].team_scores[0].total_delta, 4);
+        assert_eq!(
+            by_world["deadman-prime"].quest_lines[0].current_stage_ids,
+            vec!["wilds-under-siege".to_string()]
+        );
+        assert_eq!(
+            by_world["deadman-prime"].quest_lines[0].completed_stage_ids,
+            vec!["enter-bracket".to_string()]
+        );
+        assert_eq!(
+            by_world["deadman-shadow"].team_scores[0].team_id,
+            "iron-sigil"
+        );
+        assert_eq!(by_world["deadman-shadow"].team_scores[0].total_delta, 10);
+        assert_eq!(
+            by_world["deadman-shadow"].death_marks[0].team_id,
+            "gloam-mesh"
+        );
+        assert_eq!(by_world["deadman-shadow"].death_marks[0].applications, 2);
+        assert_eq!(
+            by_world["deadman-shadow"].quest_lines[0].current_stage_ids,
+            vec!["marked-by-kills".to_string()]
+        );
+        assert_eq!(
+            by_world["sanctuary-echo"].faction_reputation_deltas[0].id,
+            "echo-order"
+        );
+        assert_eq!(
+            by_world["sanctuary-echo"].objective_state_shifts[0].applications,
+            1
+        );
+        assert_eq!(
+            by_world["sanctuary-echo"].quest_lines[0].current_stage_ids,
+            vec!["uplifted".to_string()]
+        );
+        assert_eq!(
+            by_world["sanctuary-echo"].quest_lines[0].progress_basis_points,
+            6666
+        );
+        assert!(by_world["sanctuary-echo"]
+            .unresolved_objective_state_shifts
+            .is_empty());
+    }
+
+    #[test]
+    fn quest_line_state_resolves_reward_tag_targets() {
+        let graph = QuestStateGraph::new(
+            "echo-line",
+            "Echo Line",
+            "start",
+            vec![
+                QuestStageDefinition {
+                    stage_id: "start".into(),
+                    title: "Start".into(),
+                    objectives: vec!["Spawn into the echo.".into()],
+                    next_stage_ids: vec!["middle".into()],
+                    reward_tags: vec!["spawned".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "middle".into(),
+                    title: "Middle".into(),
+                    objectives: vec!["Reach the midpoint.".into()],
+                    next_stage_ids: vec!["end".into()],
+                    reward_tags: vec!["midpoint-reached".into()],
+                },
+                QuestStageDefinition {
+                    stage_id: "end".into(),
+                    title: "End".into(),
+                    objectives: vec!["Close the line.".into()],
+                    next_stage_ids: Vec::new(),
+                    reward_tags: vec!["sealed".into()],
+                },
+            ],
+        );
+
+        let (quest_line, unresolved) = build_quest_line_state(
+            &graph,
+            &[ObjectiveShiftReport {
+                quest_graph_id: "echo-line".into(),
+                stage_tag: "midpoint-reached".into(),
+                applications: 2,
+            }],
+        );
+
+        assert!(unresolved.is_empty());
+        assert_eq!(quest_line.current_stage_ids, vec!["middle".to_string()]);
+        assert_eq!(quest_line.completed_stage_ids, vec!["start".to_string()]);
+        assert_eq!(quest_line.pending_stage_ids, vec!["end".to_string()]);
+        assert_eq!(quest_line.stage_applications[0].stage_id, "middle");
+        assert_eq!(quest_line.stage_applications[0].applications, 2);
+    }
+
+    #[test]
+    fn zero_application_objective_shifts_do_not_advance_quest_lines() {
+        let worlds = vec![WorldRealityDefinition {
+            version: pod_core::RuntimeContractVersion::V1,
+            world_id: "sanctuary-echo".into(),
+            display_name: "Sanctuary Echo".into(),
+            ruleset_id: "echo".into(),
+            role: WorldRealityRole::Sanctuary,
+            linked_world_ids: vec!["deadman-prime".into()],
+            active_team_ids: vec!["iron-sigil".into()],
+        }];
+        let projections = vec![CrossWorldProjectionReport {
+            link_id: "prime-to-sanctuary".into(),
+            source_world_id: "deadman-prime".into(),
+            target_world_id: "sanctuary-echo".into(),
+            trigger_tags: vec!["skill-xp".into()],
+            propagation: CrossWorldPropagation::Threshold {
+                required_triggers: 3,
+            },
+            trigger_count: 2,
+            application_count: 0,
+            matched_tags: vec![],
+            projected_effects: vec![ProjectedCrossWorldEffect::ObjectiveStateShift {
+                quest_graph_id: "sanctuary-echo-uplift".into(),
+                stage_tag: "uplifted".into(),
+                applications: 0,
+            }],
+        }];
+        let (quest_graphs, world_quest_graph_ids) = build_deadman_quest_graphs();
+
+        let applied = build_applied_world_states(
+            &worlds,
+            &projections,
+            &quest_graphs,
+            &world_quest_graph_ids,
+        );
+
+        assert!(applied[0].objective_state_shifts.is_empty());
+        assert_eq!(
+            applied[0].quest_lines[0].current_stage_ids,
+            vec!["attune-shrine".to_string()]
+        );
+        assert!(applied[0].quest_lines[0].stage_applications.is_empty());
     }
 
     #[test]
@@ -1605,6 +2191,8 @@ mod tests {
                 encounter_weight_deltas: vec![],
                 resource_scarcity_deltas: vec![],
                 objective_state_shifts: vec![],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![],
             },
             AppliedWorldStateReport {
                 world_id: "deadman-prime".into(),
@@ -1619,6 +2207,8 @@ mod tests {
                 encounter_weight_deltas: vec![],
                 resource_scarcity_deltas: vec![],
                 objective_state_shifts: vec![],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![],
             },
         ];
 

@@ -342,7 +342,7 @@
 **Tasks**:
 - [x] Define native contract types for teams, worlds, tournaments, and cross-world links
 - [x] Add a headless team/world runner that can operate without the browser client
-- [ ] Define deterministic cross-world effect application rules at authority boundaries
+- [x] Define deterministic cross-world effect application rules at authority boundaries
 - [ ] Thread multi-world team admission and world identity through remote execution topology
 - [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
 
@@ -370,4 +370,4 @@
 
 1. Extend the same team/world identity and applied-effect model into remote topology instead of leaving it headless-only.
 2. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the new headless execution surface.
-3. Start comparing controller families on the same headless scenarios so neural swarms, hybrid captains, and scripted teams have a common evaluation surface.
+3. Preserve quest-line state and alternate-reality objective progression when the same topology is threaded into remote execution and evaluation surfaces.

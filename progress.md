@@ -371,3 +371,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
 - Revalidated the admission/effect-application slice with:
   - `cargo test -p pod-headless`
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+- Added authored quest lines to `apps/pod-headless`: the built-in `deadman-neural-cup` scenario now carries canonical `QuestStateGraph` definitions and per-world quest bindings for Deadman Prime, Deadman Shadow, and Sanctuary Echo.
+- Extended `applied_world_states` with resolved `quest_lines` plus `unresolved_objective_state_shifts`, so alternate-reality `ObjectiveStateShift` effects now surface as explicit current/completed/pending quest progression instead of raw `(quest_graph_id, stage_tag)` counters.
+- Tightened applied-effect semantics so zero-application projections no longer create zero-valued team/resource/faction/quest mutations, and revalidated the live app path with:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`

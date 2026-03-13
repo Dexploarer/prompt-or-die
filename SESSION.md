@@ -212,7 +212,8 @@
 - [x] Added `apps/pod-headless`, a deterministic multi-world runner that executes the built-in `deadman-neural-cup` scenario, emits a JSON report, and projects cross-world effects from authoritative reward telemetry
 - [x] Added deterministic team admission in `apps/pod-headless`, so dataset rows and standings now carry admitted team identity per world instead of world-level aggregates only
 - [x] Added applied target-world state aggregation in `apps/pod-headless`, so cross-world effects are rolled into per-world team/resource/faction/objective state summaries instead of only link-local projections
+- [x] Added canonical quest graph definitions plus per-world quest-line state reporting in `apps/pod-headless`, so alternate-reality `ObjectiveStateShift` effects now resolve into explicit quest progression with start/current/completed/pending stages
 - [ ] Thread world identity and team admission through remote topology and evaluation harnesses
 
 **Next Action**:
-- Thread the new admission-aware team/world model into remote topology and add replay/evaluation coverage for linked-world tournaments and neural swarms.
+- Thread the new admission-aware team/world model into remote topology and keep the same quest-line/effect-application rules intact while adding replay/evaluation coverage for linked-world tournaments and neural swarms.

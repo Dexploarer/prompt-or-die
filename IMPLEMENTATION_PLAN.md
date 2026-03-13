@@ -1723,5 +1723,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
   - `git diff --check`
 
-**Last updated**: Iteration 162
-**Current focus**: Iteration 163 thread the new team/world identity and applied-effect model into remote topology and add replay/evaluation coverage for linked-world tournaments and neural swarms
+### Iteration 163
+- [x] Added canonical `QuestStateGraph` definitions to the `deadman-neural-cup` scenario in `apps/pod-headless`, plus per-world quest bindings so the headless runner has authored quest-line state instead of treating `ObjectiveStateShift` as an anonymous counter.
+- [x] Extended `apps/pod-headless` reports with `quest_graphs`, `applied_world_states[].quest_lines`, and `unresolved_objective_state_shifts`, so alternate-reality objective links now resolve into explicit start/current/completed/pending quest progression per world.
+- [x] Tightened cross-world application semantics in `apps/pod-headless` so zero-application projections no longer mutate applied team/resource/quest state, and covered the new quest progression path with deterministic unit tests.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 163
+**Current focus**: Iteration 164 thread the admission-aware multi-world model, applied effect envelopes, and quest-line state into remote topology and replay/evaluation coverage for linked-world tournaments and neural swarms
