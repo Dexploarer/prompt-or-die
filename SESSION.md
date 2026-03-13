@@ -223,6 +223,8 @@
 - [x] Added `pod-net::SpacetimeDBClient::apply_debug_document(...)` and moved the remote-topology document coverage onto that generic path, keeping `apply_remote_topology_document(...)` as a thin compatibility alias
 - [x] Added a real `remote_topology_document` public row plus `publish_remote_topology_document` reducer in `pod-stdb`, so authority tooling has an actual SpacetimeDB publication surface for `RemoteTopologyBundle`
 - [x] Extended `pod-stdb` and `pod-net::SpacetimeDBClient` with row-based `receive_remote_topology_document_row(...)` ingestion, stale-row protection, and subscription query coverage so remote topology can now arrive as an authority-published feed row instead of only as direct document injection
+- [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` to `pod-stdb::StdbClient`, so generated mode can connect, subscribe, and consume authority-fed `remote_topology_document` rows through `frame_tick()` instead of hard-failing immediately
+- [x] Added generated-mode coverage in both `pod-stdb` and `pod-net::SpacetimeDBClient`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through the existing debug stream
 
 **Next Action**:
-- Hook the generated SpacetimeDB subscription/runtime path to `remote_topology_document` rows, then thread that authority-fed path into the parity and evaluation harnesses.
+- Replace the fake generated-runtime adapter with real generated binding/runtime wiring, then thread that authority-fed path into the parity and evaluation harnesses with churn/world-switch coverage.

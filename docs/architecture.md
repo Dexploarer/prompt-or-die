@@ -166,7 +166,10 @@ and
 `remote_topology_document` rows plus the `publish_remote_topology_document`
 reducer let authority-side tooling publish `RemoteTopologyBundle` TOON payloads
 through SpacetimeDB itself, while the client wrappers ingest those rows with
-stale-row protection.
+stale-row protection. [`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs)
+now also exposes a minimal generated-runtime adapter seam, so generated mode
+can consume those same rows through `frame_tick()` without bypassing the normal
+client event path.
 
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)

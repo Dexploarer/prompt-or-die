@@ -22,9 +22,48 @@
 
 #![cfg(feature = "client")]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use pod_core::{AgentToolCallTrace, TickTelemetryFrame, VersionedTickTelemetry};
 use pod_stdb::client::*;
 use pod_stdb::types::*;
+
+#[derive(Debug, Default)]
+struct FakeGeneratedRuntimeState {
+    connect_calls: usize,
+    subscriptions: Vec<Vec<String>>,
+    events: Vec<GeneratedRuntimeEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct FakeGeneratedRuntime {
+    state: Rc<RefCell<FakeGeneratedRuntimeState>>,
+}
+
+impl FakeGeneratedRuntime {
+    fn new(state: Rc<RefCell<FakeGeneratedRuntimeState>>) -> Self {
+        Self { state }
+    }
+}
+
+impl GeneratedRuntimeAdapter for FakeGeneratedRuntime {
+    fn connect(&mut self, _config: &StdbClientConfig) -> Result<(), String> {
+        self.state.borrow_mut().connect_calls += 1;
+        Ok(())
+    }
+
+    fn disconnect(&mut self) {}
+
+    fn subscribe(&mut self, queries: &[String]) -> Result<(), String> {
+        self.state.borrow_mut().subscriptions.push(queries.to_vec());
+        Ok(())
+    }
+
+    fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+        std::mem::take(&mut self.state.borrow_mut().events)
+    }
+}
 
 // ============================================================
 // CONFIGURATION
@@ -218,6 +257,97 @@ fn connect_generated_mode_requires_runtime_bindings() {
         .connect()
         .expect_err("generated mode should require runtime");
     assert!(matches!(err, StdbError::ConnectionFailed(_)));
+}
+
+#[test]
+fn generated_mode_runtime_adapter_processes_topology_rows() {
+    let runtime_state = Rc::new(RefCell::new(FakeGeneratedRuntimeState::default()));
+    let mut client = StdbClient::new(StdbClientConfig {
+        db_name: "deadman-shadow".into(),
+        connection_mode: StdbConnectionMode::Generated,
+        ..StdbClientConfig::default()
+    });
+    client.set_generated_runtime(Box::new(FakeGeneratedRuntime::new(runtime_state.clone())));
+
+    client.connect().expect("generated runtime should connect");
+    assert_eq!(runtime_state.borrow().connect_calls, 1);
+
+    runtime_state
+        .borrow_mut()
+        .events
+        .push(GeneratedRuntimeEvent::Connected {
+            identity: vec![1, 2, 3, 4],
+            token: "tok-generated".into(),
+        });
+    client.frame_tick();
+    assert!(client.is_connected());
+
+    client
+        .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
+        .expect("subscription should be routed to runtime");
+    assert_eq!(
+        runtime_state.borrow().subscriptions,
+        vec![vec!["SELECT * FROM remote_topology_document".to_string()]]
+    );
+
+    let document = pod_core::RemoteTopologyBundle {
+        version: pod_core::RuntimeContractVersion::V1,
+        scenario_id: "deadman-neural-cup".into(),
+        profile_id: "generated-test".into(),
+        generated_at_unix_ms: 99,
+        tournament: pod_core::WorldTournamentDefinition::new(
+            "deadman-neural-cup",
+            "Deadman Neural Cup",
+        ),
+        teams: vec![pod_core::AgentTeamDefinition::new(
+            "gloam-mesh",
+            "Gloam Mesh",
+            "deadman-shadow",
+        )],
+        worlds: vec![{
+            let mut world =
+                pod_core::WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+            world.role = pod_core::WorldRealityRole::Shadow;
+            world.active_team_ids = vec!["gloam-mesh".into()];
+            world
+        }],
+        links: vec![],
+        world_quest_bindings: vec![pod_core::WorldQuestBinding {
+            world_id: "deadman-shadow".into(),
+            quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+        }],
+        quest_graphs: vec![],
+        applied_world_states: vec![],
+        evaluation: pod_core::ScenarioEvaluationSummary {
+            controller_mix: vec![],
+            worlds: vec![],
+        },
+    }
+    .to_toon_document();
+
+    runtime_state.borrow_mut().events.extend([
+        GeneratedRuntimeEvent::SubscriptionApplied,
+        GeneratedRuntimeEvent::RemoteTopologyDocumentRow {
+            row_id: 11,
+            generated_at_unix_ms: 99,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "generated-test".into(),
+            topology_json: document.clone(),
+        },
+    ]);
+
+    client.frame_tick();
+    assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));
+
+    let events = client.drain_events().collect::<Vec<_>>();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StdbEvent::SubscriptionApplied)));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        StdbEvent::RemoteTopologyDocumentReceived { document: current }
+            if current == &document
+    )));
 }
 
 #[test]

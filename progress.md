@@ -427,6 +427,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo check -p pod-net --features spacetimedb`
   - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
   - `git diff --check`
-  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+- Closed the next remote-topology runtime gap: `crates/pod-stdb/src/client.rs` now exposes a `GeneratedRuntimeAdapter` seam, generated mode no longer hard-fails when that runtime is injected, and both `pod-stdb` and `pod-net::SpacetimeDBClient` now have deterministic coverage proving runtime-fed `remote_topology_document` rows update resolved world/evaluation state and forward the source document through the existing debug stream.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`

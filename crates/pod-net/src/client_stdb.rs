@@ -1437,11 +1437,47 @@ mod tests {
     use super::*;
     use pod_core::{
         action::SpeakVolume as CoreSpeakVolume, decode_toon_document, AgentTickRollup,
-        AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary, ReplayFile,
-        ReplayHeader, RemoteTopologyBundle, ShardIncidentSummary, TickTelemetryFrame,
-        VersionedTickTelemetry, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
-        WorldTournamentDefinition,
+        AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary, RemoteTopologyBundle,
+        ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry,
+        WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
     };
+    use pod_stdb::client::{GeneratedRuntimeAdapter, GeneratedRuntimeEvent};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug, Default)]
+    struct FakeGeneratedRuntimeState {
+        subscriptions: Vec<Vec<String>>,
+        events: Vec<GeneratedRuntimeEvent>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct FakeGeneratedRuntime {
+        state: Rc<RefCell<FakeGeneratedRuntimeState>>,
+    }
+
+    impl FakeGeneratedRuntime {
+        fn new(state: Rc<RefCell<FakeGeneratedRuntimeState>>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl GeneratedRuntimeAdapter for FakeGeneratedRuntime {
+        fn connect(&mut self, _config: &StdbClientConfig) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn disconnect(&mut self) {}
+
+        fn subscribe(&mut self, queries: &[String]) -> Result<(), String> {
+            self.state.borrow_mut().subscriptions.push(queries.to_vec());
+            Ok(())
+        }
+
+        fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+            std::mem::take(&mut self.state.borrow_mut().events)
+        }
+    }
 
     #[test]
     fn test_entity_to_snapshot_defaults() {
@@ -1527,10 +1563,7 @@ mod tests {
             scenario_id: "deadman-neural-cup".into(),
             profile_id: "ci-smoke".into(),
             generated_at_unix_ms: 42,
-            tournament: WorldTournamentDefinition::new(
-                "deadman-neural-cup",
-                "Deadman Neural Cup",
-            ),
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
             teams: vec![pod_core::AgentTeamDefinition::new(
                 "iron-sigil",
                 "Iron Sigil",
@@ -1609,17 +1642,10 @@ mod tests {
             scenario_id: "deadman-neural-cup".into(),
             profile_id: "ci-smoke".into(),
             generated_at_unix_ms: 42,
-            tournament: WorldTournamentDefinition::new(
-                "deadman-neural-cup",
-                "Deadman Neural Cup",
-            ),
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
             teams: vec![
                 pod_core::AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
-                pod_core::AgentTeamDefinition::new(
-                    "gloam-mesh",
-                    "Gloam Mesh",
-                    "deadman-shadow",
-                ),
+                pod_core::AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow"),
             ],
             worlds: vec![prime, shadow],
             links: vec![],
@@ -1707,7 +1733,10 @@ mod tests {
         let applied = client
             .remote_applied_world_state()
             .expect("applied world state should resolve");
-        assert_eq!(applied.quest_lines[0].current_stage_ids, vec!["marked-by-kills"]);
+        assert_eq!(
+            applied.quest_lines[0].current_stage_ids,
+            vec!["marked-by-kills"]
+        );
         assert_eq!(applied.death_marks[0].applications, 2);
 
         let evaluation = client
@@ -1766,17 +1795,10 @@ mod tests {
             scenario_id: "deadman-neural-cup".into(),
             profile_id: "ci-smoke".into(),
             generated_at_unix_ms: 42,
-            tournament: WorldTournamentDefinition::new(
-                "deadman-neural-cup",
-                "Deadman Neural Cup",
-            ),
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
             teams: vec![
                 pod_core::AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
-                pod_core::AgentTeamDefinition::new(
-                    "gloam-mesh",
-                    "Gloam Mesh",
-                    "deadman-shadow",
-                ),
+                pod_core::AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow"),
             ],
             worlds: vec![shadow],
             links: vec![],
@@ -1831,6 +1853,108 @@ mod tests {
                 if current == &document
         )));
         assert_eq!(client.last_debug_document(), Some(document.as_str()));
+        assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
+        assert_eq!(
+            client
+                .remote_world_evaluation()
+                .and_then(|world| world.controller_mix.first())
+                .map(|controller| controller.agent_type.as_str()),
+            Some("neural_agent")
+        );
+    }
+
+    #[test]
+    fn test_generated_runtime_topology_rows_flow_through_poll_updates() {
+        let runtime_state = Rc::new(RefCell::new(FakeGeneratedRuntimeState::default()));
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: "deadman-shadow".into(),
+            connection_mode: StdbConnectionMode::Generated,
+            ..Default::default()
+        });
+        client
+            .inner_mut()
+            .set_generated_runtime(Box::new(FakeGeneratedRuntime::new(runtime_state.clone())));
+        client.connect().expect("generated runtime should connect");
+
+        let document = RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "generated-test".into(),
+            generated_at_unix_ms: 77,
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
+            teams: vec![pod_core::AgentTeamDefinition::new(
+                "gloam-mesh",
+                "Gloam Mesh",
+                "deadman-shadow",
+            )],
+            worlds: vec![{
+                let mut world =
+                    WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+                world.role = WorldRealityRole::Shadow;
+                world.active_team_ids = vec!["gloam-mesh".into()];
+                world
+            }],
+            links: vec![],
+            world_quest_bindings: vec![WorldQuestBinding {
+                world_id: "deadman-shadow".into(),
+                quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: WorldRealityRole::Shadow,
+                    average_reward_per_row: 4.5,
+                    controller_mix: vec![pod_core::ControllerEvaluationSummary {
+                        agent_type: "neural_agent".into(),
+                        row_count: 3,
+                        reward_total: 13.5,
+                        average_reward_per_row: 4.5,
+                    }],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 6666,
+                    applied_score_delta_total: 0,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 0,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        }
+        .to_toon_document();
+
+        runtime_state.borrow_mut().events = vec![
+            GeneratedRuntimeEvent::Connected {
+                identity: vec![7; 16],
+                token: "tok-generated".into(),
+            },
+            GeneratedRuntimeEvent::SubscriptionApplied,
+            GeneratedRuntimeEvent::RemoteTopologyDocumentRow {
+                row_id: 13,
+                generated_at_unix_ms: 77,
+                scenario_id: "deadman-neural-cup".into(),
+                profile_id: "generated-test".into(),
+                topology_json: document.clone(),
+            },
+        ];
+
+        let messages = client.poll_updates();
+        assert!(runtime_state.borrow().subscriptions.iter().any(|queries| {
+            queries
+                .iter()
+                .any(|query| query == "SELECT * FROM remote_topology_document")
+        }));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document: current }
+                if current == &document
+        )));
         assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
         assert_eq!(
             client

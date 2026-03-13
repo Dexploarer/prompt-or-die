@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Hook the generated SpacetimeDB subscription/runtime path to `remote_topology_document` rows so remote clients receive the authority-fed topology automatically instead of through explicit test-only row injection.
+1. Replace the new generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
 2. Thread that same authority-fed topology document stream into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
 3. Add remote execution coverage for topology document churn, world switching, and cross-world quest/effect updates on top of the new authority-fed path.

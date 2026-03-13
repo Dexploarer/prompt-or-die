@@ -207,8 +207,12 @@ The authority-facing publication surface is now explicit too: SpacetimeDB
 publishes `RemoteTopologyBundle` payloads through the public
 `remote_topology_document` row and the `publish_remote_topology_document`
 reducer, and the native client wrappers can ingest those rows directly with
-stale-row protection. The remaining gap is automatic generated-binding hookup,
-not the contract or publication format itself.
+stale-row protection. [`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs)
+now also has a generated-runtime adapter seam, so generated mode can receive
+those authority-fed rows through the same `frame_tick()` ingress as emulated
+mode. The remaining gap is shipping the real generated binding/runtime
+implementation and threading that feed into the parity/evaluation harnesses,
+not redefining the contract or publication format itself.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many

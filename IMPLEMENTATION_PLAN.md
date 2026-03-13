@@ -1810,5 +1810,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-stdb --no-default-features --features module --target wasm32-unknown-unknown`
   - `git diff --check`
 
-**Last updated**: Iteration 170
-**Current focus**: Iteration 171 hook the generated SpacetimeDB subscription/runtime path to `remote_topology_document` rows so the feed is received automatically, then thread that authority path into parity and evaluation harnesses
+### Iteration 171
+- [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` in `crates/pod-stdb/src/client.rs`, giving generated mode a minimal runtime seam for connect/disconnect, subscription application, and authority-fed `remote_topology_document` row delivery.
+- [x] Extended `crates/pod-stdb/src/client.rs` so `StdbConnectionMode::Generated` now uses the injected runtime adapter instead of hard-failing immediately, while preserving the explicit error path when no runtime is wired.
+- [x] Added deterministic generated-mode coverage in `crates/pod-stdb/src/client.rs`, `crates/pod-stdb/tests/client_integration.rs`, and `crates/pod-net/src/client_stdb.rs`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through `ServerMessage::DebugDocument`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client --lib`
+  - `cargo test -p pod-stdb --no-default-features --features client --test client_integration`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+**Last updated**: Iteration 171
+**Current focus**: Iteration 172 replace the fake generated-runtime adapter with actual generated binding/runtime wiring, then thread that authority-fed topology stream into parity/evaluation harnesses with churn and world-switch coverage
