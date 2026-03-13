@@ -32,7 +32,7 @@ module = [
 unstable = ["module"]
 # Enable the native Rust client wrapper (StdbClient, event types, cached state).
 # Excluded from WASM module compilation — use only in native targets (pod-net, pod-server).
-client = []
+client = ["dep:spacetimedb-sdk"]
 
 [dependencies]
 pod-core = { path = "../pod-core" }
@@ -41,6 +41,7 @@ pod-core = { path = "../pod-core" }
 # on native arm64/x86 test binaries. Making it optional allows client-only builds
 # to compile and test without pulling in WASM symbols.
 spacetimedb = { workspace = true, optional = true }
+spacetimedb-sdk = { version = "2.0.4", optional = true }
 # Logging — used by both module and client code (no WASM symbols)
 log = { workspace = true }
 # Module-only dependencies (only needed by tables/reducers/events/observation)

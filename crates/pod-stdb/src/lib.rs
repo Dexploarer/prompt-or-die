@@ -115,3 +115,12 @@ mod module_entropy {
 /// ```
 #[cfg(feature = "client")]
 pub mod client;
+
+/// Generated SpacetimeDB client bindings for the published reducer module.
+///
+/// Refresh these with:
+/// `cargo build -p pod-stdb --target wasm32-unknown-unknown --release --no-default-features --features module`
+/// followed by:
+/// `spacetime generate --lang rust --out-dir src/module_bindings --bin-path .cargo-target/wasm32-unknown-unknown/release/pod_stdb.wasm`
+#[cfg(feature = "client")]
+pub mod module_bindings;
