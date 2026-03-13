@@ -9,6 +9,8 @@ export type ComparisonDirection =
   | "lower_is_better"
   | "higher_is_better"
   | "must_stay_true"
+  | "must_match_baseline"
+  | "must_stay_within_envelope"
   | "informational";
 
 export type ComparisonStatus =
@@ -25,10 +27,11 @@ export type SnapshotMetricComparison = {
   baseline: string;
   candidate: string;
   delta: number | null;
+  envelope: string | null;
 };
 
 export type BenchmarkSnapshotComparisonReport = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   profile: "shard-target";
   baselineLabel: string;
   candidateLabel: string;
@@ -144,6 +147,7 @@ function compareNumberMetric(
     baseline: formatValue(baseline),
     candidate: formatValue(candidate),
     delta,
+    envelope: null,
   };
 }
 
@@ -166,6 +170,7 @@ function compareBooleanMetric(
     baseline: formatValue(baseline),
     candidate: formatValue(candidate),
     delta: null,
+    envelope: null,
   };
 }
 
@@ -189,6 +194,60 @@ function compareInformationalMetric(
       typeof baseline === "number" && typeof candidate === "number"
         ? Number((candidate - baseline).toFixed(3))
         : null,
+    envelope: null,
+  };
+}
+
+function compareExactBaselineMetric(
+  category: string,
+  metric: string,
+  baseline: boolean | number | string,
+  candidate: boolean | number | string,
+): SnapshotMetricComparison {
+  return {
+    category,
+    metric,
+    direction: "must_match_baseline",
+    status: baseline === candidate ? "unchanged" : "regressed",
+    baseline: formatValue(baseline),
+    candidate: formatValue(candidate),
+    delta:
+      typeof baseline === "number" && typeof candidate === "number"
+        ? Number((candidate - baseline).toFixed(3))
+        : null,
+    envelope: formatValue(baseline),
+  };
+}
+
+function compareNumberEnvelopeMetric(
+  category: string,
+  metric: string,
+  baseline: number,
+  candidate: number,
+  minDelta: number,
+  maxDelta: number,
+): SnapshotMetricComparison {
+  const minimum = baseline + minDelta;
+  const maximum = baseline + maxDelta;
+  const delta = Number((candidate - baseline).toFixed(3));
+  const withinEnvelope = candidate >= minimum && candidate <= maximum;
+
+  let status: ComparisonStatus = "unchanged";
+  if (!withinEnvelope) {
+    status = "regressed";
+  } else if (candidate !== baseline) {
+    status = "changed";
+  }
+
+  return {
+    category,
+    metric,
+    direction: "must_stay_within_envelope",
+    status,
+    baseline: formatValue(baseline),
+    candidate: formatValue(candidate),
+    delta,
+    envelope: `[${formatValue(minimum)}, ${formatValue(maximum)}]`,
   };
 }
 
@@ -363,36 +422,56 @@ function pushTopologyWorldComparisons(
 
     for (const path of ["authority_row", "generated_runtime"] as const) {
       const pathCategory = `${worldCategory}.${path}`;
+      const baselinePath = baselineWorld[path];
+      const candidatePath = candidateWorld[path];
       comparisons.push(
         compareBooleanMetric(
           pathCategory,
           "resolved_world_matches",
-          baselineWorld[path].resolved_world_matches,
-          candidateWorld[path].resolved_world_matches,
+          baselinePath.resolved_world_matches,
+          candidatePath.resolved_world_matches,
         ),
         compareBooleanMetric(
           pathCategory,
           "quest_binding_matches",
-          baselineWorld[path].quest_binding_matches,
-          candidateWorld[path].quest_binding_matches,
+          baselinePath.quest_binding_matches,
+          candidatePath.quest_binding_matches,
         ),
         compareBooleanMetric(
           pathCategory,
           "applied_world_state_matches",
-          baselineWorld[path].applied_world_state_matches,
-          candidateWorld[path].applied_world_state_matches,
+          baselinePath.applied_world_state_matches,
+          candidatePath.applied_world_state_matches,
         ),
         compareBooleanMetric(
           pathCategory,
           "evaluation_matches",
-          baselineWorld[path].evaluation_matches,
-          candidateWorld[path].evaluation_matches,
+          baselinePath.evaluation_matches,
+          candidatePath.evaluation_matches,
+        ),
+        compareBooleanMetric(
+          pathCategory,
+          "world_tournament_orchestration_matches",
+          baselinePath.world_tournament_orchestration_matches ?? true,
+          candidatePath.world_tournament_orchestration_matches ?? true,
+        ),
+        compareBooleanMetric(
+          pathCategory,
+          "tournament_control_plane_matches",
+          baselinePath.tournament_control_plane_matches ?? true,
+          candidatePath.tournament_control_plane_matches ?? true,
+        ),
+        compareBooleanMetric(
+          pathCategory,
+          "tournament_orchestration_matches",
+          baselinePath.tournament_orchestration_matches ?? true,
+          candidatePath.tournament_orchestration_matches ?? true,
         ),
         compareInformationalMetric(
           pathCategory,
           "resolved_world_id",
-          baselineWorld[path].resolved_world_id,
-          candidateWorld[path].resolved_world_id,
+          baselinePath.resolved_world_id,
+          candidatePath.resolved_world_id,
         ),
       );
     }
@@ -405,6 +484,28 @@ export function buildSnapshotComparisonReport(
   baselinePath: string,
   candidatePath: string,
 ): BenchmarkSnapshotComparisonReport {
+  const baselineTournamentOrchestration =
+    baseline.headlessTopology.tournamentOrchestration ?? {
+      phase: "unknown",
+      activeWorldCount: null,
+      contestedWorldCount: null,
+      activeLinkCount: null,
+      leadingTeamCount: null,
+      atRiskTeamCount: null,
+      pressureWorldCount: null,
+      neuralSwarmWorldCount: null,
+    };
+  const candidateTournamentOrchestration =
+    candidate.headlessTopology.tournamentOrchestration ?? {
+      phase: "unknown",
+      activeWorldCount: null,
+      contestedWorldCount: null,
+      activeLinkCount: null,
+      leadingTeamCount: null,
+      atRiskTeamCount: null,
+      pressureWorldCount: null,
+      neuralSwarmWorldCount: null,
+    };
   const comparisons: SnapshotMetricComparison[] = [];
 
   comparisons.push(
@@ -548,6 +649,18 @@ export function buildSnapshotComparisonReport(
     ),
     compareBooleanMetric(
       "headlessTopology",
+      "topologyParity.world_admissions_match",
+      baseline.headlessTopology.topologyParity.world_admissions_match ?? true,
+      candidate.headlessTopology.topologyParity.world_admissions_match ?? true,
+    ),
+    compareBooleanMetric(
+      "headlessTopology",
+      "topologyParity.world_control_planes_match",
+      baseline.headlessTopology.topologyParity.world_control_planes_match ?? true,
+      candidate.headlessTopology.topologyParity.world_control_planes_match ?? true,
+    ),
+    compareBooleanMetric(
+      "headlessTopology",
       "topologyParity.applied_world_states_match",
       baseline.headlessTopology.topologyParity.applied_world_states_match,
       candidate.headlessTopology.topologyParity.applied_world_states_match,
@@ -557,6 +670,22 @@ export function buildSnapshotComparisonReport(
       "topologyParity.evaluation_match",
       baseline.headlessTopology.topologyParity.evaluation_match,
       candidate.headlessTopology.topologyParity.evaluation_match,
+    ),
+    compareBooleanMetric(
+      "headlessTopology",
+      "topologyParity.tournament_control_plane_match",
+      baseline.headlessTopology.topologyParity.tournament_control_plane_match ??
+        true,
+      candidate.headlessTopology.topologyParity.tournament_control_plane_match ??
+        true,
+    ),
+    compareBooleanMetric(
+      "headlessTopology",
+      "topologyParity.tournament_orchestration_match",
+      baseline.headlessTopology.topologyParity.tournament_orchestration_match ??
+        true,
+      candidate.headlessTopology.topologyParity.tournament_orchestration_match ??
+        true,
     ),
     compareInformationalMetric(
       "headlessTopology",
@@ -569,6 +698,68 @@ export function buildSnapshotComparisonReport(
       "linkCount",
       baseline.headlessTopology.linkCount,
       candidate.headlessTopology.linkCount,
+    ),
+    compareExactBaselineMetric(
+      "headlessTopology.tournamentOrchestration",
+      "phase",
+      baselineTournamentOrchestration.phase,
+      candidateTournamentOrchestration.phase,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "activeWorldCount",
+      baselineTournamentOrchestration.activeWorldCount,
+      candidateTournamentOrchestration.activeWorldCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "contestedWorldCount",
+      baselineTournamentOrchestration.contestedWorldCount,
+      candidateTournamentOrchestration.contestedWorldCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "activeLinkCount",
+      baselineTournamentOrchestration.activeLinkCount,
+      candidateTournamentOrchestration.activeLinkCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "leadingTeamCount",
+      baselineTournamentOrchestration.leadingTeamCount,
+      candidateTournamentOrchestration.leadingTeamCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "atRiskTeamCount",
+      baselineTournamentOrchestration.atRiskTeamCount,
+      candidateTournamentOrchestration.atRiskTeamCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "pressureWorldCount",
+      baselineTournamentOrchestration.pressureWorldCount,
+      candidateTournamentOrchestration.pressureWorldCount,
+      0,
+      0,
+    ),
+    compareNumberEnvelopeMetric(
+      "headlessTopology.tournamentOrchestration",
+      "neuralSwarmWorldCount",
+      baselineTournamentOrchestration.neuralSwarmWorldCount,
+      candidateTournamentOrchestration.neuralSwarmWorldCount,
+      0,
+      0,
     ),
   );
 
@@ -636,7 +827,7 @@ export function buildSnapshotComparisonReport(
   );
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile: "shard-target",
     baselineLabel: baseline.label,
     candidateLabel: candidate.label,

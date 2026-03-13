@@ -21,6 +21,8 @@ describe("run shard target snapshot", () => {
       "3200",
       "--generated-sdk-timeout-ms",
       "9000",
+      "--compare-baseline",
+      "docs/benchmark-snapshots/2026-03-shard-target.json",
       "--reuse-browser-routes",
       "--keep-spacetime",
       "--output",
@@ -31,6 +33,9 @@ describe("run shard target snapshot", () => {
     expect(options.host).toBe("127.0.0.2");
     expect(options.port).toBe(3200);
     expect(options.generatedSdkTimeoutMs).toBe(9000);
+    expect(options.compareBaseline).toBe(
+      "docs/benchmark-snapshots/2026-03-shard-target.json",
+    );
     expect(options.reuseBrowserRoutes).toBe(true);
     expect(options.keepSpacetime).toBe(true);
     expect(options.output).toBe("artifacts/custom-run.json");

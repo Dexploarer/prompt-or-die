@@ -164,12 +164,10 @@ This lets us support:
 
 In order:
 
-1. Add tournament- and swarm-level orchestration benchmarks using the same
-   replay/evaluation spine and shared topology artifacts.
-2. Carry orchestration drift into the published topology/moat history so
-   monthly shard-target snapshots show world-pressure changes, not just static
-   parity.
-3. Keep the browser optional: visualize the control plane later, after the
+1. Auto-select the latest prior monthly snapshot as the comparison baseline, so
+   month-over-month orchestration review does not depend on a manual
+   `--compare-baseline` argument.
+2. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 
 This keeps the stack coherent:

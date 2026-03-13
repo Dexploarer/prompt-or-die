@@ -74,7 +74,24 @@ describe("compare moat snapshots", () => {
     if (candidate.browserRoutes.comparison) {
       candidate.browserRoutes.comparison.workerGatesPassed = false;
     }
+    candidate.headlessTopology.tournamentOrchestration ??= {
+      phase: "unknown",
+      activeWorldCount: 0,
+      contestedWorldCount: 0,
+      activeLinkCount: 0,
+      leadingTeamCount: 0,
+      atRiskTeamCount: 0,
+      pressureWorldCount: 0,
+      neuralSwarmWorldCount: 0,
+    };
+    candidate.headlessTopology.topologyParity.tournament_orchestration_match ??= true;
+    candidate.headlessTopology.tournamentOrchestration.neuralSwarmWorldCount += 1;
+    candidate.headlessTopology.topologyParity.tournament_orchestration_match = false;
     candidate.topologyFeed.worlds[0].authority_row.quest_binding_matches = false;
+    candidate.topologyFeed.worlds[0].generated_runtime.tournament_orchestration_matches ??=
+      true;
+    candidate.topologyFeed.worlds[0].generated_runtime.tournament_orchestration_matches =
+      false;
 
     const report = buildSnapshotComparisonReport(
       baseline,
@@ -124,6 +141,40 @@ describe("compare moat snapshots", () => {
         (comparison) =>
           comparison.category === "topologyFeed.deadman-prime.authority_row" &&
           comparison.metric === "quest_binding_matches",
+      ),
+    ).toMatchObject({
+      status: "regressed",
+      candidate: "false",
+    });
+
+    expect(
+      report.comparisons.find(
+        (comparison) =>
+          comparison.category === "headlessTopology" &&
+          comparison.metric === "topologyParity.tournament_orchestration_match",
+      ),
+    ).toMatchObject({
+      status: "regressed",
+      candidate: "false",
+    });
+
+    expect(
+      report.comparisons.find(
+        (comparison) =>
+          comparison.category === "headlessTopology.tournamentOrchestration" &&
+          comparison.metric === "neuralSwarmWorldCount",
+      ),
+    ).toMatchObject({
+      direction: "must_stay_within_envelope",
+      status: "regressed",
+      envelope: "[0, 0]",
+    });
+
+    expect(
+      report.comparisons.find(
+        (comparison) =>
+          comparison.category === "topologyFeed.deadman-prime.generated_runtime" &&
+          comparison.metric === "tournament_orchestration_matches",
       ),
     ).toMatchObject({
       status: "regressed",

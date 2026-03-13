@@ -163,14 +163,33 @@ type HeadlessTopologyParityReport = {
   links_match: boolean;
   quest_graphs_match: boolean;
   world_quest_bindings_match: boolean;
+  world_admissions_match: boolean;
+  world_control_planes_match: boolean;
   applied_world_states_match: boolean;
   evaluation_match: boolean;
+  tournament_control_plane_match: boolean;
+  tournament_orchestration_match: boolean;
   missing_world_quest_binding_ids: string[];
   unexpected_world_quest_binding_ids: string[];
+  missing_world_admission_ids: string[];
+  unexpected_world_admission_ids: string[];
+  missing_world_control_plane_ids: string[];
+  unexpected_world_control_plane_ids: string[];
   missing_applied_world_ids: string[];
   unexpected_applied_world_ids: string[];
   missing_evaluation_world_ids: string[];
   unexpected_evaluation_world_ids: string[];
+};
+
+type TournamentOrchestrationMeasurementsReport = {
+  phase: string;
+  activeWorldCount: number;
+  contestedWorldCount: number;
+  activeLinkCount: number;
+  leadingTeamCount: number;
+  atRiskTeamCount: number;
+  pressureWorldCount: number;
+  neuralSwarmWorldCount: number;
 };
 
 type HeadlessTopologyCheck = {
@@ -190,6 +209,7 @@ type HeadlessTopologyMeasurementsReport = {
   worldQuestBindingCount: number;
   appliedWorldStateCount: number;
   evaluationWorldCount: number;
+  tournamentOrchestration: TournamentOrchestrationMeasurementsReport;
   topologyParity: HeadlessTopologyParityReport;
   checks: HeadlessTopologyCheck[];
   allChecksPassed: boolean;
@@ -208,6 +228,9 @@ type TopologyFeedWorldPathReport = {
   quest_binding_matches: boolean;
   applied_world_state_matches: boolean;
   evaluation_matches: boolean;
+  world_tournament_orchestration_matches: boolean;
+  tournament_control_plane_matches: boolean;
+  tournament_orchestration_matches: boolean;
 };
 
 type TopologyFeedWorldReport = {
@@ -587,6 +610,7 @@ function normalizeHeadlessTopologyMeasurements(
     worldQuestBindingCount: report.worldQuestBindingCount,
     appliedWorldStateCount: report.appliedWorldStateCount,
     evaluationWorldCount: report.evaluationWorldCount,
+    tournamentOrchestration: { ...report.tournamentOrchestration },
     topologyParity: {
       ...report.topologyParity,
       missing_world_quest_binding_ids: [

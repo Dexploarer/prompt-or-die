@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Benchmark shared tournament/swarm orchestration on top of the now-remote topology surface before opening a new phase.
+1. All audit backlog items are closed. Teach the shard-target publication flow to auto-select the latest prior monthly snapshot as the comparison baseline, so month-over-month orchestration review does not require a manual `--compare-baseline` path.
 
 ## Audit Backlog (2026-03-13)
 

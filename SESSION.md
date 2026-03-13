@@ -258,7 +258,7 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- All audited backlog items are closed. The next runtime slice should benchmark shared tournament/swarm orchestration on top of the now-remote topology surface, instead of adding more app-local aggregation.
+- All audited backlog items are closed. The next runtime slice should auto-select the latest prior monthly shard-target snapshot as the comparison baseline, so month-over-month orchestration review no longer depends on a manual `--compare-baseline` argument.
 
 ## Audit Backlog (2026-03-13)
 

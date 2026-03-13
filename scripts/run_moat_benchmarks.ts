@@ -56,14 +56,43 @@ type HeadlessTopologyParityReport = {
   links_match: boolean;
   quest_graphs_match: boolean;
   world_quest_bindings_match: boolean;
+  world_admissions_match: boolean;
+  world_control_planes_match: boolean;
   applied_world_states_match: boolean;
   evaluation_match: boolean;
+  tournament_control_plane_match: boolean;
+  tournament_orchestration_match: boolean;
   missing_world_quest_binding_ids: string[];
   unexpected_world_quest_binding_ids: string[];
+  missing_world_admission_ids: string[];
+  unexpected_world_admission_ids: string[];
+  missing_world_control_plane_ids: string[];
+  unexpected_world_control_plane_ids: string[];
   missing_applied_world_ids: string[];
   unexpected_applied_world_ids: string[];
   missing_evaluation_world_ids: string[];
   unexpected_evaluation_world_ids: string[];
+};
+
+type HeadlessWorldTournamentOrchestrationSourceReport = {
+  world_id: string;
+  controller_mix: Array<{ agent_type: string; count: number }>;
+  objective_shift_count: number;
+  unresolved_objective_shift_count: number;
+  progressed_quest_line_count: number;
+  terminal_quest_line_count: number;
+  applied_score_delta_total: number;
+  applied_death_mark_count: number;
+};
+
+type HeadlessTournamentOrchestrationSourceReport = {
+  phase: string;
+  active_world_ids: string[];
+  contested_world_ids: string[];
+  active_link_ids: string[];
+  leading_team_ids: string[];
+  at_risk_team_ids: string[];
+  worlds: HeadlessWorldTournamentOrchestrationSourceReport[];
 };
 
 type HeadlessTopologySourceReport = {
@@ -78,6 +107,7 @@ type HeadlessTopologySourceReport = {
   evaluation: {
     worlds: Array<{ world_id: string }>;
   };
+  tournament_orchestration: HeadlessTournamentOrchestrationSourceReport;
   topology_parity: HeadlessTopologyParityReport;
 };
 
@@ -98,6 +128,16 @@ type HeadlessTopologyMeasurementsReport = {
   worldQuestBindingCount: number;
   appliedWorldStateCount: number;
   evaluationWorldCount: number;
+  tournamentOrchestration: {
+    phase: string;
+    activeWorldCount: number;
+    contestedWorldCount: number;
+    activeLinkCount: number;
+    leadingTeamCount: number;
+    atRiskTeamCount: number;
+    pressureWorldCount: number;
+    neuralSwarmWorldCount: number;
+  };
   topologyParity: HeadlessTopologyParityReport;
   checks: HeadlessTopologyCheck[];
   allChecksPassed: boolean;
@@ -116,6 +156,9 @@ type TopologyFeedWorldPathReport = {
   quest_binding_matches: boolean;
   applied_world_state_matches: boolean;
   evaluation_matches: boolean;
+  world_tournament_orchestration_matches: boolean;
+  tournament_control_plane_matches: boolean;
+  tournament_orchestration_matches: boolean;
 };
 
 type TopologyFeedWorldReport = {
@@ -170,6 +213,35 @@ function buildBooleanCheck(
   };
 }
 
+function buildTournamentOrchestrationMeasurements(
+  report: HeadlessTournamentOrchestrationSourceReport,
+): HeadlessTopologyMeasurementsReport["tournamentOrchestration"] {
+  const pressureWorldCount = report.worlds.filter(
+    (world) =>
+      world.applied_score_delta_total !== 0 ||
+      world.applied_death_mark_count > 0 ||
+      world.objective_shift_count > 0 ||
+      world.unresolved_objective_shift_count > 0,
+  ).length;
+  const neuralSwarmWorldCount = report.worlds.filter((world) =>
+    world.controller_mix.some(
+      (controller) =>
+        controller.agent_type === "neural_agent" && controller.count > 0,
+    ),
+  ).length;
+
+  return {
+    phase: report.phase,
+    activeWorldCount: report.active_world_ids.length,
+    contestedWorldCount: report.contested_world_ids.length,
+    activeLinkCount: report.active_link_ids.length,
+    leadingTeamCount: report.leading_team_ids.length,
+    atRiskTeamCount: report.at_risk_team_ids.length,
+    pressureWorldCount,
+    neuralSwarmWorldCount,
+  };
+}
+
 export function buildHeadlessTopologyMeasurements(
   report: HeadlessTopologySourceReport,
 ): HeadlessTopologyMeasurementsReport {
@@ -199,12 +271,28 @@ export function buildHeadlessTopologyMeasurements(
       report.topology_parity.world_quest_bindings_match,
     ),
     buildBooleanCheck(
+      "topology_parity.world_admissions_match",
+      report.topology_parity.world_admissions_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.world_control_planes_match",
+      report.topology_parity.world_control_planes_match,
+    ),
+    buildBooleanCheck(
       "topology_parity.applied_world_states_match",
       report.topology_parity.applied_world_states_match,
     ),
     buildBooleanCheck(
       "topology_parity.evaluation_match",
       report.topology_parity.evaluation_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.tournament_control_plane_match",
+      report.topology_parity.tournament_control_plane_match,
+    ),
+    buildBooleanCheck(
+      "topology_parity.tournament_orchestration_match",
+      report.topology_parity.tournament_orchestration_match,
     ),
   ];
 
@@ -218,6 +306,9 @@ export function buildHeadlessTopologyMeasurements(
     worldQuestBindingCount: report.world_quest_bindings.length,
     appliedWorldStateCount: report.applied_world_states.length,
     evaluationWorldCount: report.evaluation.worlds.length,
+    tournamentOrchestration: buildTournamentOrchestrationMeasurements(
+      report.tournament_orchestration,
+    ),
     topologyParity: report.topology_parity,
     allChecksPassed: checks.every((check) => check.passed),
     checks,

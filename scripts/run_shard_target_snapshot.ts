@@ -9,6 +9,7 @@ type Options = {
   host: string;
   port: number;
   generatedSdkTimeoutMs: number;
+  compareBaseline: string | null;
   keepSpacetime: boolean;
   reuseBrowserRoutes: boolean;
   output: string;
@@ -27,17 +28,23 @@ type CommandSummary = {
 type BrowserRouteCaptureStatus = "passed" | "artifact_only" | "reused";
 
 type RunSummary = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAtUnixMs: number;
   label: string;
   profile: "shard-target";
   browserRouteStatus: BrowserRouteCaptureStatus;
   browserRouteGatePassed: boolean;
+  comparison: {
+    status: "skipped" | "passed";
+    baseline: string | null;
+    report: string | null;
+  };
   paths: {
     moatReport: string;
     browserRoutes: string;
     liveTopologyFeed: string;
     snapshot: string;
+    comparisonReport: string | null;
     topologyExport: string;
     runSummary: string;
   };
@@ -63,6 +70,7 @@ export function parseArgs(argv: string[]): Options {
     host: "127.0.0.1",
     port: 3110,
     generatedSdkTimeoutMs: 5_000,
+    compareBaseline: null,
     keepSpacetime: false,
     reuseBrowserRoutes: false,
     output: "artifacts/shard-target-snapshot-run.json",
@@ -97,6 +105,10 @@ export function parseArgs(argv: string[]): Options {
         index += 1;
         break;
       }
+      case "--compare-baseline":
+        options.compareBaseline = argv[index + 1] ?? options.compareBaseline;
+        index += 1;
+        break;
       case "--output":
         options.output = argv[index + 1] ?? options.output;
         index += 1;
@@ -135,7 +147,7 @@ export function resolveBrowserRouteStatus(
 
 function printHelp() {
   console.error(
-    "Usage: bun ./scripts/run_shard_target_snapshot.ts [--label YYYY-MM] [--host 127.0.0.1] [--port 3110] [--generated-sdk-timeout-ms 5000] [--reuse-browser-routes] [--keep-spacetime] [--output artifacts/shard-target-snapshot-run.json]",
+    "Usage: bun ./scripts/run_shard_target_snapshot.ts [--label YYYY-MM] [--host 127.0.0.1] [--port 3110] [--generated-sdk-timeout-ms 5000] [--compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json] [--reuse-browser-routes] [--keep-spacetime] [--output artifacts/shard-target-snapshot-run.json]",
   );
 }
 
@@ -200,6 +212,10 @@ async function main() {
   const moatOutput = resolve(repoRoot, DEFAULT_MOAT_OUTPUT);
   const browserRouteOutput = resolve(repoRoot, DEFAULT_BROWSER_ROUTE_OUTPUT);
   const liveTopologyOutput = resolve(repoRoot, DEFAULT_LIVE_TOPOLOGY_OUTPUT);
+  const comparisonOutput = resolve(
+    repoRoot,
+    "artifacts/benchmark-snapshot-comparison.json",
+  );
   const summaryOutput = resolve(repoRoot, options.output);
   const snapshotOutput = resolve(
     repoRoot,
@@ -218,20 +234,39 @@ async function main() {
   mkdirSync(dirname(summaryOutput), { recursive: true });
   mkdirSync(dirname(moatOutput), { recursive: true });
   mkdirSync(dirname(liveTopologyOutput), { recursive: true });
+  mkdirSync(dirname(comparisonOutput), { recursive: true });
   mkdirSync(spacetimeDataDir, { recursive: true });
 
   const commands: CommandSummary[] = [];
   const warnings: string[] = [];
   let browserRouteStatus: BrowserRouteCaptureStatus = "reused";
   let browserRouteGatePassed = true;
+  let comparisonStatus: RunSummary["comparison"]["status"] = "skipped";
+  let comparisonBaselinePath: string | null = null;
   let server: Bun.Subprocess | null = null;
 
   const record = (result: { summary: CommandSummary; stdout: string }) => {
     commands.push(result.summary);
     return result;
-  };
+    };
 
   try {
+    if (options.compareBaseline) {
+      comparisonBaselinePath = resolve(repoRoot, options.compareBaseline);
+      if (!existsSync(comparisonBaselinePath)) {
+        throw new Error(
+          `comparison baseline snapshot is missing at ${comparisonBaselinePath}`,
+        );
+      }
+    } else if (existsSync(snapshotOutput)) {
+      comparisonBaselinePath = resolve(tempDir, "existing-shard-baseline.json");
+      writeFileSync(comparisonBaselinePath, readFileSync(snapshotOutput));
+    } else {
+      warnings.push(
+        `No existing shard-target snapshot baseline was found for ${options.label}; skipped snapshot regression comparison.`,
+      );
+    }
+
     const moat = record(
       runCommand(
         "moat-shard-target",
@@ -448,18 +483,50 @@ async function main() {
       );
     }
 
+    if (comparisonBaselinePath) {
+      const compare = record(
+        runCommand(
+          "compare-shard-snapshot",
+          [
+            "bun",
+            "./scripts/compare_moat_snapshots.ts",
+            "--baseline",
+            comparisonBaselinePath,
+            "--candidate",
+            snapshotOutput,
+            "--output",
+            comparisonOutput,
+            "--fail-on-regressions",
+          ],
+          repoRoot,
+        ),
+      );
+      if (!compare.summary.ok) {
+        throw new Error(
+          `snapshot comparison failed:\n${compare.summary.stderrSnippet ?? "no stderr captured"}`,
+        );
+      }
+      comparisonStatus = "passed";
+    }
+
     const summary: RunSummary = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAtUnixMs: Date.now(),
       label: options.label,
       profile: "shard-target",
       browserRouteStatus,
       browserRouteGatePassed,
+      comparison: {
+        status: comparisonStatus,
+        baseline: comparisonBaselinePath,
+        report: comparisonBaselinePath ? comparisonOutput : null,
+      },
       paths: {
         moatReport: moatOutput,
         browserRoutes: browserRouteOutput,
         liveTopologyFeed: liveTopologyOutput,
         snapshot: snapshotOutput,
+        comparisonReport: comparisonBaselinePath ? comparisonOutput : null,
         topologyExport: topologyOutput,
         runSummary: summaryOutput,
       },

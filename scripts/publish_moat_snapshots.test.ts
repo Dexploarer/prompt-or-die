@@ -90,6 +90,16 @@ describe("publish moat snapshots", () => {
           worldQuestBindingCount: 3,
           appliedWorldStateCount: 2,
           evaluationWorldCount: 3,
+          tournamentOrchestration: {
+            phase: "Active",
+            activeWorldCount: 3,
+            contestedWorldCount: 2,
+            activeLinkCount: 3,
+            leadingTeamCount: 1,
+            atRiskTeamCount: 1,
+            pressureWorldCount: 2,
+            neuralSwarmWorldCount: 1,
+          },
           topologyParity: {
             consistent: true,
             teams_match: true,
@@ -97,10 +107,18 @@ describe("publish moat snapshots", () => {
             links_match: true,
             quest_graphs_match: true,
             world_quest_bindings_match: true,
+            world_admissions_match: true,
+            world_control_planes_match: true,
             applied_world_states_match: true,
             evaluation_match: true,
+            tournament_control_plane_match: true,
+            tournament_orchestration_match: true,
             missing_world_quest_binding_ids: [],
             unexpected_world_quest_binding_ids: [],
+            missing_world_admission_ids: [],
+            unexpected_world_admission_ids: [],
+            missing_world_control_plane_ids: [],
+            unexpected_world_control_plane_ids: [],
             missing_applied_world_ids: [],
             unexpected_applied_world_ids: [],
             missing_evaluation_world_ids: [],
@@ -130,6 +148,9 @@ describe("publish moat snapshots", () => {
                 quest_binding_matches: true,
                 applied_world_state_matches: true,
                 evaluation_matches: true,
+                world_tournament_orchestration_matches: true,
+                tournament_control_plane_matches: true,
+                tournament_orchestration_matches: true,
               },
               generated_runtime: {
                 resolved_world_id: "deadman-prime",
@@ -137,6 +158,9 @@ describe("publish moat snapshots", () => {
                 quest_binding_matches: true,
                 applied_world_state_matches: true,
                 evaluation_matches: true,
+                world_tournament_orchestration_matches: true,
+                tournament_control_plane_matches: true,
+                tournament_orchestration_matches: true,
               },
             },
           ],
@@ -250,6 +274,9 @@ describe("publish moat snapshots", () => {
               quest_binding_matches: true,
               applied_world_state_matches: true,
               evaluation_matches: true,
+              world_tournament_orchestration_matches: true,
+              tournament_control_plane_matches: true,
+              tournament_orchestration_matches: true,
             },
             generated_runtime: {
               resolved_world_id: "deadman-prime",
@@ -257,6 +284,9 @@ describe("publish moat snapshots", () => {
               quest_binding_matches: true,
               applied_world_state_matches: true,
               evaluation_matches: true,
+              world_tournament_orchestration_matches: true,
+              tournament_control_plane_matches: true,
+              tournament_orchestration_matches: true,
             },
           },
         ],
@@ -291,10 +321,14 @@ describe("publish moat snapshots", () => {
     );
     expect(snapshot.headlessTopology.teamCount).toBe(2);
     expect(snapshot.headlessTopology.topologyParity.consistent).toBe(true);
+    expect(snapshot.headlessTopology.tournamentOrchestration.phase).toBe("Active");
     expect(snapshot.topologyFeed.scenarioId).toBe("deadman-neural-cup");
     expect(snapshot.topologyFeed.worlds[0]?.generated_runtime.evaluation_matches).toBe(
       true,
     );
+    expect(
+      snapshot.topologyFeed.worlds[0]?.generated_runtime.tournament_orchestration_matches,
+    ).toBe(true);
     expect(snapshot.liveTopologyFeed?.profileId).toBe("shard-target");
     expect(snapshot.liveTopologyFeed?.checks[0]?.metric).toBe(
       "generated_runtime.deadman-prime.resolved_world_id",
@@ -358,10 +392,18 @@ describe("publish moat snapshots", () => {
             links_match: true,
             quest_graphs_match: true,
             world_quest_bindings_match: true,
+            world_admissions_match: true,
+            world_control_planes_match: true,
             applied_world_states_match: true,
             evaluation_match: true,
+            tournament_control_plane_match: true,
+            tournament_orchestration_match: true,
             missing_world_quest_binding_ids: [],
             unexpected_world_quest_binding_ids: [],
+            missing_world_admission_ids: [],
+            unexpected_world_admission_ids: [],
+            missing_world_control_plane_ids: [],
+            unexpected_world_control_plane_ids: [],
             missing_applied_world_ids: [],
             unexpected_applied_world_ids: [],
             missing_evaluation_world_ids: [],

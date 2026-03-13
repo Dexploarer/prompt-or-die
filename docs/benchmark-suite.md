@@ -278,8 +278,10 @@ world-pressure drift are part of the same remote parity artifact as quest
 bindings, applied world state, and evaluation.
 
 `scripts/run_moat_benchmarks.ts` now includes that payload as
-`topologyFeedMeasurements`, so the combined moat artifact records core,
-transport, browser, headless topology, and remote topology feed parity
+`topologyFeedMeasurements`, and the same combined moat artifact now also keeps
+`headlessTopology.tournamentOrchestration` plus the new tournament-control-plane
+and tournament-orchestration parity checks. That means the artifact records
+core, transport, browser, headless topology, and remote topology feed parity
 together. `scripts/publish_moat_snapshots.ts` now also preserves the same
 report under `topologyFeed` in committed shard-target snapshots, which means
 remote topology feed drift can be reviewed historically instead of only through
@@ -391,8 +393,21 @@ is `passed`.
 `compare_moat_snapshots.ts` writes a structured JSON report with per-metric
 status (`improved`, `regressed`, `changed`, `unchanged`) across transport,
 browser-route, headless-topology, topology-feed, and live-topology-feed data.
-Use `--fail-on-regressions` when you want the comparison itself to act as a
-gate.
+That now includes tournament/swarm orchestration drift from
+`headlessTopology.tournamentOrchestration` and the per-world topology-feed
+orchestration parity booleans. The tournament/swarm orchestration metrics are no
+longer informational-only: the comparison report now records explicit baseline
+envelopes for `phase`, `activeWorldCount`, `contestedWorldCount`,
+`activeLinkCount`, `leadingTeamCount`, `atRiskTeamCount`, `pressureWorldCount`,
+and `neuralSwarmWorldCount`, so drift in those deterministic shard-target
+metrics shows up as a regression instead of a generic changed value. Use
+`--fail-on-regressions` when you want the comparison itself to act as a gate.
+
+`run_shard_target_snapshot.ts` now wires that compare step into the one-command
+monthly workflow. Pass `--compare-baseline <snapshot>` for an explicit
+month-over-month review, or rerun an existing month label and the wrapper will
+reuse the current same-label snapshot as a temporary baseline before it
+publishes the refreshed artifact.
 
 ## Interpretation rules
 

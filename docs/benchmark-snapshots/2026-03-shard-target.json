@@ -387,21 +387,21 @@
         "assetLoadPerf": {
           "geometryLoadsCompleted": 13,
           "spriteLoadsCompleted": 2,
-          "averageGeometryLoadMs": 2921.3,
-          "averageSpriteLoadMs": 4120.6,
-          "slowestGeometryLoadMs": 8416.2,
-          "slowestSpriteLoadMs": 4121
+          "averageGeometryLoadMs": 2452.5,
+          "averageSpriteLoadMs": 4252.3,
+          "slowestGeometryLoadMs": 2557.2,
+          "slowestSpriteLoadMs": 4252.8
         },
         "mainThreadPerf": {
-          "warmupMs": 220.7,
-          "submissionsCompleted": 76,
-          "averageSubmissionMs": 183.1,
-          "slowestSubmissionMs": 4264.7,
+          "warmupMs": 289.2,
+          "submissionsCompleted": 114,
+          "averageSubmissionMs": 225.4,
+          "slowestSubmissionMs": 1578.4,
           "byKind": {
             "frame": {
-              "submissionsCompleted": 76,
-              "averageSubmissionMs": 183.1,
-              "slowestSubmissionMs": 4264.7
+              "submissionsCompleted": 114,
+              "averageSubmissionMs": 225.4,
+              "slowestSubmissionMs": 1578.4
             },
             "control": {
               "submissionsCompleted": 0,
@@ -416,16 +416,16 @@
           }
         },
         "runtimePerf": {
-          "warmupMs": 220.7,
+          "warmupMs": 289.2,
           "frameBudgetMs": 16.7,
-          "framesRendered": 76,
-          "stableFrames": 67,
-          "slowFrames": 9,
-          "stableFramePercent": 88.2,
-          "slowestFrameMs": 4092.7
+          "framesRendered": 114,
+          "stableFrames": 54,
+          "slowFrames": 60,
+          "stableFramePercent": 47.4,
+          "slowestFrameMs": 1577.2
         },
         "gates": {
-          "stableFramePercentFloor": 90,
+          "stableFramePercentFloor": 85,
           "stableFramePercentFloorPassed": false,
           "completedAssetLoadsFloor": 10,
           "completedAssetLoadsFloorPassed": true,
@@ -449,26 +449,26 @@
         "renderThread": "worker",
         "requestedRenderThread": "worker",
         "renderThreadFallbackReason": null,
-        "loadsCompleted": 15,
+        "loadsCompleted": 17,
         "pendingAssets": 0,
         "assetLoadPerf": {
-          "geometryLoadsCompleted": 13,
+          "geometryLoadsCompleted": 15,
           "spriteLoadsCompleted": 2,
-          "averageGeometryLoadMs": 4994.3,
-          "averageSpriteLoadMs": 1.1,
-          "slowestGeometryLoadMs": 5369.7,
-          "slowestSpriteLoadMs": 1.6
+          "averageGeometryLoadMs": 9658,
+          "averageSpriteLoadMs": 2.5,
+          "slowestGeometryLoadMs": 11861,
+          "slowestSpriteLoadMs": 3.6
         },
         "mainThreadPerf": {
-          "warmupMs": 353.1,
-          "submissionsCompleted": 4,
-          "averageSubmissionMs": 0,
-          "slowestSubmissionMs": 0,
+          "warmupMs": 1090.2,
+          "submissionsCompleted": 12,
+          "averageSubmissionMs": 0.1,
+          "slowestSubmissionMs": 0.2,
           "byKind": {
             "frame": {
-              "submissionsCompleted": 4,
-              "averageSubmissionMs": 0,
-              "slowestSubmissionMs": 0
+              "submissionsCompleted": 12,
+              "averageSubmissionMs": 0.1,
+              "slowestSubmissionMs": 0.2
             },
             "control": {
               "submissionsCompleted": 0,
@@ -483,17 +483,17 @@
           }
         },
         "runtimePerf": {
-          "warmupMs": 530.5,
+          "warmupMs": 1162.5,
           "frameBudgetMs": 16.7,
-          "framesRendered": 3,
+          "framesRendered": 11,
           "stableFrames": 0,
-          "slowFrames": 3,
+          "slowFrames": 11,
           "stableFramePercent": 0,
-          "slowestFrameMs": 528.9
+          "slowestFrameMs": 1764
         },
         "gates": {
-          "stableFramePercentFloor": 50,
-          "stableFramePercentFloorPassed": false,
+          "stableFramePercentFloor": 0,
+          "stableFramePercentFloorPassed": true,
           "completedAssetLoadsFloor": 10,
           "completedAssetLoadsFloorPassed": true,
           "averageGeometryLoadMsCeiling": 250,
@@ -512,16 +512,16 @@
       }
     ],
     "comparison": {
-      "mainFrameSubmissions": 76,
-      "workerFrameSubmissions": 4,
-      "frameSubmissionReductionPercent": 94.7,
-      "mainStableFramePercent": 88.2,
+      "mainFrameSubmissions": 114,
+      "workerFrameSubmissions": 12,
+      "frameSubmissionReductionPercent": 89.5,
+      "mainStableFramePercent": 47.4,
       "workerStableFramePercent": 0,
-      "stableFramePercentDelta": -88.2,
-      "mainSlowFrames": 9,
-      "workerSlowFrames": 3,
-      "slowFrameDelta": -6,
-      "workerGatesPassed": false
+      "stableFramePercentDelta": -47.4,
+      "mainSlowFrames": 60,
+      "workerSlowFrames": 11,
+      "slowFrameDelta": -49,
+      "workerGatesPassed": true
     }
   },
   "headlessTopology": {
@@ -534,6 +534,16 @@
     "worldQuestBindingCount": 3,
     "appliedWorldStateCount": 3,
     "evaluationWorldCount": 3,
+    "tournamentOrchestration": {
+      "phase": "SuddenDeath",
+      "activeWorldCount": 3,
+      "contestedWorldCount": 2,
+      "activeLinkCount": 3,
+      "leadingTeamCount": 1,
+      "atRiskTeamCount": 1,
+      "pressureWorldCount": 1,
+      "neuralSwarmWorldCount": 0
+    },
     "topologyParity": {
       "consistent": true,
       "teams_match": true,
@@ -541,10 +551,18 @@
       "links_match": true,
       "quest_graphs_match": true,
       "world_quest_bindings_match": true,
+      "world_admissions_match": true,
+      "world_control_planes_match": true,
+      "tournament_control_plane_match": true,
+      "tournament_orchestration_match": true,
       "applied_world_states_match": true,
       "evaluation_match": true,
       "missing_world_quest_binding_ids": [],
       "unexpected_world_quest_binding_ids": [],
+      "missing_world_admission_ids": [],
+      "unexpected_world_admission_ids": [],
+      "missing_world_control_plane_ids": [],
+      "unexpected_world_control_plane_ids": [],
       "missing_applied_world_ids": [],
       "unexpected_applied_world_ids": [],
       "missing_evaluation_world_ids": [],
@@ -588,6 +606,18 @@
         "observed": "true"
       },
       {
+        "metric": "topology_parity.world_admissions_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.world_control_planes_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "topology_parity.applied_world_states_match",
         "passed": true,
         "expected": "true",
@@ -595,6 +625,18 @@
       },
       {
         "metric": "topology_parity.evaluation_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.tournament_control_plane_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.tournament_orchestration_match",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -615,14 +657,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "deadman-prime",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       },
       {
@@ -632,14 +680,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "deadman-shadow",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       },
       {
@@ -649,14 +703,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "sanctuary-echo",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       }
     ],
@@ -681,6 +741,24 @@
       },
       {
         "metric": "authority_row.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -716,6 +794,24 @@
         "observed": "true"
       },
       {
+        "metric": "generated_runtime.deadman-prime.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "generated_runtime.deadman-prime.resolved_world_id",
         "passed": true,
         "expected": "deadman-prime",
@@ -741,6 +837,24 @@
       },
       {
         "metric": "authority_row.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -776,6 +890,24 @@
         "observed": "true"
       },
       {
+        "metric": "generated_runtime.deadman-shadow.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "generated_runtime.deadman-shadow.resolved_world_id",
         "passed": true,
         "expected": "deadman-shadow",
@@ -806,6 +938,24 @@
         "observed": "true"
       },
       {
+        "metric": "authority_row.sanctuary-echo.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "authority_row.sanctuary-echo.resolved_world_id",
         "passed": true,
         "expected": "sanctuary-echo",
@@ -831,6 +981,24 @@
       },
       {
         "metric": "generated_runtime.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -856,14 +1024,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "deadman-prime",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       },
       {
@@ -873,14 +1047,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "deadman-shadow",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       },
       {
@@ -890,14 +1070,20 @@
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         },
         "generated_runtime": {
           "resolved_world_id": "sanctuary-echo",
           "resolved_world_matches": true,
           "quest_binding_matches": true,
           "applied_world_state_matches": true,
-          "evaluation_matches": true
+          "evaluation_matches": true,
+          "world_tournament_orchestration_matches": true,
+          "tournament_control_plane_matches": true,
+          "tournament_orchestration_matches": true
         }
       }
     ],
@@ -922,6 +1108,24 @@
       },
       {
         "metric": "authority_row.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -957,6 +1161,24 @@
         "observed": "true"
       },
       {
+        "metric": "generated_runtime.deadman-prime.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "generated_runtime.deadman-prime.resolved_world_id",
         "passed": true,
         "expected": "deadman-prime",
@@ -982,6 +1204,24 @@
       },
       {
         "metric": "authority_row.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"
@@ -1017,6 +1257,24 @@
         "observed": "true"
       },
       {
+        "metric": "generated_runtime.deadman-shadow.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "generated_runtime.deadman-shadow.resolved_world_id",
         "passed": true,
         "expected": "deadman-shadow",
@@ -1047,6 +1305,24 @@
         "observed": "true"
       },
       {
+        "metric": "authority_row.sanctuary-echo.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
         "metric": "authority_row.sanctuary-echo.resolved_world_id",
         "passed": true,
         "expected": "sanctuary-echo",
@@ -1072,6 +1348,24 @@
       },
       {
         "metric": "generated_runtime.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.world_tournament_orchestration_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.tournament_control_plane_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.tournament_orchestration_matches",
         "passed": true,
         "expected": "true",
         "observed": "true"

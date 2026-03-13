@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 195
-**Current focus**: Iteration 196 benchmark shared tournament/swarm orchestration on top of the remote topology surface and publish that drift in the moat history
+**Last updated**: Iteration 198
+**Current focus**: Iteration 199 auto-select the latest prior monthly shard-target snapshot as the comparison baseline in the publication workflow
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2009,6 +2009,38 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-core -p pod-headless`
   - `cargo check -p pod-stdb --no-default-features --features client`
   - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 196
+- [x] Extended `scripts/run_moat_benchmarks.ts` and `scripts/run_moat_benchmarks.test.ts` so the moat artifact now preserves `headlessTopology.tournamentOrchestration` plus the new `tournament_control_plane_match` / `tournament_orchestration_match` parity checks instead of dropping them from the TypeScript layer.
+- [x] Extended `scripts/publish_moat_snapshots.ts`, `scripts/publish_moat_snapshots.test.ts`, `scripts/compare_moat_snapshots.ts`, and `scripts/compare_moat_snapshots.test.ts` so committed monthly shard-target snapshots and structured comparisons now preserve and report tournament/swarm orchestration drift, including topology-feed orchestration parity flags on both authority-row and generated-runtime paths.
+- [x] Regenerated `artifacts/moat-benchmarks-shard-local.json`, `artifacts/topology-feed-live-shard-local.json`, and `docs/benchmark-snapshots/2026-03-shard-target.json` through the scripted shard-target flow, so the committed history now actually contains the new orchestration metrics instead of only the code paths to emit them.
+- [x] Validation:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `git diff --check`
+
+### Iteration 197
+- [x] Extended `scripts/run_moat_benchmarks.ts` and `scripts/publish_moat_snapshots.ts` TypeScript contracts so `headlessTopology.topologyParity` now explicitly carries `world_admissions_match` and `world_control_planes_match` alongside the already shared tournament parity surfaces.
+- [x] Extended `scripts/run_moat_benchmarks.test.ts`, `scripts/publish_moat_snapshots.test.ts`, and the regenerated shard-target artifact path so the published moat/snapshot history reflects the widened headless parity check set instead of silently dropping those shared admission/control-plane invariants.
+- [x] Turned tournament/swarm orchestration history from informational-only into an explicit regression gate in `scripts/compare_moat_snapshots.ts`, using exact baseline envelopes for `phase`, `activeWorldCount`, `contestedWorldCount`, `activeLinkCount`, `leadingTeamCount`, `atRiskTeamCount`, `pressureWorldCount`, and `neuralSwarmWorldCount`.
+- [x] Extended `scripts/compare_moat_snapshots.test.ts` so orchestration drift now fails as a regression instead of being reported as a generic changed metric, and added explicit envelope metadata to the structured comparison output.
+- [x] Revalidated by regenerating the shard-target moat/snapshot artifacts and running a self-compare against `docs/benchmark-snapshots/2026-03-shard-target.json`, confirming zero regressions while the new orchestration envelopes are active.
+- [x] Validation:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-03-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions`
+  - `git diff --check`
+
+### Iteration 198
+- [x] Extended `scripts/run_shard_target_snapshot.ts` and `scripts/run_shard_target_snapshot.test.ts` with `--compare-baseline`, a structured `comparison` summary block, and automatic snapshot-comparison execution after publication, so the one-command shard-target workflow can now fail on orchestration regressions instead of requiring a separate manual compare command.
+- [x] Taught the shard-target wrapper to reuse an existing same-label snapshot as a temporary baseline when `--compare-baseline` is omitted, so deterministic reruns of the current monthly snapshot also pass through the same regression envelope gate.
+- [x] Revalidated the integrated workflow by running `scripts/run_shard_target_snapshot.ts` with `--compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json --reuse-browser-routes`, confirming the wrapper now emits `comparison.status = \"passed\"` and records `compare-shard-snapshot` in the command history.
+- [x] Validation:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json --reuse-browser-routes`
   - `git diff --check`
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
