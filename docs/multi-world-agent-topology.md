@@ -164,15 +164,11 @@ This lets us support:
 
 In order:
 
-1. Build a tournament/control-plane layer on top of the shared
-   `world_admissions` and `world_control_planes` topology contracts.
-2. Promote standings and tournament-control summaries into `pod-core` so they
-   stop living as `pod-headless` report-only aggregation.
-3. Carry that tournament/control-plane state through `pod-stdb` and `pod-net`
+1. Carry the shared tournament/control-plane state through `pod-stdb` and `pod-net`
    the same way quest, evaluation, and applied-world state already flow.
-4. Add tournament- and swarm-level benchmarks using the same replay/evaluation
+2. Add tournament- and swarm-level benchmarks using the same replay/evaluation
    spine and shared topology artifacts.
-5. Keep the browser optional: visualize the control plane later, after the
+3. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 
 This keeps the stack coherent:

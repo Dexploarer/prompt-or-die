@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 192
-**Current focus**: Iteration 193 build tournament/control-plane orchestration on top of the shared world admission and world control-plane topology contracts
+**Last updated**: Iteration 193
+**Current focus**: Iteration 194 carry shared tournament/control-plane summaries through remote topology and benchmark surfaces
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1962,6 +1962,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-stdb --no-default-features --features client -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-core -p pod-headless`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+### Iteration 193
+- [x] Added `TeamRewardLedgerSummary`, `TournamentTeamStandingSummary`, `TournamentControlPlaneSummary`, and `build_tournament_control_plane_summary(...)` in `crates/pod-core/src/contract.rs`, so tournament standings/control-plane rollups are now shared runtime contracts instead of `apps/pod-headless` private aggregation.
+- [x] Moved `apps/pod-headless` onto the shared tournament-control-plane builder, so the main report now emits `tournament_control_plane` from `pod-core` and keeps `standings` as a compatibility copy of the shared summary.
+- [x] Added deterministic contract/headless coverage for the shared tournament-control-plane surface and revalidated downstream consumer compilation with `pod-stdb` and `pod-net` checks.
+- [x] Validation:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless -- --nocapture`
   - `cargo check -p pod-core -p pod-headless`
   - `cargo check -p pod-stdb --no-default-features --features client`
   - `cargo check -p pod-net --features spacetimedb`

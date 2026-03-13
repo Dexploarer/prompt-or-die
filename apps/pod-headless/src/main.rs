@@ -6,15 +6,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
     build_remote_topology_bundle, build_remote_topology_parity_summary,
-    build_world_admission_summary, build_world_control_plane_summary, build_world_quest_bindings,
-    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
-    AgentType, AgentTypeCountSummary, AppliedWorldStateSummary, ControllerEvaluationSummary,
-    CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
+    build_tournament_control_plane_summary, build_world_admission_summary,
+    build_world_control_plane_summary, build_world_quest_bindings, run_flagship_mmo_acceptance,
+    AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition, AgentType,
+    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+    CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
     FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
     ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
     QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, RemoteTopologyParitySummary,
     ReplayTrainingSample, RewardReason, ScenarioEvaluationSummary, TeamControlMode,
-    TeamDeathMarkSummary, TeamDeltaSummary, TournamentEliminationMode, WorldAdmissionSummary,
+    TeamDeathMarkSummary, TeamDeltaSummary, TeamRewardLedgerSummary, TournamentControlPlaneSummary,
+    TournamentEliminationMode, TournamentTeamStandingSummary, WorldAdmissionSummary,
     WorldControlPlaneSummary, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
     WorldRealityRole, WorldTournamentDefinition,
 };
@@ -68,6 +70,7 @@ struct HeadlessAppReport {
     dataset_summary: RewardDatasetSummary,
     cross_world_projections: Vec<CrossWorldProjectionReport>,
     applied_world_states: Vec<AppliedWorldStateReport>,
+    tournament_control_plane: TournamentControlPlaneSummary,
     standings: Vec<TeamStandingReport>,
     evaluation: ScenarioEvaluationReport,
     topology_parity: TopologyParityReport,
@@ -218,37 +221,11 @@ enum ProjectedCrossWorldEffect {
     },
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct TeamStandingReport {
-    team_id: String,
-    display_name: String,
-    control_mode: TeamControlMode,
-    home_world_id: String,
-    participating_world_ids: Vec<String>,
-    assigned_agent_count: usize,
-    controller_mix: Vec<AgentTypeCountSummary>,
-    dataset_row_count: usize,
-    world_reward_total: f32,
-    applied_score_delta: i32,
-    active_death_marks: usize,
-    active_death_mark_ticks: u64,
-}
-
 type ScenarioEvaluationReport = ScenarioEvaluationSummary;
 type ControllerEvaluationReport = ControllerEvaluationSummary;
 type WorldEvaluationReport = WorldEvaluationSummary;
 type TopologyParityReport = RemoteTopologyParitySummary;
-
-#[derive(Debug, Default, Clone)]
-struct TeamStandingAccumulator {
-    assigned_agents: BTreeSet<String>,
-    runtime_profiles_by_agent: BTreeMap<String, AgentRuntimeProfile>,
-    dataset_row_count: usize,
-    world_reward_total: f32,
-    applied_score_delta: i32,
-    active_death_marks: usize,
-    active_death_mark_ticks: u64,
-}
+type TeamStandingReport = TournamentTeamStandingSummary;
 
 #[derive(Debug)]
 struct ScenarioRunOutputs {
@@ -678,11 +655,12 @@ fn run_scenario(
         &scenario.world_quest_graph_ids,
     );
 
-    let standings = build_team_standings(
+    let tournament_control_plane = build_tournament_control_plane_summary(
+        &scenario.tournament,
         &scenario.teams,
         &scenario.worlds,
         &world_control_planes,
-        &dataset_worlds,
+        &build_team_reward_ledgers(&dataset_worlds),
         &applied_world_states,
     );
     let evaluation = build_scenario_evaluation(&dataset_worlds, &applied_world_states);
@@ -748,7 +726,8 @@ fn run_scenario(
             dataset_summary: dataset_summary.clone(),
             cross_world_projections,
             applied_world_states,
-            standings,
+            tournament_control_plane: tournament_control_plane.clone(),
+            standings: tournament_control_plane.standings.clone(),
             evaluation,
             topology_parity,
             notes: notes.clone(),
@@ -1130,94 +1109,31 @@ fn project_effects(
         .collect()
 }
 
-fn build_team_standings(
-    teams: &[AgentTeamDefinition],
-    worlds: &[WorldRealityDefinition],
-    world_control_planes: &[WorldControlPlaneSummary],
+fn build_team_reward_ledgers(
     dataset_worlds: &[WorldDatasetExport],
-    applied_world_states: &[AppliedWorldStateReport],
-) -> Vec<TeamStandingReport> {
-    let mut by_team = BTreeMap::<String, TeamStandingAccumulator>::new();
-    for world_control_plane in world_control_planes {
-        for team in &world_control_plane.teams {
-            let entry = by_team.entry(team.team_id.clone()).or_default();
-            for assignment in &team.assignments {
-                entry.assigned_agents.insert(assignment.agent_id.clone());
-                entry
-                    .runtime_profiles_by_agent
-                    .entry(assignment.agent_id.clone())
-                    .or_insert(assignment.runtime_profile);
-            }
-        }
-    }
-    for world in dataset_worlds {
-        for row in &world.rows {
-            if let Some(team_id) = &row.team_id {
-                let entry = by_team.entry(team_id.clone()).or_default();
-                entry.dataset_row_count += 1;
-                entry.world_reward_total += row.sample.reward_summary.total;
-            }
-        }
-    }
-    for state in applied_world_states {
-        for team_score in &state.team_scores {
-            by_team
-                .entry(team_score.team_id.clone())
-                .or_default()
-                .applied_score_delta += team_score.total_delta;
-        }
-        for death_mark in &state.death_marks {
-            let entry = by_team.entry(death_mark.team_id.clone()).or_default();
-            entry.active_death_marks += death_mark.applications;
-            entry.active_death_mark_ticks += death_mark.total_duration_ticks;
-        }
-    }
-
-    teams
+) -> Vec<TeamRewardLedgerSummary> {
+    dataset_worlds
         .iter()
-        .map(|team| {
-            let totals = by_team.remove(&team.team_id).unwrap_or_default();
-            let mut controller_mix = totals.runtime_profiles_by_agent.values().fold(
-                BTreeMap::<String, usize>::new(),
-                |mut by_type, runtime_profile| {
-                    *by_type
-                        .entry(agent_type_key(runtime_profile.agent_type).to_string())
-                        .or_default() += 1;
-                    by_type
-                },
-            );
-            let participating_world_ids = worlds
-                .iter()
-                .filter(|world| {
-                    world
-                        .active_team_ids
-                        .iter()
-                        .any(|team_id| team_id == &team.team_id)
-                })
-                .map(|world| world.world_id.clone())
-                .collect();
-
-            TeamStandingReport {
-                team_id: team.team_id.clone(),
-                display_name: team.display_name.clone(),
-                control_mode: team.control_mode,
-                home_world_id: team.home_world_id.clone(),
-                participating_world_ids,
-                assigned_agent_count: totals.assigned_agents.len(),
-                controller_mix: controller_mix
-                    .iter_mut()
-                    .map(|(agent_type, count)| AgentTypeCountSummary {
-                        agent_type: agent_type.clone(),
-                        count: *count,
-                    })
-                    .collect(),
-                dataset_row_count: totals.dataset_row_count,
-                world_reward_total: totals.world_reward_total,
-                applied_score_delta: totals.applied_score_delta,
-                active_death_marks: totals.active_death_marks,
-                active_death_mark_ticks: totals.active_death_mark_ticks,
-            }
-        })
+        .flat_map(|world| world.rows.iter())
+        .fold(
+            BTreeMap::<String, TeamRewardLedgerSummary>::new(),
+            |mut by_team, row| {
+                if let Some(team_id) = &row.team_id {
+                    let entry =
+                        by_team
+                            .entry(team_id.clone())
+                            .or_insert_with(|| TeamRewardLedgerSummary {
+                                team_id: team_id.clone(),
+                                dataset_row_count: 0,
+                                world_reward_total: 0.0,
+                            });
+                    entry.dataset_row_count += 1;
+                    entry.world_reward_total += row.sample.reward_summary.total;
+                }
+                by_team
+            },
+        )
+        .into_values()
         .collect()
 }
 
@@ -1814,7 +1730,7 @@ mod tests {
     use super::*;
     use pod_core::{
         assign_roster_to_world_teams, ActionOutcomeSummary, AgentRole, AgentType,
-        RewardAttributionSummary, RewardSource,
+        AgentTypeCountSummary, RewardAttributionSummary, RewardSource,
     };
 
     fn reward(reason: RewardReason, tag: Option<&str>, value: f32) -> AgentRewardSignal {
@@ -2415,14 +2331,17 @@ mod tests {
             },
         ];
 
-        let standings = build_team_standings(
+        let tournament_control_plane = build_tournament_control_plane_summary(
+            &WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
             &[iron_sigil, gloam_mesh],
             &worlds,
             &world_control_planes,
-            &dataset_worlds,
+            &build_team_reward_ledgers(&dataset_worlds),
             &applied_world_states,
         );
-        let by_team = standings
+        assert_eq!(tournament_control_plane.tournament_id, "deadman-neural-cup");
+        let by_team = tournament_control_plane
+            .standings
             .into_iter()
             .map(|standing| (standing.team_id.clone(), standing))
             .collect::<BTreeMap<_, _>>();
