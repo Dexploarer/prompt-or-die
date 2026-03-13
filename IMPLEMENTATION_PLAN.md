@@ -1853,5 +1853,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration integration_remote_topology_feed_rows_update_quest_and_effect_state_within_same_world -- --nocapture`
   - `git diff --check`
 
-**Last updated**: Iteration 175
-**Current focus**: Iteration 176 replace the generated-runtime adapter seam with real generated binding/runtime wiring, then add matching quest/effect churn coverage on that live generated path
+### Iteration 176
+- [x] Replaced the ad hoc generated-runtime test fakes with a reusable `GeneratedRuntimeBridge` plus `GeneratedRuntimeHandle` in `crates/pod-stdb/src/client.rs`, so generated-mode callbacks now flow through the same queue/event drain path in both `pod-stdb` and `pod-net`.
+- [x] Ported `pod-stdb` generated integration coverage onto that bridge in `crates/pod-stdb/tests/client_integration.rs`, proving generated-mode topology rows still update resolved state and preserve the expected subscription flow without per-test runtime implementations.
+- [x] Added matching generated-path same-world quest/effect churn coverage in `crates/pod-stdb/src/client.rs` and `crates/pod-net/src/client_stdb.rs`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client generated_runtime -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 176
+**Current focus**: Iteration 177 wire real generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge`, then thread that live generated row feed into the parity/evaluation harnesses

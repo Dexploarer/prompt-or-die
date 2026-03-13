@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Replace the generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
-2. Thread the authority-fed topology row path into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.
-3. Add generated-runtime churn coverage for linked-world quest/effect updates so the live binding path is defended the same way the emulated row path is.
+1. Wire actual generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge` so `remote_topology_document` rows arrive through the live generated transport instead of only through test-produced handles.
+2. Thread that live generated topology feed into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.
+3. Extend the generated-path churn coverage from same-world quest/effect updates to linked-world quest/effect updates once the live binding path exists.
