@@ -164,15 +164,20 @@ This lets us support:
 
 In order:
 
-1. Finish authoritative reward and outcome attribution in `pod-core`.
-2. Make replay-derived training/export data official.
-3. Add a headless team/world runner on top of the new topology contracts.
-4. Add cross-world effect application as a deterministic system boundary.
-5. Add tournament and swarm benchmarks using the same replay/evaluation spine.
+1. Build a tournament/control-plane layer on top of the shared
+   `world_admissions` and `world_control_planes` topology contracts.
+2. Promote standings and tournament-control summaries into `pod-core` so they
+   stop living as `pod-headless` report-only aggregation.
+3. Carry that tournament/control-plane state through `pod-stdb` and `pod-net`
+   the same way quest, evaluation, and applied-world state already flow.
+4. Add tournament- and swarm-level benchmarks using the same replay/evaluation
+   spine and shared topology artifacts.
+5. Keep the browser optional: visualize the control plane later, after the
+   authority/runtime path is shared and benchmarked.
 
 This keeps the stack coherent:
 
 - `pod-core` owns truth
 - `pod-net` and `pod-stdb` own transport and remote execution
 - `pod-agents` owns controllers and policy behavior
-- headless tournament runners prove the system without depending on UI polish
+- headless and benchmark runners prove the system without depending on UI polish
