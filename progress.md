@@ -429,5 +429,6 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `git diff --check`
 - Closed the next remote-topology runtime gap: `crates/pod-stdb/src/client.rs` now exposes a `GeneratedRuntimeAdapter` seam, generated mode no longer hard-fails when that runtime is injected, and both `pod-stdb` and `pod-net::SpacetimeDBClient` now have deterministic coverage proving runtime-fed `remote_topology_document` rows update resolved world/evaluation state and forward the source document through the existing debug stream.
 - Extended the remote-topology coverage to churn too: `crates/pod-net/tests/networking_integration.rs` now proves a newer authority-fed `remote_topology_document` row can switch the resolved world and rebuild snapshot metadata, while a stale older row is ignored and cannot roll the active world/evaluation state back.
+- Threaded remote topology into the headless evaluation surface too: `apps/pod-headless/src/main.rs` now emits `world_quest_bindings` and a `topology_parity` report that checks the exported `RemoteTopologyBundle` against the same applied world state and evaluation summaries the scenario report publishes.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`

@@ -226,6 +226,7 @@
 - [x] Added `GeneratedRuntimeEvent` plus `GeneratedRuntimeAdapter` to `pod-stdb::StdbClient`, so generated mode can connect, subscribe, and consume authority-fed `remote_topology_document` rows through `frame_tick()` instead of hard-failing immediately
 - [x] Added generated-mode coverage in both `pod-stdb` and `pod-net::SpacetimeDBClient`, proving runtime-fed topology rows update resolved world/evaluation state and forward the source document through the existing debug stream
 - [x] Added `pod-net` networking integration coverage for authority-fed topology churn and world switching, proving a newer `remote_topology_document` row rebuilds snapshot metadata while a stale older row cannot roll the active world/evaluation state back
+- [x] Added `topology_parity` plus `world_quest_bindings` to the `pod-headless` report, so the headless evaluation surface now verifies that the exported `RemoteTopologyBundle` exactly matches the applied world state and evaluation data it publishes
 
 **Next Action**:
-- Thread the authority-fed topology stream into the parity/evaluation harnesses, then extend the churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring.
+- Promote the new headless topology parity report into benchmark/CI surfaces, then extend the authority-fed churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring.

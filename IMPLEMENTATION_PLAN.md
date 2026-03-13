@@ -1828,5 +1828,13 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
 
-**Last updated**: Iteration 172
-**Current focus**: Iteration 173 thread the authority-fed topology stream into parity/evaluation harnesses, then extend churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring
+### Iteration 173
+- [x] Extended `apps/pod-headless/src/main.rs` so the main report now carries `world_quest_bindings` plus a `topology_parity` summary that verifies the exported `RemoteTopologyBundle` matches the teams/worlds/links/quest graphs, applied world states, and evaluation data already published by the headless scenario runner.
+- [x] Added deterministic `pod-headless` coverage proving the topology parity report passes for matching bundles and flags missing evaluation/binding state when the topology artifact drifts.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `git diff --check`
+
+**Last updated**: Iteration 173
+**Current focus**: Iteration 174 promote the headless topology parity report into benchmark/CI surfaces, then extend authority-fed churn coverage to cross-world quest/effect updates and replace the fake generated-runtime adapter with real generated binding/runtime wiring
