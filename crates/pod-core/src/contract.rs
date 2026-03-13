@@ -131,6 +131,146 @@ impl AgentRuntimeProfile {
     }
 }
 
+pub const REMOTE_AGENT_MAX_VISIBLE_ENTITIES: usize = 10;
+pub const REMOTE_AGENT_MAX_AUDIBLE_EVENTS: usize = 10;
+pub const REMOTE_AGENT_MAX_ACTIONS_PER_TICK: u8 = 3;
+pub const REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS: u64 = 2;
+pub const REMOTE_AGENT_TIMEOUT_AFTER_TICKS: u64 = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAgentObservationBudget {
+    pub max_visible_entities: u32,
+    pub max_audible_events: u32,
+    pub stale_after_ticks: u64,
+    pub timeout_after_ticks: u64,
+}
+
+impl RemoteAgentObservationBudget {
+    pub fn spacetimedb_default() -> Self {
+        Self {
+            max_visible_entities: REMOTE_AGENT_MAX_VISIBLE_ENTITIES as u32,
+            max_audible_events: REMOTE_AGENT_MAX_AUDIBLE_EVENTS as u32,
+            stale_after_ticks: REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS,
+            timeout_after_ticks: REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
+        }
+    }
+}
+
+impl Default for RemoteAgentObservationBudget {
+    fn default() -> Self {
+        Self::spacetimedb_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAgentActionBudget {
+    pub max_actions_per_tick: u32,
+}
+
+impl RemoteAgentActionBudget {
+    pub fn spacetimedb_default() -> Self {
+        Self {
+            max_actions_per_tick: u32::from(REMOTE_AGENT_MAX_ACTIONS_PER_TICK),
+        }
+    }
+}
+
+impl Default for RemoteAgentActionBudget {
+    fn default() -> Self {
+        Self::spacetimedb_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAgentHeartbeatPolicy {
+    pub stale_after_ticks: u64,
+    pub timeout_after_ticks: u64,
+}
+
+impl RemoteAgentHeartbeatPolicy {
+    pub fn spacetimedb_default() -> Self {
+        Self {
+            stale_after_ticks: REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS,
+            timeout_after_ticks: REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
+        }
+    }
+}
+
+impl Default for RemoteAgentHeartbeatPolicy {
+    fn default() -> Self {
+        Self::spacetimedb_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteAgentFallbackMode {
+    RejectActionsUntilFreshObservation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteAgentFallbackReason {
+    ObservationMissing,
+    ObservationStale,
+    HeartbeatTimedOut,
+    ActionBudgetExceeded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAgentTransportContract {
+    pub version: RuntimeContractVersion,
+    pub profile: AgentRuntimeProfile,
+    pub observation_budget: RemoteAgentObservationBudget,
+    pub action_budget: RemoteAgentActionBudget,
+    pub heartbeat: RemoteAgentHeartbeatPolicy,
+    pub fallback_mode: RemoteAgentFallbackMode,
+}
+
+impl RemoteAgentTransportContract {
+    pub fn spacetimedb_default(profile: AgentRuntimeProfile) -> Self {
+        Self {
+            version: RuntimeContractVersion::V1,
+            profile,
+            observation_budget: RemoteAgentObservationBudget::spacetimedb_default(),
+            action_budget: RemoteAgentActionBudget::spacetimedb_default(),
+            heartbeat: RemoteAgentHeartbeatPolicy::spacetimedb_default(),
+            fallback_mode: RemoteAgentFallbackMode::RejectActionsUntilFreshObservation,
+        }
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("remote_agent_transport_contract", self)
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAgentRuntimeStatus {
+    pub fallback_active: bool,
+    pub fallback_reason: Option<RemoteAgentFallbackReason>,
+    pub last_observation_tick: Option<u64>,
+    pub last_authoritative_tick: Option<u64>,
+    pub stale_observation_ticks: u64,
+    pub pending_action_count: u32,
+    pub stale_action_rejections: u64,
+    pub budget_overflow_rejections: u64,
+    pub timeout_rejections: u64,
+}
+
+impl RemoteAgentRuntimeStatus {
+    pub fn clear_fallback(&mut self) {
+        self.fallback_active = false;
+        self.fallback_reason = None;
+    }
+
+    pub fn activate_fallback(&mut self, reason: RemoteAgentFallbackReason) {
+        self.fallback_active = true;
+        self.fallback_reason = Some(reason);
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("remote_agent_runtime_status", self)
+    }
+}
+
 /// Versioned description of an embedded tool that an agent may call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolDefinition {
@@ -1096,13 +1236,16 @@ mod tests {
         CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
         FactionReputationTier, FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary,
         QuestLineStateSummary, QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph,
-        RegionEncounterTable, RemoteTopologyBundle, RuntimeContractVersion,
+        RegionEncounterTable, RemoteAgentFallbackMode, RemoteAgentObservationBudget,
+        RemoteAgentTransportContract, RemoteTopologyBundle, RuntimeContractVersion,
         ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary, TeamDeltaSummary,
         ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
         ToolPolicy, TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
         VersionedTickTelemetry, WorldChunkDefinition, WorldEvaluationSummary,
         WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
-        RUNTIME_CONTRACT_VERSION_V1,
+        REMOTE_AGENT_MAX_ACTIONS_PER_TICK, REMOTE_AGENT_MAX_AUDIBLE_EVENTS,
+        REMOTE_AGENT_MAX_VISIBLE_ENTITIES, REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS,
+        REMOTE_AGENT_TIMEOUT_AFTER_TICKS, RUNTIME_CONTRACT_VERSION_V1,
     };
 
     #[test]
@@ -1126,6 +1269,30 @@ mod tests {
         let system = AgentRuntimeProfile::for_agent_type(AgentType::System);
         assert_eq!(system.role, AgentRole::WorldSystem);
         assert!(system.capabilities.can_spawn_world_entities);
+    }
+
+    #[test]
+    fn remote_agent_transport_contract_uses_shared_spacetimedb_defaults() {
+        let profile = AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent);
+        let contract = RemoteAgentTransportContract::spacetimedb_default(profile);
+
+        assert_eq!(
+            contract.observation_budget,
+            RemoteAgentObservationBudget {
+                max_visible_entities: REMOTE_AGENT_MAX_VISIBLE_ENTITIES as u32,
+                max_audible_events: REMOTE_AGENT_MAX_AUDIBLE_EVENTS as u32,
+                stale_after_ticks: REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS,
+                timeout_after_ticks: REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
+            }
+        );
+        assert_eq!(
+            contract.action_budget.max_actions_per_tick,
+            u32::from(REMOTE_AGENT_MAX_ACTIONS_PER_TICK)
+        );
+        assert_eq!(
+            contract.fallback_mode,
+            RemoteAgentFallbackMode::RejectActionsUntilFreshObservation
+        );
     }
 
     #[test]

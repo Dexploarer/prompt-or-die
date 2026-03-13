@@ -316,25 +316,29 @@
 
 ## Phase 13: Remote Agent Topology on SpacetimeDB
 **Type**: Agent Runtime
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 hours
 **Files**: `crates/pod-stdb/*`, `crates/pod-net/*`, `docs/agent-integration-contract.md`, remote agent tooling/tests`
 
 **Tasks**:
 - [x] Add authority-published remote-topology feed rows, generated/runtime ingestion paths, and parity measurement/report surfaces for exported `RemoteTopologyBundle` artifacts
 - [x] Capture deterministic local and live generated-SDK topology parity artifacts plus the first committed shard-target monthly snapshot
-- [ ] Define the observation/action envelope and budget contract for remote agents over SpacetimeDB
-- [ ] Clarify admission, heartbeat, timeout, and fallback rules for remote neural/LLM agents
-- [ ] Ensure transport preserves the same gameplay contract as local in-process agents
-- [ ] Add degraded-network and stale-decision tests for remote autonomous agents
+- [x] Define the observation/action envelope and budget contract for remote agents over SpacetimeDB
+- [x] Clarify admission, heartbeat, timeout, and fallback rules for remote neural/LLM agents
+- [x] Ensure transport preserves the same gameplay contract as local in-process agents
+- [x] Add degraded-network and stale-decision tests for remote autonomous agents
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-stdb --no-default-features --features client`
 - [x] `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
 - [x] `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input <exported-topology> --fail-on-checks`
-- [ ] `cargo test -p pod-stdb -- --nocapture`
-- [ ] `cargo test -p pod-net transport -- --nocapture`
-- [ ] `cargo check --workspace`
+- [x] `cargo test -p pod-core contract -- --nocapture`
+- [x] `cargo test -p pod-net --features spacetimedb test_send_actions_rejects_budget_overflow_for_remote_agent -- --nocapture`
+- [x] `cargo test -p pod-net --features spacetimedb test_send_actions_rejects_stale_remote_observation -- --nocapture`
+- [x] `cargo test -p pod-net --features spacetimedb test_send_actions_rejects_timed_out_remote_observation -- --nocapture`
+- [x] `cargo test -p pod-net --features spacetimedb test_fresh_observation_clears_remote_agent_fallback -- --nocapture`
+- [x] `cargo check -p pod-stdb --no-default-features --features client`
+- [x] `cargo check -p pod-net --features spacetimedb`
 
 **Exit Criteria**:
 - Remote agent execution is an explicit supported topology, not an implied extension of direct-connect tooling
@@ -381,14 +385,12 @@
 
 ## Immediate Next Actions
 
-1. Finish the remaining Phase 13 remote-agent gameplay contract: observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision coverage.
-2. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
-3. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
+1. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
+2. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
 
 ## Audit Backlog (2026-03-13)
 
 These are the confirmed remaining misses after the roadmap scrub:
 
-1. Phase 13 still lacks the explicit remote-agent gameplay contract: observation/action budgets, heartbeat and fallback rules, and degraded-network stale-decision coverage.
-2. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
-3. Historical comparison tooling still needs to be added on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data instead of manual snapshot inspection.
+1. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
+2. Historical comparison tooling still needs to be added on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data instead of manual snapshot inspection.

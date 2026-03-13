@@ -1,7 +1,7 @@
 # Session State
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
-**Current Stage**: In Progress
+**Current Stage**: Complete
 **Last Checkpoint**: `897e37bd`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
@@ -254,10 +254,9 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- Finish the remaining Phase 13 remote-agent gameplay contract work: observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision coverage.
+- Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift becomes structured review data instead of manual snapshot inspection.
 
 ## Audit Backlog (2026-03-13)
 
-- [ ] Phase 13: finish the explicit remote-agent gameplay contract for observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision tests.
 - [ ] Browser infra: repair the current render-route perf regression so `bun run measure:render-routes:check` passes again on the shipped asset set.
 - [ ] Benchmark tooling: add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json`.

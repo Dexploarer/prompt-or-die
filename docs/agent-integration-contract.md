@@ -162,6 +162,30 @@ Regardless of transport, the gameplay contract does not change:
 
 Transport may change latency, batching, and availability. It does not change gameplay authority.
 
+For SpacetimeDB-backed remote agents, the gameplay contract is now explicit instead
+of implied:
+
+- observation delivery is capped by the shared `RemoteAgentObservationBudget`
+  contract in `pod-core`
+- remote agents inherit the same per-tick `RemoteAgentActionBudget` envelope that
+  authority uses for `agent_constraints.actions_per_tick`
+- stale observations are measured against authoritative observation ticks, not
+  wall-clock guesses
+- remote action batches are rejected client-side when:
+  - no authoritative observation has been received yet
+  - the latest observation is stale beyond the configured stale threshold
+  - the authoritative heartbeat has timed out
+  - the queued action batch exceeds the per-tick budget
+- fallback state is inspectable through `RemoteAgentRuntimeStatus`, which tracks:
+  - last authoritative tick
+  - last observation tick
+  - stale age in ticks
+  - pending action count
+  - stale, timeout, and budget-overflow rejection counters
+
+That means remote neural and LLM agents now fail closed on stale decision paths
+instead of silently submitting old action batches into authority.
+
 ## Teams, worlds, and alternate realities
 
 Agents should also be understood as members of a wider topology, not only as

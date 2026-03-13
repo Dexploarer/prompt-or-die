@@ -52,7 +52,12 @@ use uuid::Uuid;
 use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
 use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
-use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
+use pod_core::AgentType as CoreAgentType;
+use pod_core::{
+    AgentRuntimeProfile, AppliedWorldStateSummary, RemoteAgentFallbackReason,
+    RemoteAgentRuntimeStatus, RemoteAgentTransportContract, RemoteTopologyBundle,
+    WorldEvaluationSummary,
+};
 
 use pod_stdb::client::{
     CachedEntity, ConnectionState, GeneratedBindingCommand, GeneratedBindingEndpoint,
@@ -495,6 +500,8 @@ pub struct SpacetimeDBClient {
     client_id: Option<ClientId>,
     reconnect_token: ReconnectToken,
     pending_actions: Vec<Action>,
+    remote_agent_contract: Option<RemoteAgentTransportContract>,
+    remote_agent_status: RemoteAgentRuntimeStatus,
     local_snapshot: Option<WorldSnapshot>,
     last_debug_telemetry_json: Option<String>,
     pending_debug_documents: Vec<String>,
@@ -513,6 +520,8 @@ impl SpacetimeDBClient {
             client_id: None,
             reconnect_token: ReconnectToken::new(),
             pending_actions: Vec::new(),
+            remote_agent_contract: None,
+            remote_agent_status: RemoteAgentRuntimeStatus::default(),
             local_snapshot: None,
             last_debug_telemetry_json: None,
             pending_debug_documents: Vec::new(),
@@ -542,10 +551,33 @@ impl SpacetimeDBClient {
     /// This uses the configured `player_name` as the display name for the
     /// `connect_agent` reducer with `AgentType::LlmAgent`.
     pub fn connect_llm_agent(&mut self, entity_id: u64) -> Result<(), StdbClientError> {
+        self.connect_remote_agent(entity_id, AgentType::LlmAgent)
+    }
+
+    /// Claim a remote agent slot on an entity and install the gameplay contract
+    /// used by the SpacetimeDB observation/action path.
+    pub fn connect_remote_agent(
+        &mut self,
+        entity_id: u64,
+        agent_type: AgentType,
+    ) -> Result<(), StdbClientError> {
         let display_name = self.inner.config().player_name.clone();
         self.inner
-            .call_connect_agent(entity_id, AgentType::LlmAgent, display_name)
+            .call_connect_agent(entity_id, agent_type.clone(), display_name)
             .map_err(StdbClientError::from)?;
+        let profile = AgentRuntimeProfile::for_agent_type(core_agent_type_from_stdb(&agent_type));
+        self.remote_agent_contract =
+            Some(RemoteAgentTransportContract::spacetimedb_default(profile));
+        self.remote_agent_status = RemoteAgentRuntimeStatus {
+            last_authoritative_tick: self.inner.current_tick(),
+            last_observation_tick: self.inner.latest_observation_tick(entity_id),
+            stale_observation_ticks: self
+                .inner
+                .latest_observation_tick(entity_id)
+                .map(|tick| self.current_tick_or_zero().saturating_sub(tick))
+                .unwrap_or(0),
+            ..RemoteAgentRuntimeStatus::default()
+        };
         self.subscribe_for_player(entity_id)?;
         Ok(())
     }
@@ -553,6 +585,7 @@ impl SpacetimeDBClient {
     /// Queue an action for the next [`send_actions`](Self::send_actions) call.
     pub fn queue_action(&mut self, action: Action) {
         self.pending_actions.push(action);
+        self.remote_agent_status.pending_action_count = self.pending_actions.len() as u32;
     }
 
     /// Send all queued actions to SpacetimeDB via the `submit_actions` reducer.
@@ -574,7 +607,57 @@ impl SpacetimeDBClient {
             ));
         }
 
-        let entity_id = self.inner.controlled_entity().unwrap_or(0);
+        let entity_id = self.inner.controlled_entity().ok_or_else(|| {
+            StdbClientError::InvalidState("No controlled entity is connected".into())
+        })?;
+        self.remote_agent_status.pending_action_count = self.pending_actions.len() as u32;
+        self.remote_agent_status.last_authoritative_tick = Some(self.current_tick_or_zero());
+
+        if let Some(contract) = self.remote_agent_contract.as_ref() {
+            let action_count = self.pending_actions.len() as u32;
+            if action_count > contract.action_budget.max_actions_per_tick {
+                return self.reject_remote_actions(
+                    RemoteAgentFallbackReason::ActionBudgetExceeded,
+                    format!(
+                        "Remote agent queued {action_count} actions but contract allows {} per tick",
+                        contract.action_budget.max_actions_per_tick
+                    ),
+                );
+            }
+
+            let current_tick = self.current_tick_or_zero();
+            let Some(last_observation_tick) = self.inner.latest_observation_tick(entity_id) else {
+                return self.reject_remote_actions(
+                    RemoteAgentFallbackReason::ObservationMissing,
+                    "Remote agent has no authoritative observation yet".into(),
+                );
+            };
+
+            let stale_ticks = current_tick.saturating_sub(last_observation_tick);
+            self.remote_agent_status.last_observation_tick = Some(last_observation_tick);
+            self.remote_agent_status.stale_observation_ticks = stale_ticks;
+
+            if stale_ticks > contract.heartbeat.timeout_after_ticks {
+                return self.reject_remote_actions(
+                    RemoteAgentFallbackReason::HeartbeatTimedOut,
+                    format!(
+                        "Remote agent observation timed out after {stale_ticks} ticks (limit {})",
+                        contract.heartbeat.timeout_after_ticks
+                    ),
+                );
+            }
+
+            if stale_ticks > contract.observation_budget.stale_after_ticks {
+                return self.reject_remote_actions(
+                    RemoteAgentFallbackReason::ObservationStale,
+                    format!(
+                        "Remote agent observation is {stale_ticks} ticks old (stale after {})",
+                        contract.observation_budget.stale_after_ticks
+                    ),
+                );
+            }
+        }
+
         let actions: Vec<Action> = self.pending_actions.drain(..).collect();
 
         for action in &actions {
@@ -583,6 +666,9 @@ impl SpacetimeDBClient {
                 .call_submit_action(&submitted)
                 .map_err(StdbClientError::from)?;
         }
+
+        self.remote_agent_status.pending_action_count = 0;
+        self.remote_agent_status.clear_fallback();
 
         Ok(())
     }
@@ -854,6 +940,7 @@ impl SpacetimeDBClient {
 
                 // ── Tick advancement ──
                 StdbEvent::TickAdvanced { new_tick, .. } => {
+                    self.update_remote_agent_tick(new_tick);
                     self.last_emitted_tick = self.last_emitted_tick.max(new_tick);
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = new_tick;
@@ -862,6 +949,7 @@ impl SpacetimeDBClient {
                 }
 
                 StdbEvent::WorldStateUpdated { tick, .. } => {
+                    self.update_remote_agent_tick(tick);
                     self.last_emitted_tick = self.last_emitted_tick.max(tick);
                     if let Some(ref mut local) = self.local_snapshot {
                         local.tick = tick;
@@ -870,9 +958,28 @@ impl SpacetimeDBClient {
                 }
 
                 // ── Internal events (no ServerMessage equivalent) ──
-                StdbEvent::ObservationReceived { .. }
-                | StdbEvent::ReducerCallSuccess { .. }
-                | StdbEvent::ReducerCallError { .. } => {}
+                StdbEvent::ObservationReceived {
+                    tick,
+                    observer_entity_id,
+                    ..
+                } => {
+                    if Some(observer_entity_id) == self.inner.controlled_entity() {
+                        self.remote_agent_status.last_observation_tick = Some(tick);
+                        self.remote_agent_status.last_authoritative_tick = Some(
+                            self.remote_agent_status
+                                .last_authoritative_tick
+                                .unwrap_or(tick)
+                                .max(tick),
+                        );
+                        self.remote_agent_status.stale_observation_ticks = self
+                            .remote_agent_status
+                            .last_authoritative_tick
+                            .unwrap_or(tick)
+                            .saturating_sub(tick);
+                        self.remote_agent_status.clear_fallback();
+                    }
+                }
+                StdbEvent::ReducerCallSuccess { .. } | StdbEvent::ReducerCallError { .. } => {}
             }
         }
 
@@ -885,6 +992,9 @@ impl SpacetimeDBClient {
         self.client_id = None;
         self.welcome_sent = false;
         self.last_emitted_tick = 0;
+        self.remote_agent_contract = None;
+        self.remote_agent_status = RemoteAgentRuntimeStatus::default();
+        self.pending_actions.clear();
         self.last_debug_telemetry_json = None;
         self.pending_debug_documents.clear();
         self.subscriptions.reset_connection();
@@ -1120,6 +1230,16 @@ impl SpacetimeDBClient {
         &mut self.inner
     }
 
+    /// Inspect the active remote-agent transport contract, if one is installed.
+    pub fn remote_agent_contract(&self) -> Option<&RemoteAgentTransportContract> {
+        self.remote_agent_contract.as_ref()
+    }
+
+    /// Inspect the live remote-agent runtime status.
+    pub fn remote_agent_status(&self) -> &RemoteAgentRuntimeStatus {
+        &self.remote_agent_status
+    }
+
     /// Install the command-driven generated binding runtime on the underlying
     /// [`StdbClient`] and return the public binding endpoint.
     pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint {
@@ -1200,6 +1320,42 @@ impl SpacetimeDBClient {
 
     fn current_tick_or_zero(&self) -> u64 {
         self.inner.current_tick().unwrap_or(0)
+    }
+
+    fn reject_remote_actions(
+        &mut self,
+        reason: RemoteAgentFallbackReason,
+        message: String,
+    ) -> Result<(), StdbClientError> {
+        match reason {
+            RemoteAgentFallbackReason::ActionBudgetExceeded => {
+                self.remote_agent_status.budget_overflow_rejections += 1;
+            }
+            RemoteAgentFallbackReason::HeartbeatTimedOut => {
+                self.remote_agent_status.timeout_rejections += 1;
+            }
+            RemoteAgentFallbackReason::ObservationMissing
+            | RemoteAgentFallbackReason::ObservationStale => {
+                self.remote_agent_status.stale_action_rejections += 1;
+            }
+        }
+        self.remote_agent_status.activate_fallback(reason);
+        self.pending_actions.clear();
+        self.remote_agent_status.pending_action_count = 0;
+        Err(StdbClientError::InvalidState(message))
+    }
+
+    fn update_remote_agent_tick(&mut self, tick: u64) {
+        self.remote_agent_status.last_authoritative_tick = Some(
+            self.remote_agent_status
+                .last_authoritative_tick
+                .unwrap_or(tick)
+                .max(tick),
+        );
+        if let Some(last_observation_tick) = self.remote_agent_status.last_observation_tick {
+            self.remote_agent_status.stale_observation_ticks =
+                tick.saturating_sub(last_observation_tick);
+        }
     }
 
     fn entity_position(&self, entity_id: u64) -> Vec2 {
@@ -1296,6 +1452,16 @@ fn entity_to_snapshot(
                 .unwrap_or_default(),
             ..EntityMetadataSnapshot::default()
         },
+    }
+}
+
+fn core_agent_type_from_stdb(agent_type: &AgentType) -> CoreAgentType {
+    match agent_type {
+        AgentType::Human => CoreAgentType::Human,
+        AgentType::LlmAgent => CoreAgentType::LlmAgent,
+        AgentType::NeuralAgent => CoreAgentType::NeuralAgent,
+        AgentType::ScriptedNpc => CoreAgentType::ScriptedNpc,
+        AgentType::System => CoreAgentType::System,
     }
 }
 
@@ -1948,6 +2114,24 @@ mod tests {
         ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry,
         WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
     };
+    use pod_stdb::client::CachedWorldState;
+
+    fn build_connected_remote_agent_client() -> SpacetimeDBClient {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            connection_mode: StdbConnectionMode::Emulated,
+            ..Default::default()
+        });
+        client.connect().expect("client connects in emulated mode");
+        client.inner_mut().frame_tick();
+        client
+            .inner_mut()
+            .call_spawn_entity(0.0, 0.0, Some(AgentType::LlmAgent))
+            .expect("entity spawns");
+        client
+            .connect_remote_agent(1, AgentType::LlmAgent)
+            .expect("remote llm agent connects");
+        client
+    }
 
     #[test]
     fn test_build_topology_feed_measurements_matches_authority_and_generated_paths() {
@@ -3452,6 +3636,127 @@ mod tests {
         client.queue_action(Action::Idle);
         client.queue_action(Action::Stop);
         assert_eq!(client.pending_actions.len(), 2);
+    }
+
+    #[test]
+    fn test_connect_remote_agent_installs_transport_contract() {
+        let client = build_connected_remote_agent_client();
+
+        let contract = client
+            .remote_agent_contract()
+            .expect("remote agent contract should be installed");
+        assert_eq!(contract.profile.agent_type, CoreAgentType::LlmAgent);
+        assert_eq!(contract.action_budget.max_actions_per_tick, 3);
+        assert_eq!(
+            client.remote_agent_status().last_authoritative_tick,
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn test_send_actions_rejects_budget_overflow_for_remote_agent() {
+        let mut client = build_connected_remote_agent_client();
+
+        for _ in 0..4 {
+            client.queue_action(Action::Idle);
+        }
+
+        let err = client
+            .send_actions(0)
+            .expect_err("too many queued actions should be rejected");
+        assert!(matches!(err, StdbClientError::InvalidState(_)));
+        assert_eq!(client.remote_agent_status().budget_overflow_rejections, 1);
+        assert_eq!(
+            client.remote_agent_status().fallback_reason,
+            Some(RemoteAgentFallbackReason::ActionBudgetExceeded)
+        );
+        assert_eq!(client.remote_agent_status().pending_action_count, 0);
+    }
+
+    #[test]
+    fn test_send_actions_rejects_stale_remote_observation() {
+        let mut client = build_connected_remote_agent_client();
+        client
+            .inner_mut()
+            .receive_observation(0, 1, "{\"tick\":0}".into());
+        client.inner_mut().update_world_state(CachedWorldState {
+            tick: 4,
+            rng_seed: 42,
+            ticks_per_second: 60,
+            world_width: 2000.0,
+            world_height: 2000.0,
+            max_entities: 10000,
+            paused: true,
+        });
+        client.queue_action(Action::Idle);
+
+        let err = client
+            .send_actions(4)
+            .expect_err("stale observation should be rejected");
+        assert!(matches!(err, StdbClientError::InvalidState(_)));
+        assert_eq!(client.remote_agent_status().stale_action_rejections, 1);
+        assert_eq!(client.remote_agent_status().stale_observation_ticks, 4);
+        assert_eq!(
+            client.remote_agent_status().fallback_reason,
+            Some(RemoteAgentFallbackReason::ObservationStale)
+        );
+    }
+
+    #[test]
+    fn test_send_actions_rejects_timed_out_remote_observation() {
+        let mut client = build_connected_remote_agent_client();
+        client
+            .inner_mut()
+            .receive_observation(0, 1, "{\"tick\":0}".into());
+        client.inner_mut().update_world_state(CachedWorldState {
+            tick: 7,
+            rng_seed: 42,
+            ticks_per_second: 60,
+            world_width: 2000.0,
+            world_height: 2000.0,
+            max_entities: 10000,
+            paused: true,
+        });
+        client.queue_action(Action::Idle);
+
+        let err = client
+            .send_actions(7)
+            .expect_err("timed out observation should be rejected");
+        assert!(matches!(err, StdbClientError::InvalidState(_)));
+        assert_eq!(client.remote_agent_status().timeout_rejections, 1);
+        assert_eq!(
+            client.remote_agent_status().fallback_reason,
+            Some(RemoteAgentFallbackReason::HeartbeatTimedOut)
+        );
+    }
+
+    #[test]
+    fn test_fresh_observation_clears_remote_agent_fallback() {
+        let mut client = build_connected_remote_agent_client();
+        client
+            .inner_mut()
+            .receive_observation(0, 1, "{\"tick\":0}".into());
+        client.inner_mut().update_world_state(CachedWorldState {
+            tick: 4,
+            rng_seed: 42,
+            ticks_per_second: 60,
+            world_width: 2000.0,
+            world_height: 2000.0,
+            max_entities: 10000,
+            paused: true,
+        });
+        client.queue_action(Action::Idle);
+        let _ = client.send_actions(4);
+        assert!(client.remote_agent_status().fallback_active);
+
+        client
+            .inner_mut()
+            .receive_observation(4, 1, "{\"tick\":4}".into());
+        let _ = client.poll_updates();
+
+        assert!(!client.remote_agent_status().fallback_active);
+        assert_eq!(client.remote_agent_status().fallback_reason, None);
+        assert_eq!(client.remote_agent_status().last_observation_tick, Some(4));
     }
 
     #[test]

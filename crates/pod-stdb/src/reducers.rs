@@ -25,7 +25,10 @@ use pod_core::telemetry::{
     ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
     TickTelemetryFrame, TrajectorySample,
 };
-use pod_core::{decode_toon_document, RemoteTopologyBundle, VersionedTickTelemetry};
+use pod_core::{
+    decode_toon_document, RemoteTopologyBundle, VersionedTickTelemetry,
+    REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
+};
 use serde_json::{json, Value};
 use spacetimedb::{Identity, ReducerContext, Table};
 use std::collections::HashMap;
@@ -380,7 +383,7 @@ pub fn spawn_entity_full(
     // Agent constraints (defaults)
     ctx.db.agent_constraints().insert(AgentConstraintsRow {
         entity_id: eid,
-        actions_per_tick: 3,
+        actions_per_tick: REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
         attack_cooldown: 30,
         ability_cooldowns_json: "[60,120,300]".to_string(),
         can_act: true,

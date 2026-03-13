@@ -1401,6 +1401,8 @@ pub struct StdbClient {
     entities: HashMap<u64, CachedEntity>,
     /// Latest observation JSON per observer entity_id.
     observations: HashMap<u64, String>,
+    /// Latest observation tick per observer entity_id.
+    observation_ticks: HashMap<u64, u64>,
     /// Controlled entity ID (set after connect_agent).
     controlled_entity: Option<u64>,
     /// Active SQL subscription query set.
@@ -1431,6 +1433,7 @@ impl StdbClient {
             world_state: None,
             entities: HashMap::new(),
             observations: HashMap::new(),
+            observation_ticks: HashMap::new(),
             controlled_entity: None,
             active_queries: Vec::new(),
             next_entity_id: 1,
@@ -2059,6 +2062,11 @@ impl StdbClient {
     /// Get the latest observation JSON for an entity.
     pub fn latest_observation(&self, entity_id: u64) -> Option<&str> {
         self.observations.get(&entity_id).map(|s| s.as_str())
+    }
+
+    /// Get the latest observation tick for an entity.
+    pub fn latest_observation_tick(&self, entity_id: u64) -> Option<u64> {
+        self.observation_ticks.get(&entity_id).copied()
     }
 
     /// Get the entity ID this client controls (set after connect_agent).
@@ -2789,6 +2797,7 @@ impl StdbClient {
     pub fn remove_entity(&mut self, entity_id: u64) {
         self.entities.remove(&entity_id);
         self.observations.remove(&entity_id);
+        self.observation_ticks.remove(&entity_id);
         self.events
             .push_back(StdbEvent::EntityDeleted { entity_id });
         self.events_received += 1;
@@ -2803,6 +2812,7 @@ impl StdbClient {
     ) {
         self.observations
             .insert(observer_entity_id, observation_json.clone());
+        self.observation_ticks.insert(observer_entity_id, tick);
         self.events.push_back(StdbEvent::ObservationReceived {
             tick,
             observer_entity_id,
@@ -3918,6 +3928,7 @@ mod tests {
 
         // Check observation is cached
         assert_eq!(client.latest_observation(42), Some("{\"test\":true}"));
+        assert_eq!(client.latest_observation_tick(42), Some(1));
     }
 
     #[test]

@@ -15,17 +15,18 @@
 use crate::events::*;
 use crate::tables::*;
 use crate::types::AgentType;
+use pod_core::{REMOTE_AGENT_MAX_AUDIBLE_EVENTS, REMOTE_AGENT_MAX_VISIBLE_ENTITIES};
 use spacetimedb::{Identity, ReducerContext, Table};
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 
-/// Max visible entities per observation (matches pod-core Balanced filter).
-const MAX_VISIBLE_ENTITIES: usize = 10;
+/// Max visible entities per observation (matches the shared remote-agent contract).
+const MAX_VISIBLE_ENTITIES: usize = REMOTE_AGENT_MAX_VISIBLE_ENTITIES;
 
-/// Max audible events per observation.
-const MAX_AUDIBLE_EVENTS: usize = 10;
+/// Max audible events per observation (matches the shared remote-agent contract).
+const MAX_AUDIBLE_EVENTS: usize = REMOTE_AGENT_MAX_AUDIBLE_EVENTS;
 
 /// Health fraction is only visible within this range (units).
 const HEALTH_VISIBILITY_RANGE: f32 = 100.0;
