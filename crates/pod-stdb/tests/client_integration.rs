@@ -830,6 +830,14 @@ fn stdb_error_display_subscription_error() {
 }
 
 #[test]
+fn stdb_error_display_document_error() {
+    let err = StdbError::DocumentError("bad toon".into());
+    let msg = format!("{err}");
+    assert!(msg.contains("Document error"));
+    assert!(msg.contains("bad toon"));
+}
+
+#[test]
 fn stdb_error_display_invalid_state() {
     let err = StdbError::InvalidState("already connected".into());
     let msg = format!("{err}");
@@ -858,7 +866,7 @@ fn stdb_error_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn stdb_event_all_20_variants_constructible() {
+fn stdb_event_all_21_variants_constructible() {
     // Verify all StdbEvent variants can be created without panicking.
     // This ensures the public API surface matches our expectations.
     let events: Vec<StdbEvent> = vec![
@@ -940,6 +948,9 @@ fn stdb_event_all_20_variants_constructible() {
             agent_entity_id: 5,
             document: "{\"focus\":\"hero\"}".into(),
         },
+        StdbEvent::RemoteTopologyDocumentReceived {
+            document: "{\"document_type\":\"remote_topology_bundle\"}".into(),
+        },
         StdbEvent::RemoteTopologyUpdated {
             scenario_id: "deadman-neural-cup".into(),
             resolved_world_id: Some("deadman-prime".into()),
@@ -956,7 +967,7 @@ fn stdb_event_all_20_variants_constructible() {
         },
     ];
 
-    assert_eq!(events.len(), 20);
+    assert_eq!(events.len(), 21);
 }
 
 #[test]

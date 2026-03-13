@@ -149,7 +149,14 @@ That runner now also emits a shared `RemoteTopologyBundle` contract from
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs),
 and `pod-stdb` plus `pod-net::client_stdb` now consume that same
 world/team/link/quest/evaluation payload directly instead of reconstructing it
-from app-local report JSON.
+from app-local report JSON. The newest path for that consumption is a
+document-fed ingress route in
+[`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs):
+`remote_topology_bundle` TOON documents can now be decoded into the shared
+topology cache, and
+[`crates/pod-net/src/client_stdb.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-net/src/client_stdb.rs)
+forwards that exact source document through the existing debug-document stream
+while still rebuilding snapshot metadata from the decoded topology.
 
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)

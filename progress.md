@@ -403,3 +403,14 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
+- Added a TOON-document ingress path for `RemoteTopologyBundle` in `crates/pod-stdb/src/client.rs`, including `StdbEvent::RemoteTopologyDocumentReceived` and typed `StdbError::DocumentError`, so remote topology can be decoded from an authority-style `remote_topology_bundle` document instead of only as an injected Rust struct.
+- Extended `crates/pod-net/src/client_stdb.rs` with `apply_remote_topology_document(...)` and debug-document forwarding, so the exact topology source document now rides the existing `ServerMessage::DebugDocument` channel while the decoded world/team/quest/evaluation state still updates snapshot metadata and public accessors.
+- Revalidated the document-fed topology slice with:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`

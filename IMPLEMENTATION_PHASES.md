@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface now that `pod-stdb` and `pod-net` both consume it.
-2. Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract so remote execution stops depending on local injection paths.
-3. Thread the same authority-fed topology contract into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
+1. Replace local `apply_remote_topology_document(...)` calls with an actual authority-published topology document feed so remote execution stops depending on manual injection paths.
+2. Thread that same authority-fed topology document stream into the agent evaluation/parity harness so multi-world quest/effect progress becomes benchmarkable, not just inspectable.
+3. Add remote execution coverage for topology document churn, world switching, and cross-world quest/effect updates on top of the new authority-fed path.

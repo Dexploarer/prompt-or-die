@@ -204,3 +204,88 @@ fn integration_remote_topology_surfaces_linked_world_quest_and_evaluation_state(
     assert_eq!(evaluation.applied_score_delta_total, 10);
     assert_eq!(evaluation.average_quest_progress_basis_points, 6666);
 }
+
+#[test]
+fn integration_remote_topology_document_surfaces_debug_and_evaluation_state() {
+    let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+        db_name: "deadman-shadow".into(),
+        connection_mode: StdbConnectionMode::Emulated,
+        ..SpacetimeDBClientConfig::default()
+    });
+
+    client.connect().expect("connect in emulated mode");
+    client
+        .subscribe_as_spectator()
+        .expect("staging spectator subscriptions");
+
+    let mut shadow =
+        WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow-seasonal");
+    shadow.role = WorldRealityRole::Shadow;
+    shadow.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+
+    let document = RemoteTopologyBundle {
+        version: pod_core::RuntimeContractVersion::V1,
+        scenario_id: "deadman-neural-cup".into(),
+        profile_id: "ci-smoke".into(),
+        generated_at_unix_ms: 42,
+        tournament: WorldTournamentDefinition::new(
+            "deadman-neural-cup",
+            "Deadman Neural Cup",
+        ),
+        teams: vec![],
+        worlds: vec![shadow],
+        links: vec![],
+        world_quest_bindings: vec![WorldQuestBinding {
+            world_id: "deadman-shadow".into(),
+            quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+        }],
+        quest_graphs: vec![],
+        applied_world_states: vec![],
+        evaluation: pod_core::ScenarioEvaluationSummary {
+            controller_mix: vec![],
+            worlds: vec![WorldEvaluationSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                average_reward_per_row: 4.5,
+                controller_mix: vec![ControllerEvaluationSummary {
+                    agent_type: "neural_agent".into(),
+                    row_count: 3,
+                    reward_total: 13.5,
+                    average_reward_per_row: 4.5,
+                }],
+                quest_line_count: 1,
+                progressed_quest_line_count: 1,
+                average_quest_progress_basis_points: 6666,
+                applied_score_delta_total: 0,
+                applied_death_mark_count: 0,
+                applied_death_mark_ticks: 0,
+                applied_objective_shift_count: 0,
+                applied_reputation_delta_total: 0,
+                applied_encounter_delta_total: 0,
+                applied_resource_delta_total: 0,
+            }],
+        },
+    }
+    .to_toon_document();
+
+    client
+        .apply_remote_topology_document(document.clone())
+        .expect("document applies");
+
+    let messages = client.poll_updates();
+    assert!(messages.iter().any(|message| matches!(
+        message,
+        pod_net::ServerMessage::DebugDocument { document: current }
+            if current == &document
+    )));
+    assert_eq!(client.last_debug_document(), Some(document.as_str()));
+    assert_eq!(client.remote_world_id(), Some("deadman-shadow"));
+    assert_eq!(
+        client
+            .remote_world_evaluation()
+            .and_then(|world| world.controller_mix.first())
+            .map(|controller| controller.agent_type.as_str()),
+        Some("neural_agent")
+    );
+}

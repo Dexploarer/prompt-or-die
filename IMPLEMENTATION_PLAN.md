@@ -1776,5 +1776,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
 
-**Last updated**: Iteration 167
-**Current focus**: Iteration 168 promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract in `pod-stdb` / `pod-net`, so multi-world teams, quest lines, and alternate-reality effects stop depending on local injection paths
+### Iteration 168
+- [x] Added a TOON-document ingest path to `crates/pod-stdb/src/client.rs`, so `RemoteTopologyBundle` can be decoded and applied from an authority-style `remote_topology_bundle` document instead of only as an injected Rust struct.
+- [x] Added `StdbEvent::RemoteTopologyDocumentReceived` plus a typed `StdbError::DocumentError`, so remote-topology source documents are preserved for inspection and document decode failures stop collapsing into generic state errors.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with `apply_remote_topology_document(...)`, forwarded the source document through `ServerMessage::DebugDocument`, and added deterministic unit/integration coverage proving the decoded topology still resolves world/evaluation state.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+**Last updated**: Iteration 168
+**Current focus**: Iteration 169 replace local `apply_remote_topology_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that source through the parity and evaluation harnesses

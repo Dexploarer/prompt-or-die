@@ -217,6 +217,8 @@
 - [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner can emit that portable remote-topology artifact alongside the existing report and dataset outputs
 - [x] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`, including `pod-stdb` cache resolution helpers plus `pod-net::client_stdb` snapshot metadata refresh on `RemoteTopologyUpdated`
 - [x] Added replay/evaluation coverage for linked-world tournaments and neural swarms across both `apps/pod-headless` and the public `pod-net::SpacetimeDBClient` topology surface
+- [x] Added a TOON-document ingest path for `RemoteTopologyBundle` in `pod-stdb`, preserving the source document via `StdbEvent::RemoteTopologyDocumentReceived` and decoding the authority-style `remote_topology_bundle` payload into the existing cache resolution path
+- [x] Added `pod-net::SpacetimeDBClient::apply_remote_topology_document(...)`, forwarded remote topology source documents through `ServerMessage::DebugDocument`, and covered the document-fed path with deterministic unit/integration tests
 
 **Next Action**:
-- Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract in `pod-stdb` / `pod-net`.
+- Replace local `apply_remote_topology_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that feed into the parity and evaluation harnesses.
