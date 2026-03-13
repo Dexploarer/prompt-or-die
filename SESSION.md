@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `1882cb0a`
+**Last Checkpoint**: `897e37bd`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -124,7 +124,7 @@
 
 **Known Issues**:
 - The original historical-snapshot gap is closed by `/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
-- The remaining transport/topology follow-on is workflow automation: the live shard-target publication path is still manual until Iteration 185 lands.
+- The live shard-target capture/publication path is now wrapped by `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`; the remaining transport/topology follow-on is historical comparison tooling on top of the published snapshot history.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -186,7 +186,7 @@
 
 **Known Issues**:
 - The neural path is functional, but still mostly a thin inference scaffold compared with the LLM and hybrid agents.
-- Reward attribution and dataset export are now first-class runtime contracts. The remaining open gap is Phase 12 controller evaluation/parity coverage across agent types.
+- Reward attribution and dataset export are now first-class runtime contracts. The remaining open gap is the Phase 13 remote-agent gameplay contract tracked below.
 
 ## Phase 11: Reward, Experience, and Replay Dataset Contract ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -198,7 +198,7 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Historical follow-on closed in Phases 12-14. Remaining work is broader controller parity and remote-agent contract work tracked separately below.
+- Historical follow-on closed in Phases 12-14. Remaining work is the remote-agent gameplay contract plus browser/benchmark follow-ons tracked separately below.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -254,11 +254,10 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of a manual multi-command sequence.
+- Finish the remaining Phase 13 remote-agent gameplay contract work: observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision coverage.
 
 ## Audit Backlog (2026-03-13)
 
-- [ ] Iteration 185: wrap the live shard-target topology capture and snapshot publication flow into one reproducible local script.
-- [ ] Phase 12: add the missing cross-controller evaluation harness and parity metrics for scripted, LLM, hybrid, and neural agents.
 - [ ] Phase 13: finish the explicit remote-agent gameplay contract for observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision tests.
 - [ ] Browser infra: repair the current render-route perf regression so `bun run measure:render-routes:check` passes again on the shipped asset set.
+- [ ] Benchmark tooling: add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json`.

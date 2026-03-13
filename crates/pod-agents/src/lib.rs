@@ -39,6 +39,7 @@
 #![allow(clippy::vec_init_then_push)]
 #![allow(unused_imports)]
 
+pub mod controller_harness;
 mod llm_agent;
 mod neural_agent;
 pub mod onnx_network;
@@ -87,6 +88,10 @@ pub use prompt_template::{
 };
 
 // Phase 2: Hybrid agent re-exports (Task 2.11)
+pub use controller_harness::{
+    run_controller_parity_harness, ControllerHarnessReport, ControllerHarnessStepReport,
+    ControllerHarnessSummary, ControllerParitySummary,
+};
 pub use hybrid_agent::{
     aggressive_hybrid, defensive_hybrid, HybridAgent, HybridAgentConfig, StrategyDirective,
     StrategyTrigger,

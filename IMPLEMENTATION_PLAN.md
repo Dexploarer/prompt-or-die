@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 183
-**Current focus**: Iteration 185 script the live shard-target topology benchmark and snapshot publication flow now that the first committed monthly snapshot exists
+**Last updated**: Iteration 186
+**Current focus**: Iteration 187 define the remaining Phase 13 remote-agent gameplay contract over SpacetimeDB
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1937,9 +1937,12 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Refreshed the published shard-target transport baselines in `crates/pod-net/src/server.rs` to the current deterministic benchmark output, with `steady-delta total/max = 1392/174` and aggregate full/recovery/delta totals of `1220/234/1904`.
 - [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target monthly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts.
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`.
+- [x] Added `scripts/run_shard_target_snapshot.ts` plus `scripts/run_shard_target_snapshot.test.ts`, so the previously manual shard-target topology capture, local SpacetimeDB publish, live generated-SDK benchmark, and monthly snapshot publication flow now runs through one reproducible Bun command.
+- [x] Documented the new one-command monthly routine in `README.md` and `docs/benchmark-suite.md`, including the current `artifact_only` behavior when browser render-route gates fail but still write an artifact.
+- [x] Added `crates/pod-agents/src/controller_harness.rs` plus `crates/pod-agents/examples/controller_parity_benchmark.rs`, so scripted, LLM, hybrid, and neural agents now run through the same curated evaluation harness with published validity, objective, encounter, latency, tool-call, and parity metrics.
+- [x] Added deterministic `pod-agents` coverage for the controller parity harness and documented the standalone benchmark command in `README.md` and `docs/benchmark-suite.md`.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
-- [ ] Script the live shard-target topology capture/publication flow so the current multi-command local sequence becomes one reproducible command.
 - [ ] Repair the failing browser render-route perf gate so `bun run measure:render-routes:check` passes on the current shipped asset set instead of only producing a recorded artifact.
-- [ ] Finish Phase 12 controller evaluation/parity harness work across scripted, LLM, hybrid, and neural agents.
 - [ ] Finish the remaining Phase 13 remote-agent gameplay contract work: observation/action budget envelope, heartbeat/fallback rules, and degraded-network stale-decision coverage.
+- [ ] Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json`.

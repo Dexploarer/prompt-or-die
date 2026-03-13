@@ -290,21 +290,23 @@
 
 ## Phase 12: Agent Evaluation and Parity Harness
 **Type**: Agent Runtime
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 3-6 hours
 **Files**: `crates/pod-core/*`, `crates/pod-agents/*`, benchmark scripts/docs`
 
 **Tasks**:
 - [x] Add a first cheap local evaluation/report surface on top of the headless scenario runner
-- [ ] Add scenario/replay-based evaluation harnesses for scripted, LLM, hybrid, and neural agents
-- [ ] Publish common metrics: action validity, objective progress, encounter outcomes, latency, and tool-call reliance
-- [ ] Add parity checks that compare neural behavior against deterministic baselines on curated scenarios
-- [ ] Thread the results into a cheap local benchmark/report surface that can run outside direct app invocation
+- [x] Add scenario/replay-based evaluation harnesses for scripted, LLM, hybrid, and neural agents
+- [x] Publish common metrics: action validity, objective progress, encounter outcomes, latency, and tool-call reliance
+- [x] Add parity checks that compare neural behavior against deterministic baselines on curated scenarios
+- [x] Thread the results into a cheap local benchmark/report surface that can run outside direct app invocation
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-agents --lib`
-- [ ] `cargo test -p pod-core parity -- --nocapture`
-- [ ] Benchmark/report command documented and reproducible
+- [x] `cargo test -p pod-agents controller_parity -- --nocapture`
+- [x] `cargo test -p pod-agents --lib`
+- [x] `cargo check -p pod-agents --example controller_parity_benchmark`
+- [x] `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks`
+- [x] Benchmark/report command documented and reproducible
 
 **Exit Criteria**:
 - Agent quality is measurable across controller types
@@ -379,15 +381,14 @@
 
 ## Immediate Next Actions
 
-1. Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of the current manual command chain.
-2. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.
-3. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
+1. Finish the remaining Phase 13 remote-agent gameplay contract: observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision coverage.
+2. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
+3. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
 
 ## Audit Backlog (2026-03-13)
 
 These are the confirmed remaining misses after the roadmap scrub:
 
-1. Phase 12 still lacks a cross-controller evaluation harness for scripted, LLM, hybrid, and neural agents with published parity metrics.
-2. Phase 13 still lacks the explicit remote-agent gameplay contract: observation/action budgets, heartbeat and fallback rules, and degraded-network stale-decision coverage.
-3. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
-4. The live shard-target topology capture/publication flow now works, but it is still a manual command chain until Iteration 185 wraps it in one reproducible script.
+1. Phase 13 still lacks the explicit remote-agent gameplay contract: observation/action budgets, heartbeat and fallback rules, and degraded-network stale-decision coverage.
+2. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
+3. Historical comparison tooling still needs to be added on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data instead of manual snapshot inspection.

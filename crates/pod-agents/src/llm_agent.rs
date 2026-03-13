@@ -256,6 +256,21 @@ impl LlmAgent {
         &self.recent_tool_calls
     }
 
+    /// Block briefly until the current background request has been drained into
+    /// the ready buffer. Intended for deterministic offline harnesses and tests.
+    pub fn wait_for_request_completion(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            self.drain_results();
+            if !self.request_in_flight {
+                return true;
+            }
+            std::thread::yield_now();
+        }
+        self.drain_results();
+        !self.request_in_flight
+    }
+
     /// Access the conversation memory.
     pub fn memory(&self) -> &ConversationMemory {
         &self.memory

@@ -15,6 +15,7 @@ AI-agent-native worlds.
 | Authoritative tick stability | Proves shard simulation stays within budget | `pod-core` acceptance harness | Automated |
 | Agent action acceptance/rejection transparency | Proves creators and operators can explain runtime decisions | `pod-core` telemetry | Automated |
 | Browser/native parity | Proves web is a first-class runtime, not an afterthought | `pod-render` tests plus `pod-web` checks | Automated |
+| Controller parity and evaluation | Proves scripted, LLM, hybrid, and neural agents are measured against the same scenario contract | `pod-agents` controller harness | Automated |
 | Multi-world topology parity | Proves the exported remote-topology contract matches quest/effect/evaluation truth | `pod-headless` scenario runner via moat suite | Automated |
 | Remote topology feed parity | Proves `pod-net` resolves the same world/quest/effect/evaluation state from both authority rows and generated-mode topology ingress | `pod-net` topology feed benchmark | Automated |
 | Creator time-to-first-agent-world | Measures creator adoption friction | Reference bootstrap flow | Scripted |
@@ -48,6 +49,13 @@ Remote topology feed parity report:
 ```bash
 cd /Users/home/Desktop/prompt-or-die
 cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input artifacts/pod-headless-topology-shard.json --fail-on-checks --output artifacts/topology-feed-benchmark-shard.json
+```
+
+Controller parity report:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks
 ```
 
 Combined moat benchmark suite:
@@ -346,11 +354,23 @@ Guidance:
 
 Run this every month before updating the competitor matrix:
 
-1. Run the shard-target combined moat suite.
-2. Run the shard-target browser render-route benchmark and keep the generated `apps/pod-web/artifacts/render-route-measurements.json`.
-3. Run the live shard-target topology feed benchmark against a local SpacetimeDB module and keep `artifacts/topology-feed-live-shard-local.json`.
-4. Publish the monthly snapshot with `scripts/publish_moat_snapshots.ts`.
-5. Compare deltas against the previous month and record any required responses in `IMPLEMENTATION_PLAN.md`.
+1. Run `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`.
+2. Inspect the generated summary artifact at `artifacts/shard-target-snapshot-run.json`.
+3. Compare deltas against the previous month and record any required responses in `IMPLEMENTATION_PLAN.md`.
+
+`run_shard_target_snapshot.ts` now wraps the previously manual chain:
+
+- shard-target moat capture
+- browser render-route capture
+- headless topology export
+- local SpacetimeDB startup plus module publish
+- live generated-SDK topology benchmark
+- monthly snapshot publication
+
+If the browser render-route gate still fails but `apps/pod-web/artifacts/render-route-measurements.json`
+is produced, the wrapper records that status as `artifact_only` and still
+publishes the snapshot so drift review is not blocked by the known browser perf
+regression.
 
 ## Interpretation rules
 

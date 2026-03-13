@@ -629,8 +629,14 @@ mod tests {
     #[test]
     fn test_constants_match_neural_agent() {
         // These must stay in sync with neural_agent.rs constants.
-        assert_eq!(EXPECTED_INPUT_SIZE, crate::neural_agent::NEURAL_FEATURE_COUNT);
-        assert_eq!(EXPECTED_OUTPUT_SIZE, crate::neural_agent::NEURAL_ACTION_COUNT);
+        assert_eq!(
+            EXPECTED_INPUT_SIZE,
+            crate::neural_agent::NEURAL_FEATURE_COUNT
+        );
+        assert_eq!(
+            EXPECTED_OUTPUT_SIZE,
+            crate::neural_agent::NEURAL_ACTION_COUNT
+        );
     }
 
     #[cfg(feature = "onnx")]

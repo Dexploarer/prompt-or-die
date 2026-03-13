@@ -841,9 +841,15 @@ mod tests {
         let _ = agent.decide();
 
         let info = agent.introspect();
-        assert!(info.state_description.contains("policy=inspectable-fallback"));
-        assert!(info.state_description.contains("compatibility=fallback-only"));
-        assert!(info.state_description.contains("inference=fallback(synthetic test fallback)"));
+        assert!(info
+            .state_description
+            .contains("policy=inspectable-fallback"));
+        assert!(info
+            .state_description
+            .contains("compatibility=fallback-only"));
+        assert!(info
+            .state_description
+            .contains("inference=fallback(synthetic test fallback)"));
         assert!(info.state_description.contains("last_action=idle"));
     }
 

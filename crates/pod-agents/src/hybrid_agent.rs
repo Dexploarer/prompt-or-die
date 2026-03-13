@@ -55,7 +55,7 @@ use pod_core::{AgentToolCallTrace, ToolCallStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use pod_core::action::{Action, AgentConstraints};
 use pod_core::agent::{Agent, AgentIntrospection, AgentType};
@@ -383,6 +383,29 @@ impl HybridAgent {
 
     pub fn recent_tool_calls(&self) -> &VecDeque<AgentToolCallTrace> {
         &self.recent_tool_calls
+    }
+
+    /// Block briefly until the current strategy request has been applied to the
+    /// blackboard. Intended for deterministic offline harnesses and tests.
+    pub fn wait_for_strategy_completion(&mut self, timeout: Duration) -> bool {
+        if !self.strategy_in_flight {
+            return true;
+        }
+
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Ok(result) = self.strategy_rx.try_recv() {
+                self.strategy_in_flight = false;
+                self.recent_tool_calls.extend(result.tool_calls);
+                let directive = result.directive.clone();
+                self.apply_directive_to_blackboard(&directive);
+                self.current_directive = result.directive;
+                return true;
+            }
+            std::thread::yield_now();
+        }
+
+        false
     }
 
     // ----------------------------------------------------------------
