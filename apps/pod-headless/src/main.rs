@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
     run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
-    CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
-    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, QuestStageDefinition,
-    QuestStateGraph, ReplayTrainingSample, RewardReason, TeamControlMode,
+    AgentType, CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation,
+    FlagshipMmoAcceptanceConfig, FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary,
+    QuestStageDefinition, QuestStateGraph, ReplayTrainingSample, RewardReason, TeamControlMode,
     TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
@@ -58,6 +58,7 @@ struct HeadlessAppReport {
     cross_world_projections: Vec<CrossWorldProjectionReport>,
     applied_world_states: Vec<AppliedWorldStateReport>,
     standings: Vec<TeamStandingReport>,
+    evaluation: ScenarioEvaluationReport,
     notes: Vec<String>,
 }
 
@@ -271,6 +272,39 @@ struct TeamStandingReport {
     applied_score_delta: i32,
     active_death_marks: usize,
     active_death_mark_ticks: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ScenarioEvaluationReport {
+    controller_mix: Vec<ControllerEvaluationReport>,
+    worlds: Vec<WorldEvaluationReport>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct ControllerEvaluationReport {
+    agent_type: String,
+    row_count: usize,
+    reward_total: f32,
+    average_reward_per_row: f32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct WorldEvaluationReport {
+    world_id: String,
+    display_name: String,
+    role: WorldRealityRole,
+    average_reward_per_row: f32,
+    controller_mix: Vec<ControllerEvaluationReport>,
+    quest_line_count: usize,
+    progressed_quest_line_count: usize,
+    average_quest_progress_basis_points: u16,
+    applied_score_delta_total: i32,
+    applied_death_mark_count: usize,
+    applied_death_mark_ticks: u64,
+    applied_objective_shift_count: usize,
+    applied_reputation_delta_total: i32,
+    applied_encounter_delta_total: i32,
+    applied_resource_delta_total: i32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -670,6 +704,7 @@ fn run_scenario(
         &dataset_worlds,
         &applied_world_states,
     );
+    let evaluation = build_scenario_evaluation(&dataset_worlds, &applied_world_states);
 
     let generated_at_unix_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -702,6 +737,7 @@ fn run_scenario(
             cross_world_projections,
             applied_world_states,
             standings,
+            evaluation,
             notes: notes.clone(),
         },
         dataset: RewardDatasetExport {
@@ -1198,6 +1234,146 @@ fn build_team_standings(
             }
         })
         .collect()
+}
+
+fn build_scenario_evaluation(
+    dataset_worlds: &[WorldDatasetExport],
+    applied_world_states: &[AppliedWorldStateReport],
+) -> ScenarioEvaluationReport {
+    let controller_mix = build_controller_evaluation_reports(
+        &dataset_worlds
+            .iter()
+            .flat_map(|world| world.rows.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+    let applied_world_lookup = applied_world_states
+        .iter()
+        .map(|state| (state.world_id.clone(), state))
+        .collect::<BTreeMap<_, _>>();
+
+    let worlds = dataset_worlds
+        .iter()
+        .map(|world| {
+            let applied = applied_world_lookup
+                .get(&world.world_id)
+                .expect("applied world state should exist for every dataset world");
+            let row_count = world.rows.len();
+            let average_reward_per_row = if row_count == 0 {
+                0.0
+            } else {
+                world.summary.total / row_count as f32
+            };
+            let quest_line_count = applied.quest_lines.len();
+            let progressed_quest_line_count = applied
+                .quest_lines
+                .iter()
+                .filter(|quest_line| {
+                    !quest_line.completed_stage_ids.is_empty()
+                        || !quest_line.stage_applications.is_empty()
+                })
+                .count();
+            let average_quest_progress_basis_points = if quest_line_count == 0 {
+                0
+            } else {
+                (applied
+                    .quest_lines
+                    .iter()
+                    .map(|quest_line| u32::from(quest_line.progress_basis_points))
+                    .sum::<u32>()
+                    / quest_line_count as u32) as u16
+            };
+
+            WorldEvaluationReport {
+                world_id: world.world_id.clone(),
+                display_name: world.display_name.clone(),
+                role: world.role,
+                average_reward_per_row,
+                controller_mix: build_controller_evaluation_reports(&world.rows),
+                quest_line_count,
+                progressed_quest_line_count,
+                average_quest_progress_basis_points,
+                applied_score_delta_total: applied
+                    .team_scores
+                    .iter()
+                    .map(|score| score.total_delta)
+                    .sum(),
+                applied_death_mark_count: applied
+                    .death_marks
+                    .iter()
+                    .map(|death_mark| death_mark.applications)
+                    .sum(),
+                applied_death_mark_ticks: applied
+                    .death_marks
+                    .iter()
+                    .map(|death_mark| death_mark.total_duration_ticks)
+                    .sum(),
+                applied_objective_shift_count: applied
+                    .objective_state_shifts
+                    .iter()
+                    .map(|shift| shift.applications)
+                    .sum(),
+                applied_reputation_delta_total: applied
+                    .faction_reputation_deltas
+                    .iter()
+                    .map(|delta| delta.total_delta)
+                    .sum(),
+                applied_encounter_delta_total: applied
+                    .encounter_weight_deltas
+                    .iter()
+                    .map(|delta| delta.total_delta)
+                    .sum(),
+                applied_resource_delta_total: applied
+                    .resource_scarcity_deltas
+                    .iter()
+                    .map(|delta| delta.total_delta)
+                    .sum(),
+            }
+        })
+        .collect();
+
+    ScenarioEvaluationReport {
+        controller_mix,
+        worlds,
+    }
+}
+
+fn build_controller_evaluation_reports(
+    rows: &[RewardDatasetRow],
+) -> Vec<ControllerEvaluationReport> {
+    let mut by_type = BTreeMap::<String, (usize, f32)>::new();
+    for row in rows {
+        let entry = by_type
+            .entry(agent_type_key(row.runtime_profile.agent_type).to_string())
+            .or_insert((0usize, 0.0));
+        entry.0 += 1;
+        entry.1 += row.sample.reward_summary.total;
+    }
+
+    by_type
+        .into_iter()
+        .map(
+            |(agent_type, (row_count, reward_total))| ControllerEvaluationReport {
+                agent_type,
+                row_count,
+                reward_total,
+                average_reward_per_row: if row_count == 0 {
+                    0.0
+                } else {
+                    reward_total / row_count as f32
+                },
+            },
+        )
+        .collect()
+}
+
+fn agent_type_key(agent_type: AgentType) -> &'static str {
+    match agent_type {
+        AgentType::Human => "human",
+        AgentType::ScriptedNpc => "scripted_npc",
+        AgentType::LlmAgent => "llm_agent",
+        AgentType::NeuralAgent => "neural_agent",
+        AgentType::System => "system",
+    }
 }
 
 fn build_applied_world_states(
@@ -2232,6 +2408,218 @@ mod tests {
         assert_eq!(by_team["iron-sigil"].world_reward_total, 2.0);
         assert_eq!(by_team["iron-sigil"].applied_score_delta, 15);
         assert_eq!(by_team["iron-sigil"].active_death_marks, 0);
+    }
+
+    #[test]
+    fn scenario_evaluation_reports_controller_mix_and_quest_progress() {
+        let dataset_worlds = vec![
+            WorldDatasetExport {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                world_seed: 11,
+                summary: RewardDatasetSummary {
+                    row_count: 2,
+                    terminal_row_count: 0,
+                    total: 3.0,
+                    positive_total: 3.0,
+                    negative_total: 0.0,
+                    reasons: vec![],
+                },
+                rows: vec![
+                    RewardDatasetRow {
+                        world_id: "deadman-prime".into(),
+                        world_role: WorldRealityRole::Tournament,
+                        world_seed: 11,
+                        team_id: Some("iron-sigil".into()),
+                        team_slot: Some(0),
+                        runtime_profile: AgentRuntimeProfile {
+                            role: AgentRole::Player,
+                            agent_type: AgentType::NeuralAgent,
+                            ..Default::default()
+                        },
+                        sample: ReplayTrainingSample {
+                            tick: 1,
+                            agent_id: pod_core::AgentId::default(),
+                            path_distance: 0.5,
+                            action_outcomes: ActionOutcomeSummary::default(),
+                            encounter_transition: None,
+                            tool_call_latency_ms: 0,
+                            tool_call_error_count: 0,
+                            reward_summary: RewardAttributionSummary {
+                                signal_count: 1,
+                                total: 2.0,
+                                positive_total: 2.0,
+                                negative_total: 0.0,
+                                terminal: false,
+                            },
+                        },
+                        reward_reasons: vec![],
+                    },
+                    RewardDatasetRow {
+                        world_id: "deadman-prime".into(),
+                        world_role: WorldRealityRole::Tournament,
+                        world_seed: 11,
+                        team_id: Some("gloam-mesh".into()),
+                        team_slot: Some(0),
+                        runtime_profile: AgentRuntimeProfile {
+                            role: AgentRole::Player,
+                            agent_type: AgentType::LlmAgent,
+                            ..Default::default()
+                        },
+                        sample: ReplayTrainingSample {
+                            tick: 1,
+                            agent_id: pod_core::AgentId::default(),
+                            path_distance: 0.5,
+                            action_outcomes: ActionOutcomeSummary::default(),
+                            encounter_transition: None,
+                            tool_call_latency_ms: 0,
+                            tool_call_error_count: 0,
+                            reward_summary: RewardAttributionSummary {
+                                signal_count: 1,
+                                total: 1.0,
+                                positive_total: 1.0,
+                                negative_total: 0.0,
+                                terminal: false,
+                            },
+                        },
+                        reward_reasons: vec![],
+                    },
+                ],
+            },
+            WorldDatasetExport {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                world_seed: 22,
+                summary: RewardDatasetSummary {
+                    row_count: 1,
+                    terminal_row_count: 0,
+                    total: 4.5,
+                    positive_total: 4.5,
+                    negative_total: 0.0,
+                    reasons: vec![],
+                },
+                rows: vec![RewardDatasetRow {
+                    world_id: "deadman-shadow".into(),
+                    world_role: WorldRealityRole::Shadow,
+                    world_seed: 22,
+                    team_id: Some("gloam-mesh".into()),
+                    team_slot: Some(1),
+                    runtime_profile: AgentRuntimeProfile {
+                        role: AgentRole::Player,
+                        agent_type: AgentType::NeuralAgent,
+                        ..Default::default()
+                    },
+                    sample: ReplayTrainingSample {
+                        tick: 2,
+                        agent_id: pod_core::AgentId::default(),
+                        path_distance: 1.0,
+                        action_outcomes: ActionOutcomeSummary::default(),
+                        encounter_transition: None,
+                        tool_call_latency_ms: 0,
+                        tool_call_error_count: 0,
+                        reward_summary: RewardAttributionSummary {
+                            signal_count: 1,
+                            total: 4.5,
+                            positive_total: 4.5,
+                            negative_total: 0.0,
+                            terminal: false,
+                        },
+                    },
+                    reward_reasons: vec![],
+                }],
+            },
+        ];
+        let applied_world_states = vec![
+            AppliedWorldStateReport {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                team_scores: vec![TeamDeltaReport {
+                    team_id: "gloam-mesh".into(),
+                    total_delta: 8,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![QuestLineStateReport {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    display_name: "Deadman Prime: Blood Season".into(),
+                    current_stage_ids: vec!["wilds-under-siege".into()],
+                    completed_stage_ids: vec!["enter-bracket".into()],
+                    pending_stage_ids: vec!["blood-round".into(), "crown-push".into()],
+                    next_stage_ids: vec!["blood-round".into()],
+                    progress_basis_points: 5000,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationReport {
+                        stage_id: "wilds-under-siege".into(),
+                        title: "Wilds Under Siege".into(),
+                        applications: 1,
+                    }],
+                }],
+            },
+            AppliedWorldStateReport {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: WorldRealityRole::Shadow,
+                team_scores: vec![TeamDeltaReport {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 5,
+                }],
+                death_marks: vec![TeamDeathMarkReport {
+                    team_id: "gloam-mesh".into(),
+                    applications: 1,
+                    total_duration_ticks: 600,
+                }],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![ObjectiveShiftReport {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    stage_tag: "marked-by-kills".into(),
+                    applications: 1,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![QuestLineStateReport {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    display_name: "Deadman Shadow: Mirror Hunt".into(),
+                    current_stage_ids: vec!["marked-by-kills".into()],
+                    completed_stage_ids: vec!["shadow-observe".into()],
+                    pending_stage_ids: vec!["rift-collapse".into()],
+                    next_stage_ids: vec!["rift-collapse".into()],
+                    progress_basis_points: 6666,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationReport {
+                        stage_id: "marked-by-kills".into(),
+                        title: "Marked by Kills".into(),
+                        applications: 1,
+                    }],
+                }],
+            },
+        ];
+
+        let evaluation = build_scenario_evaluation(&dataset_worlds, &applied_world_states);
+
+        assert_eq!(evaluation.controller_mix.len(), 2);
+        assert_eq!(evaluation.controller_mix[0].agent_type, "llm_agent");
+        assert_eq!(evaluation.controller_mix[0].row_count, 1);
+        assert_eq!(evaluation.controller_mix[1].agent_type, "neural_agent");
+        assert_eq!(evaluation.controller_mix[1].row_count, 2);
+        assert_eq!(evaluation.worlds[0].world_id, "deadman-prime");
+        assert_eq!(evaluation.worlds[0].average_reward_per_row, 1.5);
+        assert_eq!(evaluation.worlds[0].progressed_quest_line_count, 1);
+        assert_eq!(
+            evaluation.worlds[0].average_quest_progress_basis_points,
+            5000
+        );
+        assert_eq!(evaluation.worlds[0].applied_score_delta_total, 8);
+        assert_eq!(evaluation.worlds[1].world_id, "deadman-shadow");
+        assert_eq!(evaluation.worlds[1].applied_death_mark_count, 1);
+        assert_eq!(evaluation.worlds[1].applied_objective_shift_count, 1);
     }
 
     #[test]

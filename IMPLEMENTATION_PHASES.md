@@ -290,15 +290,16 @@
 
 ## Phase 12: Agent Evaluation and Parity Harness
 **Type**: Agent Runtime
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 3-6 hours
 **Files**: `crates/pod-core/*`, `crates/pod-agents/*`, benchmark scripts/docs`
 
 **Tasks**:
+- [x] Add a first cheap local evaluation/report surface on top of the headless scenario runner
 - [ ] Add scenario/replay-based evaluation harnesses for scripted, LLM, hybrid, and neural agents
 - [ ] Publish common metrics: action validity, objective progress, encounter outcomes, latency, and tool-call reliance
 - [ ] Add parity checks that compare neural behavior against deterministic baselines on curated scenarios
-- [ ] Thread the results into a cheap local benchmark/report surface
+- [ ] Thread the results into a cheap local benchmark/report surface that can run outside direct app invocation
 
 **Verification Criteria**:
 - [ ] `cargo test -p pod-agents --lib`

@@ -377,3 +377,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-headless`
   - `cargo check -p pod-headless`
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+- Extended `apps/pod-headless` again with an `evaluation` report surface that summarizes controller mix across the full scenario and per world directly from replay-derived dataset rows.
+- Added world-level evaluation metrics for quest progress and applied effect totals, so the same report now exposes which worlds actually advanced objectives, took cross-world pressure, or stayed idle.
+- Revalidated the evaluation slice with:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`

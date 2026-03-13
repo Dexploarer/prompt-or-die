@@ -1733,5 +1733,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
   - `git diff --check`
 
-**Last updated**: Iteration 163
-**Current focus**: Iteration 164 thread the admission-aware multi-world model, applied effect envelopes, and quest-line state into remote topology and replay/evaluation coverage for linked-world tournaments and neural swarms
+### Iteration 164
+- [x] Added `evaluation` to the `apps/pod-headless` scenario report, summarizing controller mix across the full run and per world using the same replay-derived dataset rows already exported by `--dataset-output`.
+- [x] Added per-world evaluation metrics for quest-line progress and applied cross-world effects, so linked-world runs now expose objective progression, score pressure, death-mark pressure, and world-level controller mix without requiring downstream ad hoc analysis.
+- [x] Added deterministic unit coverage for the evaluation aggregator and revalidated the live headless scenario artifact with the widened report schema.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 164
+**Current focus**: Iteration 165 thread the admission-aware multi-world model, applied effect envelopes, quest-line state, and new evaluation summaries into remote topology and replay/evaluation coverage for linked-world tournaments and neural swarms

@@ -216,4 +216,4 @@
 - [ ] Thread world identity and team admission through remote topology and evaluation harnesses
 
 **Next Action**:
-- Thread the new admission-aware team/world model into remote topology and keep the same quest-line/effect-application rules intact while adding replay/evaluation coverage for linked-world tournaments and neural swarms.
+- Thread the new admission-aware team/world model into remote topology and keep the same quest-line/effect-application rules intact while extending the new headless evaluation surface into replay/evaluation coverage for linked-world tournaments and neural swarms.
