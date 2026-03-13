@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Wire actual generated SpacetimeDB binding callbacks into `GeneratedRuntimeBridge` and replace the benchmark's generated-hook path with the live generated transport.
-2. Extend the generated-path churn coverage from same-world quest/effect updates to linked-world quest/effect updates once the live binding path exists.
+1. Replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the generated binding layer is available.
+2. Feed that live generated topology stream into the parity/evaluation harnesses so the moat path stops depending on helper-driven callback injection.
 3. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history so topology-feed drift becomes historical, not just pass/fail.

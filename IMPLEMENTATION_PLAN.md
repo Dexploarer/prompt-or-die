@@ -1891,4 +1891,20 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Last updated**: Iteration 178
-**Current focus**: Iteration 179 wire real generated SpacetimeDB callback bindings into `GeneratedRuntimeBridge`, then extend the live generated path from same-world churn to linked-world quest/effect updates
+**Current focus**: Iteration 179 replace the remaining ad hoc generated-topology callback wiring with the shared callback bridge and extend the generated path from same-world churn to linked-world quest/effect updates
+
+### Iteration 179
+- [x] Added `GeneratedBindingCallbacks`, `GeneratedRemoteTopologyDocumentRow`, `GeneratedRuntimeTrace`, and `build_generated_runtime_callback_bridge(...)` in `crates/pod-stdb/src/client.rs`, so generated-mode benchmarks and tests now drive topology updates through the same typed callback surface a real generated SpacetimeDB binding layer would use.
+- [x] Replaced the last ad hoc generated-topology bridge wiring in `crates/pod-stdb/tests/client_integration.rs` and `crates/pod-net/src/client_stdb.rs`, including the moat-facing `build_topology_feed_measurements(...)` path, with the shared callback bridge plus typed row inserts.
+- [x] Added generated-path linked-world quest/effect churn coverage in both `crates/pod-stdb/src/client.rs` and `crates/pod-net/src/client_stdb.rs`, proving newer generated-mode topology rows update linked-world quest bindings, applied state, evaluation, and snapshot metadata while stale older rows cannot roll the shadow-world state back.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client generated -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb test_build_topology_feed_measurements_matches_authority_and_generated_paths -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+**Last updated**: Iteration 179
+**Current focus**: Iteration 180 replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the binding layer is available, then project the live generated topology feed into the parity/evaluation harnesses

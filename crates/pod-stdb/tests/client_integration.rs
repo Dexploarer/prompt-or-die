@@ -227,27 +227,12 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
         connection_mode: StdbConnectionMode::Generated,
         ..StdbClientConfig::default()
     });
-    let connect_calls = std::rc::Rc::new(std::cell::RefCell::new(0usize));
-    let subscriptions = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
-    let connect_calls_for_bridge = connect_calls.clone();
-    let subscriptions_for_bridge = subscriptions.clone();
-    let (bridge, handle) = GeneratedRuntimeBridge::new(
-        move |_config, handle| {
-            *connect_calls_for_bridge.borrow_mut() += 1;
-            handle.connected(vec![1, 2, 3, 4], "tok-generated".into());
-            Ok(())
-        },
-        move |queries, handle| {
-            subscriptions_for_bridge.borrow_mut().push(queries.to_vec());
-            handle.subscription_applied();
-            Ok(())
-        },
-        || {},
-    );
+    let (bridge, callbacks, trace) =
+        build_generated_runtime_callback_bridge(vec![1, 2, 3, 4], "tok-generated");
     client.set_generated_runtime_bridge(bridge);
 
     client.connect().expect("generated runtime should connect");
-    assert_eq!(*connect_calls.borrow(), 1);
+    assert_eq!(trace.connect_configs().len(), 1);
     client.frame_tick();
     assert!(client.is_connected());
 
@@ -255,11 +240,11 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
         .subscribe(vec!["SELECT * FROM remote_topology_document".into()])
         .expect("subscription should be routed to runtime");
     assert_eq!(
-        *subscriptions.borrow(),
+        trace.subscription_queries(),
         vec![vec!["SELECT * FROM remote_topology_document".to_string()]]
     );
 
-    let document = pod_core::RemoteTopologyBundle {
+    let topology = pod_core::RemoteTopologyBundle {
         version: pod_core::RuntimeContractVersion::V1,
         scenario_id: "deadman-neural-cup".into(),
         profile_id: "generated-test".into(),
@@ -291,15 +276,12 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
             controller_mix: vec![],
             worlds: vec![],
         },
-    }
-    .to_toon_document();
+    };
+    let document = topology.to_toon_document();
 
-    handle.remote_topology_document_row(
-        11,
-        99,
-        "deadman-neural-cup",
-        "generated-test",
-        document.clone(),
+    callbacks.remote_topology_document_insert(
+        GeneratedRemoteTopologyDocumentRow::from_topology_bundle(11, &topology)
+            .expect("callback row should build"),
     );
     client.frame_tick();
     assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));

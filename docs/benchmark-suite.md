@@ -212,6 +212,12 @@ scenario report: if `pod-net` stops resolving world/quest/effect state the same
 way from authority rows and generated-mode ingress, the benchmark fails even if
 `pod-headless` still exports a valid topology bundle.
 
+The generated side now uses the same typed callback-facing surface that a real
+generated binding layer would use (`GeneratedBindingCallbacks` plus
+`GeneratedRemoteTopologyDocumentRow`) instead of benchmark-local bridge hooks,
+and the in-tree coverage now includes both same-world and linked-world
+quest/effect churn on that generated path.
+
 `scripts/run_moat_benchmarks.ts` now includes that payload as
 `topologyFeedMeasurements`, so the combined moat artifact records core,
 transport, browser, headless topology, and remote topology feed parity

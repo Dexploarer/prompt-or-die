@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `e21bc6fc`
+**Last Checkpoint**: `a9f2dda1`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -234,6 +234,9 @@
 - [x] Removed the last leftover `FakeGeneratedRuntime` helper from `pod-stdb` unit tests, so the in-tree generated-mode coverage now consistently exercises `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
 - [x] Added `pod-net` topology feed measurements plus the `topology_feed_benchmark_suite` example, so exported `RemoteTopologyBundle` artifacts can now be replayed through both direct authority-row ingestion and generated-bridge ingestion and checked for per-world quest/effect/evaluation parity outside unit tests
 - [x] Integrated `topology_feed_benchmark_suite` into `scripts/run_moat_benchmarks.ts`, so the combined moat artifact now emits `topologyFeedMeasurements`, fails on remote topology feed parity drift, and `scripts/publish_moat_snapshots.ts` now preserves the same topology feed benchmark in committed shard-target snapshots
+- [x] Added `GeneratedBindingCallbacks`, `GeneratedRemoteTopologyDocumentRow`, `GeneratedRuntimeTrace`, and `build_generated_runtime_callback_bridge(...)`, so generated-mode topology ingestion now has one typed callback surface instead of bespoke per-test bridge wiring
+- [x] Replaced the last ad hoc generated-topology bridge wiring in `pod-stdb` integration coverage and `pod-net` topology-feed measurements with the shared callback bridge plus typed row inserts
+- [x] Added generated-path linked-world quest/effect churn coverage in both `pod-stdb` and `pod-net`, proving newer generated-mode topology rows update linked-world quest bindings, applied state, evaluation, and snapshot metadata while stale older rows are ignored
 
 **Next Action**:
-- Replace the benchmark's generated-bridge hook path with real generated SpacetimeDB binding callbacks, then extend the live generated path from same-world churn to linked-world quest/effect updates.
+- Replace the shared callback bridge's synthetic connect/subscribe hooks with actual generated SpacetimeDB binding callbacks when the generated binding layer exists, then project that live generated feed into the parity/evaluation harnesses.
