@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
-    run_flagship_mmo_acceptance, AgentRewardSignal, AgentTeamDefinition, CrossWorldEffect,
-    CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
-    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, RewardReason, TeamControlMode,
-    TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
+    CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
+    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, ReplayTrainingSample, RewardReason,
+    TeamControlMode, TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole,
+    WorldTournamentDefinition,
 };
 use serde::Serialize;
 
@@ -20,6 +21,7 @@ struct HeadlessOptions {
     profile: String,
     scenario: String,
     output: Option<PathBuf>,
+    dataset_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +51,7 @@ struct HeadlessAppReport {
     worlds: Vec<WorldRealityDefinition>,
     links: Vec<CrossWorldLinkDefinition>,
     world_runs: Vec<WorldRunReport>,
+    dataset_summary: RewardDatasetSummary,
     cross_world_projections: Vec<CrossWorldProjectionReport>,
     standings: Vec<TeamStandingReport>,
     notes: Vec<String>,
@@ -82,6 +85,48 @@ struct WorldRewardReport {
     positive_total: f32,
     negative_total: f32,
     reasons: Vec<RewardReasonStat>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RewardDatasetSummary {
+    row_count: usize,
+    terminal_row_count: usize,
+    total: f32,
+    positive_total: f32,
+    negative_total: f32,
+    reasons: Vec<RewardReasonStat>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RewardDatasetExport {
+    schema_version: u32,
+    generated_at_unix_ms: u128,
+    scenario: String,
+    profile: String,
+    tournament_id: String,
+    summary: RewardDatasetSummary,
+    worlds: Vec<WorldDatasetExport>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorldDatasetExport {
+    world_id: String,
+    display_name: String,
+    role: WorldRealityRole,
+    world_seed: u64,
+    summary: RewardDatasetSummary,
+    rows: Vec<RewardDatasetRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RewardDatasetRow {
+    world_id: String,
+    world_role: WorldRealityRole,
+    world_seed: u64,
+    runtime_profile: AgentRuntimeProfile,
+    sample: ReplayTrainingSample,
+    reward_reasons: Vec<RewardReasonStat>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -165,18 +210,31 @@ struct TeamStandingAccumulator {
     projected_death_mark_ticks: u64,
 }
 
+#[derive(Debug)]
+struct ScenarioRunOutputs {
+    report: HeadlessAppReport,
+    dataset: RewardDatasetExport,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let options = parse_args()?;
     let scenario = build_scenario(&options.scenario, &options.profile)?;
-    let report = run_scenario(&options, scenario)?;
-    let json = serde_json::to_string_pretty(&report)?;
+    let outputs = run_scenario(&options, scenario)?;
+    let json = serde_json::to_string_pretty(&outputs.report)?;
 
     if let Some(output) = &options.output {
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::write(output, json.as_bytes())?;
+    }
+    if let Some(dataset_output) = &options.dataset_output {
+        if let Some(parent) = dataset_output.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let dataset_json = serde_json::to_string_pretty(&outputs.dataset)?;
+        fs::write(dataset_output, dataset_json.as_bytes())?;
     }
 
     println!("{json}");
@@ -188,6 +246,7 @@ fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
         profile: "ci-smoke".into(),
         scenario: DEFAULT_SCENARIO.into(),
         output: None,
+        dataset_output: None,
     };
 
     let args = env::args().skip(1).collect::<Vec<_>>();
@@ -209,6 +268,13 @@ fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
                 let value = args.get(index).ok_or("missing value for --output")?;
                 options.output = Some(PathBuf::from(value));
             }
+            "--dataset-output" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or("missing value for --dataset-output")?;
+                options.dataset_output = Some(PathBuf::from(value));
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -223,7 +289,7 @@ fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
 
 fn print_help() {
     eprintln!(
-        "Usage: cargo run -p pod-headless -- [--profile ci-smoke|shard-target] [--scenario deadman-neural-cup] [--output PATH]"
+        "Usage: cargo run -p pod-headless -- [--profile ci-smoke|shard-target] [--scenario deadman-neural-cup] [--output PATH] [--dataset-output PATH]"
     );
 }
 
@@ -372,7 +438,7 @@ fn build_deadman_neural_cup(base_config: FlagshipMmoAcceptanceConfig) -> Scenari
 fn run_scenario(
     options: &HeadlessOptions,
     scenario: ScenarioDefinition,
-) -> Result<HeadlessAppReport, Box<dyn std::error::Error>> {
+) -> Result<ScenarioRunOutputs, Box<dyn std::error::Error>> {
     let mut executions = Vec::new();
     for (index, world) in scenario.worlds.iter().enumerate() {
         let config = world_config_for(world, &scenario.base_config, index);
@@ -385,6 +451,17 @@ fn run_scenario(
         });
     }
 
+    let dataset_worlds = executions
+        .iter()
+        .map(build_world_dataset_export)
+        .collect::<Vec<_>>();
+    let dataset_summary = summarize_dataset_rows(
+        &dataset_worlds
+            .iter()
+            .flat_map(|world| world.rows.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+
     let mut cross_world_projections = Vec::new();
     for link in &scenario.links {
         cross_world_projections.push(build_projection_report(link, &executions)?);
@@ -393,26 +470,47 @@ fn run_scenario(
     let standings =
         build_team_standings(&scenario.teams, &scenario.worlds, &cross_world_projections);
 
-    Ok(HeadlessAppReport {
-        schema_version: REPORT_SCHEMA_VERSION,
-        generated_at_unix_ms: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-        scenario: options.scenario.clone(),
-        profile: options.profile.clone(),
-        tournament: scenario.tournament,
-        teams: scenario.teams,
-        worlds: scenario.worlds,
-        links: scenario.links,
-        world_runs: executions.into_iter().map(|execution| execution.report).collect(),
-        cross_world_projections,
-        standings,
-        notes: vec![
-            "World runs are authoritative flagship acceptance simulations with deterministic per-world seed derivation.".into(),
-            "Cross-world projections are derived from canonical reward reasons in replay telemetry, not browser-local heuristics.".into(),
-            "Team standings are projection totals from cross-world links; per-team in-world attribution still needs admission-aware runtime wiring.".into(),
-        ],
+    let generated_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let tournament_id = scenario.tournament.tournament_id.clone();
+    let notes = vec![
+        "World runs are authoritative flagship acceptance simulations with deterministic per-world seed derivation.".into(),
+        "Cross-world projections are derived from canonical reward reasons in replay telemetry, not browser-local heuristics.".into(),
+        "Team standings are projection totals from cross-world links; per-team in-world attribution still needs admission-aware runtime wiring.".into(),
+        "Dataset rows are replay-derived training samples enriched with authoritative reward reasons and runtime profile metadata.".into(),
+    ];
+
+    Ok(ScenarioRunOutputs {
+        report: HeadlessAppReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            generated_at_unix_ms,
+            scenario: options.scenario.clone(),
+            profile: options.profile.clone(),
+            tournament: scenario.tournament,
+            teams: scenario.teams,
+            worlds: scenario.worlds,
+            links: scenario.links,
+            world_runs: executions
+                .into_iter()
+                .map(|execution| execution.report)
+                .collect(),
+            dataset_summary: dataset_summary.clone(),
+            cross_world_projections,
+            standings,
+            notes: notes.clone(),
+        },
+        dataset: RewardDatasetExport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            generated_at_unix_ms,
+            scenario: options.scenario.clone(),
+            profile: options.profile.clone(),
+            tournament_id,
+            summary: dataset_summary,
+            worlds: dataset_worlds,
+            notes,
+        },
     })
 }
 
@@ -486,24 +584,8 @@ fn build_world_reward_report(result: &FlagshipMmoAcceptanceResult) -> WorldRewar
         .map(|sample| sample.reward_summary.negative_total)
         .sum();
 
-    let mut by_reason = BTreeMap::<String, (usize, f32)>::new();
-    let mut signal_count = 0usize;
-    for signal in iter_reward_signals(result) {
-        signal_count += 1;
-        let key = reward_reason_key(signal.reason).to_string();
-        let entry = by_reason.entry(key).or_insert((0usize, 0.0));
-        entry.0 += 1;
-        entry.1 += signal.value;
-    }
-
-    let reasons = by_reason
-        .into_iter()
-        .map(|(reason, (count, total_value))| RewardReasonStat {
-            reason,
-            count,
-            total_value,
-        })
-        .collect();
+    let reasons = collect_reward_reason_stats(iter_reward_signals(result));
+    let signal_count = reasons.iter().map(|stat| stat.count).sum();
 
     WorldRewardReport {
         sample_count: samples.len(),
@@ -513,6 +595,90 @@ fn build_world_reward_report(result: &FlagshipMmoAcceptanceResult) -> WorldRewar
         positive_total,
         negative_total,
         reasons,
+    }
+}
+
+fn build_world_dataset_export(execution: &WorldExecution) -> WorldDatasetExport {
+    let rows = build_dataset_rows(&execution.world, &execution.result);
+    let summary = summarize_dataset_rows(&rows);
+
+    WorldDatasetExport {
+        world_id: execution.world.world_id.clone(),
+        display_name: execution.world.display_name.clone(),
+        role: execution.world.role,
+        world_seed: execution.result.config.world_seed,
+        summary,
+        rows,
+    }
+}
+
+fn build_dataset_rows(
+    world: &WorldRealityDefinition,
+    result: &FlagshipMmoAcceptanceResult,
+) -> Vec<RewardDatasetRow> {
+    let samples = result.training_samples();
+    let mut sample_index = 0usize;
+    let mut rows = Vec::with_capacity(samples.len());
+
+    for window in result.telemetry_windows() {
+        for agent in &window.agents {
+            let sample = samples[sample_index].clone();
+            sample_index += 1;
+            rows.push(RewardDatasetRow {
+                world_id: world.world_id.clone(),
+                world_role: world.role,
+                world_seed: result.config.world_seed,
+                runtime_profile: agent.runtime_profile,
+                sample,
+                reward_reasons: collect_reward_reason_stats(agent.reward_signals.iter()),
+            });
+        }
+    }
+
+    rows
+}
+
+fn summarize_dataset_rows(rows: &[RewardDatasetRow]) -> RewardDatasetSummary {
+    let row_count = rows.len();
+    let terminal_row_count = rows
+        .iter()
+        .filter(|row| row.sample.reward_summary.terminal)
+        .count();
+    let total = rows.iter().map(|row| row.sample.reward_summary.total).sum();
+    let positive_total = rows
+        .iter()
+        .map(|row| row.sample.reward_summary.positive_total)
+        .sum();
+    let negative_total = rows
+        .iter()
+        .map(|row| row.sample.reward_summary.negative_total)
+        .sum();
+
+    let mut by_reason = BTreeMap::<String, (usize, f32)>::new();
+    for row in rows {
+        for stat in &row.reward_reasons {
+            let entry = by_reason
+                .entry(stat.reason.clone())
+                .or_insert((0usize, 0.0));
+            entry.0 += stat.count;
+            entry.1 += stat.total_value;
+        }
+    }
+
+    RewardDatasetSummary {
+        row_count,
+        terminal_row_count,
+        total,
+        positive_total,
+        negative_total,
+        reasons: by_reason
+            .into_iter()
+            .map(|(reason, (count, total_value))| RewardReasonStat {
+                reason,
+                count,
+                total_value,
+            })
+            .collect(),
     }
 }
 
@@ -728,6 +894,28 @@ fn build_team_standings(
         .collect()
 }
 
+fn collect_reward_reason_stats<'a, I>(signals: I) -> Vec<RewardReasonStat>
+where
+    I: IntoIterator<Item = &'a AgentRewardSignal>,
+{
+    let mut by_reason = BTreeMap::<String, (usize, f32)>::new();
+    for signal in signals {
+        let key = reward_reason_key(signal.reason).to_string();
+        let entry = by_reason.entry(key).or_insert((0usize, 0.0));
+        entry.0 += 1;
+        entry.1 += signal.value;
+    }
+
+    by_reason
+        .into_iter()
+        .map(|(reason, (count, total_value))| RewardReasonStat {
+            reason,
+            count,
+            total_value,
+        })
+        .collect()
+}
+
 fn iter_reward_signals(
     result: &FlagshipMmoAcceptanceResult,
 ) -> impl Iterator<Item = &AgentRewardSignal> {
@@ -785,7 +973,9 @@ fn reward_reason_key(reason: RewardReason) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pod_core::RewardSource;
+    use pod_core::{
+        ActionOutcomeSummary, AgentRole, AgentType, RewardAttributionSummary, RewardSource,
+    };
 
     fn reward(reason: RewardReason, tag: Option<&str>, value: f32) -> AgentRewardSignal {
         AgentRewardSignal::new(
@@ -983,5 +1173,121 @@ mod tests {
         assert_eq!(by_team["gloam-mesh"].projected_death_marks, 2);
         assert_eq!(by_team["iron-sigil"].projected_score, 15);
         assert_eq!(by_team["iron-sigil"].projected_death_marks, 0);
+    }
+
+    #[test]
+    fn collect_reward_reason_stats_aggregates_counts_and_totals() {
+        let signals = vec![
+            reward(RewardReason::DamageDealt, None, 1.5),
+            reward(RewardReason::DamageDealt, None, 2.0),
+            reward(RewardReason::LootClaimed, None, 0.75),
+        ];
+
+        let stats = collect_reward_reason_stats(signals.iter());
+
+        assert_eq!(
+            stats,
+            vec![
+                RewardReasonStat {
+                    reason: "damage_dealt".into(),
+                    count: 2,
+                    total_value: 3.5,
+                },
+                RewardReasonStat {
+                    reason: "loot_claimed".into(),
+                    count: 1,
+                    total_value: 0.75,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn dataset_summary_aggregates_rows_across_worlds() {
+        let rows = vec![
+            RewardDatasetRow {
+                world_id: "deadman-prime".into(),
+                world_role: WorldRealityRole::Tournament,
+                world_seed: 11,
+                runtime_profile: AgentRuntimeProfile {
+                    role: AgentRole::Player,
+                    agent_type: AgentType::NeuralAgent,
+                    ..Default::default()
+                },
+                sample: ReplayTrainingSample {
+                    tick: 3,
+                    agent_id: pod_core::AgentId::default(),
+                    path_distance: 1.25,
+                    action_outcomes: ActionOutcomeSummary {
+                        submitted: 1,
+                        executed: 1,
+                        rejected: 0,
+                        queued: 0,
+                    },
+                    encounter_transition: None,
+                    tool_call_latency_ms: 0,
+                    tool_call_error_count: 0,
+                    reward_summary: RewardAttributionSummary {
+                        signal_count: 2,
+                        total: 2.25,
+                        positive_total: 2.25,
+                        negative_total: 0.0,
+                        terminal: false,
+                    },
+                },
+                reward_reasons: vec![RewardReasonStat {
+                    reason: "damage_dealt".into(),
+                    count: 2,
+                    total_value: 2.25,
+                }],
+            },
+            RewardDatasetRow {
+                world_id: "deadman-shadow".into(),
+                world_role: WorldRealityRole::Shadow,
+                world_seed: 22,
+                runtime_profile: AgentRuntimeProfile {
+                    role: AgentRole::Player,
+                    agent_type: AgentType::LlmAgent,
+                    ..Default::default()
+                },
+                sample: ReplayTrainingSample {
+                    tick: 4,
+                    agent_id: pod_core::AgentId::default(),
+                    path_distance: 0.5,
+                    action_outcomes: ActionOutcomeSummary {
+                        submitted: 1,
+                        executed: 0,
+                        rejected: 1,
+                        queued: 0,
+                    },
+                    encounter_transition: None,
+                    tool_call_latency_ms: 30,
+                    tool_call_error_count: 1,
+                    reward_summary: RewardAttributionSummary {
+                        signal_count: 2,
+                        total: -3.25,
+                        positive_total: 0.0,
+                        negative_total: -3.25,
+                        terminal: true,
+                    },
+                },
+                reward_reasons: vec![RewardReasonStat {
+                    reason: "death_taken".into(),
+                    count: 1,
+                    total_value: -3.25,
+                }],
+            },
+        ];
+
+        let summary = summarize_dataset_rows(&rows);
+
+        assert_eq!(summary.row_count, 2);
+        assert_eq!(summary.terminal_row_count, 1);
+        assert!((summary.total + 1.0).abs() < f32::EPSILON);
+        assert!((summary.positive_total - 2.25).abs() < f32::EPSILON);
+        assert!((summary.negative_total + 3.25).abs() < f32::EPSILON);
+        assert_eq!(summary.reasons.len(), 2);
+        assert_eq!(summary.reasons[0].reason, "damage_dealt");
+        assert_eq!(summary.reasons[1].reason, "death_taken");
     }
 }

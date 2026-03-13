@@ -1701,5 +1701,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
   - `git diff --check`
 
-**Last updated**: Iteration 160
-**Current focus**: Iteration 161 add reward-aware replay dataset export/report surfaces, then thread team/world identity and deterministic cross-world effect application through `apps/pod-headless`
+### Iteration 161
+- [x] Extended `apps/pod-headless` with `--dataset-output`, so the new app can emit a reward-aware dataset artifact in addition to the scenario summary report.
+- [x] Added replay-derived dataset rows that carry world metadata, runtime profile metadata, `ReplayTrainingSample`, and authoritative reward-reason breakdowns for each agent/tick row.
+- [x] Added dataset summary aggregation to the main `pod-headless` report so reward totals and reason counts are visible even when only the scenario report is consumed.
+- [x] Added deterministic coverage for reward-reason aggregation and dataset summary totals, then revalidated the live app path with both `--output` and `--dataset-output`.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 161
+**Current focus**: Iteration 162 thread admission-aware team/world identity and deterministic authority-side cross-world effect application through `apps/pod-headless`

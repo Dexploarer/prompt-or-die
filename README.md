@@ -19,6 +19,7 @@ Prompt or Die is an open-source game platform for building games where autonomou
 cargo build --workspace
 cargo run --bin prompt-or-die
 cargo run --bin pod-headless -- --profile ci-smoke
+cargo run --bin pod-headless -- --profile ci-smoke --dataset-output /tmp/pod-headless-dataset.json
 cargo run --bin pod-server
 cargo test --workspace
 cargo check --workspace

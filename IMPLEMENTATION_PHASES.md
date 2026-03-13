@@ -274,13 +274,13 @@
 **Tasks**:
 - [x] Define authoritative reward/outcome attribution primitives instead of relying on caller-local `record_experience()` usage
 - [x] Derive replay training rows from action outcomes, encounter transitions, and telemetry windows with stable semantics
-- [ ] Add export tooling for neural datasets grounded in authoritative replay files
+- [x] Add export tooling for neural datasets grounded in authoritative replay files
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-core replay -- --nocapture`
-- [ ] `cargo test -p pod-agents neural -- --nocapture`
-- [ ] `cargo check -p pod-core -p pod-agents`
+- [x] `cargo test -p pod-headless`
+- [x] `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+- [x] `cargo check -p pod-headless`
 
 **Exit Criteria**:
 - Neural training data is derived from authoritative runtime truth

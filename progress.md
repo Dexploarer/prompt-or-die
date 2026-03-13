@@ -359,3 +359,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-headless`
   - `cargo check -p pod-headless`
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
+- Extended `apps/pod-headless` with `--dataset-output`, which now writes reward-aware dataset JSON containing replay-derived training rows enriched with world metadata, runtime profile metadata, and authoritative reward-reason breakdowns.
+- Added dataset-summary aggregation to the main scenario report so total reward, polarity splits, and per-reason counts are visible without opening the full dataset artifact.
+- Revalidated the dataset-export slice with:
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-headless`
+  - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`

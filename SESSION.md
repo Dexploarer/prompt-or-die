@@ -193,11 +193,11 @@
 **Progress**:
 - [x] Define authoritative reward/outcome attribution primitives instead of relying on caller-local `record_experience()` usage
 - [x] Derive replay training rows from action outcomes, encounter transitions, and telemetry windows with stable semantics
-- [ ] Add export tooling for neural datasets grounded in authoritative replay files
+- [x] Added reward-aware dataset export in `apps/pod-headless` via `--dataset-output`, emitting replay-derived training rows enriched with runtime profile metadata and authoritative reward reasons
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Add explicit reward-aware dataset export/report surfaces on top of the new authoritative telemetry signals so the neural path has a first-class training artifact, then thread those exports into the new headless runner.
+- Thread team/world identity through the new headless dataset/report path so standings and dataset rows stop being world-level aggregates and become admission-aware agent-team samples.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -214,4 +214,4 @@
 - [ ] Thread world identity and team admission through remote topology and evaluation harnesses
 
 **Next Action**:
-- Keep Phase 11 active for reward-aware dataset export, then upgrade `apps/pod-headless` from projection-only standings to admission-aware multi-world team execution and authority-side cross-world effect application.
+- Upgrade `apps/pod-headless` from projection-only standings to admission-aware multi-world team execution and authority-side cross-world effect application.
