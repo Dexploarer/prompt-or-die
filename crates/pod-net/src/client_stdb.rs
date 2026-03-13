@@ -1311,6 +1311,11 @@ impl SpacetimeDBClient {
         self.inner.resolved_remote_applied_world_state()
     }
 
+    /// Resolve the admitted roster summary for this client's active world.
+    pub fn remote_world_admissions(&self) -> Option<&pod_core::WorldAdmissionSummary> {
+        self.inner.resolved_remote_world_admissions()
+    }
+
     /// Resolve the replay/evaluation summary for this client's active world.
     pub fn remote_world_evaluation(&self) -> Option<&WorldEvaluationSummary> {
         self.inner.resolved_remote_world_evaluation()
@@ -2156,6 +2161,7 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 quest_graph_ids: vec!["deadman-shadow-collapse".into()],
             }],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2251,6 +2257,7 @@ mod tests {
             )],
             links: vec![],
             world_quest_bindings: vec![],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2373,6 +2380,14 @@ mod tests {
                 world_id: "deadman-prime".into(),
                 quest_graph_ids: vec!["deadman-prime-season".into()],
             }],
+            world_admissions: vec![pod_core::WorldAdmissionSummary {
+                world_id: "deadman-prime".into(),
+                assignments: vec![pod_core::WorldAdmissionAssignment {
+                    agent_id: agent_id_from_entity(7).to_string(),
+                    team_id: "iron-sigil".into(),
+                    slot_index: 0,
+                }],
+            }],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2404,6 +2419,17 @@ mod tests {
             hero.metadata.world_active_quest_graph_ids,
             vec!["deadman-prime-season".to_string()]
         );
+        let admissions = client
+            .remote_world_admissions()
+            .expect("resolved world admissions");
+        assert_eq!(admissions.world_id, "deadman-prime");
+        assert_eq!(admissions.assignments.len(), 1);
+        assert_eq!(
+            admissions.assignments[0].agent_id,
+            agent_id_from_entity(7).to_string()
+        );
+        assert_eq!(admissions.assignments[0].team_id, "iron-sigil");
+        assert_eq!(admissions.assignments[0].slot_index, 0);
     }
 
     #[test]
@@ -2457,6 +2483,7 @@ mod tests {
                     quest_graph_ids: vec!["deadman-shadow-hunt".into()],
                 },
             ],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2604,6 +2631,7 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2703,6 +2731,7 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2811,6 +2840,7 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2890,6 +2920,7 @@ mod tests {
                 world_id: "deadman-shadow".into(),
                 quest_graph_ids: vec!["deadman-shadow-collapse".into()],
             }],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3079,6 +3110,7 @@ mod tests {
                     quest_graph_ids: vec!["deadman-shadow-hunt".into()],
                 },
             ],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3188,6 +3220,7 @@ mod tests {
                     quest_graph_ids: vec!["deadman-shadow-collapse".into()],
                 },
             ],
+            world_admissions: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),

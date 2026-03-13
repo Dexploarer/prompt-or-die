@@ -244,10 +244,13 @@ so external generated hosts no longer need manual adapter injection. The
 remaining gap is threading that live SDK-backed feed into the
 parity/evaluation harnesses, not redefining the contract or publication format
 itself. The topology parity contract is shared now too: `pod-core` owns
+`assign_roster_to_world_teams(...)`, `build_world_admission_summary(...)`,
 `build_remote_topology_bundle(...)`, `RemoteTopologyParitySummary`, plus the
 `build_world_quest_bindings(...)` and `build_remote_topology_parity_summary(...)`
 helpers, so `pod-headless`, benchmark surfaces, and future remote consumers do
-not carry private copies of topology assembly/comparison logic.
+not carry private copies of topology assembly/comparison logic. Admission-aware
+team-slot assignment now travels in `RemoteTopologyBundle.world_admissions`
+instead of staying headless-local.
 that comparison logic.
 
 This matters for integration because the long-term remote/headless surface is

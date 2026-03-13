@@ -355,6 +355,7 @@
 - [x] Define native contract types for teams, worlds, tournaments, and cross-world links
 - [x] Add a headless team/world runner that can operate without the browser client
 - [x] Define deterministic cross-world effect application rules at authority boundaries
+- [x] Share world admission summaries and team-slot assignment through `pod-core` topology contracts instead of keeping roster admission app-local
 - [x] Add a shared remote-topology export contract for world quest bindings, applied world state, and scenario evaluation
 - [x] Consume the shared remote-topology artifact through remote execution topology
 - [x] Add replay/evaluation coverage for linked-world tournaments and neural swarms

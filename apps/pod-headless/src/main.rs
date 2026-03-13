@@ -5,16 +5,19 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
-    build_remote_topology_bundle, build_remote_topology_parity_summary, build_world_quest_bindings,
-    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
-    AgentType, AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
-    CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
-    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
-    ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
-    QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, RemoteTopologyParitySummary,
+    build_remote_topology_bundle, build_remote_topology_parity_summary,
+    build_world_admission_summary, build_world_quest_bindings,
+    run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile,
+    AgentTeamDefinition, AgentType, AppliedWorldStateSummary,
+    ControllerEvaluationSummary, CrossWorldEffect, CrossWorldLinkDefinition,
+    CrossWorldPropagation, FlagshipMmoAcceptanceConfig, FlagshipMmoAcceptanceResult,
+    FlagshipMmoAcceptanceSummary, NamedDeltaSummary, ObjectiveShiftSummary,
+    QuestLineStateSummary, QuestStageApplicationSummary, QuestStageDefinition,
+    QuestStateGraph, RemoteTopologyBundle, RemoteTopologyParitySummary,
     ReplayTrainingSample, RewardReason, ScenarioEvaluationSummary, TeamControlMode,
-    TeamDeathMarkSummary, TeamDeltaSummary, TournamentEliminationMode, WorldEvaluationSummary,
-    WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+    TeamDeathMarkSummary, TeamDeltaSummary, TournamentEliminationMode,
+    WorldAdmissionSummary, WorldEvaluationSummary, WorldQuestBinding,
+    WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
 
@@ -60,6 +63,7 @@ struct HeadlessAppReport {
     links: Vec<CrossWorldLinkDefinition>,
     quest_graphs: Vec<QuestStateGraph>,
     world_quest_bindings: Vec<WorldQuestBinding>,
+    world_admissions: Vec<WorldAdmissionSummary>,
     world_runs: Vec<WorldRunReport>,
     dataset_summary: RewardDatasetSummary,
     cross_world_projections: Vec<CrossWorldProjectionReport>,
@@ -656,6 +660,12 @@ fn run_scenario(
         &applied_world_states,
     );
     let evaluation = build_scenario_evaluation(&dataset_worlds, &applied_world_states);
+    let world_admissions = executions
+        .iter()
+        .map(|execution| {
+            world_admission_summary_for_result(&execution.world, &execution.result, &scenario.teams)
+        })
+        .collect::<Vec<_>>();
 
     let generated_at_unix_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -679,6 +689,7 @@ fn run_scenario(
         &scenario.links,
         &scenario.quest_graphs,
         &scenario.world_quest_graph_ids,
+        &world_admissions,
         &applied_world_states,
         &evaluation,
     );
@@ -688,6 +699,7 @@ fn run_scenario(
         &scenario.links,
         &scenario.quest_graphs,
         &world_quest_bindings,
+        &world_admissions,
         &applied_world_states,
         &evaluation,
         &topology,
@@ -705,6 +717,7 @@ fn run_scenario(
             links: scenario.links,
             quest_graphs: scenario.quest_graphs,
             world_quest_bindings: topology.world_quest_bindings.clone(),
+            world_admissions: topology.world_admissions.clone(),
             world_runs: executions
                 .into_iter()
                 .map(|execution| execution.report)
@@ -840,7 +853,11 @@ fn build_dataset_rows(
     let samples = result.training_samples();
     let mut sample_index = 0usize;
     let mut rows = Vec::with_capacity(samples.len());
-    let admissions = build_world_admissions(world, result, teams);
+    let admissions = world_admission_summary_for_result(world, result, teams)
+        .assignments
+        .into_iter()
+        .map(|assignment| (assignment.agent_id.clone(), assignment))
+        .collect::<BTreeMap<_, _>>();
 
     for window in result.telemetry_windows() {
         for agent in &window.agents {
@@ -861,6 +878,25 @@ fn build_dataset_rows(
     }
 
     rows
+}
+
+fn world_admission_summary_for_result(
+    world: &WorldRealityDefinition,
+    result: &FlagshipMmoAcceptanceResult,
+    teams: &[AgentTeamDefinition],
+) -> WorldAdmissionSummary {
+    let roster = result
+        .telemetry_windows()
+        .first()
+        .map(|window| {
+            window
+                .agents
+                .iter()
+                .map(|agent| agent.agent_id.0.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    build_world_admission_summary(&roster, world, teams)
 }
 
 fn summarize_dataset_rows(rows: &[RewardDatasetRow]) -> RewardDatasetSummary {
@@ -905,99 +941,6 @@ fn summarize_dataset_rows(rows: &[RewardDatasetRow]) -> RewardDatasetSummary {
             })
             .collect(),
     }
-}
-
-#[derive(Debug, Clone)]
-struct TeamAdmissionAssignment {
-    team_id: String,
-    slot_index: u16,
-}
-
-fn build_world_admissions(
-    world: &WorldRealityDefinition,
-    result: &FlagshipMmoAcceptanceResult,
-    teams: &[AgentTeamDefinition],
-) -> BTreeMap<String, TeamAdmissionAssignment> {
-    let Some(first_window) = result.telemetry_windows().first() else {
-        return BTreeMap::new();
-    };
-
-    let mut roster = first_window
-        .agents
-        .iter()
-        .map(|agent| agent.agent_id.0.to_string())
-        .collect::<Vec<_>>();
-    roster.sort();
-
-    let team_lookup = teams
-        .iter()
-        .map(|team| (team.team_id.clone(), team))
-        .collect::<BTreeMap<_, _>>();
-
-    assign_roster_to_world_teams(&roster, world, &team_lookup)
-}
-
-fn assign_roster_to_world_teams(
-    roster: &[String],
-    world: &WorldRealityDefinition,
-    team_lookup: &BTreeMap<String, &AgentTeamDefinition>,
-) -> BTreeMap<String, TeamAdmissionAssignment> {
-    let active_teams = world
-        .active_team_ids
-        .iter()
-        .filter_map(|team_id| team_lookup.get(team_id).copied())
-        .filter(|team| {
-            team.allowed_world_ids
-                .iter()
-                .any(|world_id| world_id == &world.world_id)
-        })
-        .collect::<Vec<_>>();
-    if active_teams.is_empty() {
-        return BTreeMap::new();
-    }
-
-    let mut assignments = BTreeMap::new();
-    let mut team_slots = active_teams
-        .iter()
-        .map(|team| (team.team_id.clone(), 0u16))
-        .collect::<BTreeMap<_, _>>();
-    let mut team_index = 0usize;
-
-    for agent_id in roster {
-        let mut selected = None;
-        for offset in 0..active_teams.len() {
-            let candidate_index = (team_index + offset) % active_teams.len();
-            let candidate = active_teams[candidate_index];
-            let next_slot = *team_slots
-                .get(&candidate.team_id)
-                .expect("candidate team has slot entry");
-            if next_slot < candidate.max_agents {
-                selected = Some((candidate_index, candidate.team_id.clone(), next_slot));
-                break;
-            }
-        }
-
-        if let Some((selected_index, team_id, slot_index)) = selected {
-            assignments.insert(
-                agent_id.clone(),
-                TeamAdmissionAssignment {
-                    team_id,
-                    slot_index,
-                },
-            );
-            if let Some(slot) = team_slots.get_mut(
-                &assignments
-                    .get(agent_id)
-                    .expect("assignment inserted")
-                    .team_id,
-            ) {
-                *slot += 1;
-            }
-            team_index = (selected_index + 1) % active_teams.len();
-        }
-    }
-
-    assignments
 }
 
 fn build_projection_report(
@@ -1939,18 +1882,16 @@ mod tests {
             active_team_ids: vec!["iron-sigil".into(), "gloam-mesh".into()],
         };
         let teams = vec![iron_sigil, gloam_mesh];
-        let team_lookup = teams
-            .iter()
-            .map(|team| (team.team_id.clone(), team))
-            .collect::<BTreeMap<_, _>>();
         let roster = vec![
             "agent-a".to_string(),
             "agent-b".to_string(),
             "agent-c".to_string(),
             "agent-d".to_string(),
         ];
-
-        let assignments = assign_roster_to_world_teams(&roster, &world, &team_lookup);
+        let assignments = assign_roster_to_world_teams(&roster, &world, &teams)
+            .iter()
+            .map(|assignment| (assignment.agent_id.clone(), assignment.clone()))
+            .collect::<BTreeMap<_, _>>();
 
         assert_eq!(assignments["agent-a"].team_id, "iron-sigil");
         assert_eq!(assignments["agent-b"].team_id, "gloam-mesh");
@@ -2657,6 +2598,14 @@ mod tests {
                 }],
             )],
             &BTreeMap::from([("deadman-prime".into(), vec!["deadman-prime-season".into()])]),
+            &[WorldAdmissionSummary {
+                world_id: "deadman-prime".into(),
+                assignments: vec![pod_core::WorldAdmissionAssignment {
+                    agent_id: "agent-a".into(),
+                    team_id: "iron-sigil".into(),
+                    slot_index: 0,
+                }],
+            }],
             &[AppliedWorldStateReport {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -2723,6 +2672,7 @@ mod tests {
         assert_eq!(bundle.profile_id, "ci-smoke");
         assert_eq!(bundle.world_quest_bindings.len(), 1);
         assert_eq!(bundle.world_quest_bindings[0].world_id, "deadman-prime");
+        assert_eq!(bundle.world_admissions[0].assignments[0].team_id, "iron-sigil");
         assert_eq!(
             bundle.world_quest_bindings[0].quest_graph_ids,
             vec!["deadman-prime-season".to_string()]
@@ -2799,6 +2749,24 @@ mod tests {
                 ("deadman-prime".into(), vec!["deadman-prime-season".into()]),
                 ("deadman-shadow".into(), vec!["deadman-shadow-hunt".into()]),
             ]),
+            &[
+                WorldAdmissionSummary {
+                    world_id: "deadman-prime".into(),
+                    assignments: vec![pod_core::WorldAdmissionAssignment {
+                        agent_id: "agent-a".into(),
+                        team_id: "iron-sigil".into(),
+                        slot_index: 0,
+                    }],
+                },
+                WorldAdmissionSummary {
+                    world_id: "deadman-shadow".into(),
+                    assignments: vec![pod_core::WorldAdmissionAssignment {
+                        agent_id: "agent-b".into(),
+                        team_id: "gloam-mesh".into(),
+                        slot_index: 0,
+                    }],
+                },
+            ],
             &[
                 AppliedWorldStateReport {
                     world_id: "deadman-prime".into(),
@@ -3020,6 +2988,14 @@ mod tests {
                 }],
             }],
         }];
+        let world_admissions = vec![WorldAdmissionSummary {
+            world_id: "deadman-prime".into(),
+            assignments: vec![pod_core::WorldAdmissionAssignment {
+                agent_id: "agent-a".into(),
+                team_id: "iron-sigil".into(),
+                slot_index: 0,
+            }],
+        }];
         let evaluation = ScenarioEvaluationReport {
             controller_mix: vec![ControllerEvaluationReport {
                 agent_type: "neural_agent".into(),
@@ -3060,6 +3036,7 @@ mod tests {
             &links,
             &quest_graphs,
             &world_quest_graph_ids,
+            &world_admissions,
             &applied_world_states,
             &evaluation,
         );
@@ -3070,6 +3047,7 @@ mod tests {
             &links,
             &quest_graphs,
             &build_world_quest_bindings(&world_quest_graph_ids),
+            &world_admissions,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3125,6 +3103,14 @@ mod tests {
             unresolved_objective_state_shifts: vec![],
             quest_lines: vec![],
         }];
+        let world_admissions = vec![WorldAdmissionSummary {
+            world_id: "deadman-prime".into(),
+            assignments: vec![pod_core::WorldAdmissionAssignment {
+                agent_id: "agent-a".into(),
+                team_id: "iron-sigil".into(),
+                slot_index: 0,
+            }],
+        }];
         let evaluation = ScenarioEvaluationReport {
             controller_mix: vec![],
             worlds: vec![WorldEvaluationReport {
@@ -3155,10 +3141,12 @@ mod tests {
             &[],
             &quest_graphs,
             &world_quest_graph_ids,
+            &world_admissions,
             &applied_world_states,
             &evaluation,
         );
         topology.world_quest_bindings.clear();
+        topology.world_admissions.clear();
         topology.evaluation.worlds.clear();
 
         let parity = build_remote_topology_parity_summary(
@@ -3167,6 +3155,7 @@ mod tests {
             &[],
             &quest_graphs,
             &build_world_quest_bindings(&world_quest_graph_ids),
+            &world_admissions,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -3174,9 +3163,14 @@ mod tests {
 
         assert!(!parity.consistent);
         assert!(!parity.world_quest_bindings_match);
+        assert!(!parity.world_admissions_match);
         assert!(!parity.evaluation_match);
         assert_eq!(
             parity.missing_world_quest_binding_ids,
+            vec!["deadman-prime".to_string()]
+        );
+        assert_eq!(
+            parity.missing_world_admission_ids,
             vec!["deadman-prime".to_string()]
         );
         assert_eq!(

@@ -1928,7 +1928,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
 **Last updated**: Iteration 188
-**Current focus**: Iteration 190 choose the next post-audit runtime phase
+**Current focus**: Iteration 191 promote world admission into the shared topology contract, then choose the next post-audit runtime phase on top of that control surface
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1948,6 +1948,9 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added deterministic remote-agent stale-decision coverage in `crates/pod-net/src/client_stdb.rs` plus the supporting `pod-stdb` cache assertion, and revalidated with targeted `pod-core`, `pod-stdb`, and `pod-net` tests plus `cargo check`.
 - [x] Added `scripts/compare_moat_snapshots.ts` plus `scripts/compare_moat_snapshots.test.ts`, so committed shard-target monthly snapshots can now be compared as a structured report instead of manual JSON inspection.
 - [x] Documented the comparison command in `README.md` and `docs/benchmark-suite.md`, and moved the roadmap backlog forward so the remaining missed item is the red browser render-route gate.
+- [x] Added `WorldAdmissionAssignment`, `WorldAdmissionSummary`, `assign_roster_to_world_teams(...)`, and `build_world_admission_summary(...)` in `crates/pod-core/src/contract.rs`, so admitted team-slot assignment is now a shared topology contract instead of `apps/pod-headless` private logic.
+- [x] Extended `RemoteTopologyBundle` and `RemoteTopologyParitySummary` with `world_admissions`, then moved `apps/pod-headless`, `crates/pod-stdb`, and `crates/pod-net` onto that shared admission surface.
+- [x] Added deterministic contract/headless/client coverage for the shared admission surface, including `pod-net::SpacetimeDBClient::remote_world_admissions()`.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

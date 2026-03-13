@@ -814,6 +814,104 @@ pub fn build_world_quest_bindings(
         .collect()
 }
 
+/// Admission of one agent into one world-scoped team slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldAdmissionAssignment {
+    pub agent_id: String,
+    pub team_id: String,
+    pub slot_index: u16,
+}
+
+impl WorldAdmissionAssignment {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("world_admission_assignment", self)
+    }
+}
+
+/// Deterministic roster admission for one world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldAdmissionSummary {
+    pub world_id: String,
+    pub assignments: Vec<WorldAdmissionAssignment>,
+}
+
+impl WorldAdmissionSummary {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("world_admission_summary", self)
+    }
+}
+
+pub fn assign_roster_to_world_teams(
+    roster: &[String],
+    world: &WorldRealityDefinition,
+    teams: &[AgentTeamDefinition],
+) -> Vec<WorldAdmissionAssignment> {
+    let active_teams = world
+        .active_team_ids
+        .iter()
+        .filter_map(|team_id| teams.iter().find(|team| &team.team_id == team_id))
+        .filter(|team| {
+            team.allowed_world_ids
+                .iter()
+                .any(|world_id| world_id == &world.world_id)
+        })
+        .collect::<Vec<_>>();
+    if active_teams.is_empty() {
+        return Vec::new();
+    }
+
+    let mut roster = roster.to_vec();
+    roster.sort();
+    roster.dedup();
+
+    let mut assignments = Vec::new();
+    let mut team_slots = active_teams
+        .iter()
+        .map(|team| (team.team_id.clone(), 0u16))
+        .collect::<BTreeMap<_, _>>();
+    let mut team_index = 0usize;
+
+    for agent_id in roster {
+        let mut selected = None;
+        for offset in 0..active_teams.len() {
+            let candidate_index = (team_index + offset) % active_teams.len();
+            let candidate = active_teams[candidate_index];
+            let next_slot = *team_slots
+                .get(&candidate.team_id)
+                .expect("candidate team has slot entry");
+            if next_slot < candidate.max_agents {
+                selected = Some((candidate_index, candidate.team_id.clone(), next_slot));
+                break;
+            }
+        }
+
+        if let Some((selected_index, team_id, slot_index)) = selected {
+            assignments.push(WorldAdmissionAssignment {
+                agent_id,
+                team_id: team_id.clone(),
+                slot_index,
+            });
+            if let Some(slot) = team_slots.get_mut(&team_id) {
+                *slot += 1;
+            }
+            team_index = (selected_index + 1) % active_teams.len();
+        }
+    }
+
+    assignments
+}
+
+pub fn build_world_admission_summary(
+    roster: &[String],
+    world: &WorldRealityDefinition,
+    teams: &[AgentTeamDefinition],
+) -> WorldAdmissionSummary {
+    WorldAdmissionSummary {
+        world_id: world.world_id.clone(),
+        assignments: assign_roster_to_world_teams(roster, world, teams),
+    }
+}
+
 /// Aggregate score effect applied to a team inside a world.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TeamDeltaSummary {
@@ -937,6 +1035,7 @@ pub struct RemoteTopologyBundle {
     pub worlds: Vec<WorldRealityDefinition>,
     pub links: Vec<CrossWorldLinkDefinition>,
     pub world_quest_bindings: Vec<WorldQuestBinding>,
+    pub world_admissions: Vec<WorldAdmissionSummary>,
     pub quest_graphs: Vec<QuestStateGraph>,
     pub applied_world_states: Vec<AppliedWorldStateSummary>,
     pub evaluation: ScenarioEvaluationSummary,
@@ -958,6 +1057,7 @@ pub fn build_remote_topology_bundle(
     links: &[CrossWorldLinkDefinition],
     quest_graphs: &[QuestStateGraph],
     world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
+    world_admissions: &[WorldAdmissionSummary],
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
 ) -> RemoteTopologyBundle {
@@ -971,6 +1071,7 @@ pub fn build_remote_topology_bundle(
         worlds: worlds.to_vec(),
         links: links.to_vec(),
         world_quest_bindings: build_world_quest_bindings(world_quest_graph_ids),
+        world_admissions: world_admissions.to_vec(),
         quest_graphs: quest_graphs.to_vec(),
         applied_world_states: applied_world_states.to_vec(),
         evaluation: evaluation.clone(),
@@ -987,10 +1088,13 @@ pub struct RemoteTopologyParitySummary {
     pub links_match: bool,
     pub quest_graphs_match: bool,
     pub world_quest_bindings_match: bool,
+    pub world_admissions_match: bool,
     pub applied_world_states_match: bool,
     pub evaluation_match: bool,
     pub missing_world_quest_binding_ids: Vec<String>,
     pub unexpected_world_quest_binding_ids: Vec<String>,
+    pub missing_world_admission_ids: Vec<String>,
+    pub unexpected_world_admission_ids: Vec<String>,
     pub missing_applied_world_ids: Vec<String>,
     pub unexpected_applied_world_ids: Vec<String>,
     pub missing_evaluation_world_ids: Vec<String>,
@@ -1009,6 +1113,7 @@ pub fn build_remote_topology_parity_summary(
     links: &[CrossWorldLinkDefinition],
     quest_graphs: &[QuestStateGraph],
     world_quest_bindings: &[WorldQuestBinding],
+    world_admissions: &[WorldAdmissionSummary],
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
     topology: &RemoteTopologyBundle,
@@ -1026,10 +1131,19 @@ pub fn build_remote_topology_parity_summary(
         .iter()
         .map(|state| state.world_id.clone())
         .collect::<BTreeSet<_>>();
+    let expected_admission_ids = world_admissions
+        .iter()
+        .map(|summary| summary.world_id.clone())
+        .collect::<BTreeSet<_>>();
     let actual_applied_ids = topology
         .applied_world_states
         .iter()
         .map(|state| state.world_id.clone())
+        .collect::<BTreeSet<_>>();
+    let actual_admission_ids = topology
+        .world_admissions
+        .iter()
+        .map(|summary| summary.world_id.clone())
         .collect::<BTreeSet<_>>();
     let expected_evaluation_ids = evaluation
         .worlds
@@ -1049,6 +1163,14 @@ pub fn build_remote_topology_parity_summary(
         .collect::<Vec<_>>();
     let unexpected_world_quest_binding_ids = actual_binding_ids
         .difference(&expected_binding_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let missing_world_admission_ids = expected_admission_ids
+        .difference(&actual_admission_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let unexpected_world_admission_ids = actual_admission_ids
+        .difference(&expected_admission_ids)
         .cloned()
         .collect::<Vec<_>>();
     let missing_applied_world_ids = expected_applied_ids
@@ -1073,6 +1195,7 @@ pub fn build_remote_topology_parity_summary(
     let links_match = topology.links == links;
     let quest_graphs_match = topology.quest_graphs == quest_graphs;
     let world_quest_bindings_match = topology.world_quest_bindings == world_quest_bindings;
+    let world_admissions_match = topology.world_admissions == world_admissions;
     let applied_world_states_match = topology.applied_world_states == applied_world_states;
     let evaluation_match = topology.evaluation == *evaluation;
     let consistent = teams_match
@@ -1080,6 +1203,7 @@ pub fn build_remote_topology_parity_summary(
         && links_match
         && quest_graphs_match
         && world_quest_bindings_match
+        && world_admissions_match
         && applied_world_states_match
         && evaluation_match;
 
@@ -1090,10 +1214,13 @@ pub fn build_remote_topology_parity_summary(
         links_match,
         quest_graphs_match,
         world_quest_bindings_match,
+        world_admissions_match,
         applied_world_states_match,
         evaluation_match,
         missing_world_quest_binding_ids,
         unexpected_world_quest_binding_ids,
+        missing_world_admission_ids,
+        unexpected_world_admission_ids,
         missing_applied_world_ids,
         unexpected_applied_world_ids,
         missing_evaluation_world_ids,
@@ -1230,7 +1357,8 @@ mod tests {
     use crate::toon::decode_toon_value;
 
     use super::{
-        build_remote_topology_bundle, build_remote_topology_parity_summary,
+        assign_roster_to_world_teams, build_remote_topology_bundle,
+        build_remote_topology_parity_summary, build_world_admission_summary,
         build_world_quest_bindings, AgentCapabilities, AgentRole, AgentRuntimeProfile,
         AgentTeamDefinition, AppliedWorldStateSummary, ControllerEvaluationSummary,
         CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
@@ -1241,11 +1369,12 @@ mod tests {
         ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary, TeamDeltaSummary,
         ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
         ToolPolicy, TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
-        VersionedTickTelemetry, WorldChunkDefinition, WorldEvaluationSummary,
-        WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
-        REMOTE_AGENT_MAX_ACTIONS_PER_TICK, REMOTE_AGENT_MAX_AUDIBLE_EVENTS,
-        REMOTE_AGENT_MAX_VISIBLE_ENTITIES, REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS,
-        REMOTE_AGENT_TIMEOUT_AFTER_TICKS, RUNTIME_CONTRACT_VERSION_V1,
+        VersionedTickTelemetry, WorldAdmissionAssignment, WorldAdmissionSummary,
+        WorldChunkDefinition, WorldEvaluationSummary, WorldRealityDefinition, WorldRealityRole,
+        WorldRegionDefinition, WorldTournamentDefinition, REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
+        REMOTE_AGENT_MAX_AUDIBLE_EVENTS, REMOTE_AGENT_MAX_VISIBLE_ENTITIES,
+        REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS, REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
+        RUNTIME_CONTRACT_VERSION_V1,
     };
 
     #[test]
@@ -1573,6 +1702,14 @@ mod tests {
             )],
             &[quest_graph],
             &BTreeMap::from([("deadman-prime".into(), vec!["deadman-prime-season".into()])]),
+            &[WorldAdmissionSummary {
+                world_id: "deadman-prime".into(),
+                assignments: vec![WorldAdmissionAssignment {
+                    agent_id: "agent-a".into(),
+                    team_id: "iron-sigil".into(),
+                    slot_index: 0,
+                }],
+            }],
             &[AppliedWorldStateSummary {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -1655,6 +1792,10 @@ mod tests {
             "deadman-prime-season"
         );
         assert_eq!(
+            value["payload"]["world_admissions"][0]["assignments"][0]["team_id"],
+            "iron-sigil"
+        );
+        assert_eq!(
             value["payload"]["applied_world_states"][0]["quest_lines"][0]["current_stage_ids"][0],
             "wilds-under-siege"
         );
@@ -1682,6 +1823,61 @@ mod tests {
                 "deadman-shadow-hunt".to_string(),
                 "deadman-shadow-rift".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn build_world_admission_summary_round_robins_roster_across_active_teams() {
+        let mut iron_sigil = AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime");
+        iron_sigil.allowed_world_ids = vec!["deadman-prime".into()];
+        let mut gloam_mesh = AgentTeamDefinition::new("gloam-mesh", "Gloam Mesh", "deadman-shadow");
+        gloam_mesh.allowed_world_ids = vec!["deadman-prime".into(), "deadman-shadow".into()];
+
+        let mut world =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        world.role = WorldRealityRole::Tournament;
+        world.active_team_ids = vec!["iron-sigil".into(), "gloam-mesh".into()];
+        let teams = vec![iron_sigil, gloam_mesh];
+        let roster = vec![
+            "agent-b".to_string(),
+            "agent-a".to_string(),
+            "agent-c".to_string(),
+            "agent-d".to_string(),
+        ];
+
+        let summary = build_world_admission_summary(&roster, &world, &teams);
+
+        assert_eq!(
+            summary,
+            WorldAdmissionSummary {
+                world_id: "deadman-prime".into(),
+                assignments: vec![
+                    WorldAdmissionAssignment {
+                        agent_id: "agent-a".into(),
+                        team_id: "iron-sigil".into(),
+                        slot_index: 0,
+                    },
+                    WorldAdmissionAssignment {
+                        agent_id: "agent-b".into(),
+                        team_id: "gloam-mesh".into(),
+                        slot_index: 0,
+                    },
+                    WorldAdmissionAssignment {
+                        agent_id: "agent-c".into(),
+                        team_id: "iron-sigil".into(),
+                        slot_index: 1,
+                    },
+                    WorldAdmissionAssignment {
+                        agent_id: "agent-d".into(),
+                        team_id: "gloam-mesh".into(),
+                        slot_index: 1,
+                    },
+                ],
+            }
+        );
+        assert_eq!(
+            assign_roster_to_world_teams(&roster, &world, &teams),
+            summary.assignments
         );
     }
 
@@ -1715,6 +1911,14 @@ mod tests {
             "deadman-prime".into(),
             vec!["deadman-prime-season".into()],
         )]));
+        let world_admissions = vec![WorldAdmissionSummary {
+            world_id: "deadman-prime".into(),
+            assignments: vec![WorldAdmissionAssignment {
+                agent_id: "agent-a".into(),
+                team_id: "iron-sigil".into(),
+                slot_index: 0,
+            }],
+        }];
         let applied_world_states = vec![AppliedWorldStateSummary {
             world_id: "deadman-prime".into(),
             display_name: "Deadman Prime".into(),
@@ -1758,11 +1962,13 @@ mod tests {
             worlds: worlds.clone(),
             links: vec![],
             world_quest_bindings: world_quest_bindings.clone(),
+            world_admissions: world_admissions.clone(),
             quest_graphs: quest_graphs.clone(),
             applied_world_states: applied_world_states.clone(),
             evaluation: evaluation.clone(),
         };
         topology.world_quest_bindings.clear();
+        topology.world_admissions.clear();
         topology.evaluation.worlds.clear();
 
         let parity = build_remote_topology_parity_summary(
@@ -1771,6 +1977,7 @@ mod tests {
             &[],
             &quest_graphs,
             &world_quest_bindings,
+            &world_admissions,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -1778,9 +1985,14 @@ mod tests {
 
         assert!(!parity.consistent);
         assert!(!parity.world_quest_bindings_match);
+        assert!(!parity.world_admissions_match);
         assert!(!parity.evaluation_match);
         assert_eq!(
             parity.missing_world_quest_binding_ids,
+            vec!["deadman-prime".to_string()]
+        );
+        assert_eq!(
+            parity.missing_world_admission_ids,
             vec!["deadman-prime".to_string()]
         );
         assert_eq!(
