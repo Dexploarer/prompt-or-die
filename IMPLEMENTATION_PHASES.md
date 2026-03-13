@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Feed `install_generated_sdk_runtime()` into the topology parity/evaluation harnesses when a live SpacetimeDB module is available, while keeping `GeneratedBindingRuntime` as the deterministic CI fallback.
+1. Run the new live generated SDK topology benchmark mode against a real SpacetimeDB module and capture the first comparable parity artifact.
 2. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history so topology-feed drift becomes historical, not just pass/fail.
 3. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.

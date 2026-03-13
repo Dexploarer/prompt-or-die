@@ -1927,7 +1927,10 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 181
-**Current focus**: Iteration 182 thread `install_generated_sdk_runtime()` into the topology parity/evaluation harnesses when a live SpacetimeDB module is available, while keeping `GeneratedBindingRuntime` as the deterministic CI/moat fallback
+**Last updated**: Iteration 182
+**Current focus**: Iteration 183 run the new live generated SDK topology benchmark mode against a real SpacetimeDB module and publish comparable shard-target topology feed history
+- [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
+- [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
+- [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
 - [x] Extracted `build_world_quest_bindings(...)`, `RemoteTopologyParitySummary`, and `build_remote_topology_parity_summary(...)` into `crates/pod-core/src/contract.rs`, so topology consistency checks are now shared engine contracts instead of `apps/pod-headless`-local report logic.
 - [x] Extracted `build_remote_topology_bundle(...)` into `crates/pod-core/src/contract.rs`, so `RemoteTopologyBundle` assembly now lives with the shared topology contract instead of `apps/pod-headless` local helpers.

@@ -41,6 +41,9 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -52,10 +55,11 @@ use pod_core::id::{AgentId, EntityId};
 use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
 
 use pod_stdb::client::{
-    CachedEntity, GeneratedBindingCommand, GeneratedBindingEndpoint,
+    CachedEntity, ConnectionState, GeneratedBindingCommand, GeneratedBindingEndpoint,
     GeneratedRemoteTopologyDocumentRow, StdbClient, StdbClientConfig, StdbConnectionMode,
     StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
+use pod_stdb::module_bindings::{self, publish_remote_topology_document};
 use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
 };
@@ -363,6 +367,42 @@ impl TopologyFeedMeasurementsReport {
     pub fn all_checks_passed(&self) -> bool {
         self.checks.iter().all(|check| check.passed)
     }
+}
+
+/// Configuration for exercising the generated path through the real SpacetimeDB SDK.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveGeneratedSdkTopologyFeedConfig {
+    pub host: String,
+    pub auth_token: Option<String>,
+    pub timeout_ms: u64,
+    pub poll_interval_ms: u64,
+}
+
+impl Default for LiveGeneratedSdkTopologyFeedConfig {
+    fn default() -> Self {
+        Self {
+            host: "http://localhost:3000".into(),
+            auth_token: None,
+            timeout_ms: 5_000,
+            poll_interval_ms: 10,
+        }
+    }
+}
+
+/// Select how the generated half of the topology benchmark should run.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum TopologyFeedGeneratedRuntimeMode {
+    /// Deterministic command-driven generated runtime used by CI and moat.
+    #[default]
+    DeterministicBinding,
+    /// Real generated SDK runtime backed by SpacetimeDB's generated Rust bindings.
+    LiveSdk(LiveGeneratedSdkTopologyFeedConfig),
+}
+
+/// Optional knobs for topology feed benchmarking.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TopologyFeedMeasurementsOptions {
+    pub generated_runtime_mode: TopologyFeedGeneratedRuntimeMode,
 }
 
 // ============================================================
@@ -1571,9 +1611,258 @@ fn collect_topology_feed_checks(
     ]
 }
 
+fn build_deterministic_generated_topology_feed_world_path_report(
+    topology: &RemoteTopologyBundle,
+    topology_json: &str,
+    world_id: &str,
+    row_id: u64,
+) -> Result<TopologyFeedWorldPathReport, StdbClientError> {
+    let mut generated_client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+        db_name: world_id.to_string(),
+        connection_mode: StdbConnectionMode::Generated,
+        ..Default::default()
+    });
+    let endpoint = generated_client.install_generated_binding_runtime();
+    let callbacks = endpoint.callbacks();
+    generated_client.connect()?;
+    let commands = endpoint.drain_commands();
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Connect { config }]
+                if config.db_name == world_id
+                    && matches!(config.connection_mode, StdbConnectionMode::Generated)
+        ),
+        "generated topology feed benchmark should request one connect command for {world_id}"
+    );
+    callbacks.connected(vec![7; 16], "tok-generated");
+    generated_client.inner_mut().frame_tick();
+    generated_client.subscribe_custom(vec!["SELECT * FROM remote_topology_document".into()])?;
+    let commands = endpoint.drain_commands();
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }]
+                if queries == &vec!["SELECT * FROM remote_topology_document".to_string()]
+        ),
+        "generated topology feed benchmark should request the topology subscription for {world_id}"
+    );
+    callbacks.subscription_applied();
+    generated_client.inner_mut().frame_tick();
+    callbacks.remote_topology_document_insert(GeneratedRemoteTopologyDocumentRow {
+        row_id,
+        generated_at_unix_ms: u64::try_from(topology.generated_at_unix_ms)
+            .map_err(|_| StdbClientError::Subscription("topology timestamp exceeds u64".into()))?,
+        scenario_id: topology.scenario_id.clone(),
+        profile_id: topology.profile_id.clone(),
+        world_count: topology.worlds.len() as u32,
+        team_count: topology.teams.len() as u32,
+        topology_json: topology_json.to_string(),
+    });
+    generated_client.inner_mut().frame_tick();
+    Ok(build_topology_feed_world_path_report(
+        &generated_client,
+        topology,
+        world_id,
+    ))
+}
+
+fn wait_for_live_generated_client_ready(
+    client: &mut SpacetimeDBClient,
+    config: &LiveGeneratedSdkTopologyFeedConfig,
+) -> Result<(), StdbClientError> {
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let _ = client.poll_updates();
+        if client.is_connected() && client.local_snapshot().is_some() {
+            return Ok(());
+        }
+
+        match client.inner().connection_state() {
+            ConnectionState::Error(message) => {
+                return Err(StdbClientError::Connection(message.clone()));
+            }
+            ConnectionState::Disconnected => {
+                return Err(StdbClientError::Connection(
+                    "generated SDK runtime disconnected before subscriptions applied".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Connection(
+                "timed out waiting for generated SDK runtime to connect and apply subscriptions"
+                    .into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+}
+
+fn connect_live_generated_sdk_publisher(
+    world_id: &str,
+    config: &LiveGeneratedSdkTopologyFeedConfig,
+) -> Result<module_bindings::DbConnection, StdbClientError> {
+    let connected = Arc::new(Mutex::new(false));
+    let connect_error = Arc::new(Mutex::new(None::<String>));
+    let disconnect_reason = Arc::new(Mutex::new(None::<String>));
+
+    let connection = module_bindings::DbConnection::builder()
+        .with_uri(config.host.clone())
+        .with_database_name(world_id.to_string())
+        .with_token(config.auth_token.clone())
+        .on_connect({
+            let connected = Arc::clone(&connected);
+            move |_connection, _identity, _token| {
+                *connected.lock().expect("publisher connect flag poisoned") = true;
+            }
+        })
+        .on_connect_error({
+            let connect_error = Arc::clone(&connect_error);
+            move |_ctx, error| {
+                *connect_error
+                    .lock()
+                    .expect("publisher connect error poisoned") = Some(error.to_string());
+            }
+        })
+        .on_disconnect({
+            let disconnect_reason = Arc::clone(&disconnect_reason);
+            move |_ctx, error| {
+                *disconnect_reason
+                    .lock()
+                    .expect("publisher disconnect poisoned") = Some(
+                    error
+                        .map(|error| error.to_string())
+                        .unwrap_or_else(|| "publisher disconnected".to_string()),
+                );
+            }
+        })
+        .build()
+        .map_err(|error| StdbClientError::Connection(error.to_string()))?;
+
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    while !*connected.lock().expect("publisher connect flag poisoned") {
+        connection
+            .frame_tick()
+            .map_err(|error| StdbClientError::Connection(error.to_string()))?;
+
+        if let Some(error) = connect_error
+            .lock()
+            .expect("publisher connect error poisoned")
+            .clone()
+        {
+            return Err(StdbClientError::Connection(error));
+        }
+
+        if let Some(reason) = disconnect_reason
+            .lock()
+            .expect("publisher disconnect poisoned")
+            .clone()
+        {
+            return Err(StdbClientError::Connection(reason));
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Connection(
+                "timed out waiting for live topology publisher connection".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+
+    Ok(connection)
+}
+
+fn build_live_generated_topology_feed_world_path_report(
+    topology: &RemoteTopologyBundle,
+    topology_json: &str,
+    world_id: &str,
+    config: &LiveGeneratedSdkTopologyFeedConfig,
+) -> Result<TopologyFeedWorldPathReport, StdbClientError> {
+    let mut generated_client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+        host: config.host.clone(),
+        db_name: world_id.to_string(),
+        auth_token: config.auth_token.clone(),
+        connection_mode: StdbConnectionMode::Generated,
+        ..Default::default()
+    });
+    generated_client.install_generated_sdk_runtime();
+    generated_client.subscribe_custom(vec!["SELECT * FROM remote_topology_document".into()])?;
+    generated_client.connect()?;
+    wait_for_live_generated_client_ready(&mut generated_client, config)?;
+
+    let publisher = connect_live_generated_sdk_publisher(world_id, config)?;
+    publisher
+        .reducers
+        .publish_remote_topology_document(topology_json.to_string())
+        .map_err(|error| StdbClientError::Reducer(error.to_string()))?;
+
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+    loop {
+        publisher
+            .frame_tick()
+            .map_err(|error| StdbClientError::Reducer(error.to_string()))?;
+        let _ = generated_client.poll_updates();
+
+        if generated_client.remote_world_id() == Some(world_id)
+            && generated_client.remote_applied_world_state().is_some()
+            && generated_client.remote_world_evaluation().is_some()
+        {
+            return Ok(build_topology_feed_world_path_report(
+                &generated_client,
+                topology,
+                world_id,
+            ));
+        }
+
+        match generated_client.inner().connection_state() {
+            ConnectionState::Error(message) => {
+                return Err(StdbClientError::Connection(message.clone()));
+            }
+            ConnectionState::Disconnected => {
+                return Err(StdbClientError::Connection(
+                    "generated SDK runtime disconnected before topology row arrived".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Connection(
+                "timed out waiting for generated SDK runtime topology row".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+}
+
 /// Replay a shared topology bundle through both authority-row and generated-mode ingestion paths.
 pub fn build_topology_feed_measurements(
     topology: &RemoteTopologyBundle,
+) -> Result<TopologyFeedMeasurementsReport, StdbClientError> {
+    build_topology_feed_measurements_with_options(
+        topology,
+        &TopologyFeedMeasurementsOptions::default(),
+    )
+}
+
+/// Replay a shared topology bundle through both authority-row and generated-mode ingestion paths,
+/// using explicit benchmark options for the generated half.
+pub fn build_topology_feed_measurements_with_options(
+    topology: &RemoteTopologyBundle,
+    options: &TopologyFeedMeasurementsOptions,
 ) -> Result<TopologyFeedMeasurementsReport, StdbClientError> {
     let topology_json = topology.to_toon_document();
     let generated_at_unix_ms = u64::try_from(topology.generated_at_unix_ms)
@@ -1599,45 +1888,24 @@ pub fn build_topology_feed_measurements(
         let authority_row =
             build_topology_feed_world_path_report(&authority_client, topology, &world_id);
 
-        let mut generated_client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
-            db_name: world_id.clone(),
-            connection_mode: StdbConnectionMode::Generated,
-            ..Default::default()
-        });
-        let endpoint = generated_client.install_generated_binding_runtime();
-        let callbacks = endpoint.callbacks();
-        generated_client.connect()?;
-        let commands = endpoint.drain_commands();
-        assert!(
-            matches!(
-                commands.as_slice(),
-                [GeneratedBindingCommand::Connect { config }]
-                    if config.db_name == world_id
-                        && matches!(config.connection_mode, StdbConnectionMode::Generated)
-            ),
-            "generated topology feed benchmark should request one connect command for {world_id}"
-        );
-        callbacks.connected(vec![7; 16], "tok-generated");
-        generated_client.inner_mut().frame_tick();
-        generated_client.subscribe_custom(vec!["SELECT * FROM remote_topology_document".into()])?;
-        let commands = endpoint.drain_commands();
-        assert!(
-            matches!(
-                commands.as_slice(),
-                [GeneratedBindingCommand::Subscribe { queries }]
-                    if queries == &vec!["SELECT * FROM remote_topology_document".to_string()]
-            ),
-            "generated topology feed benchmark should request the topology subscription for {world_id}"
-        );
-        callbacks.subscription_applied();
-        generated_client.inner_mut().frame_tick();
-        callbacks.remote_topology_document_insert(
-            GeneratedRemoteTopologyDocumentRow::from_topology_bundle(index as u64 + 1, topology)
-                .map_err(StdbClientError::Subscription)?,
-        );
-        generated_client.inner_mut().frame_tick();
-        let generated_runtime =
-            build_topology_feed_world_path_report(&generated_client, topology, &world_id);
+        let generated_runtime = match &options.generated_runtime_mode {
+            TopologyFeedGeneratedRuntimeMode::DeterministicBinding => {
+                build_deterministic_generated_topology_feed_world_path_report(
+                    topology,
+                    &topology_json,
+                    &world_id,
+                    index as u64 + 1,
+                )?
+            }
+            TopologyFeedGeneratedRuntimeMode::LiveSdk(config) => {
+                build_live_generated_topology_feed_world_path_report(
+                    topology,
+                    &topology_json,
+                    &world_id,
+                    config,
+                )?
+            }
+        };
 
         checks.extend(collect_topology_feed_checks(
             &world_id,
@@ -1777,6 +2045,52 @@ mod tests {
         assert!(report.worlds[0].authority_row.applied_world_state_matches);
         assert!(report.worlds[0].generated_runtime.quest_binding_matches);
         assert!(report.worlds[0].generated_runtime.evaluation_matches);
+    }
+
+    #[test]
+    fn test_build_topology_feed_measurements_live_sdk_propagates_connect_failures() {
+        let topology = RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup"),
+            teams: vec![pod_core::AgentTeamDefinition::new(
+                "gloam-mesh",
+                "Gloam Mesh",
+                "deadman-shadow",
+            )],
+            worlds: vec![WorldRealityDefinition::new(
+                "deadman-shadow",
+                "Deadman Shadow",
+                "shadow",
+            )],
+            links: vec![],
+            world_quest_bindings: vec![],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        };
+
+        let err = build_topology_feed_measurements_with_options(
+            &topology,
+            &TopologyFeedMeasurementsOptions {
+                generated_runtime_mode: TopologyFeedGeneratedRuntimeMode::LiveSdk(
+                    LiveGeneratedSdkTopologyFeedConfig {
+                        host: "http://127.0.0.1:1".into(),
+                        auth_token: None,
+                        timeout_ms: 100,
+                        poll_interval_ms: 1,
+                    },
+                ),
+            },
+        )
+        .expect_err("closed localhost port should fail the live generated SDK path");
+
+        assert!(matches!(err, StdbClientError::Connection(_)));
     }
 
     #[test]

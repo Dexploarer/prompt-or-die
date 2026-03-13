@@ -225,9 +225,12 @@ generated Rust bindings plus `GeneratedSdkRuntime`, which can be installed
 through `install_generated_sdk_runtime(...)` to drive generated mode through
 the real generated `DbConnection` and typed topology table callbacks. The moat
 benchmark stays on the deterministic command-driven path until a live
-SpacetimeDB module-backed feed is available in CI. The in-tree coverage now
-includes both same-world and linked-world quest/effect churn on the generated
-paths.
+SpacetimeDB module-backed feed is available in CI. The standalone example now
+accepts `--generated-sdk-host`, `--generated-sdk-auth-token`, and
+`--generated-sdk-timeout-ms` so the same benchmark can be pointed at a real
+module without changing the report format. The in-tree coverage now includes
+both same-world and linked-world quest/effect churn on the generated paths, plus
+deterministic closed-port coverage for the live SDK option.
 `pod-core` also owns the shared `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, and parity/binding builder helpers now, so
 headless and moat parity checks compare exported topology artifacts through one

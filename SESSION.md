@@ -244,6 +244,8 @@
 - [x] Moved `build_remote_topology_bundle(...)` out of `pod-headless` and into `pod-core`, so bundle assembly now lives with the shared topology contract instead of the app binary
 - [x] Installed real generated Rust bindings for `pod-stdb`, upgraded the repo to Rust `1.93.0`, and added `GeneratedSdkRuntime`, so generated mode can now use the actual generated `DbConnection`, typed topology table callbacks, and real subscription lifecycle instead of only the synthetic command-driven seam
 - [x] Added `install_generated_sdk_runtime(...)` to `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving the live generated SDK path is reachable and maps failures through the public error surface
+- [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig`, so `pod-net` topology parity can now opt into the live generated SDK path without changing the deterministic moat default
+- [x] Extended `topology_feed_benchmark_suite` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests that cover flag parsing and closed-port live SDK failure propagation
 
 **Next Action**:
-- Thread `install_generated_sdk_runtime()` into the topology parity/evaluation harnesses when a live SpacetimeDB module is available, while keeping `GeneratedBindingRuntime` as the deterministic CI/moat fallback.
+- Run `topology_feed_benchmark_suite` in live generated SDK mode against a real SpacetimeDB module and capture the first comparable parity artifact alongside the deterministic moat baseline.

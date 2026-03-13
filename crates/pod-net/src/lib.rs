@@ -92,8 +92,10 @@ pub use client_web::{ClientError, WebClient};
 
 #[cfg(feature = "spacetimedb")]
 pub use client_stdb::{
-    build_topology_feed_measurements, SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError,
-    TopologyFeedCheck, TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport,
+    build_topology_feed_measurements, build_topology_feed_measurements_with_options,
+    LiveGeneratedSdkTopologyFeedConfig, SpacetimeDBClient, SpacetimeDBClientConfig,
+    StdbClientError, TopologyFeedCheck, TopologyFeedGeneratedRuntimeMode,
+    TopologyFeedMeasurementsOptions, TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport,
     TopologyFeedWorldReport,
 };
 
