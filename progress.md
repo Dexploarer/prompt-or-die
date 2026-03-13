@@ -433,3 +433,4 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`
 - Promoted that headless topology parity surface into the moat benchmark contract: `scripts/run_moat_benchmarks.ts` now runs `pod-headless`, records `headlessTopology`, and fails when parity checks drift, while `scripts/publish_moat_snapshots.ts` now keeps the same headless summary in shard-target benchmark snapshots.
+- Extended authority-fed topology churn coverage beyond simple world switching: `crates/pod-stdb/src/client.rs` and `crates/pod-net/tests/networking_integration.rs` now both prove same-world `remote_topology_document` updates can change quest bindings, applied world state, and evaluation, and that stale older rows cannot roll those quest/effect changes back.

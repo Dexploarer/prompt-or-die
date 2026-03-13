@@ -1845,5 +1845,13 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --output artifacts/moat-benchmarks-ci-local.json`
   - `git diff --check`
 
-**Last updated**: Iteration 174
-**Current focus**: Iteration 175 extend authority-fed churn coverage to cross-world quest/effect updates, then replace the generated-runtime adapter seam with real generated binding/runtime wiring
+### Iteration 175
+- [x] Added `pod-stdb` coverage proving a newer `remote_topology_document` row can update quest bindings, applied world state, and evaluation inside the same resolved world without requiring a world switch.
+- [x] Added matching public `pod-net` integration coverage proving the authority-fed row path rebuilds snapshot metadata for same-world quest binding churn and preserves the newer quest/effect state when a stale older row arrives afterward.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client test_receive_remote_topology_document_row_updates_quest_and_effect_state_within_same_world -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration integration_remote_topology_feed_rows_update_quest_and_effect_state_within_same_world -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 175
+**Current focus**: Iteration 176 replace the generated-runtime adapter seam with real generated binding/runtime wiring, then add matching quest/effect churn coverage on that live generated path

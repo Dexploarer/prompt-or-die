@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Extend the churn/world-switch coverage to cross-world quest/effect update flows on top of the authority-fed path.
-2. Replace the generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
-3. Thread the authority-fed topology row path into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.
+1. Replace the generated-runtime adapter seam with actual generated SpacetimeDB binding/runtime wiring so `remote_topology_document` rows arrive from the live transport instead of only from test adapters.
+2. Thread the authority-fed topology row path into parity/evaluation harnesses beyond `pod-headless` so remote execution and benchmark surfaces share the same publication flow.
+3. Add generated-runtime churn coverage for linked-world quest/effect updates so the live binding path is defended the same way the emulated row path is.

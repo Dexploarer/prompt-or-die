@@ -3144,6 +3144,243 @@ mod tests {
     }
 
     #[test]
+    fn test_receive_remote_topology_document_row_updates_quest_and_effect_state_within_same_world()
+    {
+        let mut client = StdbClient::new(StdbClientConfig {
+            db_name: "deadman-shadow".into(),
+            ..StdbClientConfig::default()
+        });
+        let mut world =
+            pod_core::WorldRealityDefinition::new("deadman-shadow", "Deadman Shadow", "shadow");
+        world.role = pod_core::WorldRealityRole::Shadow;
+        world.active_team_ids = vec!["iron-sigil".into()];
+
+        let initial = pod_core::RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 200,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![],
+            worlds: vec![world.clone()],
+            links: vec![],
+            world_quest_bindings: vec![pod_core::WorldQuestBinding {
+                world_id: "deadman-shadow".into(),
+                quest_graph_ids: vec!["deadman-shadow-hunt".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![pod_core::AppliedWorldStateSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: pod_core::WorldRealityRole::Shadow,
+                team_scores: vec![pod_core::TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 3,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![pod_core::ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    stage_tag: "marked-by-kills".into(),
+                    applications: 1,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![pod_core::QuestLineStateSummary {
+                    quest_graph_id: "deadman-shadow-hunt".into(),
+                    display_name: "Deadman Shadow: Mirror Hunt".into(),
+                    current_stage_ids: vec!["marked-by-kills".into()],
+                    completed_stage_ids: vec!["shadow-observe".into()],
+                    pending_stage_ids: vec!["rift-collapse".into()],
+                    next_stage_ids: vec!["rift-collapse".into()],
+                    progress_basis_points: 5000,
+                    terminal: false,
+                    stage_applications: vec![pod_core::QuestStageApplicationSummary {
+                        stage_id: "marked-by-kills".into(),
+                        title: "Marked by Kills".into(),
+                        applications: 1,
+                    }],
+                }],
+            }],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: pod_core::WorldRealityRole::Shadow,
+                    average_reward_per_row: 4.5,
+                    controller_mix: vec![],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 5000,
+                    applied_score_delta_total: 3,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 1,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        }
+        .to_toon_document();
+
+        let updated = pod_core::RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 260,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![],
+            worlds: vec![world],
+            links: vec![],
+            world_quest_bindings: vec![pod_core::WorldQuestBinding {
+                world_id: "deadman-shadow".into(),
+                quest_graph_ids: vec!["deadman-shadow-collapse".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![pod_core::AppliedWorldStateSummary {
+                world_id: "deadman-shadow".into(),
+                display_name: "Deadman Shadow".into(),
+                role: pod_core::WorldRealityRole::Shadow,
+                team_scores: vec![pod_core::TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 9,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![pod_core::ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-shadow-collapse".into(),
+                    stage_tag: "rift-collapse".into(),
+                    applications: 4,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![pod_core::QuestLineStateSummary {
+                    quest_graph_id: "deadman-shadow-collapse".into(),
+                    display_name: "Deadman Shadow: Collapse".into(),
+                    current_stage_ids: vec!["rift-collapse".into()],
+                    completed_stage_ids: vec!["shadow-observe".into()],
+                    pending_stage_ids: vec!["echo-resolve".into()],
+                    next_stage_ids: vec!["echo-resolve".into()],
+                    progress_basis_points: 7500,
+                    terminal: false,
+                    stage_applications: vec![pod_core::QuestStageApplicationSummary {
+                        stage_id: "rift-collapse".into(),
+                        title: "Rift Collapse".into(),
+                        applications: 4,
+                    }],
+                }],
+            }],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-shadow".into(),
+                    display_name: "Deadman Shadow".into(),
+                    role: pod_core::WorldRealityRole::Shadow,
+                    average_reward_per_row: 6.25,
+                    controller_mix: vec![],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 7500,
+                    applied_score_delta_total: 9,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 4,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        }
+        .to_toon_document();
+
+        client
+            .receive_remote_topology_document_row(
+                10,
+                200,
+                "deadman-neural-cup".into(),
+                "ci-smoke".into(),
+                initial.clone(),
+            )
+            .expect("initial row should apply");
+        client
+            .receive_remote_topology_document_row(
+                11,
+                260,
+                "deadman-neural-cup".into(),
+                "ci-smoke".into(),
+                updated.clone(),
+            )
+            .expect("updated row should apply");
+        client
+            .receive_remote_topology_document_row(
+                9,
+                240,
+                "deadman-neural-cup".into(),
+                "ci-smoke".into(),
+                initial,
+            )
+            .expect("stale row should be ignored");
+
+        assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));
+        assert_eq!(
+            client
+                .resolved_remote_world_quest_binding()
+                .map(|binding| binding.quest_graph_ids.as_slice()),
+            Some(["deadman-shadow-collapse".to_string()].as_slice())
+        );
+        assert_eq!(
+            client
+                .resolved_remote_applied_world_state()
+                .and_then(|state| state.team_scores.first())
+                .map(|score| score.total_delta),
+            Some(9)
+        );
+        assert_eq!(
+            client
+                .resolved_remote_applied_world_state()
+                .and_then(|state| state.quest_lines.first())
+                .map(|quest| quest.quest_graph_id.as_str()),
+            Some("deadman-shadow-collapse")
+        );
+        assert_eq!(
+            client
+                .resolved_remote_world_evaluation()
+                .map(|world| world.average_reward_per_row),
+            Some(6.25)
+        );
+        assert_eq!(
+            client
+                .resolved_remote_world_evaluation()
+                .map(|world| world.applied_objective_shift_count),
+            Some(4)
+        );
+
+        let events = client.drain_events().collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, StdbEvent::RemoteTopologyUpdated { .. }))
+                .count(),
+            2
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StdbEvent::RemoteTopologyDocumentReceived { document }
+                if document == &updated
+        )));
+    }
+
+    #[test]
     fn test_receive_debug_document_dispatches_tool_call_event() {
         use pod_core::{AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary};
 
