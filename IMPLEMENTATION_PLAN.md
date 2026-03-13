@@ -1743,5 +1743,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
   - `git diff --check`
 
-**Last updated**: Iteration 164
-**Current focus**: Iteration 165 thread the admission-aware multi-world model, applied effect envelopes, quest-line state, and new evaluation summaries into remote topology and replay/evaluation coverage for linked-world tournaments and neural swarms
+### Iteration 165
+- [x] Added shared remote-topology summary contracts to `crates/pod-core/src/contract.rs`, including `WorldQuestBinding`, `AppliedWorldStateSummary`, `ScenarioEvaluationSummary`, and the top-level `RemoteTopologyBundle`.
+- [x] Exported that shared topology bundle surface from `crates/pod-core/src/lib.rs` and covered the TOON/document contract with deterministic unit tests.
+- [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner now emits a reusable remote-topology artifact alongside the scenario report and reward-aware dataset export.
+- [x] Replaced the app-local quest/evaluation report structs in `apps/pod-headless` with the shared `pod-core` summary contracts and added deterministic unit coverage for the new CLI path plus bundle assembly.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-core -p pod-headless`
+  - `git diff --check`
+
+**Last updated**: Iteration 165
+**Current focus**: Iteration 166 consume the shared `RemoteTopologyBundle` through `pod-net` / `pod-stdb` so remote execution and evaluation surfaces stop reconstructing multi-world team, quest, and effect state from app-local report JSON

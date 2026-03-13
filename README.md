@@ -20,6 +20,7 @@ cargo build --workspace
 cargo run --bin prompt-or-die
 cargo run --bin pod-headless -- --profile ci-smoke
 cargo run --bin pod-headless -- --profile ci-smoke --dataset-output /tmp/pod-headless-dataset.json
+cargo run --bin pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json
 cargo run --bin pod-server
 cargo test --workspace
 cargo check --workspace
@@ -99,4 +100,4 @@ docs/
 
 ## Current status
 
-The project has completed its deterministic core, networking, rendering baseline, editor scaffold, scene-system foundations, and the first real browser-side Three.js/WebGPU client. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle. `apps/pod-headless` is now the main non-UI proving ground for the agent roadmap: it can run deterministic multi-world scenarios, export reward-aware datasets, bind runtime agents to admitted teams per world, roll projected cross-world effects into applied target-world state summaries, resolve authored quest lines per world so alternate-reality objective shifts show up as explicit progression instead of raw counters, and emit evaluation summaries for controller mix plus world-level quest/effect progress.
+The project has completed its deterministic core, networking, rendering baseline, editor scaffold, scene-system foundations, and the first real browser-side Three.js/WebGPU client. The next major layers are public platform hardening, import/shipping workflows, and a formal plugin lifecycle. `apps/pod-headless` is now the main non-UI proving ground for the agent roadmap: it can run deterministic multi-world scenarios, export reward-aware datasets, bind runtime agents to admitted teams per world, roll projected cross-world effects into applied target-world state summaries, resolve authored quest lines per world so alternate-reality objective shifts show up as explicit progression instead of raw counters, emit evaluation summaries for controller mix plus world-level quest/effect progress, and export a shared `RemoteTopologyBundle` artifact that future `pod-net` / `pod-stdb` remote execution surfaces can consume directly.

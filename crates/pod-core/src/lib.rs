@@ -66,14 +66,17 @@ pub use constraint::{
     ValidationPipeline,
 };
 pub use contract::{
-    AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition, CrossWorldEffect,
+    AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition,
+    AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
     CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry, FactionReputationTier,
-    FactionReputationTrack, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
-    RuntimeContractVersion, TeamControlMode, ToolBudget, ToolCatalog, ToolDefinition,
+    FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary, QuestLineStateSummary,
+    QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
+    RemoteTopologyBundle, RuntimeContractVersion, ScenarioEvaluationSummary, TeamControlMode,
+    TeamDeathMarkSummary, TeamDeltaSummary, ToolBudget, ToolCatalog, ToolDefinition,
     ToolInvocationRequest, ToolInvocationResult, ToolPolicy, TournamentEliminationMode,
     VersionedAgentAction, VersionedObservation, VersionedTickTelemetry, WorldChunkDefinition,
-    WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
-    RUNTIME_CONTRACT_VERSION_V1,
+    WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
+    WorldRegionDefinition, WorldTournamentDefinition, RUNTIME_CONTRACT_VERSION_V1,
 };
 pub use event::*;
 pub use id::*;

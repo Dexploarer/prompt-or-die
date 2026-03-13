@@ -647,6 +647,153 @@ impl WorldTournamentDefinition {
     }
 }
 
+/// Explicit world-to-quest attachment used by remote topology consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldQuestBinding {
+    pub world_id: String,
+    pub quest_graph_ids: Vec<String>,
+}
+
+impl WorldQuestBinding {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("world_quest_binding", self)
+    }
+}
+
+/// Aggregate score effect applied to a team inside a world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamDeltaSummary {
+    pub team_id: String,
+    pub total_delta: i32,
+}
+
+/// Aggregate death-mark pressure applied to a team inside a world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamDeathMarkSummary {
+    pub team_id: String,
+    pub applications: usize,
+    pub total_duration_ticks: u64,
+}
+
+/// Aggregate delta keyed by an authored id such as faction, encounter table, or biome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedDeltaSummary {
+    pub id: String,
+    pub total_delta: i32,
+}
+
+/// Aggregate authored quest/objective shift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectiveShiftSummary {
+    pub quest_graph_id: String,
+    pub stage_tag: String,
+    pub applications: usize,
+}
+
+/// Application counts for a concrete quest stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestStageApplicationSummary {
+    pub stage_id: String,
+    pub title: String,
+    pub applications: usize,
+}
+
+/// Resolved quest-line progression for one world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestLineStateSummary {
+    pub quest_graph_id: String,
+    pub display_name: String,
+    pub current_stage_ids: Vec<String>,
+    pub completed_stage_ids: Vec<String>,
+    pub pending_stage_ids: Vec<String>,
+    pub next_stage_ids: Vec<String>,
+    pub progress_basis_points: u16,
+    pub terminal: bool,
+    pub stage_applications: Vec<QuestStageApplicationSummary>,
+}
+
+/// Applied cross-world consequences resolved into a target world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppliedWorldStateSummary {
+    pub world_id: String,
+    pub display_name: String,
+    pub role: WorldRealityRole,
+    pub team_scores: Vec<TeamDeltaSummary>,
+    pub death_marks: Vec<TeamDeathMarkSummary>,
+    pub faction_reputation_deltas: Vec<NamedDeltaSummary>,
+    pub encounter_weight_deltas: Vec<NamedDeltaSummary>,
+    pub resource_scarcity_deltas: Vec<NamedDeltaSummary>,
+    pub objective_state_shifts: Vec<ObjectiveShiftSummary>,
+    pub unresolved_objective_state_shifts: Vec<ObjectiveShiftSummary>,
+    pub quest_lines: Vec<QuestLineStateSummary>,
+}
+
+/// Reward and controller mix rollup keyed by agent type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ControllerEvaluationSummary {
+    pub agent_type: String,
+    pub row_count: usize,
+    pub reward_total: f32,
+    pub average_reward_per_row: f32,
+}
+
+/// Per-world evaluation rollup for replay-derived datasets plus applied effects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldEvaluationSummary {
+    pub world_id: String,
+    pub display_name: String,
+    pub role: WorldRealityRole,
+    pub average_reward_per_row: f32,
+    pub controller_mix: Vec<ControllerEvaluationSummary>,
+    pub quest_line_count: usize,
+    pub progressed_quest_line_count: usize,
+    pub average_quest_progress_basis_points: u16,
+    pub applied_score_delta_total: i32,
+    pub applied_death_mark_count: usize,
+    pub applied_death_mark_ticks: u64,
+    pub applied_objective_shift_count: usize,
+    pub applied_reputation_delta_total: i32,
+    pub applied_encounter_delta_total: i32,
+    pub applied_resource_delta_total: i32,
+}
+
+/// Top-level evaluation summary across a multi-world scenario.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioEvaluationSummary {
+    pub controller_mix: Vec<ControllerEvaluationSummary>,
+    pub worlds: Vec<WorldEvaluationSummary>,
+}
+
+impl ScenarioEvaluationSummary {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("scenario_evaluation_summary", self)
+    }
+}
+
+/// Portable authority-facing topology artifact emitted by headless runners and
+/// consumable by future remote runtime surfaces.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RemoteTopologyBundle {
+    pub version: RuntimeContractVersion,
+    pub scenario_id: String,
+    pub profile_id: String,
+    pub generated_at_unix_ms: u128,
+    pub tournament: WorldTournamentDefinition,
+    pub teams: Vec<AgentTeamDefinition>,
+    pub worlds: Vec<WorldRealityDefinition>,
+    pub links: Vec<CrossWorldLinkDefinition>,
+    pub world_quest_bindings: Vec<WorldQuestBinding>,
+    pub quest_graphs: Vec<QuestStateGraph>,
+    pub applied_world_states: Vec<AppliedWorldStateSummary>,
+    pub evaluation: ScenarioEvaluationSummary,
+}
+
+impl RemoteTopologyBundle {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("remote_topology_bundle", self)
+    }
+}
+
 /// Request emitted by an embedded tool runtime before a side effect occurs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolInvocationRequest {
@@ -774,14 +921,18 @@ mod tests {
     use crate::toon::decode_toon_value;
 
     use super::{
-        AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition, CrossWorldEffect,
+        AgentCapabilities, AgentRole, AgentRuntimeProfile, AgentTeamDefinition,
+        AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
         CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
-        FactionReputationTier, FactionReputationTrack, QuestStageDefinition, QuestStateGraph,
-        RegionEncounterTable, RuntimeContractVersion, TeamControlMode, ToolBudget, ToolCatalog,
-        ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
-        TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
-        VersionedTickTelemetry, WorldChunkDefinition, WorldRealityDefinition, WorldRealityRole,
-        WorldRegionDefinition, WorldTournamentDefinition, RUNTIME_CONTRACT_VERSION_V1,
+        FactionReputationTier, FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary,
+        QuestLineStateSummary, QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph,
+        RegionEncounterTable, RemoteTopologyBundle, RuntimeContractVersion,
+        ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary, TeamDeltaSummary,
+        ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
+        ToolPolicy, TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
+        VersionedTickTelemetry, WorldChunkDefinition, WorldEvaluationSummary, WorldQuestBinding,
+        WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition, WorldTournamentDefinition,
+        RUNTIME_CONTRACT_VERSION_V1,
     };
 
     #[test]
@@ -1039,6 +1190,144 @@ mod tests {
         assert_eq!(
             tournament_value["payload"]["tournament_id"],
             "deadman-neural-cup"
+        );
+    }
+
+    #[test]
+    fn remote_topology_bundle_exports_quest_and_evaluation_state() {
+        let mut tournament =
+            WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup");
+        tournament.world_ids = vec!["deadman-prime".into()];
+        tournament.team_ids = vec!["iron-sigil".into()];
+
+        let mut world =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        world.role = WorldRealityRole::Tournament;
+        world.active_team_ids = vec!["iron-sigil".into()];
+
+        let quest_graph = QuestStateGraph::new(
+            "deadman-prime-season",
+            "Deadman Prime: Blood Season",
+            "enter-bracket",
+            vec![QuestStageDefinition {
+                stage_id: "enter-bracket".into(),
+                title: "Enter the Bracket".into(),
+                objectives: vec!["Establish the team camp.".into()],
+                next_stage_ids: vec!["wilds-under-siege".into()],
+                reward_tags: vec!["season-open".into()],
+            }],
+        );
+
+        let bundle = RemoteTopologyBundle {
+            version: RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament,
+            teams: vec![AgentTeamDefinition::new(
+                "iron-sigil",
+                "Iron Sigil",
+                "deadman-prime",
+            )],
+            worlds: vec![world],
+            links: vec![CrossWorldLinkDefinition::new(
+                "prime-to-shadow",
+                "deadman-prime",
+                "deadman-shadow",
+            )],
+            world_quest_bindings: vec![WorldQuestBinding {
+                world_id: "deadman-prime".into(),
+                quest_graph_ids: vec!["deadman-prime-season".into()],
+            }],
+            quest_graphs: vec![quest_graph],
+            applied_world_states: vec![AppliedWorldStateSummary {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                team_scores: vec![TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 8,
+                }],
+                death_marks: vec![TeamDeathMarkSummary {
+                    team_id: "iron-sigil".into(),
+                    applications: 1,
+                    total_duration_ticks: 600,
+                }],
+                faction_reputation_deltas: vec![NamedDeltaSummary {
+                    id: "echo-order".into(),
+                    total_delta: 2,
+                }],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![ObjectiveShiftSummary {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    stage_tag: "wilds-under-siege".into(),
+                    applications: 1,
+                }],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![QuestLineStateSummary {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    display_name: "Deadman Prime: Blood Season".into(),
+                    current_stage_ids: vec!["wilds-under-siege".into()],
+                    completed_stage_ids: vec!["enter-bracket".into()],
+                    pending_stage_ids: vec![],
+                    next_stage_ids: vec![],
+                    progress_basis_points: 5_000,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationSummary {
+                        stage_id: "wilds-under-siege".into(),
+                        title: "Wilds Under Siege".into(),
+                        applications: 1,
+                    }],
+                }],
+            }],
+            evaluation: ScenarioEvaluationSummary {
+                controller_mix: vec![ControllerEvaluationSummary {
+                    agent_type: "neural_agent".into(),
+                    row_count: 1,
+                    reward_total: 4.5,
+                    average_reward_per_row: 4.5,
+                }],
+                worlds: vec![WorldEvaluationSummary {
+                    world_id: "deadman-prime".into(),
+                    display_name: "Deadman Prime".into(),
+                    role: WorldRealityRole::Tournament,
+                    average_reward_per_row: 4.5,
+                    controller_mix: vec![ControllerEvaluationSummary {
+                        agent_type: "neural_agent".into(),
+                        row_count: 1,
+                        reward_total: 4.5,
+                        average_reward_per_row: 4.5,
+                    }],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 5_000,
+                    applied_score_delta_total: 8,
+                    applied_death_mark_count: 1,
+                    applied_death_mark_ticks: 600,
+                    applied_objective_shift_count: 1,
+                    applied_reputation_delta_total: 2,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        };
+
+        let value = decode_toon_value(&bundle.to_toon_document())
+            .expect("remote topology bundle should decode");
+        assert_eq!(value["document_type"], "remote_topology_bundle");
+        assert_eq!(value["payload"]["scenario_id"], "deadman-neural-cup");
+        assert_eq!(
+            value["payload"]["world_quest_bindings"][0]["quest_graph_ids"][0],
+            "deadman-prime-season"
+        );
+        assert_eq!(
+            value["payload"]["applied_world_states"][0]["quest_lines"][0]["current_stage_ids"][0],
+            "wilds-under-siege"
+        );
+        assert_eq!(
+            value["payload"]["evaluation"]["worlds"][0]["applied_score_delta_total"],
+            8
         );
     }
 }

@@ -383,3 +383,9 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-headless`
   - `cargo check -p pod-headless`
   - `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json --dataset-output /tmp/pod-headless-dataset.json`
+- Added a shared `RemoteTopologyBundle` contract in `crates/pod-core/src/contract.rs` for world quest bindings, applied world state, and scenario evaluation, so headless multi-world topology is no longer trapped in app-local report structs.
+- Extended `apps/pod-headless` with `--topology-output`, replaced its local quest/evaluation report shapes with the shared `pod-core` contracts, and revalidated the widened app surface with:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless`
+  - `cargo check -p pod-core -p pod-headless`
+  - `git diff --check`

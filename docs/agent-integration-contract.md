@@ -181,11 +181,17 @@ The first-pass topology contracts are now:
 - `WorldRealityDefinition`
 - `CrossWorldLinkDefinition`
 - `WorldTournamentDefinition`
+- `RemoteTopologyBundle`
 
 They are defined in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
 and described in
 [`docs/multi-world-agent-topology.md`](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
+
+`RemoteTopologyBundle` is the current portable artifact for headless and future
+remote surfaces: it packages teams, worlds, links, quest bindings, quest-line
+state, and evaluation summaries into one authority-facing payload rather than
+leaving those relationships spread across app-local JSON shapes.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many

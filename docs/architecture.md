@@ -145,6 +145,11 @@ which runs deterministic multi-world scenarios on top of `pod-core`,
 aggregates authoritative reward telemetry, and projects cross-world effects
 without depending on `apps/pod-web`.
 
+That runner now also emits a shared `RemoteTopologyBundle` contract from
+[`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs),
+so remote consumers can reuse the same world/team/link/quest/evaluation payload
+instead of reconstructing it from app-local report JSON.
+
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)
 and is documented in

@@ -197,7 +197,7 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Extend the new headless dataset/report surface into remote topology so admission-aware team/world identity survives beyond the local runner.
+- Consume the shared remote topology artifact in `pod-net` / `pod-stdb` so admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -213,7 +213,9 @@
 - [x] Added deterministic team admission in `apps/pod-headless`, so dataset rows and standings now carry admitted team identity per world instead of world-level aggregates only
 - [x] Added applied target-world state aggregation in `apps/pod-headless`, so cross-world effects are rolled into per-world team/resource/faction/objective state summaries instead of only link-local projections
 - [x] Added canonical quest graph definitions plus per-world quest-line state reporting in `apps/pod-headless`, so alternate-reality `ObjectiveStateShift` effects now resolve into explicit quest progression with start/current/completed/pending stages
-- [ ] Thread world identity and team admission through remote topology and evaluation harnesses
+- [x] Added shared `RemoteTopologyBundle` contracts in `pod-core` for world quest bindings, applied world state, and scenario evaluation, so remote surfaces have one portable topology artifact instead of app-local JSON shapes
+- [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner can emit that portable remote-topology artifact alongside the existing report and dataset outputs
+- [ ] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`
 
 **Next Action**:
-- Thread the new admission-aware team/world model into remote topology and keep the same quest-line/effect-application rules intact while extending the new headless evaluation surface into replay/evaluation coverage for linked-world tournaments and neural swarms.
+- Consume the shared `RemoteTopologyBundle` in `pod-net` / `pod-stdb` so admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner and become first-class remote execution state.

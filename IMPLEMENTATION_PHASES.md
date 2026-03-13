@@ -344,7 +344,8 @@
 - [x] Define native contract types for teams, worlds, tournaments, and cross-world links
 - [x] Add a headless team/world runner that can operate without the browser client
 - [x] Define deterministic cross-world effect application rules at authority boundaries
-- [ ] Thread multi-world team admission and world identity through remote execution topology
+- [x] Add a shared remote-topology export contract for world quest bindings, applied world state, and scenario evaluation
+- [ ] Consume the shared remote-topology artifact through remote execution topology
 - [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
 
 **Verification Criteria**:
@@ -369,6 +370,6 @@
 
 ## Immediate Next Actions
 
-1. Extend the same team/world identity and applied-effect model into remote topology instead of leaving it headless-only.
-2. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the new headless execution surface.
+1. Consume the exported `RemoteTopologyBundle` through `pod-net` / `pod-stdb` so remote execution stops reconstructing multi-world state from app-local reports.
+2. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of that shared remote topology surface.
 3. Preserve quest-line state and alternate-reality objective progression when the same topology is threaded into remote execution and evaluation surfaces.

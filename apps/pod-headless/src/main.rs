@@ -6,10 +6,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pod_core::{
     run_flagship_mmo_acceptance, AgentRewardSignal, AgentRuntimeProfile, AgentTeamDefinition,
-    AgentType, CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation,
-    FlagshipMmoAcceptanceConfig, FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary,
-    QuestStageDefinition, QuestStateGraph, ReplayTrainingSample, RewardReason, TeamControlMode,
-    TournamentEliminationMode, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+    AgentType, AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+    CrossWorldLinkDefinition, CrossWorldPropagation, FlagshipMmoAcceptanceConfig,
+    FlagshipMmoAcceptanceResult, FlagshipMmoAcceptanceSummary, NamedDeltaSummary,
+    ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
+    QuestStageDefinition, QuestStateGraph, RemoteTopologyBundle, ReplayTrainingSample,
+    RewardReason, ScenarioEvaluationSummary, TeamControlMode, TeamDeathMarkSummary,
+    TeamDeltaSummary, TournamentEliminationMode, WorldEvaluationSummary, WorldQuestBinding,
+    WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
 };
 use serde::Serialize;
 
@@ -22,6 +26,7 @@ struct HeadlessOptions {
     scenario: String,
     output: Option<PathBuf>,
     dataset_output: Option<PathBuf>,
+    topology_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,66 +161,13 @@ struct CrossWorldProjectionReport {
     projected_effects: Vec<ProjectedCrossWorldEffect>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AppliedWorldStateReport {
-    world_id: String,
-    display_name: String,
-    role: WorldRealityRole,
-    team_scores: Vec<TeamDeltaReport>,
-    death_marks: Vec<TeamDeathMarkReport>,
-    faction_reputation_deltas: Vec<NamedDeltaReport>,
-    encounter_weight_deltas: Vec<NamedDeltaReport>,
-    resource_scarcity_deltas: Vec<NamedDeltaReport>,
-    objective_state_shifts: Vec<ObjectiveShiftReport>,
-    unresolved_objective_state_shifts: Vec<ObjectiveShiftReport>,
-    quest_lines: Vec<QuestLineStateReport>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct TeamDeltaReport {
-    team_id: String,
-    total_delta: i32,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct TeamDeathMarkReport {
-    team_id: String,
-    applications: usize,
-    total_duration_ticks: u64,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct NamedDeltaReport {
-    id: String,
-    total_delta: i32,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct ObjectiveShiftReport {
-    quest_graph_id: String,
-    stage_tag: String,
-    applications: usize,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct QuestLineStateReport {
-    quest_graph_id: String,
-    display_name: String,
-    current_stage_ids: Vec<String>,
-    completed_stage_ids: Vec<String>,
-    pending_stage_ids: Vec<String>,
-    next_stage_ids: Vec<String>,
-    progress_basis_points: u16,
-    terminal: bool,
-    stage_applications: Vec<QuestStageApplicationReport>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct QuestStageApplicationReport {
-    stage_id: String,
-    title: String,
-    applications: usize,
-}
+type AppliedWorldStateReport = AppliedWorldStateSummary;
+type TeamDeltaReport = TeamDeltaSummary;
+type TeamDeathMarkReport = TeamDeathMarkSummary;
+type NamedDeltaReport = NamedDeltaSummary;
+type ObjectiveShiftReport = ObjectiveShiftSummary;
+type QuestLineStateReport = QuestLineStateSummary;
+type QuestStageApplicationReport = QuestStageApplicationSummary;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 struct LinkTriggerMatch {
@@ -274,38 +226,9 @@ struct TeamStandingReport {
     active_death_mark_ticks: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct ScenarioEvaluationReport {
-    controller_mix: Vec<ControllerEvaluationReport>,
-    worlds: Vec<WorldEvaluationReport>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-struct ControllerEvaluationReport {
-    agent_type: String,
-    row_count: usize,
-    reward_total: f32,
-    average_reward_per_row: f32,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-struct WorldEvaluationReport {
-    world_id: String,
-    display_name: String,
-    role: WorldRealityRole,
-    average_reward_per_row: f32,
-    controller_mix: Vec<ControllerEvaluationReport>,
-    quest_line_count: usize,
-    progressed_quest_line_count: usize,
-    average_quest_progress_basis_points: u16,
-    applied_score_delta_total: i32,
-    applied_death_mark_count: usize,
-    applied_death_mark_ticks: u64,
-    applied_objective_shift_count: usize,
-    applied_reputation_delta_total: i32,
-    applied_encounter_delta_total: i32,
-    applied_resource_delta_total: i32,
-}
+type ScenarioEvaluationReport = ScenarioEvaluationSummary;
+type ControllerEvaluationReport = ControllerEvaluationSummary;
+type WorldEvaluationReport = WorldEvaluationSummary;
 
 #[derive(Debug, Default, Clone)]
 struct TeamStandingAccumulator {
@@ -321,6 +244,7 @@ struct TeamStandingAccumulator {
 struct ScenarioRunOutputs {
     report: HeadlessAppReport,
     dataset: RewardDatasetExport,
+    topology: RemoteTopologyBundle,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -343,20 +267,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dataset_json = serde_json::to_string_pretty(&outputs.dataset)?;
         fs::write(dataset_output, dataset_json.as_bytes())?;
     }
+    if let Some(topology_output) = &options.topology_output {
+        if let Some(parent) = topology_output.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let topology_json = serde_json::to_string_pretty(&outputs.topology)?;
+        fs::write(topology_output, topology_json.as_bytes())?;
+    }
 
     println!("{json}");
     Ok(())
 }
 
 fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
+    parse_args_from(env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(args: I) -> Result<HeadlessOptions, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
     let mut options = HeadlessOptions {
         profile: "ci-smoke".into(),
         scenario: DEFAULT_SCENARIO.into(),
         output: None,
         dataset_output: None,
+        topology_output: None,
     };
 
-    let args = env::args().skip(1).collect::<Vec<_>>();
+    let args = args.into_iter().map(Into::into).collect::<Vec<String>>();
     let mut index = 0usize;
     while index < args.len() {
         match args[index].as_str() {
@@ -382,6 +322,13 @@ fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
                     .ok_or("missing value for --dataset-output")?;
                 options.dataset_output = Some(PathBuf::from(value));
             }
+            "--topology-output" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or("missing value for --topology-output")?;
+                options.topology_output = Some(PathBuf::from(value));
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -396,7 +343,7 @@ fn parse_args() -> Result<HeadlessOptions, Box<dyn std::error::Error>> {
 
 fn print_help() {
     eprintln!(
-        "Usage: cargo run -p pod-headless -- [--profile ci-smoke|shard-target] [--scenario deadman-neural-cup] [--output PATH] [--dataset-output PATH]"
+        "Usage: cargo run -p pod-headless -- [--profile ci-smoke|shard-target] [--scenario deadman-neural-cup] [--output PATH] [--dataset-output PATH] [--topology-output PATH]"
     );
 }
 
@@ -717,6 +664,19 @@ fn run_scenario(
         "Team standings are projection totals from cross-world links; per-team in-world attribution still needs admission-aware runtime wiring.".into(),
         "Dataset rows are replay-derived training samples enriched with authoritative reward reasons and runtime profile metadata.".into(),
     ];
+    let topology = build_remote_topology_bundle(
+        &options.scenario,
+        &options.profile,
+        generated_at_unix_ms,
+        &scenario.tournament,
+        &scenario.teams,
+        &scenario.worlds,
+        &scenario.links,
+        &scenario.quest_graphs,
+        &scenario.world_quest_graph_ids,
+        &applied_world_states,
+        &evaluation,
+    );
 
     Ok(ScenarioRunOutputs {
         report: HeadlessAppReport {
@@ -750,7 +710,46 @@ fn run_scenario(
             worlds: dataset_worlds,
             notes,
         },
+        topology,
     })
+}
+
+fn build_remote_topology_bundle(
+    scenario_id: &str,
+    profile_id: &str,
+    generated_at_unix_ms: u128,
+    tournament: &WorldTournamentDefinition,
+    teams: &[AgentTeamDefinition],
+    worlds: &[WorldRealityDefinition],
+    links: &[CrossWorldLinkDefinition],
+    quest_graphs: &[QuestStateGraph],
+    world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
+    applied_world_states: &[AppliedWorldStateReport],
+    evaluation: &ScenarioEvaluationReport,
+) -> RemoteTopologyBundle {
+    let mut world_quest_bindings = world_quest_graph_ids
+        .iter()
+        .map(|(world_id, quest_graph_ids)| WorldQuestBinding {
+            world_id: world_id.clone(),
+            quest_graph_ids: quest_graph_ids.clone(),
+        })
+        .collect::<Vec<_>>();
+    world_quest_bindings.sort_by(|left, right| left.world_id.cmp(&right.world_id));
+
+    RemoteTopologyBundle {
+        version: pod_core::RuntimeContractVersion::V1,
+        scenario_id: scenario_id.into(),
+        profile_id: profile_id.into(),
+        generated_at_unix_ms,
+        tournament: tournament.clone(),
+        teams: teams.to_vec(),
+        worlds: worlds.to_vec(),
+        links: links.to_vec(),
+        world_quest_bindings,
+        quest_graphs: quest_graphs.to_vec(),
+        applied_world_states: applied_world_states.to_vec(),
+        evaluation: evaluation.clone(),
+    }
 }
 
 fn world_config_for(
@@ -2620,6 +2619,140 @@ mod tests {
         assert_eq!(evaluation.worlds[1].world_id, "deadman-shadow");
         assert_eq!(evaluation.worlds[1].applied_death_mark_count, 1);
         assert_eq!(evaluation.worlds[1].applied_objective_shift_count, 1);
+    }
+
+    #[test]
+    fn parse_args_accepts_topology_output() {
+        let options = parse_args_from([
+            "--profile",
+            "shard-target",
+            "--scenario",
+            "deadman-neural-cup",
+            "--topology-output",
+            "/tmp/topology.json",
+        ])
+        .expect("args should parse");
+
+        assert_eq!(options.profile, "shard-target");
+        assert_eq!(options.scenario, "deadman-neural-cup");
+        assert_eq!(
+            options.topology_output,
+            Some(PathBuf::from("/tmp/topology.json"))
+        );
+    }
+
+    #[test]
+    fn remote_topology_bundle_preserves_world_quest_bindings() {
+        let mut tournament =
+            WorldTournamentDefinition::new("deadman-neural-cup", "Deadman Neural Cup");
+        tournament.world_ids = vec!["deadman-prime".into()];
+        tournament.team_ids = vec!["iron-sigil".into()];
+
+        let mut world =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        world.role = WorldRealityRole::Tournament;
+        world.active_team_ids = vec!["iron-sigil".into()];
+
+        let bundle = build_remote_topology_bundle(
+            "deadman-neural-cup",
+            "ci-smoke",
+            42,
+            &tournament,
+            &[AgentTeamDefinition::new(
+                "iron-sigil",
+                "Iron Sigil",
+                "deadman-prime",
+            )],
+            &[world],
+            &[],
+            &[QuestStateGraph::new(
+                "deadman-prime-season",
+                "Deadman Prime: Blood Season",
+                "enter-bracket",
+                vec![QuestStageDefinition {
+                    stage_id: "enter-bracket".into(),
+                    title: "Enter the Bracket".into(),
+                    objectives: vec!["Establish camp.".into()],
+                    next_stage_ids: vec!["wilds-under-siege".into()],
+                    reward_tags: vec!["season-open".into()],
+                }],
+            )],
+            &BTreeMap::from([("deadman-prime".into(), vec!["deadman-prime-season".into()])]),
+            &[AppliedWorldStateReport {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: WorldRealityRole::Tournament,
+                team_scores: vec![TeamDeltaReport {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 8,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![QuestLineStateReport {
+                    quest_graph_id: "deadman-prime-season".into(),
+                    display_name: "Deadman Prime: Blood Season".into(),
+                    current_stage_ids: vec!["wilds-under-siege".into()],
+                    completed_stage_ids: vec!["enter-bracket".into()],
+                    pending_stage_ids: vec![],
+                    next_stage_ids: vec![],
+                    progress_basis_points: 5_000,
+                    terminal: false,
+                    stage_applications: vec![QuestStageApplicationReport {
+                        stage_id: "wilds-under-siege".into(),
+                        title: "Wilds Under Siege".into(),
+                        applications: 1,
+                    }],
+                }],
+            }],
+            &ScenarioEvaluationReport {
+                controller_mix: vec![ControllerEvaluationReport {
+                    agent_type: "neural_agent".into(),
+                    row_count: 1,
+                    reward_total: 4.5,
+                    average_reward_per_row: 4.5,
+                }],
+                worlds: vec![WorldEvaluationReport {
+                    world_id: "deadman-prime".into(),
+                    display_name: "Deadman Prime".into(),
+                    role: WorldRealityRole::Tournament,
+                    average_reward_per_row: 4.5,
+                    controller_mix: vec![ControllerEvaluationReport {
+                        agent_type: "neural_agent".into(),
+                        row_count: 1,
+                        reward_total: 4.5,
+                        average_reward_per_row: 4.5,
+                    }],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 5_000,
+                    applied_score_delta_total: 8,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 0,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        );
+
+        assert_eq!(bundle.scenario_id, "deadman-neural-cup");
+        assert_eq!(bundle.profile_id, "ci-smoke");
+        assert_eq!(bundle.world_quest_bindings.len(), 1);
+        assert_eq!(bundle.world_quest_bindings[0].world_id, "deadman-prime");
+        assert_eq!(
+            bundle.world_quest_bindings[0].quest_graph_ids,
+            vec!["deadman-prime-season".to_string()]
+        );
+        assert_eq!(
+            bundle.applied_world_states[0].quest_lines[0].current_stage_ids,
+            vec!["wilds-under-siege".to_string()]
+        );
+        assert_eq!(bundle.evaluation.worlds[0].applied_score_delta_total, 8);
     }
 
     #[test]
