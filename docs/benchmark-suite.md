@@ -245,7 +245,11 @@ cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark
 
 That local run produced `/Users/home/Desktop/prompt-or-die/artifacts/topology-feed-live-local.json`
 with `30/30` checks passing across `deadman-prime`, `deadman-shadow`, and
-`sanctuary-echo`.
+`sanctuary-echo`. The same live path has now also been exercised on the
+`shard-target` profile, producing
+`/Users/home/Desktop/prompt-or-die/artifacts/topology-feed-live-shard-local.json`
+and the first committed monthly snapshot at
+`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
 `pod-core` also owns the shared `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, and parity/binding builder helpers now, so
 headless and moat parity checks compare exported topology artifacts through one
@@ -289,10 +293,10 @@ that mode so CI fails if the direct-connect transport invariants regress.
 On the `shard-target` profile, the benchmark now also enforces published
 deterministic baselines for:
 
-- `steady-delta` total delta bytes (`1304`) and max delta size (`163`)
+- `steady-delta` total delta bytes (`1392`) and max delta size (`174`)
 - `recovery-success` total recovery snapshot bytes (`234`) and max full-snapshot size (`78`)
 - `queue-pressure-timeout` total / peak pending queue depth (`6`) and inbound bytes (`44`)
-- aggregate total full-snapshot bytes (`1187`), total recovery bytes (`234`), total delta bytes (`1816`), peak pending queue depth (`6`), and queue-pressure event count (`1`)
+- aggregate total full-snapshot bytes (`1220`), total recovery bytes (`234`), total delta bytes (`1904`), peak pending queue depth (`6`), and queue-pressure event count (`1`)
 
 Phase 6 transport counters still exist on the direct-connect debug path too.
 `shard_transport_summary` documents include:
@@ -305,11 +309,14 @@ Phase 6 transport counters still exist on the direct-connect debug path too.
 Those counters remain exposed through the browser debug transport summary and
 are still exercised by targeted reconnect/recovery regression tests in
 `apps/pod-web/src/direct-connect.test.ts` and `crates/pod-net/src/server.rs`.
-The next follow-on gap is historical drift tracking: the benchmark now has
-published shard-target baselines, but it still needs a routine snapshot
-comparison story across monthly moat reports instead of only pass/fail gates.
-That monthly path now preserves `headlessTopology` too, so historical shard
-snapshots can compare multi-world parity alongside transport and browser data.
+Historical drift tracking is now live too: the first committed shard-target
+snapshot at
+`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`
+captures transport, browser-route, headless topology, topology feed, and live
+topology feed data together. The next follow-on gap is workflow, not contract:
+the live shard-target topology capture and snapshot publication path still
+needs to be wrapped in one reproducible local script instead of a manual
+command chain.
 
 ### Creator time-to-first-agent-world
 
@@ -339,11 +346,11 @@ Guidance:
 
 Run this every month before updating the competitor matrix:
 
-1. Run the shard-target core report.
-2. Run the combined benchmark suite.
-3. Record creator time from the reference bootstrap.
-4. Compare deltas against the previous month.
-5. Add any regressions or required responses to `IMPLEMENTATION_PLAN.md`.
+1. Run the shard-target combined moat suite.
+2. Run the shard-target browser render-route benchmark and keep the generated `apps/pod-web/artifacts/render-route-measurements.json`.
+3. Run the live shard-target topology feed benchmark against a local SpacetimeDB module and keep `artifacts/topology-feed-live-shard-local.json`.
+4. Publish the monthly snapshot with `scripts/publish_moat_snapshots.ts`.
+5. Compare deltas against the previous month and record any required responses in `IMPLEMENTATION_PLAN.md`.
 
 ## Interpretation rules
 

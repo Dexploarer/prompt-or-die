@@ -234,7 +234,7 @@ type CombinedReport = {
 };
 
 export type PublishedMoatSnapshot = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   label: string;
   profile: "shard-target";
   transport: {
@@ -260,16 +260,30 @@ export type PublishedMoatSnapshot = {
     worlds: TopologyFeedWorldReport[];
     checks: TopologyFeedCheck[];
   };
+  liveTopologyFeed: {
+    sourceSchemaVersion: number;
+    scenarioId: string;
+    profileId: string;
+    worldCount: number;
+    worlds: TopologyFeedWorldReport[];
+    checks: TopologyFeedCheck[];
+  } | null;
 };
 
 type Options = {
   input: string;
   output: string;
   label: string;
+  browserRouteInput: string | null;
+  liveTopologyFeedInput: string | null;
 };
 
 const DEFAULT_INPUT = "artifacts/moat-benchmarks-shard-local.json";
 const DEFAULT_OUTPUT_ROOT = "docs/benchmark-snapshots";
+const DEFAULT_BROWSER_ROUTE_INPUT =
+  "apps/pod-web/artifacts/render-route-measurements.json";
+const DEFAULT_LIVE_TOPOLOGY_FEED_INPUT =
+  "artifacts/topology-feed-live-shard-local.json";
 
 function roundMetric(value: number | null): number | null {
   if (value == null) {
@@ -294,6 +308,8 @@ function parseArgs(argv: string[]): Options {
     input: DEFAULT_INPUT,
     output: buildDefaultSnapshotOutputPath(label),
     label,
+    browserRouteInput: DEFAULT_BROWSER_ROUTE_INPUT,
+    liveTopologyFeedInput: DEFAULT_LIVE_TOPOLOGY_FEED_INPUT,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -327,10 +343,34 @@ function parseArgs(argv: string[]): Options {
         index += 1;
         break;
       }
+      case "--browser-route-input": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("missing value for --browser-route-input");
+        }
+        options.browserRouteInput = value;
+        index += 1;
+        break;
+      }
+      case "--skip-browser-routes":
+        options.browserRouteInput = null;
+        break;
+      case "--live-topology-feed-input": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("missing value for --live-topology-feed-input");
+        }
+        options.liveTopologyFeedInput = value;
+        index += 1;
+        break;
+      }
+      case "--skip-live-topology-feed":
+        options.liveTopologyFeedInput = null;
+        break;
       case "--help":
       case "-h":
         console.error(
-          "Usage: bun ./scripts/publish_moat_snapshots.ts [--input PATH] [--label YYYY-MM] [--output PATH]",
+          "Usage: bun ./scripts/publish_moat_snapshots.ts [--input PATH] [--label YYYY-MM] [--output PATH] [--browser-route-input PATH] [--skip-browser-routes] [--live-topology-feed-input PATH] [--skip-live-topology-feed]",
         );
         process.exit(0);
       default:
@@ -588,9 +628,20 @@ function normalizeTopologyFeedMeasurements(
   };
 }
 
+function normalizeOptionalTopologyFeedMeasurements(
+  report: TopologyFeedMeasurementsReport | null,
+): PublishedMoatSnapshot["liveTopologyFeed"] {
+  if (!report) {
+    return null;
+  }
+  return normalizeTopologyFeedMeasurements(report);
+}
+
 export function normalizeShardTargetMoatSnapshot(
   report: CombinedReport,
   label: string,
+  browserRouteReport: BrowserRouteMeasurementsReport | null = null,
+  liveTopologyFeedReport: TopologyFeedMeasurementsReport | null = null,
 ): PublishedMoatSnapshot {
   if (report.profile !== "shard-target") {
     throw new Error(
@@ -600,7 +651,9 @@ export function normalizeShardTargetMoatSnapshot(
   if (!report.transportMeasurements) {
     throw new Error("missing transportMeasurements in moat report");
   }
-  if (!report.browserRouteMeasurements) {
+  const browserRouteMeasurements =
+    report.browserRouteMeasurements ?? browserRouteReport;
+  if (!browserRouteMeasurements) {
     throw new Error("missing browserRouteMeasurements in moat report");
   }
   if (!report.headlessTopology) {
@@ -611,18 +664,19 @@ export function normalizeShardTargetMoatSnapshot(
   }
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     label,
     profile: "shard-target",
     transport: normalizeTransportMeasurements(report.transportMeasurements),
-    browserRoutes: normalizeBrowserRouteMeasurements(
-      report.browserRouteMeasurements,
-    ),
+    browserRoutes: normalizeBrowserRouteMeasurements(browserRouteMeasurements),
     headlessTopology: normalizeHeadlessTopologyMeasurements(
       report.headlessTopology,
     ),
     topologyFeed: normalizeTopologyFeedMeasurements(
       report.topologyFeedMeasurements,
+    ),
+    liveTopologyFeed: normalizeOptionalTopologyFeedMeasurements(
+      liveTopologyFeedReport,
     ),
   };
 }
@@ -633,7 +687,22 @@ function main() {
   const inputPath = resolve(repoRoot, options.input);
   const outputPath = resolve(repoRoot, options.output);
   const report = JSON.parse(readFileSync(inputPath, "utf8")) as CombinedReport;
-  const snapshot = normalizeShardTargetMoatSnapshot(report, options.label);
+  const browserRouteReport = options.browserRouteInput
+    ? (JSON.parse(
+        readFileSync(resolve(repoRoot, options.browserRouteInput), "utf8"),
+      ) as BrowserRouteMeasurementsReport)
+    : null;
+  const liveTopologyFeedReport = options.liveTopologyFeedInput
+    ? (JSON.parse(
+        readFileSync(resolve(repoRoot, options.liveTopologyFeedInput), "utf8"),
+      ) as TopologyFeedMeasurementsReport)
+    : null;
+  const snapshot = normalizeShardTargetMoatSnapshot(
+    report,
+    options.label,
+    browserRouteReport,
+    liveTopologyFeedReport,
+  );
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, JSON.stringify(snapshot, null, 2));
   console.log(JSON.stringify(snapshot, null, 2));

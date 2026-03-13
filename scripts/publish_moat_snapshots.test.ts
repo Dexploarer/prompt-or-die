@@ -235,9 +235,43 @@ describe("publish moat snapshots", () => {
         },
       },
       "2026-03",
+      null,
+      {
+        schema_version: 1,
+        scenario_id: "deadman-neural-cup",
+        profile_id: "shard-target",
+        world_count: 1,
+        worlds: [
+          {
+            world_id: "deadman-prime",
+            authority_row: {
+              resolved_world_id: "deadman-prime",
+              resolved_world_matches: true,
+              quest_binding_matches: true,
+              applied_world_state_matches: true,
+              evaluation_matches: true,
+            },
+            generated_runtime: {
+              resolved_world_id: "deadman-prime",
+              resolved_world_matches: true,
+              quest_binding_matches: true,
+              applied_world_state_matches: true,
+              evaluation_matches: true,
+            },
+          },
+        ],
+        checks: [
+          {
+            metric: "generated_runtime.deadman-prime.resolved_world_id",
+            passed: true,
+            expected: "deadman-prime",
+            observed: "deadman-prime",
+          },
+        ],
+      },
     );
 
-    expect(snapshot.schemaVersion).toBe(3);
+    expect(snapshot.schemaVersion).toBe(4);
     expect(snapshot.label).toBe("2026-03");
     expect(snapshot.transport.aggregate.published_baseline_profile).toBe(
       "shard-target",
@@ -261,6 +295,10 @@ describe("publish moat snapshots", () => {
     expect(snapshot.topologyFeed.worlds[0]?.generated_runtime.evaluation_matches).toBe(
       true,
     );
+    expect(snapshot.liveTopologyFeed?.profileId).toBe("shard-target");
+    expect(snapshot.liveTopologyFeed?.checks[0]?.metric).toBe(
+      "generated_runtime.deadman-prime.resolved_world_id",
+    );
   });
 
   test("rejects non shard-target moat reports", () => {
@@ -276,6 +314,152 @@ describe("publish moat snapshots", () => {
         "2026-03",
       ),
     ).toThrow("expected shard-target moat report");
+  });
+
+  test("accepts browser routes from a separate artifact when the moat report skips browser execution", () => {
+    const snapshot = normalizeShardTargetMoatSnapshot(
+      {
+        profile: "shard-target",
+        transportMeasurements: {
+          schema_version: 2,
+          profile: "shard-target",
+          aggregate: {
+            all_checks_passed: true,
+            scenarios_passed: 0,
+            scenario_count: 0,
+            published_baseline_profile: "shard-target",
+            checks: [],
+            total_full_snapshot_bytes: 1220,
+            total_recovery_snapshot_bytes: 234,
+            total_delta_bytes: 1904,
+            total_delta_entities_updated: 8,
+            total_delta_entities_destroyed: 8,
+            total_queue_pressure_events: 1,
+            total_resumed_sessions: 1,
+            total_timed_out_clients: 1,
+            total_recovery_delivery_failures: 1,
+          },
+          scenarios: [],
+        },
+        headlessTopology: {
+          sourceSchemaVersion: 2,
+          scenario: "deadman-neural-cup",
+          profile: "shard-target",
+          teamCount: 2,
+          worldCount: 3,
+          linkCount: 3,
+          worldQuestBindingCount: 3,
+          appliedWorldStateCount: 3,
+          evaluationWorldCount: 3,
+          topologyParity: {
+            consistent: true,
+            teams_match: true,
+            worlds_match: true,
+            links_match: true,
+            quest_graphs_match: true,
+            world_quest_bindings_match: true,
+            applied_world_states_match: true,
+            evaluation_match: true,
+            missing_world_quest_binding_ids: [],
+            unexpected_world_quest_binding_ids: [],
+            missing_applied_world_ids: [],
+            unexpected_applied_world_ids: [],
+            missing_evaluation_world_ids: [],
+            unexpected_evaluation_world_ids: [],
+          },
+          checks: [],
+          allChecksPassed: true,
+        },
+        topologyFeedMeasurements: {
+          schema_version: 1,
+          scenario_id: "deadman-neural-cup",
+          profile_id: "shard-target",
+          world_count: 3,
+          worlds: [],
+          checks: [],
+        },
+        browserRouteMeasurements: null,
+      },
+      "2026-03",
+      {
+        schemaVersion: 2,
+        routes: [
+          {
+            label: "main",
+            url: "http://127.0.0.1:4178/?world=local-sandbox&renderThread=main&backend=webgl2",
+            renderThread: "main",
+            requestedRenderThread: "main",
+            renderThreadFallbackReason: null,
+            loadsCompleted: 15,
+            pendingAssets: 0,
+            assetLoadPerf: {
+              geometryLoadsCompleted: 10,
+              spriteLoadsCompleted: 5,
+              averageGeometryLoadMs: 100,
+              averageSpriteLoadMs: 150,
+              slowestGeometryLoadMs: 200,
+              slowestSpriteLoadMs: 250,
+            },
+            mainThreadPerf: {
+              warmupMs: 10,
+              submissionsCompleted: 70,
+              averageSubmissionMs: 0.5,
+              slowestSubmissionMs: 0.9,
+              byKind: {
+                frame: {
+                  submissionsCompleted: 70,
+                  averageSubmissionMs: 0.5,
+                  slowestSubmissionMs: 0.9,
+                },
+                control: {
+                  submissionsCompleted: 0,
+                  averageSubmissionMs: 0,
+                  slowestSubmissionMs: 0,
+                },
+                resize: {
+                  submissionsCompleted: 0,
+                  averageSubmissionMs: 0,
+                  slowestSubmissionMs: 0,
+                },
+              },
+            },
+            runtimePerf: {
+              warmupMs: 16.6,
+              frameBudgetMs: 16.6,
+              framesRendered: 8,
+              stableFrames: 7,
+              slowFrames: 1,
+              stableFramePercent: 87.5,
+              slowestFrameMs: 17.2,
+            },
+            gates: {
+              stableFramePercentFloor: 90,
+              stableFramePercentFloorPassed: false,
+              completedAssetLoadsFloor: 10,
+              completedAssetLoadsFloorPassed: true,
+              averageGeometryLoadMsCeiling: 250,
+              averageGeometryLoadMsCeilingPassed: true,
+              averageSpriteLoadMsCeiling: 500,
+              averageSpriteLoadMsCeilingPassed: true,
+              slowestGeometryLoadMsCeiling: 2000,
+              slowestGeometryLoadMsCeilingPassed: true,
+              slowestSpriteLoadMsCeiling: 1000,
+              slowestSpriteLoadMsCeilingPassed: true,
+              controlSubmissionCeiling: null,
+              controlSubmissionCeilingPassed: null,
+              resizeSubmissionCeiling: null,
+              resizeSubmissionCeilingPassed: null,
+            },
+          },
+        ],
+        comparison: null,
+      },
+    );
+
+    expect(snapshot.browserRoutes.routes[0]?.label).toBe("main");
+    expect(snapshot.browserRoutes.routes[0]?.routePath).toBe(
+      "/?world=local-sandbox&renderThread=main&backend=webgl2",
+    );
   });
 
   test("builds the default month-labeled output path", () => {

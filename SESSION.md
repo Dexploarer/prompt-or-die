@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `16410993`
+**Last Checkpoint**: `406ce528`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -248,6 +248,9 @@
 - [x] Extended `topology_feed_benchmark_suite` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests that cover flag parsing and closed-port live SDK failure propagation
 - [x] Exported a fresh `pod-headless` topology artifact, started a local in-memory SpacetimeDB on `127.0.0.1:3100`, published `pod_stdb.wasm` to `deadman-prime`, `deadman-shadow`, and `sanctuary-echo`, and ran the live generated SDK topology benchmark successfully
 - [x] Wrote the first live parity artifact to `artifacts/topology-feed-live-local.json`; all `30/30` checks passed across the three benchmark worlds
+- [x] Refreshed the shard-target transport benchmark baselines in `crates/pod-net/src/server.rs` to the current deterministic byte envelopes, with `steady-delta total/max = 1392/174` and aggregate full/recovery/delta totals of `1220/234/1904`
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target monthly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts
+- [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- Publish and review comparable shard-target topology feed history now that the live generated SDK parity artifact has been captured locally.
+- Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of a manual multi-command sequence.

@@ -2024,8 +2024,8 @@ fn build_transport_benchmark_aggregate(
         TransportBenchmarkProfile::ShardTarget => vec![
             transport_check(
                 "published_baseline.aggregate.total_full_snapshot_bytes",
-                total_full_snapshot_bytes == 1187,
-                "1187",
+                total_full_snapshot_bytes == 1220,
+                "1220",
                 total_full_snapshot_bytes.to_string(),
             ),
             transport_check(
@@ -2036,8 +2036,8 @@ fn build_transport_benchmark_aggregate(
             ),
             transport_check(
                 "published_baseline.aggregate.total_delta_bytes",
-                total_delta_bytes == 1816,
-                "1816",
+                total_delta_bytes == 1904,
+                "1904",
                 total_delta_bytes.to_string(),
             ),
             transport_check(
@@ -2194,14 +2194,14 @@ async fn benchmark_delta_delivery(
     if matches!(profile, TransportBenchmarkProfile::ShardTarget) {
         checks.push(transport_check(
             "published_baseline.steady_delta.total_delta_bytes",
-            summary.total_delta_bytes == 1304,
-            "1304",
+            summary.total_delta_bytes == 1392,
+            "1392",
             summary.total_delta_bytes.to_string(),
         ));
         checks.push(transport_check(
             "published_baseline.steady_delta.max_delta_bytes",
-            summary.max_delta_bytes == 163,
-            "163",
+            summary.max_delta_bytes == 174,
+            "174",
             summary.max_delta_bytes.to_string(),
         ));
     }

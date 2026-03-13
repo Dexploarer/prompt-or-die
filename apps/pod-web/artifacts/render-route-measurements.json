@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAtUnixMs": 1773312847580,
+  "generatedAtUnixMs": 1773400848444,
   "baseUrl": "http://127.0.0.1:4178",
   "routes": [
     {
@@ -14,21 +14,21 @@
       "assetLoadPerf": {
         "geometryLoadsCompleted": 13,
         "spriteLoadsCompleted": 2,
-        "averageGeometryLoadMs": 5089.55,
-        "averageSpriteLoadMs": 9047.15,
-        "slowestGeometryLoadMs": 5350.5,
-        "slowestSpriteLoadMs": 9047.7
+        "averageGeometryLoadMs": 3026.7,
+        "averageSpriteLoadMs": 4202.2,
+        "slowestGeometryLoadMs": 8744.5,
+        "slowestSpriteLoadMs": 4202.7
       },
       "mainThreadPerf": {
-        "warmupMs": 421.6,
-        "submissionsCompleted": 75,
-        "averageSubmissionMs": 389.36,
-        "slowestSubmissionMs": 15731.5,
+        "warmupMs": 223.9,
+        "submissionsCompleted": 76,
+        "averageSubmissionMs": 188.56,
+        "slowestSubmissionMs": 4488.2,
         "byKind": {
           "frame": {
-            "submissionsCompleted": 75,
-            "averageSubmissionMs": 389.36,
-            "slowestSubmissionMs": 15731.5
+            "submissionsCompleted": 76,
+            "averageSubmissionMs": 188.56,
+            "slowestSubmissionMs": 4488.2
           },
           "control": {
             "submissionsCompleted": 0,
@@ -43,13 +43,13 @@
         }
       },
       "runtimePerf": {
-        "warmupMs": 421.6,
+        "warmupMs": 223.9,
         "frameBudgetMs": 16.67,
-        "framesRendered": 75,
-        "stableFrames": 14,
-        "slowFrames": 61,
-        "stableFramePercent": 18.7,
-        "slowestFrameMs": 15730.8
+        "framesRendered": 76,
+        "stableFrames": 67,
+        "slowFrames": 9,
+        "stableFramePercent": 88.2,
+        "slowestFrameMs": 4313.7
       },
       "gates": {
         "stableFramePercentFloor": 90,
@@ -76,26 +76,26 @@
       "renderThread": "worker",
       "requestedRenderThread": "worker",
       "renderThreadFallbackReason": null,
-      "loadsCompleted": 14,
+      "loadsCompleted": 15,
       "pendingAssets": 0,
       "assetLoadPerf": {
-        "geometryLoadsCompleted": 12,
+        "geometryLoadsCompleted": 13,
         "spriteLoadsCompleted": 2,
-        "averageGeometryLoadMs": 11123.68,
-        "averageSpriteLoadMs": 1.85,
-        "slowestGeometryLoadMs": 11125.5,
-        "slowestSpriteLoadMs": 2.5
+        "averageGeometryLoadMs": 5365.99,
+        "averageSpriteLoadMs": 2.2,
+        "slowestGeometryLoadMs": 5765.7,
+        "slowestSpriteLoadMs": 2.3
       },
       "mainThreadPerf": {
-        "warmupMs": 1450.1,
-        "submissionsCompleted": 3,
-        "averageSubmissionMs": 0,
-        "slowestSubmissionMs": 0,
+        "warmupMs": 611.5,
+        "submissionsCompleted": 4,
+        "averageSubmissionMs": 0.05,
+        "slowestSubmissionMs": 0.1,
         "byKind": {
           "frame": {
-            "submissionsCompleted": 3,
-            "averageSubmissionMs": 0,
-            "slowestSubmissionMs": 0
+            "submissionsCompleted": 4,
+            "averageSubmissionMs": 0.05,
+            "slowestSubmissionMs": 0.1
           },
           "control": {
             "submissionsCompleted": 0,
@@ -110,13 +110,13 @@
         }
       },
       "runtimePerf": {
-        "warmupMs": 929.4,
+        "warmupMs": 575.3,
         "frameBudgetMs": 16.67,
-        "framesRendered": 2,
+        "framesRendered": 3,
         "stableFrames": 0,
-        "slowFrames": 2,
+        "slowFrames": 3,
         "stableFramePercent": 0,
-        "slowestFrameMs": 693.6
+        "slowestFrameMs": 583
       },
       "gates": {
         "stableFramePercentFloor": 50,
@@ -139,15 +139,15 @@
     }
   ],
   "comparison": {
-    "mainFrameSubmissions": 75,
-    "workerFrameSubmissions": 3,
-    "frameSubmissionReductionPercent": 96,
-    "mainStableFramePercent": 18.7,
+    "mainFrameSubmissions": 76,
+    "workerFrameSubmissions": 4,
+    "frameSubmissionReductionPercent": 94.7,
+    "mainStableFramePercent": 88.2,
     "workerStableFramePercent": 0,
-    "stableFramePercentDelta": -18.7,
-    "mainSlowFrames": 61,
-    "workerSlowFrames": 2,
-    "slowFrameDelta": -59,
+    "stableFramePercentDelta": -88.2,
+    "mainSlowFrames": 9,
+    "workerSlowFrames": 3,
+    "slowFrameDelta": -6,
     "workerGatesPassed": false
   }
 }

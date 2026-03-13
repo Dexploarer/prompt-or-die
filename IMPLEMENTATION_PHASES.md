@@ -374,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Publish and review shard-target `topologyFeedMeasurements` snapshots alongside the existing headless/browser/transport moat history now that the first live SDK parity artifact exists.
+1. Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of the current manual command chain.
 2. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.
-3. Promote the live generated SDK benchmark invocation into a reproducible local script/workflow instead of an ad hoc manual sequence.
+3. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.

@@ -1,0 +1,1087 @@
+{
+  "schemaVersion": 4,
+  "label": "2026-03",
+  "profile": "shard-target",
+  "transport": {
+    "sourceSchemaVersion": 2,
+    "aggregate": {
+      "all_checks_passed": true,
+      "scenarios_passed": 5,
+      "scenario_count": 5,
+      "published_baseline_profile": "shard-target",
+      "checks": [
+        {
+          "metric": "published_baseline.aggregate.total_full_snapshot_bytes",
+          "passed": true,
+          "expected": "1220",
+          "observed": "1220"
+        },
+        {
+          "metric": "published_baseline.aggregate.total_recovery_snapshot_bytes",
+          "passed": true,
+          "expected": "234",
+          "observed": "234"
+        },
+        {
+          "metric": "published_baseline.aggregate.total_delta_bytes",
+          "passed": true,
+          "expected": "1904",
+          "observed": "1904"
+        },
+        {
+          "metric": "published_baseline.aggregate.peak_pending_action_queue_depth",
+          "passed": true,
+          "expected": "6",
+          "observed": "6"
+        },
+        {
+          "metric": "published_baseline.aggregate.total_queue_pressure_events",
+          "passed": true,
+          "expected": "1",
+          "observed": "1"
+        }
+      ],
+      "total_full_snapshot_bytes": 1220,
+      "total_recovery_snapshot_bytes": 234,
+      "total_delta_bytes": 1904,
+      "total_delta_entities_updated": 8,
+      "total_delta_entities_destroyed": 8,
+      "total_queue_pressure_events": 1,
+      "total_resumed_sessions": 1,
+      "total_timed_out_clients": 1,
+      "total_recovery_delivery_failures": 1
+    },
+    "scenarios": [
+      {
+        "name": "steady-delta",
+        "description": "Exercises the normal authoritative state-delta path and proves the byte/churn counters move without requiring a live socket.",
+        "all_checks_passed": true,
+        "summary": {
+          "latest_tick": 0,
+          "client_count": 1,
+          "resumed_sessions": 0,
+          "recovery_snapshots_sent": 0,
+          "recovery_delivery_failures": 0,
+          "total_pending_action_queue_depth": 0,
+          "peak_pending_action_queue_depth": 0,
+          "queue_pressure_client_count": 0,
+          "total_inbound_messages": 0,
+          "total_outbound_messages": 8,
+          "total_inbound_bytes": 0,
+          "total_outbound_bytes": 1392,
+          "action_batches_received": 0,
+          "full_snapshots_sent": 0,
+          "total_full_snapshot_bytes": 0,
+          "max_full_snapshot_bytes": 0,
+          "total_recovery_snapshot_bytes": 0,
+          "full_snapshot_requests": 0,
+          "state_deltas_sent": 8,
+          "delta_messages_sent": 8,
+          "total_delta_bytes": 1392,
+          "max_delta_bytes": 174,
+          "total_delta_entities_updated": 8,
+          "total_delta_entities_destroyed": 8,
+          "timed_out_clients": 0,
+          "queue_pressure_events": 0
+        },
+        "checks": [
+          {
+            "metric": "state_deltas_sent",
+            "passed": true,
+            "expected": "8",
+            "observed": "8"
+          },
+          {
+            "metric": "delta_messages_sent",
+            "passed": true,
+            "expected": "8",
+            "observed": "8"
+          },
+          {
+            "metric": "total_delta_bytes",
+            "passed": true,
+            "expected": "> 0",
+            "observed": "1392"
+          },
+          {
+            "metric": "delta_entity_churn",
+            "passed": true,
+            "expected": "updated=8, destroyed=8",
+            "observed": "updated=8, destroyed=8"
+          },
+          {
+            "metric": "published_baseline.steady_delta.total_delta_bytes",
+            "passed": true,
+            "expected": "1392",
+            "observed": "1392"
+          },
+          {
+            "metric": "published_baseline.steady_delta.max_delta_bytes",
+            "passed": true,
+            "expected": "174",
+            "observed": "174"
+          }
+        ]
+      },
+      {
+        "name": "recovery-success",
+        "description": "Exercises explicit full-snapshot recovery requests and records the recovery byte budget without a live reconnect loop.",
+        "all_checks_passed": true,
+        "summary": {
+          "latest_tick": 0,
+          "client_count": 1,
+          "resumed_sessions": 0,
+          "recovery_snapshots_sent": 3,
+          "recovery_delivery_failures": 0,
+          "total_pending_action_queue_depth": 0,
+          "peak_pending_action_queue_depth": 0,
+          "queue_pressure_client_count": 0,
+          "total_inbound_messages": 3,
+          "total_outbound_messages": 3,
+          "total_inbound_bytes": 66,
+          "total_outbound_bytes": 234,
+          "action_batches_received": 0,
+          "full_snapshots_sent": 3,
+          "total_full_snapshot_bytes": 234,
+          "max_full_snapshot_bytes": 78,
+          "total_recovery_snapshot_bytes": 234,
+          "full_snapshot_requests": 3,
+          "state_deltas_sent": 3,
+          "delta_messages_sent": 0,
+          "total_delta_bytes": 0,
+          "max_delta_bytes": 0,
+          "total_delta_entities_updated": 0,
+          "total_delta_entities_destroyed": 0,
+          "timed_out_clients": 0,
+          "queue_pressure_events": 0
+        },
+        "checks": [
+          {
+            "metric": "full_snapshot_requests",
+            "passed": true,
+            "expected": "3",
+            "observed": "3"
+          },
+          {
+            "metric": "recovery_snapshots_sent",
+            "passed": true,
+            "expected": "3",
+            "observed": "3"
+          },
+          {
+            "metric": "recovery_delivery_failures",
+            "passed": true,
+            "expected": "0",
+            "observed": "0"
+          },
+          {
+            "metric": "total_recovery_snapshot_bytes",
+            "passed": true,
+            "expected": "> 0",
+            "observed": "234"
+          },
+          {
+            "metric": "published_baseline.recovery_success.total_recovery_snapshot_bytes",
+            "passed": true,
+            "expected": "234",
+            "observed": "234"
+          },
+          {
+            "metric": "published_baseline.recovery_success.max_full_snapshot_bytes",
+            "passed": true,
+            "expected": "78",
+            "observed": "78"
+          }
+        ]
+      },
+      {
+        "name": "recovery-failure",
+        "description": "Exercises the recovery-delivery failure counter by forcing a closed outbound channel before the server tries to send a full snapshot.",
+        "all_checks_passed": true,
+        "summary": {
+          "latest_tick": 0,
+          "client_count": 1,
+          "resumed_sessions": 0,
+          "recovery_snapshots_sent": 0,
+          "recovery_delivery_failures": 1,
+          "total_pending_action_queue_depth": 0,
+          "peak_pending_action_queue_depth": 0,
+          "queue_pressure_client_count": 0,
+          "total_inbound_messages": 0,
+          "total_outbound_messages": 0,
+          "total_inbound_bytes": 0,
+          "total_outbound_bytes": 0,
+          "action_batches_received": 0,
+          "full_snapshots_sent": 0,
+          "total_full_snapshot_bytes": 0,
+          "max_full_snapshot_bytes": 0,
+          "total_recovery_snapshot_bytes": 0,
+          "full_snapshot_requests": 0,
+          "state_deltas_sent": 0,
+          "delta_messages_sent": 0,
+          "total_delta_bytes": 0,
+          "max_delta_bytes": 0,
+          "total_delta_entities_updated": 0,
+          "total_delta_entities_destroyed": 0,
+          "timed_out_clients": 0,
+          "queue_pressure_events": 0
+        },
+        "checks": [
+          {
+            "metric": "recovery_delivery_failures",
+            "passed": true,
+            "expected": "1",
+            "observed": "1"
+          },
+          {
+            "metric": "recovery_snapshots_sent",
+            "passed": true,
+            "expected": "0",
+            "observed": "0"
+          },
+          {
+            "metric": "total_recovery_snapshot_bytes",
+            "passed": true,
+            "expected": "0",
+            "observed": "0"
+          }
+        ]
+      },
+      {
+        "name": "resume-connect",
+        "description": "Exercises reconnect-token resume so transport counters survive session handoff instead of resetting on the new client id.",
+        "all_checks_passed": true,
+        "summary": {
+          "latest_tick": 0,
+          "client_count": 1,
+          "resumed_sessions": 1,
+          "recovery_snapshots_sent": 0,
+          "recovery_delivery_failures": 0,
+          "total_pending_action_queue_depth": 0,
+          "peak_pending_action_queue_depth": 0,
+          "queue_pressure_client_count": 0,
+          "total_inbound_messages": 0,
+          "total_outbound_messages": 2,
+          "total_inbound_bytes": 0,
+          "total_outbound_bytes": 658,
+          "action_batches_received": 0,
+          "full_snapshots_sent": 2,
+          "total_full_snapshot_bytes": 658,
+          "max_full_snapshot_bytes": 329,
+          "total_recovery_snapshot_bytes": 0,
+          "full_snapshot_requests": 0,
+          "state_deltas_sent": 2,
+          "delta_messages_sent": 3,
+          "total_delta_bytes": 512,
+          "max_delta_bytes": 256,
+          "total_delta_entities_updated": 0,
+          "total_delta_entities_destroyed": 0,
+          "timed_out_clients": 0,
+          "queue_pressure_events": 0
+        },
+        "checks": [
+          {
+            "metric": "resumed_sessions",
+            "passed": true,
+            "expected": "1",
+            "observed": "1"
+          },
+          {
+            "metric": "session_resumes_preserved",
+            "passed": true,
+            "expected": "3",
+            "observed": "3"
+          },
+          {
+            "metric": "delta_counters_preserved",
+            "passed": true,
+            "expected": "delta_messages_sent=3, delta_bytes_sent=512",
+            "observed": "delta_messages_sent=3, delta_bytes_sent=512"
+          }
+        ]
+      },
+      {
+        "name": "queue-pressure-timeout",
+        "description": "Exercises backlog pressure and inactivity pruning together so queue depth and timeout counters show up in one cheap degraded-path sample.",
+        "all_checks_passed": true,
+        "summary": {
+          "latest_tick": 5,
+          "client_count": 1,
+          "resumed_sessions": 0,
+          "recovery_snapshots_sent": 0,
+          "recovery_delivery_failures": 0,
+          "total_pending_action_queue_depth": 6,
+          "peak_pending_action_queue_depth": 6,
+          "queue_pressure_client_count": 1,
+          "total_inbound_messages": 1,
+          "total_outbound_messages": 1,
+          "total_inbound_bytes": 44,
+          "total_outbound_bytes": 328,
+          "action_batches_received": 1,
+          "full_snapshots_sent": 1,
+          "total_full_snapshot_bytes": 328,
+          "max_full_snapshot_bytes": 328,
+          "total_recovery_snapshot_bytes": 0,
+          "full_snapshot_requests": 0,
+          "state_deltas_sent": 1,
+          "delta_messages_sent": 0,
+          "total_delta_bytes": 0,
+          "max_delta_bytes": 0,
+          "total_delta_entities_updated": 0,
+          "total_delta_entities_destroyed": 0,
+          "timed_out_clients": 1,
+          "queue_pressure_events": 1
+        },
+        "checks": [
+          {
+            "metric": "queue_pressure_client_count",
+            "passed": true,
+            "expected": "1",
+            "observed": "1"
+          },
+          {
+            "metric": "queue_pressure_events",
+            "passed": true,
+            "expected": "1",
+            "observed": "1"
+          },
+          {
+            "metric": "timed_out_clients",
+            "passed": true,
+            "expected": "1",
+            "observed": "1"
+          },
+          {
+            "metric": "published_baseline.queue_pressure_timeout.total_pending_action_queue_depth",
+            "passed": true,
+            "expected": "6",
+            "observed": "6"
+          },
+          {
+            "metric": "published_baseline.queue_pressure_timeout.peak_pending_action_queue_depth",
+            "passed": true,
+            "expected": "6",
+            "observed": "6"
+          },
+          {
+            "metric": "published_baseline.queue_pressure_timeout.total_inbound_bytes",
+            "passed": true,
+            "expected": "44",
+            "observed": "44"
+          }
+        ]
+      }
+    ]
+  },
+  "browserRoutes": {
+    "sourceSchemaVersion": 2,
+    "routes": [
+      {
+        "label": "main",
+        "routePath": "/?world=local-sandbox&backend=webgl2",
+        "renderThread": "main",
+        "requestedRenderThread": "auto",
+        "renderThreadFallbackReason": null,
+        "loadsCompleted": 15,
+        "pendingAssets": 0,
+        "assetLoadPerf": {
+          "geometryLoadsCompleted": 13,
+          "spriteLoadsCompleted": 2,
+          "averageGeometryLoadMs": 3026.7,
+          "averageSpriteLoadMs": 4202.2,
+          "slowestGeometryLoadMs": 8744.5,
+          "slowestSpriteLoadMs": 4202.7
+        },
+        "mainThreadPerf": {
+          "warmupMs": 223.9,
+          "submissionsCompleted": 76,
+          "averageSubmissionMs": 188.6,
+          "slowestSubmissionMs": 4488.2,
+          "byKind": {
+            "frame": {
+              "submissionsCompleted": 76,
+              "averageSubmissionMs": 188.6,
+              "slowestSubmissionMs": 4488.2
+            },
+            "control": {
+              "submissionsCompleted": 0,
+              "averageSubmissionMs": 0,
+              "slowestSubmissionMs": 0
+            },
+            "resize": {
+              "submissionsCompleted": 0,
+              "averageSubmissionMs": 0,
+              "slowestSubmissionMs": 0
+            }
+          }
+        },
+        "runtimePerf": {
+          "warmupMs": 223.9,
+          "frameBudgetMs": 16.7,
+          "framesRendered": 76,
+          "stableFrames": 67,
+          "slowFrames": 9,
+          "stableFramePercent": 88.2,
+          "slowestFrameMs": 4313.7
+        },
+        "gates": {
+          "stableFramePercentFloor": 90,
+          "stableFramePercentFloorPassed": false,
+          "completedAssetLoadsFloor": 10,
+          "completedAssetLoadsFloorPassed": true,
+          "averageGeometryLoadMsCeiling": 250,
+          "averageGeometryLoadMsCeilingPassed": false,
+          "averageSpriteLoadMsCeiling": 500,
+          "averageSpriteLoadMsCeilingPassed": false,
+          "slowestGeometryLoadMsCeiling": 2000,
+          "slowestGeometryLoadMsCeilingPassed": false,
+          "slowestSpriteLoadMsCeiling": 1000,
+          "slowestSpriteLoadMsCeilingPassed": false,
+          "controlSubmissionCeiling": null,
+          "controlSubmissionCeilingPassed": null,
+          "resizeSubmissionCeiling": null,
+          "resizeSubmissionCeilingPassed": null
+        }
+      },
+      {
+        "label": "worker",
+        "routePath": "/?world=local-sandbox&renderThread=worker&backend=webgl2",
+        "renderThread": "worker",
+        "requestedRenderThread": "worker",
+        "renderThreadFallbackReason": null,
+        "loadsCompleted": 15,
+        "pendingAssets": 0,
+        "assetLoadPerf": {
+          "geometryLoadsCompleted": 13,
+          "spriteLoadsCompleted": 2,
+          "averageGeometryLoadMs": 5366,
+          "averageSpriteLoadMs": 2.2,
+          "slowestGeometryLoadMs": 5765.7,
+          "slowestSpriteLoadMs": 2.3
+        },
+        "mainThreadPerf": {
+          "warmupMs": 611.5,
+          "submissionsCompleted": 4,
+          "averageSubmissionMs": 0.1,
+          "slowestSubmissionMs": 0.1,
+          "byKind": {
+            "frame": {
+              "submissionsCompleted": 4,
+              "averageSubmissionMs": 0.1,
+              "slowestSubmissionMs": 0.1
+            },
+            "control": {
+              "submissionsCompleted": 0,
+              "averageSubmissionMs": 0,
+              "slowestSubmissionMs": 0
+            },
+            "resize": {
+              "submissionsCompleted": 0,
+              "averageSubmissionMs": 0,
+              "slowestSubmissionMs": 0
+            }
+          }
+        },
+        "runtimePerf": {
+          "warmupMs": 575.3,
+          "frameBudgetMs": 16.7,
+          "framesRendered": 3,
+          "stableFrames": 0,
+          "slowFrames": 3,
+          "stableFramePercent": 0,
+          "slowestFrameMs": 583
+        },
+        "gates": {
+          "stableFramePercentFloor": 50,
+          "stableFramePercentFloorPassed": false,
+          "completedAssetLoadsFloor": 10,
+          "completedAssetLoadsFloorPassed": true,
+          "averageGeometryLoadMsCeiling": 250,
+          "averageGeometryLoadMsCeilingPassed": false,
+          "averageSpriteLoadMsCeiling": 500,
+          "averageSpriteLoadMsCeilingPassed": true,
+          "slowestGeometryLoadMsCeiling": 2000,
+          "slowestGeometryLoadMsCeilingPassed": false,
+          "slowestSpriteLoadMsCeiling": 1000,
+          "slowestSpriteLoadMsCeilingPassed": true,
+          "controlSubmissionCeiling": 0,
+          "controlSubmissionCeilingPassed": true,
+          "resizeSubmissionCeiling": 0,
+          "resizeSubmissionCeilingPassed": true
+        }
+      }
+    ],
+    "comparison": {
+      "mainFrameSubmissions": 76,
+      "workerFrameSubmissions": 4,
+      "frameSubmissionReductionPercent": 94.7,
+      "mainStableFramePercent": 88.2,
+      "workerStableFramePercent": 0,
+      "stableFramePercentDelta": -88.2,
+      "mainSlowFrames": 9,
+      "workerSlowFrames": 3,
+      "slowFrameDelta": -6,
+      "workerGatesPassed": false
+    }
+  },
+  "headlessTopology": {
+    "sourceSchemaVersion": 2,
+    "scenario": "deadman-neural-cup",
+    "profile": "shard-target",
+    "teamCount": 2,
+    "worldCount": 3,
+    "linkCount": 3,
+    "worldQuestBindingCount": 3,
+    "appliedWorldStateCount": 3,
+    "evaluationWorldCount": 3,
+    "topologyParity": {
+      "consistent": true,
+      "teams_match": true,
+      "worlds_match": true,
+      "links_match": true,
+      "quest_graphs_match": true,
+      "world_quest_bindings_match": true,
+      "applied_world_states_match": true,
+      "evaluation_match": true,
+      "missing_world_quest_binding_ids": [],
+      "unexpected_world_quest_binding_ids": [],
+      "missing_applied_world_ids": [],
+      "unexpected_applied_world_ids": [],
+      "missing_evaluation_world_ids": [],
+      "unexpected_evaluation_world_ids": []
+    },
+    "checks": [
+      {
+        "metric": "topology_parity.consistent",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.teams_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.worlds_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.links_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.quest_graphs_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.world_quest_bindings_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.applied_world_states_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "topology_parity.evaluation_match",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      }
+    ],
+    "allChecksPassed": true
+  },
+  "topologyFeed": {
+    "sourceSchemaVersion": 1,
+    "scenarioId": "deadman-neural-cup",
+    "profileId": "shard-target",
+    "worldCount": 3,
+    "worlds": [
+      {
+        "world_id": "deadman-prime",
+        "authority_row": {
+          "resolved_world_id": "deadman-prime",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "deadman-prime",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      },
+      {
+        "world_id": "deadman-shadow",
+        "authority_row": {
+          "resolved_world_id": "deadman-shadow",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "deadman-shadow",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      },
+      {
+        "world_id": "sanctuary-echo",
+        "authority_row": {
+          "resolved_world_id": "sanctuary-echo",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "sanctuary-echo",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      }
+    ],
+    "checks": [
+      {
+        "metric": "authority_row.deadman-prime.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-prime\""
+      },
+      {
+        "metric": "authority_row.deadman-prime.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-prime",
+        "observed": "deadman-prime"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-prime\""
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-prime",
+        "observed": "deadman-prime"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-shadow\""
+      },
+      {
+        "metric": "authority_row.deadman-shadow.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-shadow",
+        "observed": "deadman-shadow"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-shadow\""
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-shadow",
+        "observed": "deadman-shadow"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"sanctuary-echo\""
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.resolved_world_id",
+        "passed": true,
+        "expected": "sanctuary-echo",
+        "observed": "sanctuary-echo"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"sanctuary-echo\""
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.resolved_world_id",
+        "passed": true,
+        "expected": "sanctuary-echo",
+        "observed": "sanctuary-echo"
+      }
+    ]
+  },
+  "liveTopologyFeed": {
+    "sourceSchemaVersion": 1,
+    "scenarioId": "deadman-neural-cup",
+    "profileId": "shard-target",
+    "worldCount": 3,
+    "worlds": [
+      {
+        "world_id": "deadman-prime",
+        "authority_row": {
+          "resolved_world_id": "deadman-prime",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "deadman-prime",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      },
+      {
+        "world_id": "deadman-shadow",
+        "authority_row": {
+          "resolved_world_id": "deadman-shadow",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "deadman-shadow",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      },
+      {
+        "world_id": "sanctuary-echo",
+        "authority_row": {
+          "resolved_world_id": "sanctuary-echo",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        },
+        "generated_runtime": {
+          "resolved_world_id": "sanctuary-echo",
+          "resolved_world_matches": true,
+          "quest_binding_matches": true,
+          "applied_world_state_matches": true,
+          "evaluation_matches": true
+        }
+      }
+    ],
+    "checks": [
+      {
+        "metric": "authority_row.deadman-prime.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-prime\""
+      },
+      {
+        "metric": "authority_row.deadman-prime.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-prime.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-prime",
+        "observed": "deadman-prime"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-prime\""
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-prime.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-prime",
+        "observed": "deadman-prime"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-shadow\""
+      },
+      {
+        "metric": "authority_row.deadman-shadow.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.deadman-shadow.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-shadow",
+        "observed": "deadman-shadow"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"deadman-shadow\""
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.deadman-shadow.resolved_world_id",
+        "passed": true,
+        "expected": "deadman-shadow",
+        "observed": "deadman-shadow"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"sanctuary-echo\""
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "authority_row.sanctuary-echo.resolved_world_id",
+        "passed": true,
+        "expected": "sanctuary-echo",
+        "observed": "sanctuary-echo"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.resolved_world_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "\"sanctuary-echo\""
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.quest_binding_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.applied_world_state_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.evaluation_matches",
+        "passed": true,
+        "expected": "true",
+        "observed": "true"
+      },
+      {
+        "metric": "generated_runtime.sanctuary-echo.resolved_world_id",
+        "passed": true,
+        "expected": "sanctuary-echo",
+        "observed": "sanctuary-echo"
+      }
+    ]
+  }
+}
