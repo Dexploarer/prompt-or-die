@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `406ce528`
+**Last Checkpoint**: `1882cb0a`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -35,7 +35,7 @@
 - [x] Project available compressed sidecars into app-level runtime manifests without manual duplication
 - [x] Express the full browser-facing contract in the sample lane by folding any authored `.ktx2` sprite sidecars into the shared runtime bundle spec automatically
 
-**Next Action**: Start Phase 5 by profiling worker vs main-thread asset warmup and frame stability now that the shipped manifest prefers both meshopt-compressed geometry and KTX2 textures by budget.
+**Next Action**: Historical follow-on resolved in Phase 5.
 
 **Key Files**:
 - [crates/pod-assets/src/lib.rs](/Users/home/Desktop/prompt-or-die/crates/pod-assets/src/lib.rs)
@@ -44,8 +44,8 @@
 - [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
 
 **Known Issues**:
-- The shared pipeline now ships checked-in `.ktx2` ring fixtures and `.meshopt.glb` mesh fixtures, and the runtime prefers both by budget; the next remaining bottleneck is how quickly those optimized assets warm on worker vs main-thread routes.
-- Sample geometry generation intentionally remains in `apps/pod-web/scripts/sync-assets.mjs`; the next work should measure runtime behavior, not move that sample-authoring step again.
+- No open issues in this phase. The worker/main-thread warmup follow-on was completed in Phase 5.
+- Sample geometry generation intentionally remains in `apps/pod-web/scripts/sync-assets.mjs`; any future changes here should be driven by measured runtime regressions, not pipeline churn.
 
 ## Phase 4: Compression, LOD, and Shipping Discipline ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -67,7 +67,7 @@
 
 **Known Issues**:
 - The shipped sample set now prefers compressed assets on both fronts: `.ktx2` for ring sprites and `.meshopt.glb` for meshes where the compressed fixtures beat the source `.glb` outputs by budget.
-- Browser smoke is deterministic across the optimized routes, but Phase 5 still needs explicit worker/main-thread perf counters so regressions surface as data, not only as pass/fail route checks.
+- The original worker/main-thread measurement gap was closed in Phase 5. The remaining open browser issue is different: the current render-route perf gate still needs a repair pass to get `measure:render-routes:check` green again.
 
 ## Phase 5: Render Worker and Main-Thread Relief ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -123,7 +123,8 @@
 - [apps/pod-web/src/hud.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/hud.ts)
 
 **Known Issues**:
-- The moat suite now has published shard-target transport byte and queue-depth baselines, but it still lacks committed historical shard-target snapshots for transport/browser drift review across monthly runs.
+- The original historical-snapshot gap is closed by `/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
+- The remaining transport/topology follow-on is workflow automation: the live shard-target publication path is still manual until Iteration 185 lands.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -135,7 +136,7 @@
 - [x] Identified the remaining missing lifecycle/registration hooks that still force integrators into app bootstrap code
 
 **Next Action**:
-- Publish committed shard-target moat snapshots for `transportMeasurements` and `browserRouteMeasurements` so drift can be reviewed historically instead of only through pass/fail gates.
+- Historical follow-on closed by the first committed shard-target monthly snapshot. Any further work here belongs to snapshot comparison tooling, not snapshot existence.
 
 ## Phase 8: CI and Regression Gates ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -155,7 +156,7 @@
 - [scripts/run_moat_benchmarks.ts](/Users/home/Desktop/prompt-or-die/scripts/run_moat_benchmarks.ts)
 
 **Known Issues**:
-- The browser asset/render-route gates and transport baselines are now routine, but the repo still lacks committed shard-target benchmark snapshots for drift review across monthly runs.
+- The committed shard-target snapshot now exists. The remaining missed item is repair work for the currently failing browser render-route perf gate so the recorded artifact and the enforced gate converge again.
 
 ## Phase 9: Agent Runtime Audit and Contract Alignment ✅
 **Completed**: 2026-03-12
@@ -181,13 +182,13 @@
 - [x] Surface neural-runtime compatibility and fallback status through introspection and telemetry
 
 **Next Action**:
-- Start the reward/replay contract by moving training outcomes away from caller-local `record_experience()` calls and toward authoritative action-outcome attribution.
+- Historical follow-on resolved in Phase 11.
 
 **Known Issues**:
 - The neural path is functional, but still mostly a thin inference scaffold compared with the LLM and hybrid agents.
-- Reward attribution, dataset export discipline, and scenario evaluation still depend on follow-up phases and are not yet first-class runtime contracts.
+- Reward attribution and dataset export are now first-class runtime contracts. The remaining open gap is Phase 12 controller evaluation/parity coverage across agent types.
 
-## Phase 11: Reward, Experience, and Replay Dataset Contract ⏳
+## Phase 11: Reward, Experience, and Replay Dataset Contract ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
 
 **Progress**:
@@ -197,7 +198,7 @@
 - [x] Add deterministic tests for reward attribution, sample derivation, and terminal-state handling
 
 **Next Action**:
-- Thread reward/evaluation outputs into the broader remote topology and parity harnesses now that admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner.
+- Historical follow-on closed in Phases 12-14. Remaining work is broader controller parity and remote-agent contract work tracked separately below.
 
 **Discovered Follow-up**:
 - The long-term proving ground should be headless multi-world team orchestration, not more browser-first scaffolding.
@@ -254,3 +255,10 @@
 
 **Next Action**:
 - Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of a manual multi-command sequence.
+
+## Audit Backlog (2026-03-13)
+
+- [ ] Iteration 185: wrap the live shard-target topology capture and snapshot publication flow into one reproducible local script.
+- [ ] Phase 12: add the missing cross-controller evaluation harness and parity metrics for scripted, LLM, hybrid, and neural agents.
+- [ ] Phase 13: finish the explicit remote-agent gameplay contract for observation/action budgets, heartbeat/fallback rules, and degraded-network stale-decision tests.
+- [ ] Browser infra: repair the current render-route perf regression so `bun run measure:render-routes:check` passes again on the shipped asset set.

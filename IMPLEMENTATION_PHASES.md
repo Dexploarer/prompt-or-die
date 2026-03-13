@@ -254,10 +254,10 @@
 - [x] Surface neural-runtime compatibility and fallback status through introspection/telemetry
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-agents neural -- --nocapture`
-- [ ] `cargo test -p pod-agents onnx -- --nocapture`
-- [ ] `cargo check -p pod-core -p pod-agents`
-- [ ] `git diff --check`
+- [x] `cargo test -p pod-agents neural -- --nocapture`
+- [x] `cargo test -p pod-agents --lib`
+- [x] `cargo check -p pod-core -p pod-agents`
+- [x] `git diff --check`
 
 **Exit Criteria**:
 - Neural models have a stable runtime contract instead of implicit array-shape coupling
@@ -267,7 +267,7 @@
 
 ## Phase 11: Reward, Experience, and Replay Dataset Contract
 **Type**: Agent Runtime
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 3-5 hours
 **Files**: `crates/pod-core/src/telemetry.rs`, `crates/pod-core/src/replay.rs`, `crates/pod-core/src/tick.rs`, `crates/pod-agents/src/neural_agent.rs`, docs/tooling`
 
@@ -314,17 +314,22 @@
 
 ## Phase 13: Remote Agent Topology on SpacetimeDB
 **Type**: Agent Runtime
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 hours
 **Files**: `crates/pod-stdb/*`, `crates/pod-net/*`, `docs/agent-integration-contract.md`, remote agent tooling/tests`
 
 **Tasks**:
+- [x] Add authority-published remote-topology feed rows, generated/runtime ingestion paths, and parity measurement/report surfaces for exported `RemoteTopologyBundle` artifacts
+- [x] Capture deterministic local and live generated-SDK topology parity artifacts plus the first committed shard-target monthly snapshot
 - [ ] Define the observation/action envelope and budget contract for remote agents over SpacetimeDB
 - [ ] Clarify admission, heartbeat, timeout, and fallback rules for remote neural/LLM agents
 - [ ] Ensure transport preserves the same gameplay contract as local in-process agents
 - [ ] Add degraded-network and stale-decision tests for remote autonomous agents
 
 **Verification Criteria**:
+- [x] `cargo test -p pod-stdb --no-default-features --features client`
+- [x] `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+- [x] `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input <exported-topology> --fail-on-checks`
 - [ ] `cargo test -p pod-stdb -- --nocapture`
 - [ ] `cargo test -p pod-net transport -- --nocapture`
 - [ ] `cargo check --workspace`
@@ -377,3 +382,12 @@
 1. Promote the live shard-target topology benchmark and snapshot publication flow into a single reproducible local script/workflow instead of the current manual command chain.
 2. Remove any remaining helper-only generated topology wiring once the live generated runtime is exercised by the parity/evaluation path.
 3. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
+
+## Audit Backlog (2026-03-13)
+
+These are the confirmed remaining misses after the roadmap scrub:
+
+1. Phase 12 still lacks a cross-controller evaluation harness for scripted, LLM, hybrid, and neural agents with published parity metrics.
+2. Phase 13 still lacks the explicit remote-agent gameplay contract: observation/action budgets, heartbeat and fallback rules, and degraded-network stale-decision coverage.
+3. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
+4. The live shard-target topology capture/publication flow now works, but it is still a manual command chain until Iteration 185 wraps it in one reproducible script.
