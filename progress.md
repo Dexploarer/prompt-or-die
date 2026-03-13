@@ -411,6 +411,13 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `cargo check -p pod-net --features spacetimedb`
   - `git diff --check`
+- Added a generic `receive_debug_document(...)` ingress to `crates/pod-stdb/src/client.rs`, so `remote_topology_bundle`, `versioned_tick_telemetry`, `agent_tool_call_event`, `agent_tick_rollup`, and `focused_entity_debug_summary` documents now share one authority-document dispatch path instead of one-off topology wiring.
+- Extended `crates/pod-net/src/client_stdb.rs` with `apply_debug_document(...)`, moved the remote-topology document tests onto that generic ingress, and kept `apply_remote_topology_document(...)` as a thin compatibility alias instead of the main remote seam.
+- Revalidated the generic authority-document slice with:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
   - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
   - `git diff --check`

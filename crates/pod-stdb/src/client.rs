@@ -77,9 +77,9 @@ use crate::types::*;
 use std::collections::{HashMap, VecDeque};
 
 use pod_core::{
-    decode_toon_document, AgentTickRollup, AgentToolCallEvent, AppliedWorldStateSummary,
-    FocusedEntityDebugSummary, RemoteTopologyBundle, ToolCallStatus, WorldEvaluationSummary,
-    WorldQuestBinding, WorldRealityDefinition,
+    decode_toon_document, decode_toon_value, AgentTickRollup, AgentToolCallEvent,
+    AppliedWorldStateSummary, FocusedEntityDebugSummary, RemoteTopologyBundle, ToolCallStatus,
+    VersionedTickTelemetry, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
 };
 
 // ============================================================
@@ -1396,6 +1396,94 @@ impl StdbClient {
         Ok(())
     }
 
+    /// Store an authority-fed TOON document and dispatch it to the matching
+    /// debug/topology ingress path.
+    pub fn receive_debug_document(&mut self, document: String) -> Result<(), StdbError> {
+        let document_type = decode_toon_value(&document)
+            .map_err(StdbError::DocumentError)?
+            .get("document_type")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                StdbError::DocumentError(
+                    "decoded TOON document missing string `document_type` field".into(),
+                )
+            })?;
+
+        match document_type.as_str() {
+            "remote_topology_bundle" => self.receive_remote_topology_document(document),
+            "versioned_tick_telemetry" => {
+                let telemetry: VersionedTickTelemetry = decode_toon_document(
+                    &document,
+                    "versioned_tick_telemetry",
+                )
+                .map_err(|error| {
+                    StdbError::DocumentError(format!(
+                        "failed to decode versioned_tick_telemetry: {error}"
+                    ))
+                })?;
+                for frame in telemetry.payload.agents {
+                    if let Some(entity_id) = frame.entity_id {
+                        self.receive_agent_telemetry_tick(frame.tick, entity_id.0, document.clone());
+                    }
+                }
+                Ok(())
+            }
+            "agent_tool_call_event" => {
+                let event: AgentToolCallEvent =
+                    decode_toon_document(&document, "agent_tool_call_event").map_err(|error| {
+                        StdbError::DocumentError(format!(
+                            "failed to decode agent_tool_call_event: {error}"
+                        ))
+                    })?;
+                self.receive_agent_tool_call_event(
+                    event.tick,
+                    event.agent_entity_id,
+                    event.trace.tool_name.clone(),
+                    event.trace.provider.clone(),
+                    format!("{:?}", event.trace.status),
+                    document,
+                );
+                Ok(())
+            }
+            "agent_tick_rollup" => {
+                let rollup: AgentTickRollup =
+                    decode_toon_document(&document, "agent_tick_rollup").map_err(|error| {
+                        StdbError::DocumentError(format!(
+                            "failed to decode agent_tick_rollup: {error}"
+                        ))
+                    })?;
+                self.receive_agent_tick_rollup(
+                    rollup.tick_start,
+                    rollup.tick_end,
+                    rollup.agent_entity_id,
+                    document,
+                );
+                Ok(())
+            }
+            "focused_entity_debug_summary" => {
+                let summary: FocusedEntityDebugSummary =
+                    decode_toon_document(&document, "focused_entity_debug_summary").map_err(
+                        |error| {
+                            StdbError::DocumentError(format!(
+                                "failed to decode focused_entity_debug_summary: {error}"
+                            ))
+                        },
+                    )?;
+                self.events
+                    .push_back(StdbEvent::FocusedEntityDebugSummaryReceived {
+                        agent_entity_id: summary.entity_id,
+                        document,
+                    });
+                self.events_received += 1;
+                Ok(())
+            }
+            other => Err(StdbError::DocumentError(format!(
+                "unsupported debug document type `{other}`"
+            ))),
+        }
+    }
+
     fn apply_remote_topology_resolved(
         &mut self,
         topology: RemoteTopologyBundle,
@@ -2459,7 +2547,7 @@ mod tests {
     }
 
     #[test]
-    fn test_receive_remote_topology_document_decodes_and_emits_document_event() {
+    fn test_receive_debug_document_decodes_remote_topology_and_emits_document_event() {
         let mut client = StdbClient::new(StdbClientConfig {
             db_name: "deadman-shadow".into(),
             ..StdbClientConfig::default()
@@ -2549,7 +2637,7 @@ mod tests {
         .to_toon_document();
 
         client
-            .receive_remote_topology_document(document.clone())
+            .receive_debug_document(document.clone())
             .expect("document should decode");
 
         assert_eq!(client.resolved_remote_world_id(), Some("deadman-shadow"));
@@ -2574,6 +2662,70 @@ mod tests {
                 ..
             } if resolved_world_id.as_deref() == Some("deadman-shadow")
         )));
+    }
+
+    #[test]
+    fn test_receive_debug_document_dispatches_tool_call_event() {
+        use pod_core::{AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary};
+
+        let mut client = StdbClient::new(StdbClientConfig::default());
+        let document = AgentToolCallEvent::new(
+            41,
+            AgentToolCallTrace::success(8, "llm.complete", "qwen", 12, 24, 8),
+        )
+        .to_toon_document();
+
+        client
+            .receive_debug_document(document.clone())
+            .expect("tool document should decode");
+
+        let events = client.drain_events().collect::<Vec<_>>();
+        assert!(matches!(
+            &events[0],
+            StdbEvent::AgentToolCallEventReceived {
+                tick: 8,
+                agent_entity_id: 41,
+                tool_name,
+                provider,
+                status,
+                document: current,
+            } if tool_name == "llm.complete"
+                && provider == "qwen"
+                && status == "Succeeded"
+                && current == &document
+        ));
+        let summary = match &events[1] {
+            StdbEvent::FocusedEntityDebugSummaryReceived {
+                agent_entity_id,
+                document,
+            } => {
+                assert_eq!(*agent_entity_id, 41);
+                decode_toon_document::<FocusedEntityDebugSummary>(
+                    document,
+                    "focused_entity_debug_summary",
+                )
+                .expect("focused summary document should decode")
+            }
+            other => panic!("expected focused summary event, got {other:?}"),
+        };
+        assert_eq!(summary.entity_id, 41);
+        assert_eq!(summary.tool_call_count, 1);
+        assert_eq!(summary.latest_tool_name.as_deref(), Some("llm.complete"));
+    }
+
+    #[test]
+    fn test_receive_debug_document_rejects_unknown_document_type() {
+        let mut client = StdbClient::new(StdbClientConfig::default());
+        let document = pod_core::encode_toon_document("unsupported_debug_document", &vec![1_u8]);
+
+        let error = client
+            .receive_debug_document(document)
+            .expect_err("unknown document type should fail");
+        assert!(matches!(
+            error,
+            StdbError::DocumentError(message)
+                if message.contains("unsupported debug document type `unsupported_debug_document`")
+        ));
     }
 
     #[test]

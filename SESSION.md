@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
 **Current Stage**: In Progress
-**Last Checkpoint**: `45086efa`
+**Last Checkpoint**: `53f9c205`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -219,6 +219,8 @@
 - [x] Added replay/evaluation coverage for linked-world tournaments and neural swarms across both `apps/pod-headless` and the public `pod-net::SpacetimeDBClient` topology surface
 - [x] Added a TOON-document ingest path for `RemoteTopologyBundle` in `pod-stdb`, preserving the source document via `StdbEvent::RemoteTopologyDocumentReceived` and decoding the authority-style `remote_topology_bundle` payload into the existing cache resolution path
 - [x] Added `pod-net::SpacetimeDBClient::apply_remote_topology_document(...)`, forwarded remote topology source documents through `ServerMessage::DebugDocument`, and covered the document-fed path with deterministic unit/integration tests
+- [x] Generalized the authority-document ingress in `pod-stdb` with `receive_debug_document(...)`, so topology, tool-call, rollup, focused-summary, and versioned telemetry TOON documents now share one dispatch path instead of growing more topology-only hooks
+- [x] Added `pod-net::SpacetimeDBClient::apply_debug_document(...)` and moved the remote-topology document coverage onto that generic path, keeping `apply_remote_topology_document(...)` as a thin compatibility alias
 
 **Next Action**:
-- Replace local `apply_remote_topology_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that feed into the parity and evaluation harnesses.
+- Replace local `apply_debug_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that feed into the parity and evaluation harnesses.

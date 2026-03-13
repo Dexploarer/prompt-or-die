@@ -150,10 +150,11 @@ That runner now also emits a shared `RemoteTopologyBundle` contract from
 and `pod-stdb` plus `pod-net::client_stdb` now consume that same
 world/team/link/quest/evaluation payload directly instead of reconstructing it
 from app-local report JSON. The newest path for that consumption is a
-document-fed ingress route in
+generic authority-document ingress route in
 [`crates/pod-stdb/src/client.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-stdb/src/client.rs):
-`remote_topology_bundle` TOON documents can now be decoded into the shared
-topology cache, and
+`remote_topology_bundle`, telemetry, tool-call, rollup, and focused-summary
+TOON documents can now be dispatched into the shared client cache/event path,
+and
 [`crates/pod-net/src/client_stdb.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-net/src/client_stdb.rs)
 forwards that exact source document through the existing debug-document stream
 while still rebuilding snapshot metadata from the decoded topology.

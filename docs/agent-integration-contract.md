@@ -192,8 +192,10 @@ and described in
 runtime surfaces: it packages teams, worlds, links, quest bindings, quest-line
 state, and evaluation summaries into one authority-facing payload rather than
 leaving those relationships spread across app-local JSON shapes. `pod-stdb`
-now caches and resolves that bundle for the active world, can also decode it
-from an authority-style `remote_topology_bundle` TOON document, and
+now caches and resolves that bundle for the active world through the same
+generic authority-document ingress that also accepts telemetry and focused
+debug documents, can decode it from an authority-style
+`remote_topology_bundle` TOON document, and
 `pod-net::SpacetimeDBClient` projects the resolved world/team/quest metadata
 into entity snapshots while also exposing the resolved applied-world-state and
 world-evaluation summaries directly. The same client also forwards the exact

@@ -1787,5 +1787,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-net --features spacetimedb`
   - `git diff --check`
 
-**Last updated**: Iteration 168
-**Current focus**: Iteration 169 replace local `apply_remote_topology_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that source through the parity and evaluation harnesses
+### Iteration 169
+- [x] Added a generic `receive_debug_document(...)` ingress to `crates/pod-stdb/src/client.rs`, so `remote_topology_bundle`, `versioned_tick_telemetry`, `agent_tool_call_event`, `agent_tick_rollup`, and `focused_entity_debug_summary` TOON documents now share one authority-document dispatch path.
+- [x] Added deterministic `pod-stdb` coverage for the new generic path, including remote-topology decode, tool-call dispatch plus focused-summary synthesis, and rejection of unsupported debug document kinds.
+- [x] Extended `crates/pod-net/src/client_stdb.rs` with `apply_debug_document(...)`, moved the remote-topology document unit/integration coverage onto that generic path, and kept `apply_remote_topology_document(...)` as a compatibility alias instead of the primary remote ingress seam.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `git diff --check`
+
+**Last updated**: Iteration 169
+**Current focus**: Iteration 170 replace local `apply_debug_document(...)` calls with an actual authority-published topology document feed in `pod-stdb` / `pod-net`, then thread that source through the parity and evaluation harnesses

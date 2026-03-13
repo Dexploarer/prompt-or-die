@@ -1043,13 +1043,21 @@ impl SpacetimeDBClient {
         Ok(())
     }
 
+    /// Apply an authority TOON document through the underlying SpacetimeDB client.
+    pub fn apply_debug_document(
+        &mut self,
+        document: impl Into<String>,
+    ) -> Result<(), StdbClientError> {
+        self.inner.receive_debug_document(document.into())?;
+        Ok(())
+    }
+
     /// Apply a shared multi-world topology artifact received as an authority TOON document.
     pub fn apply_remote_topology_document(
         &mut self,
         document: impl Into<String>,
     ) -> Result<(), StdbClientError> {
-        self.inner.receive_remote_topology_document(document.into())?;
-        Ok(())
+        self.apply_debug_document(document)
     }
 
     /// Access the last applied multi-world topology artifact, if any.
@@ -1714,7 +1722,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_remote_topology_document_emits_debug_document_and_updates_state() {
+    fn test_apply_debug_document_emits_debug_document_and_updates_state() {
         let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
             db_name: "deadman-shadow".into(),
             connection_mode: StdbConnectionMode::Emulated,
@@ -1788,7 +1796,7 @@ mod tests {
         .to_toon_document();
 
         client
-            .apply_remote_topology_document(document.clone())
+            .apply_debug_document(document.clone())
             .expect("document applies");
 
         let messages = client.poll_updates();
