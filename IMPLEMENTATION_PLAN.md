@@ -1754,5 +1754,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-core -p pod-headless`
   - `git diff --check`
 
-**Last updated**: Iteration 165
-**Current focus**: Iteration 166 consume the shared `RemoteTopologyBundle` through `pod-net` / `pod-stdb` so remote execution and evaluation surfaces stop reconstructing multi-world team, quest, and effect state from app-local report JSON
+### Iteration 166
+- [x] Added shared remote-topology caching and resolution helpers to `crates/pod-stdb/src/client.rs`, so the client cache can resolve active world identity, admitted team keys, world quest bindings, applied world state, and world evaluation summaries from a `RemoteTopologyBundle`.
+- [x] Added `StdbEvent::RemoteTopologyUpdated` and used it in `crates/pod-net/src/client_stdb.rs` to rebuild a full snapshot when remote topology changes after welcome/subscription handoff.
+- [x] Extended `crates/pod-net/src/snapshot.rs` and `crates/pod-net/src/client_stdb.rs` so entity snapshots now carry remote world/team metadata (`team_key`, `world_id`, `world_role`, `world_active_quest_graph_ids`) instead of leaving those relationships trapped in app-local report JSON.
+- [x] Added deterministic unit/integration coverage in `crates/pod-stdb` and `crates/pod-net` for topology resolution, widened `StdbEvent` surface construction, and topology-triggered snapshot refresh behavior.
+- [x] Revalidated touched targets:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
+
+**Last updated**: Iteration 166
+**Current focus**: Iteration 167 add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface, so quest-line state and alternate-reality effects are validated beyond local headless reports

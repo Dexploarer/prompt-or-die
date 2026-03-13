@@ -13,6 +13,7 @@ use pod_core::{
     CombatPresentation, CombatStyle, CreatureIdentity, EncounterKind, EncounterProfile,
     EncounterState, FactionAffiliation, FactionDisposition, Health, Label, LootContainer, Movement,
     QuestAnchor, ResourceNode, SkillKind, SpawnProfile, Team, Transform, Velocity,
+    WorldRealityRole,
     WorldPopulationState,
 };
 
@@ -93,6 +94,10 @@ pub struct EntityMetadataSnapshot {
     pub region_id: Option<String>,
     pub region_name: Option<String>,
     pub team_id: Option<u8>,
+    pub team_key: Option<String>,
+    pub world_id: Option<String>,
+    pub world_role: Option<WorldRealityRole>,
+    pub world_active_quest_graph_ids: Vec<String>,
     pub quest_graph_ids: Vec<String>,
     pub faction_track_id: Option<String>,
     pub encounter_table_id: Option<String>,
@@ -636,6 +641,10 @@ impl WorldSnapshot {
                     region_id: streaming.region_id.clone(),
                     region_name: streaming.region_name.clone(),
                     team_id,
+                    team_key: None,
+                    world_id: None,
+                    world_role: None,
+                    world_active_quest_graph_ids: Vec::new(),
                     quest_graph_ids,
                     faction_track_id: faction
                         .as_ref()
@@ -1514,6 +1523,13 @@ fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_option_str(hash, metadata.region_id.as_deref());
     hash_option_str(hash, metadata.region_name.as_deref());
     hash_option_u8(hash, metadata.team_id);
+    hash_option_str(hash, metadata.team_key.as_deref());
+    hash_option_str(hash, metadata.world_id.as_deref());
+    hash_option_str(hash, metadata.world_role.map(world_reality_role_name));
+    hash_u64(hash, metadata.world_active_quest_graph_ids.len() as u64);
+    for quest_graph_id in &metadata.world_active_quest_graph_ids {
+        hash_option_str(hash, Some(quest_graph_id.as_str()));
+    }
     hash_u64(hash, metadata.quest_graph_ids.len() as u64);
     for quest_graph_id in &metadata.quest_graph_ids {
         hash_option_str(hash, Some(quest_graph_id.as_str()));
@@ -1542,6 +1558,16 @@ fn hash_entity_metadata(hash: &mut u64, metadata: &EntityMetadataSnapshot) {
     hash_bool(hash, metadata.interaction.can_capture);
     hash_bool(hash, metadata.interaction.can_command_companion);
     hash_bool(hash, metadata.interaction.can_chat);
+}
+
+fn world_reality_role_name(role: WorldRealityRole) -> &'static str {
+    match role {
+        WorldRealityRole::Primary => "primary",
+        WorldRealityRole::Mirror => "mirror",
+        WorldRealityRole::Tournament => "tournament",
+        WorldRealityRole::Sanctuary => "sanctuary",
+        WorldRealityRole::Shadow => "shadow",
+    }
 }
 
 fn team_to_id(team: Team) -> Option<u8> {

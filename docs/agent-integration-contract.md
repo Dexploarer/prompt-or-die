@@ -188,10 +188,14 @@ They are defined in
 and described in
 [`docs/multi-world-agent-topology.md`](/Users/home/Desktop/prompt-or-die/docs/multi-world-agent-topology.md).
 
-`RemoteTopologyBundle` is the current portable artifact for headless and future
-remote surfaces: it packages teams, worlds, links, quest bindings, quest-line
+`RemoteTopologyBundle` is the current portable artifact for headless and remote
+runtime surfaces: it packages teams, worlds, links, quest bindings, quest-line
 state, and evaluation summaries into one authority-facing payload rather than
-leaving those relationships spread across app-local JSON shapes.
+leaving those relationships spread across app-local JSON shapes. `pod-stdb`
+now caches and resolves that bundle for the active world, and
+`pod-net::client_stdb` projects the resolved world/team/quest metadata into
+entity snapshots so remote consumers do not have to reconstruct topology state
+out-of-band.
 
 This matters for integration because the long-term remote/headless surface is
 not "one browser client per world". It is "one runtime contract across many

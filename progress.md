@@ -389,3 +389,11 @@ Original prompt: its the graphics and the worlds scene, everything is piled up o
   - `cargo test -p pod-headless`
   - `cargo check -p pod-core -p pod-headless`
   - `git diff --check`
+- Added shared remote-topology cache/resolution helpers to `crates/pod-stdb/src/client.rs`, including active world, team-key, quest-binding, applied-world-state, and evaluation lookups plus a new `StdbEvent::RemoteTopologyUpdated`.
+- Extended `crates/pod-net/src/client_stdb.rs` and `crates/pod-net/src/snapshot.rs` so remote snapshot metadata now carries `team_key`, `world_id`, `world_role`, and `world_active_quest_graph_ids`, and topology updates rebuild a full snapshot after welcome/subscription handoff.
+- Revalidated the remote-consumer slice with:
+  - `cargo test -p pod-stdb --no-default-features --features client`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`

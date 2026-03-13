@@ -345,7 +345,7 @@
 - [x] Add a headless team/world runner that can operate without the browser client
 - [x] Define deterministic cross-world effect application rules at authority boundaries
 - [x] Add a shared remote-topology export contract for world quest bindings, applied world state, and scenario evaluation
-- [ ] Consume the shared remote-topology artifact through remote execution topology
+- [x] Consume the shared remote-topology artifact through remote execution topology
 - [ ] Add replay/evaluation coverage for linked-world tournaments and neural swarms
 
 **Verification Criteria**:
@@ -353,6 +353,10 @@
 - [x] `cargo check -p pod-core -p pod-agents`
 - [x] `cargo test -p pod-headless`
 - [x] `cargo run -p pod-headless -- --profile ci-smoke --scenario deadman-neural-cup --output /tmp/pod-headless-report.json`
+- [x] `cargo test -p pod-stdb --no-default-features --features client`
+- [x] `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+- [x] `cargo check -p pod-stdb --no-default-features --features client`
+- [x] `cargo check -p pod-net --features spacetimedb`
 - [x] `git diff --check`
 
 **Exit Criteria**:
@@ -370,6 +374,6 @@
 
 ## Immediate Next Actions
 
-1. Consume the exported `RemoteTopologyBundle` through `pod-net` / `pod-stdb` so remote execution stops reconstructing multi-world state from app-local reports.
-2. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of that shared remote topology surface.
-3. Preserve quest-line state and alternate-reality objective progression when the same topology is threaded into remote execution and evaluation surfaces.
+1. Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface now that `pod-stdb` and `pod-net` both consume it.
+2. Preserve quest-line state and alternate-reality objective progression in those replay/evaluation paths instead of validating them only through `pod-headless` JSON artifacts.
+3. Promote `RemoteTopologyBundle` from a manually applied client artifact toward an authority-fed remote contract once the first replay/evaluation coverage is in place.

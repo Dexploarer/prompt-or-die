@@ -48,6 +48,7 @@ use uuid::Uuid;
 use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
 use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
+use pod_core::RemoteTopologyBundle;
 
 use pod_stdb::client::{
     CachedEntity, StdbClient, StdbClientConfig, StdbConnectionMode, StdbError, StdbEvent,
@@ -548,6 +549,31 @@ impl SpacetimeDBClient {
                         }
                     }
                 }
+                StdbEvent::RemoteTopologyUpdated { .. } => {
+                    if !self.welcome_sent {
+                        continue;
+                    }
+                    let tick = self.current_tick_or_zero();
+                    let snapshot = self.build_world_snapshot();
+                    let updated_entities = snapshot.entities.clone();
+                    let population = snapshot.population.clone();
+                    let authoritative_digest = snapshot.digest();
+                    self.local_snapshot = Some(snapshot);
+                    self.ingest_local_snapshot();
+
+                    messages.push(ServerMessage::StateDelta {
+                        tick,
+                        acknowledged_action_tick: None,
+                        authoritative_digest,
+                        is_full_snapshot: true,
+                        delta: StateDelta {
+                            tick,
+                            updated: updated_entities,
+                            destroyed: Vec::new(),
+                            population,
+                        },
+                    });
+                }
 
                 StdbEvent::ConnectError { message } => {
                     log::error!("[pod-net stdb] Connection failed: {message}");
@@ -565,7 +591,7 @@ impl SpacetimeDBClient {
                 StdbEvent::EntityInserted { entity_id }
                 | StdbEvent::EntityUpdated { entity_id } => {
                     if let Some(cached) = self.inner.entity(entity_id) {
-                        let snap = entity_to_snapshot(cached);
+                        let snap = self.entity_to_snapshot(cached);
                         let tick = self.current_tick_or_zero();
                         if tick < self.last_emitted_tick {
                             continue;
@@ -1000,6 +1026,15 @@ impl SpacetimeDBClient {
         &mut self.inner
     }
 
+    /// Apply a shared multi-world topology artifact to the underlying SpacetimeDB client.
+    pub fn apply_remote_topology(
+        &mut self,
+        topology: RemoteTopologyBundle,
+    ) -> Result<(), StdbClientError> {
+        self.inner.apply_remote_topology(topology);
+        Ok(())
+    }
+
     // ── Internal helpers ──
 
     fn current_tick_or_zero(&self) -> u64 {
@@ -1019,7 +1054,7 @@ impl SpacetimeDBClient {
             .inner
             .entities()
             .values()
-            .map(entity_to_snapshot)
+            .map(|entity| self.entity_to_snapshot(entity))
             .collect();
 
         WorldSnapshot {
@@ -1030,6 +1065,18 @@ impl SpacetimeDBClient {
                 ..Default::default()
             },
         }
+    }
+
+    fn entity_to_snapshot(&self, cached: &CachedEntity) -> EntitySnapshot {
+        entity_to_snapshot(
+            cached,
+            self.inner.resolved_remote_world_id(),
+            self.inner.resolved_remote_world().map(|world| world.role),
+            self.inner.resolved_remote_team_key(cached.team_id),
+            self.inner
+                .resolved_remote_world_quest_binding()
+                .map(|binding| binding.quest_graph_ids.as_slice()),
+        )
     }
 
     fn upsert_local_snapshot(&mut self, tick: u64, snap: &EntitySnapshot) {
@@ -1061,7 +1108,13 @@ impl SpacetimeDBClient {
 // ============================================================
 
 /// Convert a cached SpacetimeDB entity into a pod-net [`EntitySnapshot`].
-fn entity_to_snapshot(cached: &CachedEntity) -> EntitySnapshot {
+fn entity_to_snapshot(
+    cached: &CachedEntity,
+    world_id: Option<&str>,
+    world_role: Option<pod_core::WorldRealityRole>,
+    team_key: Option<String>,
+    world_active_quest_graph_ids: Option<&[String]>,
+) -> EntitySnapshot {
     let (px, py) = cached.position().unwrap_or((0.0, 0.0));
     EntitySnapshot {
         id: cached.entity_id,
@@ -1074,6 +1127,12 @@ fn entity_to_snapshot(cached: &CachedEntity) -> EntitySnapshot {
         label: cached.name.clone(),
         metadata: EntityMetadataSnapshot {
             team_id: cached.team_id,
+            team_key,
+            world_id: world_id.map(ToOwned::to_owned),
+            world_role,
+            world_active_quest_graph_ids: world_active_quest_graph_ids
+                .map(|quest_ids| quest_ids.to_vec())
+                .unwrap_or_default(),
             ..EntityMetadataSnapshot::default()
         },
     }
@@ -1315,13 +1374,15 @@ mod tests {
     use pod_core::{
         action::SpeakVolume as CoreSpeakVolume, decode_toon_document, AgentTickRollup,
         AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary, ReplayFile,
-        ReplayHeader, ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry,
+        ReplayHeader, RemoteTopologyBundle, ShardIncidentSummary, TickTelemetryFrame,
+        VersionedTickTelemetry, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
+        WorldTournamentDefinition,
     };
 
     #[test]
     fn test_entity_to_snapshot_defaults() {
         let cached = CachedEntity::from_entity(42, None, true);
-        let snap = entity_to_snapshot(&cached);
+        let snap = entity_to_snapshot(&cached, None, None, None, None);
 
         assert_eq!(snap.id, 42);
         assert_eq!(snap.position, Vec2::ZERO);
@@ -1336,6 +1397,7 @@ mod tests {
     #[test]
     fn test_entity_to_snapshot_with_components() {
         let mut cached = CachedEntity::from_entity(7, None, true);
+        let quest_graph_ids = vec!["deadman-prime-season".to_string()];
         cached.pos_x = Some(100.0);
         cached.pos_y = Some(200.0);
         cached.vel_x = Some(1.0);
@@ -1345,8 +1407,15 @@ mod tests {
         cached.max_health = Some(100.0);
         cached.max_speed = Some(240.0);
         cached.name = Some("Hero".into());
+        cached.team_id = Some(1);
 
-        let snap = entity_to_snapshot(&cached);
+        let snap = entity_to_snapshot(
+            &cached,
+            Some("deadman-prime"),
+            Some(WorldRealityRole::Tournament),
+            Some("iron-sigil".into()),
+            Some(quest_graph_ids.as_slice()),
+        );
 
         assert_eq!(snap.id, 7);
         assert_eq!(snap.position, Vec2::new(100.0, 200.0));
@@ -1356,6 +1425,90 @@ mod tests {
         assert_eq!(snap.max_health, Some(100.0));
         assert_eq!(snap.movement_speed, Some(240.0));
         assert_eq!(snap.label.as_deref(), Some("Hero"));
+        assert_eq!(snap.metadata.team_id, Some(1));
+        assert_eq!(snap.metadata.team_key.as_deref(), Some("iron-sigil"));
+        assert_eq!(snap.metadata.world_id.as_deref(), Some("deadman-prime"));
+        assert_eq!(snap.metadata.world_role, Some(WorldRealityRole::Tournament));
+        assert_eq!(
+            snap.metadata.world_active_quest_graph_ids,
+            vec!["deadman-prime-season".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_apply_remote_topology_rebuilds_snapshot_metadata() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: "deadman-prime".into(),
+            connection_mode: StdbConnectionMode::Emulated,
+            ..Default::default()
+        });
+        client.connect().expect("client connects in emulated mode");
+        client.inner.frame_tick();
+        client
+            .subscriptions
+            .ensure_subscriptions_applied(&mut client.inner)
+            .expect("subscriptions apply");
+
+        let mut cached = CachedEntity::from_entity(7, None, true);
+        cached.name = Some("Hero".into());
+        cached.team_id = Some(1);
+        client.inner.upsert_entity(cached);
+
+        let mut world =
+            WorldRealityDefinition::new("deadman-prime", "Deadman Prime", "deadman-seasonal");
+        world.role = WorldRealityRole::Tournament;
+        world.active_team_ids = vec!["iron-sigil".into()];
+        let topology = RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![pod_core::AgentTeamDefinition::new(
+                "iron-sigil",
+                "Iron Sigil",
+                "deadman-prime",
+            )],
+            worlds: vec![world],
+            links: vec![],
+            world_quest_bindings: vec![WorldQuestBinding {
+                world_id: "deadman-prime".into(),
+                quest_graph_ids: vec!["deadman-prime-season".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        };
+
+        client
+            .apply_remote_topology(topology)
+            .expect("topology applies");
+        let messages = client.poll_updates();
+        let delta = messages
+            .into_iter()
+            .find_map(|message| match message {
+                ServerMessage::StateDelta { delta, .. } => Some(delta),
+                _ => None,
+            })
+            .expect("state delta emitted after topology update");
+        let hero = delta
+            .updated
+            .into_iter()
+            .find(|entity| entity.id == 7)
+            .expect("hero snapshot updated");
+        assert_eq!(hero.metadata.team_key.as_deref(), Some("iron-sigil"));
+        assert_eq!(hero.metadata.world_id.as_deref(), Some("deadman-prime"));
+        assert_eq!(hero.metadata.world_role, Some(WorldRealityRole::Tournament));
+        assert_eq!(
+            hero.metadata.world_active_quest_graph_ids,
+            vec!["deadman-prime-season".to_string()]
+        );
     }
 
     #[test]

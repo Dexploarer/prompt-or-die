@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 14 - Multi-World Teams and Reality Links
 **Current Stage**: In Progress
-**Last Checkpoint**: `17a46e76`
+**Last Checkpoint**: `30eed712`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -215,7 +215,7 @@
 - [x] Added canonical quest graph definitions plus per-world quest-line state reporting in `apps/pod-headless`, so alternate-reality `ObjectiveStateShift` effects now resolve into explicit quest progression with start/current/completed/pending stages
 - [x] Added shared `RemoteTopologyBundle` contracts in `pod-core` for world quest bindings, applied world state, and scenario evaluation, so remote surfaces have one portable topology artifact instead of app-local JSON shapes
 - [x] Extended `apps/pod-headless` with `--topology-output`, so the headless runner can emit that portable remote-topology artifact alongside the existing report and dataset outputs
-- [ ] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`
+- [x] Consume the shared remote topology artifact in `pod-net` / `pod-stdb`, including `pod-stdb` cache resolution helpers plus `pod-net::client_stdb` snapshot metadata refresh on `RemoteTopologyUpdated`
 
 **Next Action**:
-- Consume the shared `RemoteTopologyBundle` in `pod-net` / `pod-stdb` so admission-aware team/world identity, quest-line state, and evaluation summaries survive beyond the local runner and become first-class remote execution state.
+- Add replay/evaluation coverage for linked-world tournaments and neural swarms on top of the shared remote-topology surface, so admission-aware quest-line state and alternate-reality effects are validated in remote execution too.

@@ -77,8 +77,9 @@ use crate::types::*;
 use std::collections::{HashMap, VecDeque};
 
 use pod_core::{
-    decode_toon_document, AgentTickRollup, AgentToolCallEvent, FocusedEntityDebugSummary,
-    ToolCallStatus,
+    decode_toon_document, AgentTickRollup, AgentToolCallEvent, AppliedWorldStateSummary,
+    FocusedEntityDebugSummary, RemoteTopologyBundle, ToolCallStatus, WorldEvaluationSummary,
+    WorldQuestBinding, WorldRealityDefinition,
 };
 
 // ============================================================
@@ -257,6 +258,13 @@ pub enum StdbEvent {
     FocusedEntityDebugSummaryReceived {
         agent_entity_id: u64,
         document: String,
+    },
+    /// Shared multi-world topology/evaluation bundle applied to the client cache.
+    RemoteTopologyUpdated {
+        scenario_id: String,
+        resolved_world_id: Option<String>,
+        world_count: usize,
+        team_count: usize,
     },
 
     // ── Reducer acknowledgments ──
@@ -787,6 +795,8 @@ pub struct StdbClient {
     next_entity_id: u64,
     /// Retained focused debug summaries synthesized from tool-call and rollup docs.
     focused_debug_summaries: HashMap<u64, FocusedEntityDebugSummary>,
+    /// Latest shared multi-world topology artifact applied to this client.
+    remote_topology: Option<RemoteTopologyBundle>,
 
     // ── Metrics ──
     frames_processed: u64,
@@ -808,6 +818,7 @@ impl StdbClient {
             active_queries: Vec::new(),
             next_entity_id: 1,
             focused_debug_summaries: HashMap::new(),
+            remote_topology: None,
             frames_processed: 0,
             reducers_called: 0,
             events_received: 0,
@@ -1358,6 +1369,77 @@ impl StdbClient {
     /// Get the entity ID this client controls (set after connect_agent).
     pub fn controlled_entity(&self) -> Option<u64> {
         self.controlled_entity
+    }
+
+    /// Apply a shared remote topology bundle to the client-side cache.
+    pub fn apply_remote_topology(&mut self, topology: RemoteTopologyBundle) {
+        let resolved_world_id = resolve_topology_world_id(&self.config.db_name, &topology);
+        let scenario_id = topology.scenario_id.clone();
+        let world_count = topology.worlds.len();
+        let team_count = topology.teams.len();
+        self.remote_topology = Some(topology);
+        self.events.push_back(StdbEvent::RemoteTopologyUpdated {
+            scenario_id,
+            resolved_world_id,
+            world_count,
+            team_count,
+        });
+        self.events_received += 1;
+    }
+
+    /// Return the last applied shared topology bundle, if any.
+    pub fn remote_topology(&self) -> Option<&RemoteTopologyBundle> {
+        self.remote_topology.as_ref()
+    }
+
+    /// Resolve the active remote world definition for this client.
+    pub fn resolved_remote_world(&self) -> Option<&WorldRealityDefinition> {
+        let topology = self.remote_topology.as_ref()?;
+        let world_id = resolve_topology_world_id(&self.config.db_name, topology)?;
+        topology.worlds.iter().find(|world| world.world_id == world_id)
+    }
+
+    /// Resolve the active remote world id for this client.
+    pub fn resolved_remote_world_id(&self) -> Option<&str> {
+        self.resolved_remote_world().map(|world| world.world_id.as_str())
+    }
+
+    /// Resolve the authored quest binding for the active remote world.
+    pub fn resolved_remote_world_quest_binding(&self) -> Option<&WorldQuestBinding> {
+        let topology = self.remote_topology.as_ref()?;
+        let world_id = self.resolved_remote_world_id()?;
+        topology
+            .world_quest_bindings
+            .iter()
+            .find(|binding| binding.world_id == world_id)
+    }
+
+    /// Resolve the applied world-state summary for the active remote world.
+    pub fn resolved_remote_applied_world_state(&self) -> Option<&AppliedWorldStateSummary> {
+        let topology = self.remote_topology.as_ref()?;
+        let world_id = self.resolved_remote_world_id()?;
+        topology
+            .applied_world_states
+            .iter()
+            .find(|state| state.world_id == world_id)
+    }
+
+    /// Resolve the evaluation summary for the active remote world.
+    pub fn resolved_remote_world_evaluation(&self) -> Option<&WorldEvaluationSummary> {
+        let topology = self.remote_topology.as_ref()?;
+        let world_id = self.resolved_remote_world_id()?;
+        topology
+            .evaluation
+            .worlds
+            .iter()
+            .find(|world| world.world_id == world_id)
+    }
+
+    /// Resolve a symbolic team id from the numeric entity team slot.
+    pub fn resolved_remote_team_key(&self, numeric_team_id: Option<u8>) -> Option<String> {
+        let team_index = usize::from(numeric_team_id?.checked_sub(1)?);
+        self.resolved_remote_world()
+            .and_then(|world| world.active_team_ids.get(team_index).cloned())
     }
 
     // ── Connection state ──
@@ -2096,6 +2178,18 @@ impl StdbClient {
     }
 }
 
+fn resolve_topology_world_id(db_name: &str, topology: &RemoteTopologyBundle) -> Option<String> {
+    if topology.worlds.iter().any(|world| world.world_id == db_name) {
+        return Some(db_name.to_string());
+    }
+
+    if topology.worlds.len() == 1 {
+        return topology.worlds.first().map(|world| world.world_id.clone());
+    }
+
+    None
+}
+
 impl std::fmt::Debug for StdbClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StdbClient")
@@ -2202,6 +2296,133 @@ mod tests {
 
         // Check observation is cached
         assert_eq!(client.latest_observation(42), Some("{\"test\":true}"));
+    }
+
+    #[test]
+    fn test_apply_remote_topology_resolves_world_and_team_metadata() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            db_name: "deadman-prime".into(),
+            ..StdbClientConfig::default()
+        });
+        let mut world = pod_core::WorldRealityDefinition::new(
+            "deadman-prime",
+            "Deadman Prime",
+            "deadman-seasonal",
+        );
+        world.role = pod_core::WorldRealityRole::Tournament;
+        world.active_team_ids = vec!["iron-sigil".into(), "ember-veil".into()];
+
+        client.apply_remote_topology(pod_core::RemoteTopologyBundle {
+            version: pod_core::RuntimeContractVersion::V1,
+            scenario_id: "deadman-neural-cup".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: pod_core::WorldTournamentDefinition::new(
+                "deadman-neural-cup",
+                "Deadman Neural Cup",
+            ),
+            teams: vec![
+                pod_core::AgentTeamDefinition::new("iron-sigil", "Iron Sigil", "deadman-prime"),
+                pod_core::AgentTeamDefinition::new("ember-veil", "Ember Veil", "deadman-prime"),
+            ],
+            worlds: vec![world],
+            links: vec![],
+            world_quest_bindings: vec![pod_core::WorldQuestBinding {
+                world_id: "deadman-prime".into(),
+                quest_graph_ids: vec!["deadman-prime-season".into()],
+            }],
+            quest_graphs: vec![],
+            applied_world_states: vec![pod_core::AppliedWorldStateSummary {
+                world_id: "deadman-prime".into(),
+                display_name: "Deadman Prime".into(),
+                role: pod_core::WorldRealityRole::Tournament,
+                team_scores: vec![pod_core::TeamDeltaSummary {
+                    team_id: "iron-sigil".into(),
+                    total_delta: 4,
+                }],
+                death_marks: vec![],
+                faction_reputation_deltas: vec![],
+                encounter_weight_deltas: vec![],
+                resource_scarcity_deltas: vec![],
+                objective_state_shifts: vec![],
+                unresolved_objective_state_shifts: vec![],
+                quest_lines: vec![],
+            }],
+            evaluation: pod_core::ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![pod_core::WorldEvaluationSummary {
+                    world_id: "deadman-prime".into(),
+                    display_name: "Deadman Prime".into(),
+                    role: pod_core::WorldRealityRole::Tournament,
+                    average_reward_per_row: 1.5,
+                    controller_mix: vec![],
+                    quest_line_count: 1,
+                    progressed_quest_line_count: 1,
+                    average_quest_progress_basis_points: 6500,
+                    applied_score_delta_total: 4,
+                    applied_death_mark_count: 0,
+                    applied_death_mark_ticks: 0,
+                    applied_objective_shift_count: 0,
+                    applied_reputation_delta_total: 0,
+                    applied_encounter_delta_total: 0,
+                    applied_resource_delta_total: 0,
+                }],
+            },
+        });
+
+        assert_eq!(client.resolved_remote_world_id(), Some("deadman-prime"));
+        assert_eq!(
+            client
+                .resolved_remote_world()
+                .map(|world| world.role),
+            Some(pod_core::WorldRealityRole::Tournament)
+        );
+        assert_eq!(
+            client.resolved_remote_team_key(Some(1)).as_deref(),
+            Some("iron-sigil")
+        );
+        assert_eq!(
+            client.resolved_remote_team_key(Some(2)).as_deref(),
+            Some("ember-veil")
+        );
+        assert_eq!(
+            client
+                .resolved_remote_world_quest_binding()
+                .map(|binding| binding.quest_graph_ids.as_slice()),
+            Some(["deadman-prime-season".to_string()].as_slice())
+        );
+        assert_eq!(
+            client
+                .resolved_remote_applied_world_state()
+                .and_then(|state| state.team_scores.first())
+                .map(|score| (score.team_id.as_str(), score.total_delta)),
+            Some(("iron-sigil", 4))
+        );
+        assert_eq!(
+            client
+                .resolved_remote_world_evaluation()
+                .map(|world| world.average_reward_per_row),
+            Some(1.5)
+        );
+
+        let event = client
+            .drain_events()
+            .find(|event| matches!(event, StdbEvent::RemoteTopologyUpdated { .. }))
+            .expect("remote topology event emitted");
+        match event {
+            StdbEvent::RemoteTopologyUpdated {
+                scenario_id,
+                resolved_world_id,
+                world_count,
+                team_count,
+            } => {
+                assert_eq!(scenario_id, "deadman-neural-cup");
+                assert_eq!(resolved_world_id.as_deref(), Some("deadman-prime"));
+                assert_eq!(world_count, 1);
+                assert_eq!(team_count, 2);
+            }
+            _ => panic!("unexpected event variant"),
+        }
     }
 
     #[test]

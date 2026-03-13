@@ -147,8 +147,9 @@ without depending on `apps/pod-web`.
 
 That runner now also emits a shared `RemoteTopologyBundle` contract from
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs),
-so remote consumers can reuse the same world/team/link/quest/evaluation payload
-instead of reconstructing it from app-local report JSON.
+and `pod-stdb` plus `pod-net::client_stdb` now consume that same
+world/team/link/quest/evaluation payload directly instead of reconstructing it
+from app-local report JSON.
 
 The current contract surface for that direction lives in
 [`crates/pod-core/src/contract.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/contract.rs)

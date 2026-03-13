@@ -858,7 +858,7 @@ fn stdb_error_clone_and_debug() {
 // ============================================================
 
 #[test]
-fn stdb_event_all_18_variants_constructible() {
+fn stdb_event_all_20_variants_constructible() {
     // Verify all StdbEvent variants can be created without panicking.
     // This ensures the public API surface matches our expectations.
     let events: Vec<StdbEvent> = vec![
@@ -936,6 +936,16 @@ fn stdb_event_all_18_variants_constructible() {
             agent_entity_id: 5,
             document: "{\"distance\":128.0}".into(),
         },
+        StdbEvent::FocusedEntityDebugSummaryReceived {
+            agent_entity_id: 5,
+            document: "{\"focus\":\"hero\"}".into(),
+        },
+        StdbEvent::RemoteTopologyUpdated {
+            scenario_id: "deadman-neural-cup".into(),
+            resolved_world_id: Some("deadman-prime".into()),
+            world_count: 2,
+            team_count: 4,
+        },
         // Reducer acknowledgments
         StdbEvent::ReducerCallSuccess {
             reducer_name: "create_world".into(),
@@ -946,7 +956,7 @@ fn stdb_event_all_18_variants_constructible() {
         },
     ];
 
-    assert_eq!(events.len(), 18);
+    assert_eq!(events.len(), 20);
 }
 
 #[test]
