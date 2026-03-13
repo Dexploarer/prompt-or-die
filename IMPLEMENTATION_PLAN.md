@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 187
-**Current focus**: Iteration 188 add historical comparison tooling for shard-target benchmark snapshots
+**Last updated**: Iteration 188
+**Current focus**: Iteration 189 repair the browser render-route perf gate on the shipped asset set
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1946,7 +1946,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Extended `crates/pod-stdb/src/client.rs` with cached observation ticks, enabling remote clients to measure stale-authority age from the authoritative observation stream instead of inferring freshness indirectly.
 - [x] Extended `crates/pod-net/src/client_stdb.rs` with `connect_remote_agent(...)`, explicit remote-agent contract/status accessors, and client-side rejection of budget-overflow, missing-observation, stale-observation, and heartbeat-timeout action batches before they hit the reducer path.
 - [x] Added deterministic remote-agent stale-decision coverage in `crates/pod-net/src/client_stdb.rs` plus the supporting `pod-stdb` cache assertion, and revalidated with targeted `pod-core`, `pod-stdb`, and `pod-net` tests plus `cargo check`.
+- [x] Added `scripts/compare_moat_snapshots.ts` plus `scripts/compare_moat_snapshots.test.ts`, so committed shard-target monthly snapshots can now be compared as a structured report instead of manual JSON inspection.
+- [x] Documented the comparison command in `README.md` and `docs/benchmark-suite.md`, and moved the roadmap backlog forward so the remaining missed item is the red browser render-route gate.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [ ] Repair the failing browser render-route perf gate so `bun run measure:render-routes:check` passes on the current shipped asset set instead of only producing a recorded artifact.
-- [ ] Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json`.

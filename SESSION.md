@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 13 - Remote Agent Topology on SpacetimeDB
-**Current Stage**: Complete
-**Last Checkpoint**: `897e37bd`
+**Current Phase**: Phase 8 - CI and Regression Gates
+**Current Stage**: In Progress
+**Last Checkpoint**: `c4cbf4cc`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 
 ---
@@ -124,7 +124,7 @@
 
 **Known Issues**:
 - The original historical-snapshot gap is closed by `/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
-- The live shard-target capture/publication path is now wrapped by `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`; the remaining transport/topology follow-on is historical comparison tooling on top of the published snapshot history.
+- The live shard-target capture/publication path is now wrapped by `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`, and `bun ./scripts/compare_moat_snapshots.ts --baseline ... --candidate ...` now turns published snapshot history into structured drift data.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -254,9 +254,8 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift becomes structured review data instead of manual snapshot inspection.
+- Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes again on the shipped asset set.
 
 ## Audit Backlog (2026-03-13)
 
 - [ ] Browser infra: repair the current render-route perf regression so `bun run measure:render-routes:check` passes again on the shipped asset set.
-- [ ] Benchmark tooling: add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json`.

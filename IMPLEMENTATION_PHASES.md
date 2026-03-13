@@ -385,12 +385,10 @@
 
 ## Immediate Next Actions
 
-1. Add historical comparison tooling on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data, not only manual inspection.
-2. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
+1. Repair the browser render-route performance gate so `bun run measure:render-routes:check` passes on the shipped asset set instead of only emitting an artifact.
 
 ## Audit Backlog (2026-03-13)
 
 These are the confirmed remaining misses after the roadmap scrub:
 
 1. The browser render-route performance gate is still red on the current asset set; `apps/pod-web/artifacts/render-route-measurements.json` exists, but `bun run measure:render-routes:check` still fails its stability/load ceilings and needs a dedicated repair slice.
-2. Historical comparison tooling still needs to be added on top of `docs/benchmark-snapshots/2026-03-shard-target.json` so drift is surfaced as structured review data instead of manual snapshot inspection.

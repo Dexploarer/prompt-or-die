@@ -65,6 +65,13 @@ cd /Users/home/Desktop/prompt-or-die
 bun ./scripts/run_moat_benchmarks.ts --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-benchmarks.json
 ```
 
+Historical snapshot comparison:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-04-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions
+```
+
 Browser asset and render-route regression gates:
 
 ```bash
@@ -356,7 +363,8 @@ Run this every month before updating the competitor matrix:
 
 1. Run `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`.
 2. Inspect the generated summary artifact at `artifacts/shard-target-snapshot-run.json`.
-3. Compare deltas against the previous month and record any required responses in `IMPLEMENTATION_PLAN.md`.
+3. Run `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/PREVIOUS-shard-target.json --candidate docs/benchmark-snapshots/YYYY-MM-shard-target.json --output artifacts/benchmark-snapshot-comparison.json`.
+4. Record any required responses from the comparison report in `IMPLEMENTATION_PLAN.md`.
 
 `run_shard_target_snapshot.ts` now wraps the previously manual chain:
 
@@ -371,6 +379,12 @@ If the browser render-route gate still fails but `apps/pod-web/artifacts/render-
 is produced, the wrapper records that status as `artifact_only` and still
 publishes the snapshot so drift review is not blocked by the known browser perf
 regression.
+
+`compare_moat_snapshots.ts` writes a structured JSON report with per-metric
+status (`improved`, `regressed`, `changed`, `unchanged`) across transport,
+browser-route, headless-topology, topology-feed, and live-topology-feed data.
+Use `--fail-on-regressions` when you want the comparison itself to act as a
+gate.
 
 ## Interpretation rules
 
