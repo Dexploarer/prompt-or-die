@@ -195,15 +195,46 @@ type HeadlessTopologyMeasurementsReport = {
   allChecksPassed: boolean;
 };
 
+type TopologyFeedCheck = {
+  metric: string;
+  passed: boolean;
+  expected: string;
+  observed: string;
+};
+
+type TopologyFeedWorldPathReport = {
+  resolved_world_id: string | null;
+  resolved_world_matches: boolean;
+  quest_binding_matches: boolean;
+  applied_world_state_matches: boolean;
+  evaluation_matches: boolean;
+};
+
+type TopologyFeedWorldReport = {
+  world_id: string;
+  authority_row: TopologyFeedWorldPathReport;
+  generated_runtime: TopologyFeedWorldPathReport;
+};
+
+type TopologyFeedMeasurementsReport = {
+  schema_version: number;
+  scenario_id: string;
+  profile_id: string;
+  world_count: number;
+  worlds: TopologyFeedWorldReport[];
+  checks: TopologyFeedCheck[];
+};
+
 type CombinedReport = {
   profile: string;
   transportMeasurements: TransportMeasurementsReport | null;
   headlessTopology: HeadlessTopologyMeasurementsReport | null;
+  topologyFeedMeasurements: TopologyFeedMeasurementsReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
 };
 
 export type PublishedMoatSnapshot = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   label: string;
   profile: "shard-target";
   transport: {
@@ -221,6 +252,14 @@ export type PublishedMoatSnapshot = {
     comparison: BrowserRouteMeasurementsReport["comparison"];
   };
   headlessTopology: HeadlessTopologyMeasurementsReport;
+  topologyFeed: {
+    sourceSchemaVersion: number;
+    scenarioId: string;
+    profileId: string;
+    worldCount: number;
+    worlds: TopologyFeedWorldReport[];
+    checks: TopologyFeedCheck[];
+  };
 };
 
 type Options = {
@@ -532,6 +571,23 @@ function normalizeHeadlessTopologyMeasurements(
   };
 }
 
+function normalizeTopologyFeedMeasurements(
+  report: TopologyFeedMeasurementsReport,
+): PublishedMoatSnapshot["topologyFeed"] {
+  return {
+    sourceSchemaVersion: report.schema_version,
+    scenarioId: report.scenario_id,
+    profileId: report.profile_id,
+    worldCount: report.world_count,
+    worlds: report.worlds.map((world) => ({
+      world_id: world.world_id,
+      authority_row: { ...world.authority_row },
+      generated_runtime: { ...world.generated_runtime },
+    })),
+    checks: report.checks.map((check) => ({ ...check })),
+  };
+}
+
 export function normalizeShardTargetMoatSnapshot(
   report: CombinedReport,
   label: string,
@@ -550,9 +606,12 @@ export function normalizeShardTargetMoatSnapshot(
   if (!report.headlessTopology) {
     throw new Error("missing headlessTopology in moat report");
   }
+  if (!report.topologyFeedMeasurements) {
+    throw new Error("missing topologyFeedMeasurements in moat report");
+  }
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     label,
     profile: "shard-target",
     transport: normalizeTransportMeasurements(report.transportMeasurements),
@@ -561,6 +620,9 @@ export function normalizeShardTargetMoatSnapshot(
     ),
     headlessTopology: normalizeHeadlessTopologyMeasurements(
       report.headlessTopology,
+    ),
+    topologyFeed: normalizeTopologyFeedMeasurements(
+      report.topologyFeedMeasurements,
     ),
   };
 }

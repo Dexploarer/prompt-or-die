@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildHeadlessTopologyMeasurements } from "./run_moat_benchmarks";
+import {
+  buildHeadlessTopologyMeasurements,
+  topologyFeedChecksPassed,
+} from "./run_moat_benchmarks";
 
 describe("run moat benchmarks", () => {
   test("summarizes passing headless topology parity checks", () => {
@@ -89,5 +92,45 @@ describe("run moat benchmarks", () => {
       "topology_parity.applied_world_states_match",
       "topology_parity.evaluation_match",
     ]);
+  });
+
+  test("accepts passing topology feed parity checks", () => {
+    expect(
+      topologyFeedChecksPassed({
+        schema_version: 1,
+        scenario_id: "deadman-neural-cup",
+        profile_id: "ci-smoke",
+        world_count: 1,
+        worlds: [],
+        checks: [
+          {
+            metric: "authority_row.deadman-prime.resolved_world_matches",
+            passed: true,
+            expected: "true",
+            observed: "\"deadman-prime\"",
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  test("flags failed topology feed parity checks", () => {
+    expect(
+      topologyFeedChecksPassed({
+        schema_version: 1,
+        scenario_id: "deadman-neural-cup",
+        profile_id: "ci-smoke",
+        world_count: 1,
+        worlds: [],
+        checks: [
+          {
+            metric: "generated_runtime.deadman-prime.quest_binding_matches",
+            passed: false,
+            expected: "true",
+            observed: "false",
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });

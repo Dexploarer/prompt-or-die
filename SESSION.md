@@ -233,6 +233,7 @@
 - [x] Added generated-path same-world quest/effect churn coverage in both `pod-stdb` and `pod-net`, proving newer generated-mode topology rows update quest bindings, applied world state, evaluation, and snapshot metadata while stale older rows are ignored
 - [x] Removed the last leftover `FakeGeneratedRuntime` helper from `pod-stdb` unit tests, so the in-tree generated-mode coverage now consistently exercises `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
 - [x] Added `pod-net` topology feed measurements plus the `topology_feed_benchmark_suite` example, so exported `RemoteTopologyBundle` artifacts can now be replayed through both direct authority-row ingestion and generated-bridge ingestion and checked for per-world quest/effect/evaluation parity outside unit tests
+- [x] Integrated `topology_feed_benchmark_suite` into `scripts/run_moat_benchmarks.ts`, so the combined moat artifact now emits `topologyFeedMeasurements`, fails on remote topology feed parity drift, and `scripts/publish_moat_snapshots.ts` now preserves the same topology feed benchmark in committed shard-target snapshots
 
 **Next Action**:
-- Integrate `topology_feed_benchmark_suite` into the combined moat benchmark path, then replace its generated-bridge hook path with real generated SpacetimeDB binding callbacks when the binding layer is available.
+- Replace the benchmark's generated-bridge hook path with real generated SpacetimeDB binding callbacks, then extend the live generated path from same-world churn to linked-world quest/effect updates.

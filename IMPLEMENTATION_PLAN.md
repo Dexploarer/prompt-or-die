@@ -1880,3 +1880,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 **Last updated**: Iteration 177
 **Current focus**: Iteration 178 integrate `topology_feed_benchmark_suite` into the combined moat suite, then replace its generated-bridge hook path with real generated SpacetimeDB callback wiring when the binding layer is available
+
+### Iteration 178
+- [x] Extended `scripts/run_moat_benchmarks.ts` so the combined moat artifact now runs `topology_feed_benchmark_suite`, emits `topologyFeedMeasurements`, fails on topology feed parity drift, and bumps the combined artifact schema to `4`.
+- [x] Added deterministic Bun coverage in `scripts/run_moat_benchmarks.test.ts` for passing and failing `topologyFeedMeasurements` parity checks.
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so committed shard-target moat snapshots preserve the remote topology feed benchmark under `topologyFeed` and bump the published snapshot schema to `3`.
+- [x] Revalidated touched targets:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts`
+  - `bun ./scripts/run_moat_benchmarks.ts --profile ci-smoke --skip-browser --skip-creator --output artifacts/moat-benchmarks-ci-local.json`
+  - `git diff --check`
+
+**Last updated**: Iteration 178
+**Current focus**: Iteration 179 wire real generated SpacetimeDB callback bindings into `GeneratedRuntimeBridge`, then extend the live generated path from same-world churn to linked-world quest/effect updates

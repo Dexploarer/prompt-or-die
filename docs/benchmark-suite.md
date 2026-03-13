@@ -212,6 +212,14 @@ scenario report: if `pod-net` stops resolving world/quest/effect state the same
 way from authority rows and generated-mode ingress, the benchmark fails even if
 `pod-headless` still exports a valid topology bundle.
 
+`scripts/run_moat_benchmarks.ts` now includes that payload as
+`topologyFeedMeasurements`, so the combined moat artifact records core,
+transport, browser, headless topology, and remote topology feed parity
+together. `scripts/publish_moat_snapshots.ts` now also preserves the same
+report under `topologyFeed` in committed shard-target snapshots, which means
+remote topology feed drift can be reviewed historically instead of only through
+pass/fail output.
+
 ### Transport benchmark report
 
 Produced by `crates/pod-net/examples/transport_benchmark_suite.rs`.
