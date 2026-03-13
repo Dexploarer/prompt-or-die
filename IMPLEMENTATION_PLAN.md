@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 188
-**Current focus**: Iteration 191 promote world admission into the shared topology contract, then choose the next post-audit runtime phase on top of that control surface
+**Last updated**: Iteration 192
+**Current focus**: Iteration 193 build tournament/control-plane orchestration on top of the shared world admission and world control-plane topology contracts
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -1951,6 +1951,21 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `WorldAdmissionAssignment`, `WorldAdmissionSummary`, `assign_roster_to_world_teams(...)`, and `build_world_admission_summary(...)` in `crates/pod-core/src/contract.rs`, so admitted team-slot assignment is now a shared topology contract instead of `apps/pod-headless` private logic.
 - [x] Extended `RemoteTopologyBundle` and `RemoteTopologyParitySummary` with `world_admissions`, then moved `apps/pod-headless`, `crates/pod-stdb`, and `crates/pod-net` onto that shared admission surface.
 - [x] Added deterministic contract/headless/client coverage for the shared admission surface, including `pod-net::SpacetimeDBClient::remote_world_admissions()`.
+
+### Iteration 192
+- [x] Added `AgentTypeCountSummary`, `WorldControlAssignmentSummary`, `WorldTeamControlSummary`, `WorldControlPlaneSummary`, and `build_world_control_plane_summary(...)` in `crates/pod-core/src/contract.rs`, so admitted roster/controller composition is now a shared topology contract instead of `apps/pod-headless` private report logic.
+- [x] Extended `RemoteTopologyBundle` and `RemoteTopologyParitySummary` with `world_control_planes`, then moved `apps/pod-headless`, `crates/pod-stdb`, and `crates/pod-net` onto that shared control-plane surface.
+- [x] Added deterministic contract/headless/client/integration coverage for the shared control-plane surface, including `pod-stdb::StdbClient::resolved_remote_world_control_plane()` and `pod-net::SpacetimeDBClient::remote_world_control_plane()`.
+- [x] Validation:
+  - `cargo test -p pod-core contract -- --nocapture`
+  - `cargo test -p pod-headless -- --nocapture`
+  - `cargo test -p pod-stdb --no-default-features --features client -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb --test networking_integration -- --nocapture`
+  - `cargo check -p pod-core -p pod-headless`
+  - `cargo check -p pod-stdb --no-default-features --features client`
+  - `cargo check -p pod-net --features spacetimedb`
+  - `git diff --check`
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

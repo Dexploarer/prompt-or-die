@@ -1316,6 +1316,11 @@ impl SpacetimeDBClient {
         self.inner.resolved_remote_world_admissions()
     }
 
+    /// Resolve the admitted roster/controller mix for this client's active world.
+    pub fn remote_world_control_plane(&self) -> Option<&pod_core::WorldControlPlaneSummary> {
+        self.inner.resolved_remote_world_control_plane()
+    }
+
     /// Resolve the replay/evaluation summary for this client's active world.
     pub fn remote_world_evaluation(&self) -> Option<&WorldEvaluationSummary> {
         self.inner.resolved_remote_world_evaluation()
@@ -2162,6 +2167,7 @@ mod tests {
                 quest_graph_ids: vec!["deadman-shadow-collapse".into()],
             }],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2258,6 +2264,7 @@ mod tests {
             links: vec![],
             world_quest_bindings: vec![],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2388,6 +2395,23 @@ mod tests {
                     slot_index: 0,
                 }],
             }],
+            world_control_planes: vec![pod_core::WorldControlPlaneSummary {
+                world_id: "deadman-prime".into(),
+                teams: vec![pod_core::WorldTeamControlSummary {
+                    team_id: "iron-sigil".into(),
+                    assignments: vec![pod_core::WorldControlAssignmentSummary {
+                        agent_id: agent_id_from_entity(7).to_string(),
+                        slot_index: 0,
+                        runtime_profile: pod_core::AgentRuntimeProfile::for_agent_type(
+                            pod_core::AgentType::NeuralAgent,
+                        ),
+                    }],
+                    controller_mix: vec![pod_core::AgentTypeCountSummary {
+                        agent_type: "neural_agent".into(),
+                        count: 1,
+                    }],
+                }],
+            }],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2430,6 +2454,17 @@ mod tests {
         );
         assert_eq!(admissions.assignments[0].team_id, "iron-sigil");
         assert_eq!(admissions.assignments[0].slot_index, 0);
+        let control_plane = client
+            .remote_world_control_plane()
+            .expect("resolved world control plane");
+        assert_eq!(control_plane.world_id, "deadman-prime");
+        assert_eq!(control_plane.teams.len(), 1);
+        assert_eq!(control_plane.teams[0].team_id, "iron-sigil");
+        assert_eq!(
+            control_plane.teams[0].controller_mix[0].agent_type,
+            "neural_agent"
+        );
+        assert_eq!(control_plane.teams[0].controller_mix[0].count, 1);
     }
 
     #[test]
@@ -2484,6 +2519,7 @@ mod tests {
                 },
             ],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2632,6 +2668,7 @@ mod tests {
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2732,6 +2769,7 @@ mod tests {
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![],
             evaluation: pod_core::ScenarioEvaluationSummary {
@@ -2841,6 +2879,7 @@ mod tests {
                 quest_graph_ids: vec!["deadman-shadow-hunt".into()],
             }],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -2921,6 +2960,7 @@ mod tests {
                 quest_graph_ids: vec!["deadman-shadow-collapse".into()],
             }],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3111,6 +3151,7 @@ mod tests {
                 },
             ],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),
@@ -3221,6 +3262,7 @@ mod tests {
                 },
             ],
             world_admissions: vec![],
+            world_control_planes: vec![],
             quest_graphs: vec![],
             applied_world_states: vec![pod_core::AppliedWorldStateSummary {
                 world_id: "deadman-shadow".into(),

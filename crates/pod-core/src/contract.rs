@@ -841,6 +841,119 @@ impl WorldAdmissionSummary {
     }
 }
 
+/// Deterministic count rollup keyed by admitted controller type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTypeCountSummary {
+    pub agent_type: String,
+    pub count: usize,
+}
+
+/// Runtime-visible slot assignment for one admitted agent in one world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldControlAssignmentSummary {
+    pub agent_id: String,
+    pub slot_index: u16,
+    pub runtime_profile: AgentRuntimeProfile,
+}
+
+/// Team-scoped control plane snapshot for one world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldTeamControlSummary {
+    pub team_id: String,
+    pub assignments: Vec<WorldControlAssignmentSummary>,
+    pub controller_mix: Vec<AgentTypeCountSummary>,
+}
+
+/// Explicit world-scoped roster/control snapshot derived from admissions plus
+/// the actual runtime profiles present in the authoritative run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldControlPlaneSummary {
+    pub world_id: String,
+    pub teams: Vec<WorldTeamControlSummary>,
+}
+
+impl WorldControlPlaneSummary {
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("world_control_plane_summary", self)
+    }
+}
+
+fn agent_type_key(agent_type: AgentType) -> &'static str {
+    match agent_type {
+        AgentType::Human => "human",
+        AgentType::LlmAgent => "llm_agent",
+        AgentType::NeuralAgent => "neural_agent",
+        AgentType::ScriptedNpc => "scripted_npc",
+        AgentType::System => "system",
+    }
+}
+
+pub fn build_world_control_plane_summary(
+    admissions: &WorldAdmissionSummary,
+    runtime_profiles: &BTreeMap<String, AgentRuntimeProfile>,
+) -> WorldControlPlaneSummary {
+    let mut teams: Vec<WorldTeamControlSummary> = admissions
+        .assignments
+        .iter()
+        .fold(
+            BTreeMap::<String, Vec<WorldControlAssignmentSummary>>::new(),
+            |mut by_team, assignment| {
+                by_team.entry(assignment.team_id.clone()).or_default().push(
+                    WorldControlAssignmentSummary {
+                        agent_id: assignment.agent_id.clone(),
+                        slot_index: assignment.slot_index,
+                        runtime_profile: runtime_profiles
+                            .get(&assignment.agent_id)
+                            .copied()
+                            .unwrap_or_default(),
+                    },
+                );
+                by_team
+            },
+        )
+        .into_iter()
+        .map(|(team_id, mut assignments)| {
+            assignments.sort_by(|left, right| {
+                left.slot_index
+                    .cmp(&right.slot_index)
+                    .then_with(|| left.agent_id.cmp(&right.agent_id))
+            });
+            let mut controller_mix = assignments.iter().fold(
+                BTreeMap::<String, usize>::new(),
+                |mut by_type, assignment| {
+                    *by_type
+                        .entry(agent_type_key(assignment.runtime_profile.agent_type).to_string())
+                        .or_default() += 1;
+                    by_type
+                },
+            );
+            let controller_mix = controller_mix
+                .iter_mut()
+                .map(|(agent_type, count)| AgentTypeCountSummary {
+                    agent_type: agent_type.clone(),
+                    count: *count,
+                })
+                .collect();
+            WorldTeamControlSummary {
+                team_id,
+                assignments,
+                controller_mix,
+            }
+        })
+        .collect();
+
+    teams.sort_by(
+        |left: &WorldTeamControlSummary, right: &WorldTeamControlSummary| {
+            left.team_id.cmp(&right.team_id)
+        },
+    );
+
+    WorldControlPlaneSummary {
+        world_id: admissions.world_id.clone(),
+        teams,
+    }
+}
+
 pub fn assign_roster_to_world_teams(
     roster: &[String],
     world: &WorldRealityDefinition,
@@ -1036,6 +1149,8 @@ pub struct RemoteTopologyBundle {
     pub links: Vec<CrossWorldLinkDefinition>,
     pub world_quest_bindings: Vec<WorldQuestBinding>,
     pub world_admissions: Vec<WorldAdmissionSummary>,
+    #[serde(default)]
+    pub world_control_planes: Vec<WorldControlPlaneSummary>,
     pub quest_graphs: Vec<QuestStateGraph>,
     pub applied_world_states: Vec<AppliedWorldStateSummary>,
     pub evaluation: ScenarioEvaluationSummary,
@@ -1058,6 +1173,7 @@ pub fn build_remote_topology_bundle(
     quest_graphs: &[QuestStateGraph],
     world_quest_graph_ids: &BTreeMap<String, Vec<String>>,
     world_admissions: &[WorldAdmissionSummary],
+    world_control_planes: &[WorldControlPlaneSummary],
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
 ) -> RemoteTopologyBundle {
@@ -1072,6 +1188,7 @@ pub fn build_remote_topology_bundle(
         links: links.to_vec(),
         world_quest_bindings: build_world_quest_bindings(world_quest_graph_ids),
         world_admissions: world_admissions.to_vec(),
+        world_control_planes: world_control_planes.to_vec(),
         quest_graphs: quest_graphs.to_vec(),
         applied_world_states: applied_world_states.to_vec(),
         evaluation: evaluation.clone(),
@@ -1089,12 +1206,15 @@ pub struct RemoteTopologyParitySummary {
     pub quest_graphs_match: bool,
     pub world_quest_bindings_match: bool,
     pub world_admissions_match: bool,
+    pub world_control_planes_match: bool,
     pub applied_world_states_match: bool,
     pub evaluation_match: bool,
     pub missing_world_quest_binding_ids: Vec<String>,
     pub unexpected_world_quest_binding_ids: Vec<String>,
     pub missing_world_admission_ids: Vec<String>,
     pub unexpected_world_admission_ids: Vec<String>,
+    pub missing_world_control_plane_ids: Vec<String>,
+    pub unexpected_world_control_plane_ids: Vec<String>,
     pub missing_applied_world_ids: Vec<String>,
     pub unexpected_applied_world_ids: Vec<String>,
     pub missing_evaluation_world_ids: Vec<String>,
@@ -1114,6 +1234,7 @@ pub fn build_remote_topology_parity_summary(
     quest_graphs: &[QuestStateGraph],
     world_quest_bindings: &[WorldQuestBinding],
     world_admissions: &[WorldAdmissionSummary],
+    world_control_planes: &[WorldControlPlaneSummary],
     applied_world_states: &[AppliedWorldStateSummary],
     evaluation: &ScenarioEvaluationSummary,
     topology: &RemoteTopologyBundle,
@@ -1135,6 +1256,10 @@ pub fn build_remote_topology_parity_summary(
         .iter()
         .map(|summary| summary.world_id.clone())
         .collect::<BTreeSet<_>>();
+    let expected_control_plane_ids = world_control_planes
+        .iter()
+        .map(|summary| summary.world_id.clone())
+        .collect::<BTreeSet<_>>();
     let actual_applied_ids = topology
         .applied_world_states
         .iter()
@@ -1142,6 +1267,11 @@ pub fn build_remote_topology_parity_summary(
         .collect::<BTreeSet<_>>();
     let actual_admission_ids = topology
         .world_admissions
+        .iter()
+        .map(|summary| summary.world_id.clone())
+        .collect::<BTreeSet<_>>();
+    let actual_control_plane_ids = topology
+        .world_control_planes
         .iter()
         .map(|summary| summary.world_id.clone())
         .collect::<BTreeSet<_>>();
@@ -1173,6 +1303,14 @@ pub fn build_remote_topology_parity_summary(
         .difference(&expected_admission_ids)
         .cloned()
         .collect::<Vec<_>>();
+    let missing_world_control_plane_ids = expected_control_plane_ids
+        .difference(&actual_control_plane_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let unexpected_world_control_plane_ids = actual_control_plane_ids
+        .difference(&expected_control_plane_ids)
+        .cloned()
+        .collect::<Vec<_>>();
     let missing_applied_world_ids = expected_applied_ids
         .difference(&actual_applied_ids)
         .cloned()
@@ -1196,6 +1334,7 @@ pub fn build_remote_topology_parity_summary(
     let quest_graphs_match = topology.quest_graphs == quest_graphs;
     let world_quest_bindings_match = topology.world_quest_bindings == world_quest_bindings;
     let world_admissions_match = topology.world_admissions == world_admissions;
+    let world_control_planes_match = topology.world_control_planes == world_control_planes;
     let applied_world_states_match = topology.applied_world_states == applied_world_states;
     let evaluation_match = topology.evaluation == *evaluation;
     let consistent = teams_match
@@ -1204,6 +1343,7 @@ pub fn build_remote_topology_parity_summary(
         && quest_graphs_match
         && world_quest_bindings_match
         && world_admissions_match
+        && world_control_planes_match
         && applied_world_states_match
         && evaluation_match;
 
@@ -1215,12 +1355,15 @@ pub fn build_remote_topology_parity_summary(
         quest_graphs_match,
         world_quest_bindings_match,
         world_admissions_match,
+        world_control_planes_match,
         applied_world_states_match,
         evaluation_match,
         missing_world_quest_binding_ids,
         unexpected_world_quest_binding_ids,
         missing_world_admission_ids,
         unexpected_world_admission_ids,
+        missing_world_control_plane_ids,
+        unexpected_world_control_plane_ids,
         missing_applied_world_ids,
         unexpected_applied_world_ids,
         missing_evaluation_world_ids,
@@ -1359,9 +1502,10 @@ mod tests {
     use super::{
         assign_roster_to_world_teams, build_remote_topology_bundle,
         build_remote_topology_parity_summary, build_world_admission_summary,
-        build_world_quest_bindings, AgentCapabilities, AgentRole, AgentRuntimeProfile,
-        AgentTeamDefinition, AppliedWorldStateSummary, ControllerEvaluationSummary,
-        CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
+        build_world_control_plane_summary, build_world_quest_bindings, AgentCapabilities,
+        AgentRole, AgentRuntimeProfile, AgentTeamDefinition, AgentTypeCountSummary,
+        AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
+        CrossWorldLinkDefinition, CrossWorldPropagation, EncounterSpawnEntry,
         FactionReputationTier, FactionReputationTrack, NamedDeltaSummary, ObjectiveShiftSummary,
         QuestLineStateSummary, QuestStageApplicationSummary, QuestStageDefinition, QuestStateGraph,
         RegionEncounterTable, RemoteAgentFallbackMode, RemoteAgentObservationBudget,
@@ -1370,8 +1514,9 @@ mod tests {
         ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
         ToolPolicy, TournamentEliminationMode, VersionedAgentAction, VersionedObservation,
         VersionedTickTelemetry, WorldAdmissionAssignment, WorldAdmissionSummary,
-        WorldChunkDefinition, WorldEvaluationSummary, WorldRealityDefinition, WorldRealityRole,
-        WorldRegionDefinition, WorldTournamentDefinition, REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
+        WorldChunkDefinition, WorldControlAssignmentSummary, WorldControlPlaneSummary,
+        WorldEvaluationSummary, WorldRealityDefinition, WorldRealityRole, WorldRegionDefinition,
+        WorldTeamControlSummary, WorldTournamentDefinition, REMOTE_AGENT_MAX_ACTIONS_PER_TICK,
         REMOTE_AGENT_MAX_AUDIBLE_EVENTS, REMOTE_AGENT_MAX_VISIBLE_ENTITIES,
         REMOTE_AGENT_OBSERVATION_STALE_AFTER_TICKS, REMOTE_AGENT_TIMEOUT_AFTER_TICKS,
         RUNTIME_CONTRACT_VERSION_V1,
@@ -1710,6 +1855,23 @@ mod tests {
                     slot_index: 0,
                 }],
             }],
+            &[WorldControlPlaneSummary {
+                world_id: "deadman-prime".into(),
+                teams: vec![WorldTeamControlSummary {
+                    team_id: "iron-sigil".into(),
+                    assignments: vec![WorldControlAssignmentSummary {
+                        agent_id: "agent-a".into(),
+                        slot_index: 0,
+                        runtime_profile: AgentRuntimeProfile::for_agent_type(
+                            AgentType::NeuralAgent,
+                        ),
+                    }],
+                    controller_mix: vec![AgentTypeCountSummary {
+                        agent_type: "neural_agent".into(),
+                        count: 1,
+                    }],
+                }],
+            }],
             &[AppliedWorldStateSummary {
                 world_id: "deadman-prime".into(),
                 display_name: "Deadman Prime".into(),
@@ -1882,6 +2044,74 @@ mod tests {
     }
 
     #[test]
+    fn build_world_control_plane_summary_preserves_slots_and_controller_mix() {
+        let admissions = WorldAdmissionSummary {
+            world_id: "deadman-prime".into(),
+            assignments: vec![
+                WorldAdmissionAssignment {
+                    agent_id: "agent-a".into(),
+                    team_id: "iron-sigil".into(),
+                    slot_index: 0,
+                },
+                WorldAdmissionAssignment {
+                    agent_id: "agent-b".into(),
+                    team_id: "iron-sigil".into(),
+                    slot_index: 1,
+                },
+                WorldAdmissionAssignment {
+                    agent_id: "agent-c".into(),
+                    team_id: "gloam-mesh".into(),
+                    slot_index: 0,
+                },
+            ],
+        };
+        let runtime_profiles = BTreeMap::from([
+            (
+                "agent-a".to_string(),
+                AgentRuntimeProfile::for_agent_type(AgentType::NeuralAgent),
+            ),
+            (
+                "agent-b".to_string(),
+                AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent),
+            ),
+            (
+                "agent-c".to_string(),
+                AgentRuntimeProfile::for_agent_type(AgentType::ScriptedNpc),
+            ),
+        ]);
+
+        let summary = build_world_control_plane_summary(&admissions, &runtime_profiles);
+
+        assert_eq!(summary.world_id, "deadman-prime");
+        assert_eq!(summary.teams.len(), 2);
+        assert_eq!(summary.teams[0].team_id, "gloam-mesh");
+        assert_eq!(summary.teams[0].assignments[0].agent_id, "agent-c");
+        assert_eq!(
+            summary.teams[0].controller_mix,
+            vec![AgentTypeCountSummary {
+                agent_type: "scripted_npc".into(),
+                count: 1,
+            }]
+        );
+        assert_eq!(summary.teams[1].team_id, "iron-sigil");
+        assert_eq!(summary.teams[1].assignments[0].slot_index, 0);
+        assert_eq!(summary.teams[1].assignments[1].slot_index, 1);
+        assert_eq!(
+            summary.teams[1].controller_mix,
+            vec![
+                AgentTypeCountSummary {
+                    agent_type: "llm_agent".into(),
+                    count: 1,
+                },
+                AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn remote_topology_parity_summary_flags_missing_bundle_sections() {
         let teams = vec![AgentTeamDefinition::new(
             "iron-sigil",
@@ -1917,6 +2147,21 @@ mod tests {
                 agent_id: "agent-a".into(),
                 team_id: "iron-sigil".into(),
                 slot_index: 0,
+            }],
+        }];
+        let world_control_planes = vec![WorldControlPlaneSummary {
+            world_id: "deadman-prime".into(),
+            teams: vec![WorldTeamControlSummary {
+                team_id: "iron-sigil".into(),
+                assignments: vec![WorldControlAssignmentSummary {
+                    agent_id: "agent-a".into(),
+                    slot_index: 0,
+                    runtime_profile: AgentRuntimeProfile::for_agent_type(AgentType::NeuralAgent),
+                }],
+                controller_mix: vec![AgentTypeCountSummary {
+                    agent_type: "neural_agent".into(),
+                    count: 1,
+                }],
             }],
         }];
         let applied_world_states = vec![AppliedWorldStateSummary {
@@ -1963,12 +2208,14 @@ mod tests {
             links: vec![],
             world_quest_bindings: world_quest_bindings.clone(),
             world_admissions: world_admissions.clone(),
+            world_control_planes: world_control_planes.clone(),
             quest_graphs: quest_graphs.clone(),
             applied_world_states: applied_world_states.clone(),
             evaluation: evaluation.clone(),
         };
         topology.world_quest_bindings.clear();
         topology.world_admissions.clear();
+        topology.world_control_planes.clear();
         topology.evaluation.worlds.clear();
 
         let parity = build_remote_topology_parity_summary(
@@ -1978,6 +2225,7 @@ mod tests {
             &quest_graphs,
             &world_quest_bindings,
             &world_admissions,
+            &world_control_planes,
             &applied_world_states,
             &evaluation,
             &topology,
@@ -1986,6 +2234,7 @@ mod tests {
         assert!(!parity.consistent);
         assert!(!parity.world_quest_bindings_match);
         assert!(!parity.world_admissions_match);
+        assert!(!parity.world_control_planes_match);
         assert!(!parity.evaluation_match);
         assert_eq!(
             parity.missing_world_quest_binding_ids,
@@ -1993,6 +2242,10 @@ mod tests {
         );
         assert_eq!(
             parity.missing_world_admission_ids,
+            vec!["deadman-prime".to_string()]
+        );
+        assert_eq!(
+            parity.missing_world_control_plane_ids,
             vec!["deadman-prime".to_string()]
         );
         assert_eq!(

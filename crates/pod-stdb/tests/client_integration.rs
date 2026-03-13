@@ -290,6 +290,7 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
             quest_graph_ids: vec!["deadman-shadow-hunt".into()],
         }],
         world_admissions: vec![],
+        world_control_planes: vec![],
         quest_graphs: vec![],
         applied_world_states: vec![],
         evaluation: pod_core::ScenarioEvaluationSummary {

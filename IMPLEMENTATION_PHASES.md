@@ -356,6 +356,7 @@
 - [x] Add a headless team/world runner that can operate without the browser client
 - [x] Define deterministic cross-world effect application rules at authority boundaries
 - [x] Share world admission summaries and team-slot assignment through `pod-core` topology contracts instead of keeping roster admission app-local
+- [x] Share per-world admitted roster/controller summaries through `pod-core` topology contracts instead of keeping control-plane composition app-local
 - [x] Add a shared remote-topology export contract for world quest bindings, applied world state, and scenario evaluation
 - [x] Consume the shared remote-topology artifact through remote execution topology
 - [x] Add replay/evaluation coverage for linked-world tournaments and neural swarms
@@ -386,7 +387,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Select the next post-audit agent/runtime phase before resuming.
+1. All audit backlog items are closed. Build the tournament/control-plane layer on top of the shared world admission and world control-plane contracts before opening a new phase.
 
 ## Audit Backlog (2026-03-13)
 
