@@ -83,6 +83,16 @@ use pod_core::{
     AppliedWorldStateSummary, FocusedEntityDebugSummary, RemoteTopologyBundle, ToolCallStatus,
     VersionedTickTelemetry, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
 };
+use spacetimedb_sdk::{
+    DbContext as _, SubscriptionHandle as _, Table as _, TableWithPrimaryKey as _,
+};
+
+use crate::module_bindings::{
+    self, remote_topology_document_table::RemoteTopologyDocumentTableAccess as _,
+    DbConnection as GeneratedSdkDbConnection,
+    RemoteTopologyDocumentRow as GeneratedSdkRemoteTopologyDocumentRow,
+    SubscriptionHandle as GeneratedSdkSubscriptionHandle,
+};
 
 // ============================================================
 // CONFIGURATION
@@ -428,6 +438,153 @@ impl GeneratedRuntimeAdapter for GeneratedBindingRuntime {
     }
 
     fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+        self.handle.drain()
+    }
+}
+
+/// Real generated-runtime adapter backed by SpacetimeDB's generated Rust bindings.
+///
+/// This uses the generated `DbConnection` plus typed table callbacks instead of
+/// the command-queue simulation used by [`GeneratedBindingRuntime`].
+pub struct GeneratedSdkRuntime {
+    handle: GeneratedRuntimeHandle,
+    connection: Option<GeneratedSdkDbConnection>,
+    subscription: Option<GeneratedSdkSubscriptionHandle>,
+}
+
+impl GeneratedSdkRuntime {
+    /// Create a real generated-runtime adapter backed by the installed SDK bindings.
+    pub fn new() -> Self {
+        Self {
+            handle: GeneratedRuntimeHandle::default(),
+            connection: None,
+            subscription: None,
+        }
+    }
+
+    fn push_remote_topology_row(
+        handle: &GeneratedRuntimeHandle,
+        row: &GeneratedSdkRemoteTopologyDocumentRow,
+    ) {
+        handle.remote_topology_document_insert(GeneratedRemoteTopologyDocumentRow {
+            row_id: row.row_id,
+            generated_at_unix_ms: row.generated_at_unix_ms,
+            scenario_id: row.scenario_id.clone(),
+            profile_id: row.profile_id.clone(),
+            world_count: row.world_count,
+            team_count: row.team_count,
+            topology_json: row.topology_json.clone(),
+        });
+    }
+
+    fn register_topology_callbacks(
+        connection: &GeneratedSdkDbConnection,
+        handle: &GeneratedRuntimeHandle,
+    ) {
+        let table = connection.db.remote_topology_document();
+
+        let insert_handle = handle.clone();
+        table.on_insert(move |_ctx, row| {
+            Self::push_remote_topology_row(&insert_handle, row);
+        });
+
+        let update_handle = handle.clone();
+        table.on_update(move |_ctx, _old, new| {
+            Self::push_remote_topology_row(&update_handle, new);
+        });
+    }
+}
+
+impl Default for GeneratedSdkRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratedRuntimeAdapter for GeneratedSdkRuntime {
+    fn connect(&mut self, config: &StdbClientConfig) -> Result<(), String> {
+        if self.connection.is_some() {
+            return Err("generated SDK runtime already has an active connection".into());
+        }
+
+        let on_connect_handle = self.handle.clone();
+        let on_error_handle = self.handle.clone();
+        let on_disconnect_handle = self.handle.clone();
+        let connection = module_bindings::DbConnection::builder()
+            .with_uri(config.host.clone())
+            .with_database_name(config.db_name.clone())
+            .with_token(config.auth_token.clone())
+            .on_connect(move |connection, identity, token| {
+                Self::register_topology_callbacks(connection, &on_connect_handle);
+                on_connect_handle.connected(identity.to_byte_array().to_vec(), token.to_string());
+            })
+            .on_connect_error(move |_ctx, error| {
+                on_error_handle.connect_error(error.to_string());
+            })
+            .on_disconnect(move |_ctx, error| {
+                let reason = error
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| "generated runtime disconnected".to_string());
+                on_disconnect_handle.disconnected(reason);
+            })
+            .build()
+            .map_err(|error| error.to_string())?;
+
+        self.connection = Some(connection);
+        Ok(())
+    }
+
+    fn disconnect(&mut self) {
+        if let Some(subscription) = self.subscription.take() {
+            let _ = subscription.unsubscribe();
+        }
+
+        if let Some(connection) = self.connection.take() {
+            let _ = connection.disconnect();
+        }
+
+        let _ = self.handle.drain();
+    }
+
+    fn subscribe(&mut self, queries: &[String]) -> Result<(), String> {
+        let connection = self
+            .connection
+            .as_ref()
+            .ok_or_else(|| "generated SDK runtime has no active connection".to_string())?;
+
+        if let Some(subscription) = self.subscription.take() {
+            let _ = subscription.unsubscribe();
+        }
+
+        let applied_handle = self.handle.clone();
+        let error_handle = self.handle.clone();
+        let subscription = connection
+            .subscription_builder()
+            .on_applied(move |_ctx| {
+                applied_handle.subscription_applied();
+            })
+            .on_error(move |_ctx, error| {
+                error_handle.connect_error(format!("subscription failed: {error}"));
+            })
+            .subscribe(queries.to_vec());
+        self.subscription = Some(subscription);
+        Ok(())
+    }
+
+    fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+        let mut disconnected_reason = None;
+        if let Some(connection) = self.connection.as_ref() {
+            if let Err(error) = connection.frame_tick() {
+                disconnected_reason = Some(error.to_string());
+            }
+        }
+
+        if let Some(reason) = disconnected_reason {
+            self.subscription = None;
+            self.connection = None;
+            self.handle.disconnected(reason);
+        }
+
         self.handle.drain()
     }
 }
@@ -1305,6 +1462,14 @@ impl StdbClient {
         endpoint
     }
 
+    /// Install the real generated SpacetimeDB SDK runtime.
+    ///
+    /// This uses the generated `DbConnection` and typed table callbacks from
+    /// [`crate::module_bindings`] instead of the synthetic command-queue test seam.
+    pub fn install_generated_sdk_runtime(&mut self) {
+        self.set_generated_runtime(Box::new(GeneratedSdkRuntime::new()));
+    }
+
     /// Wire a generated-runtime bridge backed by callback hooks.
     ///
     /// This is kept as a lightweight hook seam for focused tests and helpers.
@@ -1359,11 +1524,9 @@ impl StdbClient {
 
         if matches!(self.config.connection_mode, StdbConnectionMode::Generated) {
             let runtime = self.generated_runtime.as_mut().ok_or_else(|| {
-                self.state = ConnectionState::Error(
-                    "generated SpacetimeDB bindings/runtime are not wired in this build".into(),
-                );
+                self.state = ConnectionState::Error("generated SpacetimeDB runtime is not installed".into());
                 StdbError::ConnectionFailed(
-                    "generated SpacetimeDB bindings/runtime are not wired in this build; use StdbConnectionMode::Emulated for local fallback".into(),
+                    "generated SpacetimeDB runtime is not installed; call install_generated_sdk_runtime() for the live bindings path or use StdbConnectionMode::Emulated for local fallback".into(),
                 )
             })?;
 
@@ -2979,6 +3142,21 @@ mod tests {
             client.connection_state(),
             ConnectionState::Error(_)
         ));
+    }
+
+    #[test]
+    fn test_generated_sdk_runtime_uses_live_bindings_path() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            host: "http://127.0.0.1:1".into(),
+            connection_mode: StdbConnectionMode::Generated,
+            ..StdbClientConfig::default()
+        });
+        client.install_generated_sdk_runtime();
+
+        let err = client
+            .connect()
+            .expect_err("closed localhost port should fail the real generated SDK connection");
+        assert!(matches!(err, StdbError::ConnectionFailed(_)));
     }
 
     #[test]

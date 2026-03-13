@@ -1086,6 +1086,11 @@ impl SpacetimeDBClient {
         self.inner.install_generated_binding_runtime()
     }
 
+    /// Install the real generated SpacetimeDB SDK runtime on the wrapped client.
+    pub fn install_generated_sdk_runtime(&mut self) {
+        self.inner.install_generated_sdk_runtime();
+    }
+
     /// Apply a shared multi-world topology artifact to the underlying SpacetimeDB client.
     pub fn apply_remote_topology(
         &mut self,
@@ -3049,6 +3054,21 @@ mod tests {
         assert!(!client.is_connected());
         assert!(client.client_id().is_none());
         assert!(client.local_snapshot().is_none());
+    }
+
+    #[test]
+    fn test_install_generated_sdk_runtime_maps_live_connect_failure() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            host: "http://127.0.0.1:1".into(),
+            connection_mode: StdbConnectionMode::Generated,
+            ..Default::default()
+        });
+        client.install_generated_sdk_runtime();
+
+        let err = client
+            .connect()
+            .expect_err("closed localhost port should fail the live generated runtime");
+        assert!(matches!(err, StdbClientError::Connection(_)));
     }
 
     #[test]

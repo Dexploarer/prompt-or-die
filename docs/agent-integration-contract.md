@@ -214,10 +214,10 @@ pair for focused callback-hook tests and a command-driven
 mode receive those authority-fed rows through the same `frame_tick()` ingress
 without custom per-test runtimes or auto-acked connect/subscription hooks.
 `StdbClient` and `pod-net::SpacetimeDBClient` now expose
-`install_generated_binding_runtime(...)` so external generated hosts can install
-that seam without manual adapter injection. The remaining gap is swapping that
-command/callback seam over to actual generated
-SpacetimeDB binding callbacks and threading the live feed into the
+`install_generated_binding_runtime(...)` for the deterministic command-driven
+path and `install_generated_sdk_runtime(...)` for the live generated SDK path,
+so external generated hosts no longer need manual adapter injection. The
+remaining gap is threading that live SDK-backed feed into the
 parity/evaluation harnesses, not redefining the contract or publication format
 itself. The topology parity contract is shared now too: `pod-core` owns
 `build_remote_topology_bundle(...)`, `RemoteTopologyParitySummary`, plus the

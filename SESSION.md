@@ -242,6 +242,8 @@
 - [x] Added `install_generated_binding_runtime(...)` to `StdbClient` and `pod-net::SpacetimeDBClient`, so generated-mode consumers install the command-driven runtime through one public handoff instead of re-creating `GeneratedBindingRuntime::new()` boilerplate at each call site
 - [x] Moved `world_quest_bindings` + `topology_parity` ownership out of `pod-headless` private report code and into `pod-core`, which now exports `build_world_quest_bindings(...)`, `RemoteTopologyParitySummary`, and `build_remote_topology_parity_summary(...)` for app, benchmark, and remote runtime reuse
 - [x] Moved `build_remote_topology_bundle(...)` out of `pod-headless` and into `pod-core`, so bundle assembly now lives with the shared topology contract instead of the app binary
+- [x] Installed real generated Rust bindings for `pod-stdb`, upgraded the repo to Rust `1.93.0`, and added `GeneratedSdkRuntime`, so generated mode can now use the actual generated `DbConnection`, typed topology table callbacks, and real subscription lifecycle instead of only the synthetic command-driven seam
+- [x] Added `install_generated_sdk_runtime(...)` to `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving the live generated SDK path is reachable and maps failures through the public error surface
 
 **Next Action**:
-- Swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the generated binding layer exists, then project that live generated feed into the parity/evaluation harnesses.
+- Thread `install_generated_sdk_runtime()` into the topology parity/evaluation harnesses when a live SpacetimeDB module is available, while keeping `GeneratedBindingRuntime` as the deterministic CI/moat fallback.

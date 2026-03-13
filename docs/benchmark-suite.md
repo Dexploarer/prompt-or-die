@@ -212,16 +212,22 @@ scenario report: if `pod-net` stops resolving world/quest/effect state the same
 way from authority rows and generated-mode ingress, the benchmark fails even if
 `pod-headless` still exports a valid topology bundle.
 
-The generated side now uses a command-driven binding seam that is much closer
-to a real generated transport: `GeneratedBindingRuntime` emits outbound
-connect/subscribe commands, `GeneratedBindingEndpoint` exposes those commands
-to the simulated binding layer, and the same typed callback-facing surface
-(`GeneratedBindingCallbacks` plus `GeneratedRemoteTopologyDocumentRow`) feeds
-events back into `frame_tick()`. `StdbClient` and `pod-net::SpacetimeDBClient`
-install that seam through `install_generated_binding_runtime(...)`, so the
-benchmark and integration paths no longer hand-wire the adapter. The in-tree
-coverage now includes both
-same-world and linked-world quest/effect churn on that generated path.
+The deterministic generated side still uses a command-driven binding seam that
+is much closer to a real generated transport: `GeneratedBindingRuntime` emits
+outbound connect/subscribe commands, `GeneratedBindingEndpoint` exposes those
+commands to the simulated binding layer, and the same typed callback-facing
+surface (`GeneratedBindingCallbacks` plus `GeneratedRemoteTopologyDocumentRow`)
+feeds events back into `frame_tick()`. `StdbClient` and
+`pod-net::SpacetimeDBClient` install that seam through
+`install_generated_binding_runtime(...)`, so the benchmark and integration
+paths no longer hand-wire the adapter. The repo now also ships installed
+generated Rust bindings plus `GeneratedSdkRuntime`, which can be installed
+through `install_generated_sdk_runtime(...)` to drive generated mode through
+the real generated `DbConnection` and typed topology table callbacks. The moat
+benchmark stays on the deterministic command-driven path until a live
+SpacetimeDB module-backed feed is available in CI. The in-tree coverage now
+includes both same-world and linked-world quest/effect churn on the generated
+paths.
 `pod-core` also owns the shared `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, and parity/binding builder helpers now, so
 headless and moat parity checks compare exported topology artifacts through one

@@ -1922,6 +1922,12 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Last updated**: Iteration 180
-**Current focus**: Iteration 181 swap `GeneratedBindingRuntime` from command-queue simulation to actual generated SpacetimeDB binding callbacks when the binding layer exists, then push that live feed into parity/evaluation harnesses
+**Current focus**: Iteration 181 install the real generated SpacetimeDB SDK runtime and route live callback delivery through it, then push that live feed into parity/evaluation harnesses
+- [x] Installed real generated Rust bindings for `pod-stdb` under `crates/pod-stdb/src/module_bindings` and upgraded the repo toolchain to Rust `1.93.0`, so the generated client path is now buildable in-tree instead of blocked on SDK/toolchain drift.
+- [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
+- [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
+
+**Last updated**: Iteration 181
+**Current focus**: Iteration 182 thread `install_generated_sdk_runtime()` into the topology parity/evaluation harnesses when a live SpacetimeDB module is available, while keeping `GeneratedBindingRuntime` as the deterministic CI/moat fallback
 - [x] Extracted `build_world_quest_bindings(...)`, `RemoteTopologyParitySummary`, and `build_remote_topology_parity_summary(...)` into `crates/pod-core/src/contract.rs`, so topology consistency checks are now shared engine contracts instead of `apps/pod-headless`-local report logic.
 - [x] Extracted `build_remote_topology_bundle(...)` into `crates/pod-core/src/contract.rs`, so `RemoteTopologyBundle` assembly now lives with the shared topology contract instead of `apps/pod-headless` local helpers.
