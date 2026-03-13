@@ -227,9 +227,8 @@ fn generated_mode_runtime_adapter_processes_topology_rows() {
         connection_mode: StdbConnectionMode::Generated,
         ..StdbClientConfig::default()
     });
-    let (runtime, endpoint) = GeneratedBindingRuntime::new();
+    let endpoint = client.install_generated_binding_runtime();
     let callbacks = endpoint.callbacks();
-    client.set_generated_runtime(Box::new(runtime));
 
     client.connect().expect("generated runtime should connect");
     let commands = endpoint.drain_commands();

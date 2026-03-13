@@ -1913,6 +1913,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedBindingCommand`, `GeneratedBindingRuntime`, and `GeneratedBindingEndpoint` in `crates/pod-stdb/src/client.rs`, so generated mode now has a command-driven runtime seam that records outbound connect/subscribe/disconnect requests and accepts inbound callbacks separately instead of auto-acking connect/subscription hooks.
 - [x] Moved the public generated-mode integration path in `crates/pod-stdb/tests/client_integration.rs` and the moat/public generated path in `crates/pod-net/src/client_stdb.rs` onto that command-driven runtime, including explicit connect/subscription command assertions before topology-row callbacks are delivered.
 - [x] Kept `GeneratedRuntimeBridge` as a lightweight hook seam for focused unit tests, but updated docs/comments to make `GeneratedBindingRuntime` the live-like generated binding path.
+- [x] Added `install_generated_binding_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, so generated-mode consumers can install the command-driven runtime without manual `GeneratedBindingRuntime::new()` plus adapter injection boilerplate.
 - [x] Revalidated touched targets:
   - `cargo test -p pod-stdb --no-default-features --features client generated_mode_runtime_adapter_processes_topology_rows -- --nocapture`
   - `cargo test -p pod-net --features spacetimedb generated_runtime -- --nocapture`

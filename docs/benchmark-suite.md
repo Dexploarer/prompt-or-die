@@ -217,7 +217,10 @@ to a real generated transport: `GeneratedBindingRuntime` emits outbound
 connect/subscribe commands, `GeneratedBindingEndpoint` exposes those commands
 to the simulated binding layer, and the same typed callback-facing surface
 (`GeneratedBindingCallbacks` plus `GeneratedRemoteTopologyDocumentRow`) feeds
-events back into `frame_tick()`. The in-tree coverage now includes both
+events back into `frame_tick()`. `StdbClient` and `pod-net::SpacetimeDBClient`
+install that seam through `install_generated_binding_runtime(...)`, so the
+benchmark and integration paths no longer hand-wire the adapter. The in-tree
+coverage now includes both
 same-world and linked-world quest/effect churn on that generated path.
 
 `scripts/run_moat_benchmarks.ts` now includes that payload as

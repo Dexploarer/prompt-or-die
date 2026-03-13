@@ -52,7 +52,7 @@ use pod_core::id::{AgentId, EntityId};
 use pod_core::{AppliedWorldStateSummary, RemoteTopologyBundle, WorldEvaluationSummary};
 
 use pod_stdb::client::{
-    CachedEntity, GeneratedBindingCommand, GeneratedBindingRuntime,
+    CachedEntity, GeneratedBindingCommand, GeneratedBindingEndpoint,
     GeneratedRemoteTopologyDocumentRow, StdbClient, StdbClientConfig, StdbConnectionMode,
     StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
@@ -1080,6 +1080,12 @@ impl SpacetimeDBClient {
         &mut self.inner
     }
 
+    /// Install the command-driven generated binding runtime on the underlying
+    /// [`StdbClient`] and return the public binding endpoint.
+    pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint {
+        self.inner.install_generated_binding_runtime()
+    }
+
     /// Apply a shared multi-world topology artifact to the underlying SpacetimeDB client.
     pub fn apply_remote_topology(
         &mut self,
@@ -1593,11 +1599,8 @@ pub fn build_topology_feed_measurements(
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let endpoint = generated_client.install_generated_binding_runtime();
         let callbacks = endpoint.callbacks();
-        generated_client
-            .inner_mut()
-            .set_generated_runtime(Box::new(runtime));
         generated_client.connect()?;
         let commands = endpoint.drain_commands();
         assert!(
@@ -2162,9 +2165,8 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let endpoint = client.install_generated_binding_runtime();
         let callbacks = endpoint.callbacks();
-        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
         let commands = endpoint.drain_commands();
         assert!(matches!(
@@ -2262,9 +2264,8 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let endpoint = client.install_generated_binding_runtime();
         let callbacks = endpoint.callbacks();
-        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
         let commands = endpoint.drain_commands();
         assert!(matches!(
@@ -2510,9 +2511,8 @@ mod tests {
             connection_mode: StdbConnectionMode::Generated,
             ..Default::default()
         });
-        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        let endpoint = client.install_generated_binding_runtime();
         let callbacks = endpoint.callbacks();
-        client.inner_mut().set_generated_runtime(Box::new(runtime));
         client.connect().expect("generated runtime should connect");
         let commands = endpoint.drain_commands();
         assert!(matches!(

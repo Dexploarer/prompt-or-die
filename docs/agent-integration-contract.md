@@ -212,8 +212,11 @@ now also has both a reusable `GeneratedRuntimeBridge` / `GeneratedRuntimeHandle`
 pair for focused callback-hook tests and a command-driven
 `GeneratedBindingRuntime` / `GeneratedBindingEndpoint` seam that lets generated
 mode receive those authority-fed rows through the same `frame_tick()` ingress
-without custom per-test runtimes or auto-acked connect/subscription hooks. The
-remaining gap is swapping that command/callback seam over to actual generated
+without custom per-test runtimes or auto-acked connect/subscription hooks.
+`StdbClient` and `pod-net::SpacetimeDBClient` now expose
+`install_generated_binding_runtime(...)` so external generated hosts can install
+that seam without manual adapter injection. The remaining gap is swapping that
+command/callback seam over to actual generated
 SpacetimeDB binding callbacks and threading the live feed into the
 parity/evaluation harnesses, not redefining the contract or publication format
 itself.

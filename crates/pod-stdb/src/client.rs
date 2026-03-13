@@ -1293,6 +1293,17 @@ impl StdbClient {
         self.generated_runtime = Some(runtime);
     }
 
+    /// Install the command-driven generated binding runtime and return its endpoint.
+    ///
+    /// Call this before [`connect`](Self::connect) when running in
+    /// [`StdbConnectionMode::Generated`] and an external binding host needs to
+    /// observe outbound commands and deliver inbound callbacks separately.
+    pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint {
+        let (runtime, endpoint) = GeneratedBindingRuntime::new();
+        self.set_generated_runtime(Box::new(runtime));
+        endpoint
+    }
+
     /// Wire a generated-runtime bridge backed by callback hooks.
     ///
     /// This is kept as a lightweight hook seam for focused tests and helpers.
