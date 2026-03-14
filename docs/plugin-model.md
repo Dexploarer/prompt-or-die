@@ -112,13 +112,14 @@ integrators back into app composition roots:
 - Multi-shard authority control-plane hook:
   `crates/pod-host/src/lib.rs` now exposes
   `AuthorityShardControlPlaneHandle` and
-  `ShardSupervisorControlPlaneHandle`, plus derived shard incident summaries and
-  coordinated drain/shutdown commands, so supervised shard sets can snapshot
-  live direct-connect transport pressure, gameplay/tick incident state, and
-  lifecycle control without per-shard log scraping. What is still missing is a
-  durable supervisor-level ops publication surface above the supervised shard
-  set, so browser/editor/ops consumers still depend on `apps/pod-server`
-  private debug-stream wiring for one shared document feed.
+  `ShardSupervisorControlPlaneHandle`, plus derived shard incident summaries,
+  coordinated drain/shutdown commands, and live `AuthorityShardOpsHandle` /
+  `ShardSupervisorOpsHandle` document subscriptions, so supervised shard sets
+  can snapshot control-plane state and subscribe to one shared MMO ops feed
+  without per-shard log scraping or `apps/pod-server` private wiring. What is
+  still missing is retained cross-shard ops aggregation above those live
+  broadcasts, so late-joining browser/editor/ops consumers still need a
+  higher-level sink if they want history instead of just the live stream.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

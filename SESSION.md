@@ -266,7 +266,7 @@
 - [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Move shared shard/supervisor ops document publication out of `apps/pod-server` and into a reusable crate surface so direct-connect and local authority hosts can emit the same MMO ops feed without app-private debug-stream wiring.
+- Add retained supervisor-level ops aggregation above `AuthorityShardOpsHandle` and `ShardSupervisorOpsHandle` so multi-shard browser/editor/ops consumers can attach late and still inspect recent MMO history instead of only the live broadcast.
 
 ## Iteration 207 Progress
 
@@ -297,6 +297,12 @@
 - [x] Added `ShardGameplayIncidentTracker` in `crates/pod-core/src/ops.rs`, so tick-budget, tool-call, trajectory, and flagship MMO action counters now live on a shared runtime surface instead of `apps/pod-server` private stats.
 - [x] Extended `crates/pod-net/src/server.rs` with gameplay incident watch publication and shard incident debug documents, so `GameServer` now emits transport, lifecycle, and gameplay summaries from one authority runtime path.
 - [x] Updated `crates/pod-host/src/lib.rs` control-plane snapshots plus the architecture/plugin docs, moving the next MMO blocker up to durable shared ops publication instead of missing gameplay telemetry on the shard surface.
+
+## Iteration 212 Progress
+
+- [x] Added `LocalAuthorityRuntime`, `AuthorityShardOpsHandle`, and `ShardSupervisorOpsHandle` in `crates/pod-host/src/lib.rs`, so both local and direct-connect hosts now publish the same live TOON ops feed from one reusable crate surface.
+- [x] Extended `crates/pod-net/src/server.rs` with host-facing ops-document broadcasts that stay active without debug clients, and wired `DirectConnectAuthorityRuntime` onto that path.
+- [x] Removed the app-private shard ops stream from `apps/pod-server/src/main.rs`, updated the compatibility exports, and moved the next MMO blocker up to retained multi-shard ops aggregation instead of basic live publication.
 
 ## Audit Backlog (2026-03-13)
 

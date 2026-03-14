@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 211
-**Current focus**: Iteration 212 move shared shard/supervisor ops document publication out of `apps/pod-server` and into a reusable crate surface
+**Last updated**: Iteration 212
+**Current focus**: Iteration 213 add retained supervisor-level ops aggregation above the new live shard/supervisor broadcast handles
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2170,7 +2170,20 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check --workspace`
   - `git diff --check`
 
-**Next focus**: Move shared shard/supervisor ops document publication out of `apps/pod-server` and into a reusable crate surface so direct-connect and local authority hosts can emit the same MMO ops feed without app-private debug-stream wiring.
+### Iteration 212
+- [x] Added `LocalAuthorityRuntime`, `AuthorityShardOpsHandle`, and `ShardSupervisorOpsHandle` in `crates/pod-host/src/lib.rs`, so local and direct-connect authority hosts now expose one shared live TOON ops-feed surface instead of leaving local publication trapped in `apps/pod-server`.
+- [x] Extended `crates/pod-net/src/server.rs` with host-facing ops-document broadcasts that stay active without debug clients, then wired `DirectConnectAuthorityRuntime` and `PreparedShardSupervisor` onto that shared host surface.
+- [x] Simplified `apps/pod-server/src/main.rs` onto `LocalAuthorityRuntime::step(...)`, removed the app-private shard ops stream, refreshed compatibility exports in `apps/pod-server/src/lib.rs`, and updated the lifecycle docs so the remaining MMO gap is retained multi-shard ops aggregation rather than basic live publication.
+- [x] Validation:
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-net ops_documents_for_host_subscribers -- --nocapture`
+  - `cargo test -p pod-net broadcast_updates -- --nocapture`
+  - `cargo test -p pod-net test_lifecycle_control -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Add retained supervisor-level ops aggregation above `AuthorityShardOpsHandle` and `ShardSupervisorOpsHandle` so multi-shard browser/editor/ops consumers can attach late and still inspect recent MMO history instead of only the live broadcast.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

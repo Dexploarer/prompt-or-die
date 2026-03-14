@@ -1,13 +1,20 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 use pod_core::{
-    build_authoritative_world, AuthorityWorldConfig, IncidentSeverity, ShardIncidentSummary,
-    ShardTransportSummary, World,
+    build_authoritative_world, summarize_focused_entity_debug, AgentTickRollup, AgentToolCallEvent,
+    AuthorityWorldConfig, FocusedEntityDebugSummary, IncidentSeverity,
+    ShardGameplayIncidentTracker, ShardIncidentSummary, ShardTransportSummary, TelemetryArchive,
+    TelemetryConfig, VersionedTickTelemetry, World,
 };
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
 use pod_net::{ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState};
+
+const OPS_DOCUMENT_CHANNEL_CAPACITY: usize = 256;
+const ROLLUP_WINDOW_TICKS: u64 = 60;
+const INCIDENT_EMIT_INTERVAL_TICKS: u64 = 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthorityTransportMode {
@@ -102,7 +109,9 @@ impl AuthorityHostConfig {
             let runtime = DirectConnectAuthorityRuntime::new_with_shard_id(self, world, shard_id)?;
             Ok(AuthorityHostRuntime::DirectConnect(runtime))
         } else {
-            Ok(AuthorityHostRuntime::Local { world })
+            Ok(AuthorityHostRuntime::Local(
+                LocalAuthorityRuntime::new_with_shard_id(self, world, shard_id),
+            ))
         }
     }
 
@@ -230,6 +239,7 @@ impl ShardSupervisorConfig {
                     })?;
                 Ok(PreparedAuthorityShard {
                     control_plane: runtime.control_plane_handle(shard_summary.clone()),
+                    ops_handle: runtime.ops_handle(shard_summary.clone()),
                     summary: shard_summary,
                     runtime,
                 })
@@ -333,6 +343,22 @@ pub struct ShardSupervisorLifecycleCommandResult {
     pub targeted_shard_count: usize,
     pub accepted_shard_ids: Vec<String>,
     pub rejected: Vec<AuthorityShardCommandRejection>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthorityShardOpsHandle {
+    shard: AuthorityShardSummary,
+    document_tx: broadcast::Sender<String>,
+}
+
+impl AuthorityShardOpsHandle {
+    pub fn shard(&self) -> &AuthorityShardSummary {
+        &self.shard
+    }
+
+    pub fn subscribe_documents(&self) -> broadcast::Receiver<String> {
+        self.document_tx.subscribe()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -675,6 +701,23 @@ pub struct ShardSupervisorControlPlaneSummary {
     pub shards: Vec<AuthorityShardControlPlaneSummary>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsHandle {
+    shards: Vec<AuthorityShardOpsHandle>,
+}
+
+impl ShardSupervisorOpsHandle {
+    pub fn shards(&self) -> &[AuthorityShardOpsHandle] {
+        &self.shards
+    }
+
+    pub fn shard(&self, shard_id: &str) -> Option<&AuthorityShardOpsHandle> {
+        self.shards
+            .iter()
+            .find(|handle| handle.shard.shard_id == shard_id)
+    }
+}
+
 fn authority_lifecycle_state_from_server_state(
     state: &ServerLifecycleState,
 ) -> AuthorityShardLifecycleState {
@@ -824,8 +867,228 @@ fn build_control_plane_incident_summary(
     }
 }
 
+#[derive(Debug, Clone)]
+struct LocalAuthorityOpsStream {
+    shard_id: String,
+    archive: TelemetryArchive,
+    pending_documents: VecDeque<String>,
+}
+
+impl LocalAuthorityOpsStream {
+    fn new(shard_id: impl Into<String>) -> Self {
+        Self {
+            shard_id: shard_id.into(),
+            archive: TelemetryArchive::with_capacity(TelemetryConfig::default().core_archive_ticks),
+            pending_documents: VecDeque::new(),
+        }
+    }
+
+    fn record_tick(
+        &mut self,
+        tick_result: &pod_core::tick::TickResult,
+        incident: &ShardIncidentSummary,
+    ) {
+        self.archive.record_tick(tick_result.telemetry.clone());
+        self.pending_documents.push_back(
+            VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document(),
+        );
+
+        for agent in &tick_result.telemetry.agents {
+            let Some(entity_id) = agent.entity_id else {
+                continue;
+            };
+            for trace in &agent.tool_calls {
+                self.pending_documents.push_back(
+                    AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document(),
+                );
+            }
+        }
+
+        if (tick_result.tick + 1).is_multiple_of(ROLLUP_WINDOW_TICKS) {
+            for rollup in self.rollups_for_tick(tick_result.tick) {
+                self.pending_documents.push_back(rollup.to_toon_document());
+            }
+        }
+
+        let emit_incident = !matches!(incident.severity, IncidentSeverity::Healthy)
+            || (tick_result.tick + 1).is_multiple_of(INCIDENT_EMIT_INTERVAL_TICKS);
+        if emit_incident {
+            self.pending_documents
+                .push_back(incident.to_toon_document());
+        }
+    }
+
+    fn drain_documents(&mut self) -> Vec<String> {
+        self.pending_documents.drain(..).collect()
+    }
+
+    fn focused_entity_summary(&self, entity_id: u64) -> Option<FocusedEntityDebugSummary> {
+        summarize_focused_entity_debug(self.shard_id.clone(), &self.archive, entity_id)
+    }
+
+    fn focused_entity_document(&self, entity_id: u64) -> Option<String> {
+        self.focused_entity_summary(entity_id)
+            .map(|summary| summary.to_toon_document())
+    }
+
+    fn rollups_for_tick(&self, tick_end: u64) -> Vec<AgentTickRollup> {
+        let tick_start = tick_end.saturating_sub(ROLLUP_WINDOW_TICKS - 1);
+        let mut frames_by_agent = HashMap::<u64, Vec<pod_core::AgentTelemetryFrame>>::new();
+
+        for frame in self
+            .archive
+            .frames()
+            .iter()
+            .filter(|frame| frame.tick >= tick_start && frame.tick <= tick_end)
+        {
+            for agent in &frame.agents {
+                let Some(entity_id) = agent.entity_id else {
+                    continue;
+                };
+                frames_by_agent
+                    .entry(entity_id.0)
+                    .or_default()
+                    .push(agent.clone());
+            }
+        }
+
+        let mut entity_ids: Vec<u64> = frames_by_agent.keys().copied().collect();
+        entity_ids.sort_unstable();
+
+        entity_ids
+            .into_iter()
+            .filter_map(|entity_id| {
+                frames_by_agent
+                    .get(&entity_id)
+                    .and_then(|frames| AgentTickRollup::from_agent_frames(entity_id, frames))
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct LocalAuthorityTickOutcome {
+    pub tick_result: pod_core::tick::TickResult,
+    pub tick_elapsed: Duration,
+    pub tick_over_budget: bool,
+}
+
+pub struct LocalAuthorityRuntime {
+    pub world: World,
+    shard_id: String,
+    gameplay_incident_tracker: ShardGameplayIncidentTracker,
+    ops_stream: LocalAuthorityOpsStream,
+    gameplay_incident_summary_tx: watch::Sender<Option<ShardIncidentSummary>>,
+    lifecycle_state_tx: watch::Sender<ServerLifecycleState>,
+    ops_document_tx: broadcast::Sender<String>,
+    control_plane: AuthorityShardControlPlaneHandle,
+    ops_handle: AuthorityShardOpsHandle,
+}
+
+impl LocalAuthorityRuntime {
+    pub fn new_with_shard_id(
+        config: &AuthorityHostConfig,
+        world: World,
+        shard_id: impl Into<String>,
+    ) -> Self {
+        let shard_id = shard_id.into();
+        let shard = AuthorityShardSummary {
+            shard_id: shard_id.clone(),
+            linked_shard_ids: Vec::new(),
+            transport_mode: AuthorityTransportMode::Local,
+            tick_rate: config.tick_rate,
+            world_seed: config.world.world_seed,
+            map_name: config.world.map_name.clone(),
+            initial_idle_agents: config.world.initial_idle_agents,
+            direct_connect_bind_address: None,
+            direct_connect_websocket_port: None,
+            direct_connect_max_clients: None,
+        };
+        let (gameplay_incident_summary_tx, gameplay_incident_summary_rx) = watch::channel(None);
+        let (lifecycle_state_tx, lifecycle_state_rx) = watch::channel(ServerLifecycleState {
+            shard_id: shard_id.clone(),
+            phase: ServerLifecyclePhase::Running,
+            accepting_new_connections: false,
+            latest_tick: 0,
+            reason: None,
+        });
+        let (ops_document_tx, _) = broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY);
+
+        Self {
+            world,
+            shard_id: shard_id.clone(),
+            gameplay_incident_tracker: ShardGameplayIncidentTracker::new(),
+            ops_stream: LocalAuthorityOpsStream::new(shard_id),
+            gameplay_incident_summary_tx,
+            lifecycle_state_tx,
+            ops_document_tx: ops_document_tx.clone(),
+            control_plane: AuthorityShardControlPlaneHandle {
+                shard: shard.clone(),
+                transport_summary_rx: None,
+                gameplay_incident_summary_rx: Some(gameplay_incident_summary_rx),
+                lifecycle_state_rx: Some(lifecycle_state_rx),
+                lifecycle_command_tx: None,
+            },
+            ops_handle: AuthorityShardOpsHandle {
+                shard,
+                document_tx: ops_document_tx,
+            },
+        }
+    }
+
+    pub fn control_plane_handle(&self) -> AuthorityShardControlPlaneHandle {
+        self.control_plane.clone()
+    }
+
+    pub fn ops_handle(&self) -> AuthorityShardOpsHandle {
+        self.ops_handle.clone()
+    }
+
+    pub fn focused_entity_summary(&self, entity_id: u64) -> Option<FocusedEntityDebugSummary> {
+        self.ops_stream.focused_entity_summary(entity_id)
+    }
+
+    pub fn focused_entity_document(&self, entity_id: u64) -> Option<String> {
+        self.ops_stream.focused_entity_document(entity_id)
+    }
+
+    pub fn step(&mut self, tick_budget: Duration) -> LocalAuthorityTickOutcome {
+        let tick_start = Instant::now();
+        let tick_result = self.world.step();
+        let tick_elapsed = tick_start.elapsed();
+        let tick_over_budget = tick_elapsed > tick_budget;
+
+        self.gameplay_incident_tracker.record_tick(
+            &tick_result,
+            self.world.agent_count(),
+            tick_over_budget,
+        );
+        let incident = self
+            .gameplay_incident_tracker
+            .incident_summary(self.shard_id.clone(), tick_result.tick);
+        self.ops_stream.record_tick(&tick_result, &incident);
+        let _ = self.gameplay_incident_summary_tx.send(Some(incident));
+        let _ = self.lifecycle_state_tx.send(ServerLifecycleState {
+            shard_id: self.shard_id.clone(),
+            phase: ServerLifecyclePhase::Running,
+            accepting_new_connections: false,
+            latest_tick: tick_result.tick,
+            reason: None,
+        });
+        for document in self.ops_stream.drain_documents() {
+            let _ = self.ops_document_tx.send(document);
+        }
+
+        LocalAuthorityTickOutcome {
+            tick_result,
+            tick_elapsed,
+            tick_over_budget,
+        }
+    }
+}
+
 pub enum AuthorityHostRuntime {
-    Local { world: World },
+    Local(LocalAuthorityRuntime),
     DirectConnect(DirectConnectAuthorityRuntime),
 }
 
@@ -835,15 +1098,28 @@ impl AuthorityHostRuntime {
         shard: AuthorityShardSummary,
     ) -> AuthorityShardControlPlaneHandle {
         match self {
-            Self::Local { .. } => AuthorityShardControlPlaneHandle {
-                shard,
-                transport_summary_rx: None,
-                gameplay_incident_summary_rx: None,
-                lifecycle_state_rx: None,
-                lifecycle_command_tx: None,
-            },
+            Self::Local(runtime) => {
+                let mut handle = runtime.control_plane_handle();
+                handle.shard = shard;
+                handle
+            }
             Self::DirectConnect(runtime) => {
                 let mut handle = runtime.control_plane_handle();
+                handle.shard = shard;
+                handle
+            }
+        }
+    }
+
+    fn ops_handle(&self, shard: AuthorityShardSummary) -> AuthorityShardOpsHandle {
+        match self {
+            Self::Local(runtime) => {
+                let mut handle = runtime.ops_handle();
+                handle.shard = shard;
+                handle
+            }
+            Self::DirectConnect(runtime) => {
+                let mut handle = runtime.ops_handle();
                 handle.shard = shard;
                 handle
             }
@@ -854,6 +1130,7 @@ impl AuthorityHostRuntime {
 pub struct DirectConnectAuthorityRuntime {
     server: pod_net::GameServer,
     control_plane: AuthorityShardControlPlaneHandle,
+    ops_handle: AuthorityShardOpsHandle,
 }
 
 impl DirectConnectAuthorityRuntime {
@@ -876,36 +1153,47 @@ impl DirectConnectAuthorityRuntime {
         let (lifecycle_command_tx, lifecycle_command_rx) = mpsc::unbounded_channel();
         let (lifecycle_state_tx, lifecycle_state_rx) =
             watch::channel(ServerLifecycleState::running(&shard_id));
+        let (ops_document_tx, _) = broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY);
         let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
         server.install_transport_summary_watch(transport_summary_tx);
         server.install_incident_summary_watch(gameplay_incident_summary_tx);
         server.install_lifecycle_control(lifecycle_command_rx, lifecycle_state_tx);
+        server.install_ops_document_broadcast(ops_document_tx.clone());
+        let shard = AuthorityShardSummary {
+            shard_id,
+            linked_shard_ids: Vec::new(),
+            transport_mode: AuthorityTransportMode::DirectConnect,
+            tick_rate: config.tick_rate,
+            world_seed: config.world.world_seed,
+            map_name: config.world.map_name.clone(),
+            initial_idle_agents: config.world.initial_idle_agents,
+            direct_connect_bind_address: Some(config.bind_address().to_string()),
+            direct_connect_websocket_port: Some(config.websocket_port()),
+            direct_connect_max_clients: Some(config.max_clients()),
+        };
 
         Ok(Self {
             server,
             control_plane: AuthorityShardControlPlaneHandle {
-                shard: AuthorityShardSummary {
-                    shard_id,
-                    linked_shard_ids: Vec::new(),
-                    transport_mode: AuthorityTransportMode::DirectConnect,
-                    tick_rate: config.tick_rate,
-                    world_seed: config.world.world_seed,
-                    map_name: config.world.map_name.clone(),
-                    initial_idle_agents: config.world.initial_idle_agents,
-                    direct_connect_bind_address: Some(config.bind_address().to_string()),
-                    direct_connect_websocket_port: Some(config.websocket_port()),
-                    direct_connect_max_clients: Some(config.max_clients()),
-                },
+                shard: shard.clone(),
                 transport_summary_rx: Some(transport_summary_rx),
                 gameplay_incident_summary_rx: Some(gameplay_incident_summary_rx),
                 lifecycle_state_rx: Some(lifecycle_state_rx),
                 lifecycle_command_tx: Some(lifecycle_command_tx),
+            },
+            ops_handle: AuthorityShardOpsHandle {
+                shard,
+                document_tx: ops_document_tx,
             },
         })
     }
 
     pub fn control_plane_handle(&self) -> AuthorityShardControlPlaneHandle {
         self.control_plane.clone()
+    }
+
+    pub fn ops_handle(&self) -> AuthorityShardOpsHandle {
+        self.ops_handle.clone()
     }
 
     pub async fn run(mut self) -> Result<(), AuthorityHostError> {
@@ -948,6 +1236,7 @@ pub struct PreparedAuthorityShard {
     pub summary: AuthorityShardSummary,
     pub runtime: AuthorityHostRuntime,
     control_plane: AuthorityShardControlPlaneHandle,
+    ops_handle: AuthorityShardOpsHandle,
 }
 
 pub struct PreparedShardSupervisor {
@@ -974,6 +1263,16 @@ impl PreparedShardSupervisor {
         }
     }
 
+    pub fn ops_handle(&self) -> ShardSupervisorOpsHandle {
+        ShardSupervisorOpsHandle {
+            shards: self
+                .shards
+                .iter()
+                .map(PreparedAuthorityShard::ops_handle)
+                .collect(),
+        }
+    }
+
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
         let local_set = tokio::task::LocalSet::new();
 
@@ -993,7 +1292,7 @@ impl PreparedShardSupervisor {
                                 let _ = result_tx.send((shard_id, runtime.run().await));
                             });
                         }
-                        AuthorityHostRuntime::Local { .. } => {
+                        AuthorityHostRuntime::Local(_) => {
                             return Err(ShardSupervisorError::UnsupportedLocalRuntime(shard_id));
                         }
                     }
@@ -1019,6 +1318,10 @@ impl PreparedShardSupervisor {
 impl PreparedAuthorityShard {
     pub fn control_plane_handle(&self) -> AuthorityShardControlPlaneHandle {
         self.control_plane.clone()
+    }
+
+    pub fn ops_handle(&self) -> AuthorityShardOpsHandle {
+        self.ops_handle.clone()
     }
 }
 
@@ -1089,17 +1392,21 @@ mod tests {
     use super::{
         AuthorityHostConfig, AuthorityHostRuntime, AuthorityShardConfig,
         AuthorityShardControlPlaneHandle, AuthorityShardLifecycleCommandKind,
-        AuthorityShardLifecyclePhase, AuthorityTransportMode, DirectConnectAuthorityRuntime,
+        AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
+        DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
         PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
-        ShardSupervisorError, ShardSupervisorSummary,
+        ShardSupervisorError, ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
+    use pod_core::tick::TickResult;
     use pod_core::{
-        AuthorityWorldConfig, IncidentSeverity, ShardIncidentSummary, ShardTransportSummary,
+        decode_toon_value, AuthorityWorldConfig, IncidentSeverity, ShardIncidentSummary,
+        ShardTransportSummary, TickTelemetryFrame,
     };
     use pod_net::{
         DirectConnectTransportConfig, ServerLifecycleCommand, ServerLifecycleState, TransportPolicy,
     };
-    use tokio::sync::{mpsc, watch};
+    use std::time::Duration;
+    use tokio::sync::{broadcast, mpsc, watch};
 
     #[test]
     fn authority_host_config_reads_runtime_mode_from_env() {
@@ -1143,7 +1450,7 @@ mod tests {
             .expect("local host runtime should build");
 
         match runtime {
-            AuthorityHostRuntime::Local { world } => {
+            AuthorityHostRuntime::Local(LocalAuthorityRuntime { world, .. }) => {
                 assert_eq!(world.agent_count(), 2);
                 assert!(world.entity_count() >= 1);
             }
@@ -1151,6 +1458,91 @@ mod tests {
                 panic!("expected local host runtime");
             }
         }
+    }
+
+    #[test]
+    fn local_runtime_publishes_ops_documents_and_updates_control_plane() {
+        let config = sample_config(AuthorityTransportMode::Local);
+        let mut runtime = match config
+            .prepare_runtime(|world, _map_name| {
+                world
+                    .spawn_at(1.0, 1.0)
+                    .with_label("local-ops-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("local host runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        let mut documents = runtime.ops_handle().subscribe_documents();
+
+        let outcome = runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
+        assert_eq!(outcome.tick_result.tick, 0);
+
+        let first_document = documents
+            .try_recv()
+            .expect("local runtime should publish a TOON ops document");
+        let value = decode_toon_value(&first_document).expect("ops document should decode as TOON");
+        assert_eq!(value["document_type"], "versioned_tick_telemetry");
+
+        let snapshot = runtime.control_plane_handle().snapshot();
+        assert_eq!(snapshot.latest_tick, Some(0));
+        assert_eq!(
+            snapshot
+                .gameplay_incident_summary
+                .as_ref()
+                .map(|summary| summary.latest_tick),
+            Some(0)
+        );
+        assert_eq!(snapshot.shard.transport_mode, AuthorityTransportMode::Local);
+    }
+
+    #[test]
+    fn local_ops_stream_emits_tick_and_incident_documents() {
+        let mut stream = LocalAuthorityOpsStream::new("overworld-a");
+        let tick_result = TickResult {
+            tick: 59,
+            events: vec![],
+            entity_count: 12,
+            actions_processed: 3,
+            actions_rejected: 1,
+            telemetry: TickTelemetryFrame {
+                tick: 59,
+                agents: Vec::new(),
+            },
+        };
+        let incident = ShardIncidentSummary {
+            shard_id: "overworld-a".into(),
+            latest_tick: 59,
+            severity: IncidentSeverity::Healthy,
+            summary: "Shard overworld-a is healthy at tick 59".into(),
+            tick_budget_overrun_rate: 0.0,
+            action_rejection_rate: 0.0,
+            tool_call_error_rate: 0.0,
+            average_tool_latency_ms: 0.0,
+            average_trajectory_distance: 0.0,
+            peak_entity_count: 12,
+            peak_agent_count: 5,
+            capture_actions: 0,
+            summon_actions: 0,
+            gather_actions: 0,
+            loot_actions: 0,
+            notes: Vec::new(),
+        };
+        stream.record_tick(&tick_result, &incident);
+
+        let documents = stream.drain_documents();
+        assert!(documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)
+        }));
+        assert!(documents.iter().any(|document| {
+            decode_toon_value(document)
+                .map(|value| value["document_type"] == "shard_incident_summary")
+                .unwrap_or(false)
+        }));
     }
 
     #[test]
@@ -1266,7 +1658,7 @@ mod tests {
         assert!(prepared
             .shards()
             .iter()
-            .all(|shard| matches!(shard.runtime, AuthorityHostRuntime::Local { .. })));
+            .all(|shard| matches!(shard.runtime, AuthorityHostRuntime::Local(_))));
 
         let control_plane = prepared.control_plane_handle().snapshot();
         assert_eq!(control_plane.shard_count, 2);
@@ -1460,10 +1852,12 @@ mod tests {
                     host: sample_config(AuthorityTransportMode::Local),
                 }
                 .summary(),
-                runtime: AuthorityHostRuntime::Local {
-                    world: sample_config(AuthorityTransportMode::Local)
+                runtime: AuthorityHostRuntime::Local(LocalAuthorityRuntime::new_with_shard_id(
+                    &sample_config(AuthorityTransportMode::Local),
+                    sample_config(AuthorityTransportMode::Local)
                         .build_world(|_world, _map_name| {}),
-                },
+                    "alpha-1",
+                )),
                 control_plane: AuthorityShardControlPlaneHandle {
                     shard: AuthorityShardConfig {
                         shard_id: "alpha-1".into(),
@@ -1475,6 +1869,15 @@ mod tests {
                     gameplay_incident_summary_rx: None,
                     lifecycle_state_rx: None,
                     lifecycle_command_tx: None,
+                },
+                ops_handle: AuthorityShardOpsHandle {
+                    shard: AuthorityShardConfig {
+                        shard_id: "alpha-1".into(),
+                        linked_shard_ids: vec![],
+                        host: sample_config(AuthorityTransportMode::Local),
+                    }
+                    .summary(),
+                    document_tx: broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY).0,
                 },
             }],
         };

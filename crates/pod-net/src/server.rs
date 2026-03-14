@@ -14,7 +14,7 @@ use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use serde::Serialize;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{broadcast, mpsc, watch, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
@@ -235,6 +235,8 @@ pub struct GameServer {
     gameplay_incident_tracker: ShardGameplayIncidentTracker,
     /// Optional watch sink for live shard gameplay incident summaries.
     incident_summary_tx: Option<watch::Sender<Option<ShardIncidentSummary>>>,
+    /// Optional broadcast sink for unfiltered shard ops TOON documents.
+    ops_document_tx: Option<broadcast::Sender<String>>,
     /// Optional runtime lifecycle command receiver.
     lifecycle_command_rx: Option<mpsc::UnboundedReceiver<ServerLifecycleCommand>>,
     /// Optional watch sink for live shard lifecycle state.
@@ -285,6 +287,7 @@ impl GameServer {
             transport_summary_tx: None,
             gameplay_incident_tracker: ShardGameplayIncidentTracker::new(),
             incident_summary_tx: None,
+            ops_document_tx: None,
             lifecycle_command_rx: None,
             lifecycle_state_tx: None,
             lifecycle_state: ServerLifecycleState::running(shard_id),
@@ -307,6 +310,10 @@ impl GameServer {
         tx: watch::Sender<Option<ShardIncidentSummary>>,
     ) {
         self.incident_summary_tx = Some(tx);
+    }
+
+    pub fn install_ops_document_broadcast(&mut self, tx: broadcast::Sender<String>) {
+        self.ops_document_tx = Some(tx);
     }
 
     pub fn install_lifecycle_control(
@@ -1143,10 +1150,16 @@ impl GameServer {
         let has_debug_subscribers = client_targets
             .iter()
             .any(|target| target.debug_telemetry_enabled);
+        let has_ops_subscribers = self
+            .ops_document_tx
+            .as_ref()
+            .map(|tx| tx.receiver_count() > 0)
+            .unwrap_or(false);
 
         if !has_authoritative_baseline
             && client_targets.is_empty()
             && !has_debug_subscribers
+            && !has_ops_subscribers
             && !has_event_update
         {
             self.pending_events.clear();
@@ -1160,7 +1173,9 @@ impl GameServer {
             .any(|target| target.last_sent_snapshot.is_none());
         let mut any_state_update = !has_authoritative_baseline;
 
-        if has_debug_subscribers && self.tick.is_multiple_of(TRANSPORT_SUMMARY_INTERVAL_TICKS) {
+        if (has_debug_subscribers || has_ops_subscribers)
+            && self.tick.is_multiple_of(TRANSPORT_SUMMARY_INTERVAL_TICKS)
+        {
             self.pending_debug_documents
                 .push(PendingDebugDocument::ShardTransportSummary(
                     self.transport_summary().await,
@@ -1279,6 +1294,15 @@ impl GameServer {
         }
         if any_state_update {
             self.last_snapshot = Some(authoritative_snapshot);
+        }
+        if let Some(tx) = &self.ops_document_tx {
+            for document in self
+                .pending_debug_documents
+                .iter()
+                .map(PendingDebugDocument::to_toon_document)
+            {
+                let _ = tx.send(document);
+            }
         }
         self.pending_events.clear();
         self.pending_debug_documents.clear();
@@ -2906,6 +2930,25 @@ mod tests {
         }
 
         assert!(saw_tick_telemetry);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_updates_emits_ops_documents_for_host_subscribers() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
+        let (ops_tx, mut ops_rx) = tokio::sync::broadcast::channel(16);
+        server.install_ops_document_broadcast(ops_tx);
+
+        server.step_tick().await.unwrap();
+        server.broadcast_updates().await.unwrap();
+
+        let document = ops_rx
+            .try_recv()
+            .expect("host ops subscribers should receive a TOON document");
+        let value = decode_toon_value(&document).expect("ops document should decode");
+        assert_eq!(value["document_type"], "versioned_tick_telemetry");
+        assert_eq!(value["payload"]["payload"]["tick"], 0);
     }
 
     #[tokio::test]

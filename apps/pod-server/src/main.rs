@@ -15,7 +15,7 @@
 
 use log::{error, info, warn};
 use pod_core::World;
-use pod_host::{AuthorityHostConfig as ServerConfig, AuthorityHostRuntime};
+use pod_host::{AuthorityHostConfig as ServerConfig, AuthorityHostRuntime, LocalAuthorityRuntime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -301,16 +301,8 @@ mod map {
 
 #[allow(dead_code)]
 mod stats {
-    use pod_core::{
-        summarize_focused_entity_debug, AgentTickRollup, AgentToolCallEvent,
-        FocusedEntityDebugSummary, IncidentSeverity, ShardGameplayIncidentTracker,
-        ShardIncidentSummary, TelemetryArchive, TelemetryConfig, VersionedTickTelemetry,
-    };
-    use std::collections::{HashMap, VecDeque};
+    use pod_core::{ShardGameplayIncidentTracker, ShardIncidentSummary};
     use std::time::Instant;
-
-    const ROLLUP_WINDOW_TICKS: u64 = 60;
-    const INCIDENT_EMIT_INTERVAL_TICKS: u64 = 60;
 
     /// Server statistics tracker
     #[derive(Debug)]
@@ -449,117 +441,9 @@ mod stats {
             info!("═══════════════════════════════════════════════════════════");
         }
     }
-
-    /// Live TOON document stream emitted by the authoritative server runtime.
-    ///
-    /// This keeps browser/editor/ops consumers on the same document path as the
-    /// in-memory authoritative server loop rather than only the direct-connect
-    /// or synthetic test paths.
-    #[derive(Debug, Clone)]
-    pub struct ShardOpsDebugStream {
-        shard_id: String,
-        archive: TelemetryArchive,
-        pending_documents: VecDeque<String>,
-    }
-
-    impl ShardOpsDebugStream {
-        pub fn new(shard_id: impl Into<String>) -> Self {
-            Self {
-                shard_id: shard_id.into(),
-                archive: TelemetryArchive::with_capacity(
-                    TelemetryConfig::default().core_archive_ticks,
-                ),
-                pending_documents: VecDeque::new(),
-            }
-        }
-
-        pub fn record_tick(
-            &mut self,
-            tick_result: &pod_core::tick::TickResult,
-            stats: &ServerStats,
-        ) {
-            self.archive.record_tick(tick_result.telemetry.clone());
-            self.pending_documents.push_back(
-                VersionedTickTelemetry::new(tick_result.telemetry.clone()).to_toon_document(),
-            );
-
-            for agent in &tick_result.telemetry.agents {
-                let Some(entity_id) = agent.entity_id else {
-                    continue;
-                };
-                for trace in &agent.tool_calls {
-                    self.pending_documents.push_back(
-                        AgentToolCallEvent::new(entity_id.0, trace.clone()).to_toon_document(),
-                    );
-                }
-            }
-
-            if (tick_result.tick + 1).is_multiple_of(ROLLUP_WINDOW_TICKS) {
-                for rollup in self.rollups_for_tick(tick_result.tick) {
-                    self.pending_documents.push_back(rollup.to_toon_document());
-                }
-            }
-
-            let incident = stats.incident_summary(self.shard_id.clone(), tick_result.tick);
-            let emit_incident = !matches!(incident.severity, IncidentSeverity::Healthy)
-                || (tick_result.tick + 1).is_multiple_of(INCIDENT_EMIT_INTERVAL_TICKS);
-            if emit_incident {
-                self.pending_documents
-                    .push_back(incident.to_toon_document());
-            }
-        }
-
-        pub fn drain_documents(&mut self) -> Vec<String> {
-            self.pending_documents.drain(..).collect()
-        }
-
-        pub fn focused_entity_summary(&self, entity_id: u64) -> Option<FocusedEntityDebugSummary> {
-            summarize_focused_entity_debug(self.shard_id.clone(), &self.archive, entity_id)
-        }
-
-        pub fn focused_entity_document(&self, entity_id: u64) -> Option<String> {
-            self.focused_entity_summary(entity_id)
-                .map(|summary| summary.to_toon_document())
-        }
-
-        fn rollups_for_tick(&self, tick_end: u64) -> Vec<AgentTickRollup> {
-            let tick_start = tick_end.saturating_sub(ROLLUP_WINDOW_TICKS - 1);
-            let mut frames_by_agent = HashMap::<u64, Vec<pod_core::AgentTelemetryFrame>>::new();
-
-            for frame in self
-                .archive
-                .frames()
-                .iter()
-                .filter(|frame| frame.tick >= tick_start && frame.tick <= tick_end)
-            {
-                for agent in &frame.agents {
-                    let Some(entity_id) = agent.entity_id else {
-                        continue;
-                    };
-                    frames_by_agent
-                        .entry(entity_id.0)
-                        .or_default()
-                        .push(agent.clone());
-                }
-            }
-
-            let mut entity_ids: Vec<u64> = frames_by_agent.keys().copied().collect();
-            entity_ids.sort_unstable();
-
-            entity_ids
-                .into_iter()
-                .filter_map(|entity_id| {
-                    frames_by_agent
-                        .get(&entity_id)
-                        .and_then(|frames| AgentTickRollup::from_agent_frames(entity_id, frames))
-                })
-                .collect()
-        }
-    }
-
     #[cfg(test)]
     mod tests {
-        use super::{ServerStats, ShardOpsDebugStream};
+        use super::ServerStats;
         use glam::Vec2;
         use pod_core::acceptance::{run_flagship_mmo_acceptance, FlagshipMmoAcceptanceConfig};
         use pod_core::action::Action;
@@ -570,12 +454,13 @@ mod stats {
             ActionLifecycleStage, ActionSource, AgentTelemetryFrame, AgentToolCallTrace,
             TickTelemetryFrame, ToolCallStatus, TrajectorySample,
         };
+        use pod_core::tick::TickResult;
         use pod_core::{decode_toon_value, IncidentSeverity};
 
-        fn sample_tick_at(tick: u64) -> pod_core::tick::TickResult {
+        fn sample_tick() -> TickResult {
             let agent_id = AgentId::new();
             let mut agent = AgentTelemetryFrame::new(
-                tick,
+                7,
                 agent_id,
                 Some(EntityId(41)),
                 AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent),
@@ -586,16 +471,16 @@ mod stats {
                 1,
                 None,
                 Some(TrajectorySample::new(
-                    tick,
-                    tick as f32 / 60.0,
+                    7,
+                    7.0 / 60.0,
                     Vec2::ZERO,
                     Vec2::ZERO,
                     0.0,
                 )),
             );
             agent.update_trajectory_end(TrajectorySample::new(
-                tick,
-                tick as f32 / 60.0 + 1.0 / 60.0,
+                7,
+                7.0 / 60.0 + 1.0 / 60.0,
                 Vec2::new(3.0, 4.0),
                 Vec2::ZERO,
                 0.0,
@@ -619,7 +504,7 @@ mod stats {
                 None,
             );
             agent.record_tool_call(AgentToolCallTrace::new(
-                tick,
+                7,
                 "llm.complete",
                 "mock",
                 ToolCallStatus::ParseError,
@@ -629,21 +514,17 @@ mod stats {
                 Some("bad json".into()),
             ));
 
-            pod_core::tick::TickResult {
-                tick,
+            TickResult {
+                tick: 7,
                 events: vec![],
                 entity_count: 12,
                 actions_processed: 3,
                 actions_rejected: 1,
                 telemetry: TickTelemetryFrame {
-                    tick,
+                    tick: 7,
                     agents: vec![agent],
                 },
             }
-        }
-
-        fn sample_tick() -> pod_core::tick::TickResult {
-            sample_tick_at(7)
         }
 
         #[test]
@@ -676,16 +557,28 @@ mod stats {
                 stats.record_tick(tick, result.summary.total_agents, false);
             }
 
-            assert_eq!(stats.tracker.capture_actions(), result.summary.capture_actions);
-            assert_eq!(stats.tracker.summon_actions(), result.summary.summon_actions);
-            assert_eq!(stats.tracker.gather_actions(), result.summary.gather_actions);
+            assert_eq!(
+                stats.tracker.capture_actions(),
+                result.summary.capture_actions
+            );
+            assert_eq!(
+                stats.tracker.summon_actions(),
+                result.summary.summon_actions
+            );
+            assert_eq!(
+                stats.tracker.gather_actions(),
+                result.summary.gather_actions
+            );
             assert_eq!(stats.tracker.loot_actions(), result.summary.loot_actions);
             assert_eq!(stats.tracker.total_tool_calls(), result.summary.tool_calls);
             assert_eq!(
                 stats.tracker.total_tool_call_errors(),
                 result.summary.tool_call_errors
             );
-            assert_eq!(stats.tracker.ticks_completed(), result.summary.ticks_completed);
+            assert_eq!(
+                stats.tracker.ticks_completed(),
+                result.summary.ticks_completed
+            );
             assert!(result.parity_passed());
         }
 
@@ -702,60 +595,6 @@ mod stats {
             assert_eq!(value["document_type"], "shard_incident_summary");
             assert_eq!(value["payload"]["shard_id"], "overworld-a");
             assert_eq!(value["payload"]["latest_tick"], 7);
-        }
-
-        #[test]
-        fn shard_ops_debug_stream_emits_live_toon_documents() {
-            let mut stats = ServerStats::new(60);
-            let mut stream = ShardOpsDebugStream::new("overworld-a");
-
-            for tick in 0..60 {
-                let tick_result = sample_tick_at(tick);
-                stats.record_tick(&tick_result, 5, false);
-                stream.record_tick(&tick_result, &stats);
-            }
-
-            let documents = stream.drain_documents();
-            assert!(documents.iter().any(|document| decode_toon_value(document)
-                .map(|value| value["document_type"] == "versioned_tick_telemetry")
-                .unwrap_or(false)));
-            assert!(documents.iter().any(|document| decode_toon_value(document)
-                .map(|value| value["document_type"] == "agent_tool_call_event")
-                .unwrap_or(false)));
-            assert!(documents.iter().any(|document| decode_toon_value(document)
-                .map(|value| value["document_type"] == "agent_tick_rollup")
-                .unwrap_or(false)));
-            assert!(documents.iter().any(|document| decode_toon_value(document)
-                .map(|value| value["document_type"] == "shard_incident_summary")
-                .unwrap_or(false)));
-        }
-
-        #[test]
-        fn shard_ops_debug_stream_builds_focused_entity_debug_documents() {
-            let mut stats = ServerStats::new(60);
-            let mut stream = ShardOpsDebugStream::new("overworld-a");
-
-            for tick in 0..6 {
-                let tick_result = sample_tick_at(tick);
-                stats.record_tick(&tick_result, 5, false);
-                stream.record_tick(&tick_result, &stats);
-            }
-
-            let summary = stream
-                .focused_entity_summary(41)
-                .expect("focused summary should exist");
-            assert_eq!(summary.entity_id, 41);
-            assert_eq!(summary.shard_id, "overworld-a");
-            assert!(summary.tool_call_count >= 1);
-            assert!(summary.total_distance > 0.0);
-
-            let document = stream
-                .focused_entity_document(41)
-                .expect("focused document should exist");
-            let value = decode_toon_value(&document).expect("focused document should decode");
-            assert_eq!(value["document_type"], "focused_entity_debug_summary");
-            assert_eq!(value["payload"]["entity_id"], 41);
-            assert_eq!(value["payload"]["shard_id"], "overworld-a");
         }
     }
 }
@@ -799,8 +638,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .run()
             .await
             .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { Box::new(err) }),
-        AuthorityHostRuntime::Local { mut world } => {
-            run_game_loop(&mut world, &config, &mut stats, &shutdown_flag).await
+        AuthorityHostRuntime::Local(mut runtime) => {
+            run_game_loop(&mut runtime, &config, &mut stats, &shutdown_flag).await
         }
     };
 
@@ -823,7 +662,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 // ============================================================================
 
 async fn run_game_loop(
-    world: &mut World,
+    runtime: &mut LocalAuthorityRuntime,
     config: &ServerConfig,
     stats: &mut ServerStats,
     shutdown_flag: &Arc<AtomicBool>,
@@ -838,8 +677,8 @@ async fn run_game_loop(
     );
     info!(
         "Entities: {}, Agents: {}, Max clients: {}",
-        world.entity_count(),
-        world.agent_count(),
+        runtime.world.entity_count(),
+        runtime.world.agent_count(),
         config.max_clients()
     );
 
@@ -849,25 +688,27 @@ async fn run_game_loop(
             break;
         }
 
-        let tick_start = Instant::now();
-
         // ====== PHASE 1: ACCEPT NEW CONNECTIONS ======
-        process_local_connection_ingress(world, config);
+        process_local_connection_ingress(&mut runtime.world, config);
 
         // ====== PHASE 2: TICK THE WORLD ======
-        let tick_result = world.step();
+        let outcome = runtime.step(tick_duration);
+        let tick_result = outcome.tick_result;
 
         // ====== PHASE 3: BROADCAST EVENTS TO CLIENTS ======
         broadcast_local_tick_update(&tick_result);
 
         // ====== PHASE 4: RECORD STATS ======
-        let tick_elapsed = tick_start.elapsed();
-        let tick_over_budget = tick_elapsed > tick_duration;
-        stats.record_tick(&tick_result, world.agent_count(), tick_over_budget);
+        let tick_elapsed = outcome.tick_elapsed;
+        stats.record_tick(
+            &tick_result,
+            runtime.world.agent_count(),
+            outcome.tick_over_budget,
+        );
 
         // ====== PHASE 5: PERIODIC LOGGING ======
         if last_stats_print.elapsed() >= Duration::from_secs(1) {
-            stats.print_periodic(world);
+            stats.print_periodic(&runtime.world);
             last_stats_print = Instant::now();
         }
 
@@ -877,7 +718,7 @@ async fn run_game_loop(
         } else {
             warn!(
                 "Tick {} took {:.2}ms (over budget by {:.2}ms)",
-                world.tick,
+                runtime.world.tick,
                 tick_elapsed.as_secs_f32() * 1000.0,
                 (tick_elapsed - tick_duration).as_secs_f32() * 1000.0
             );
