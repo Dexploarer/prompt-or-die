@@ -49,6 +49,7 @@
 
 #![allow(clippy::unnecessary_lazy_evaluations)]
 
+pub mod authority;
 pub mod protocol;
 pub mod snapshot;
 
@@ -65,6 +66,10 @@ pub mod client_web;
 pub mod client_stdb;
 
 // Re-export common types
+pub use authority::{
+    build_authoritative_world, parse_bind_target, AuthorityRuntimeConfig, TransportPolicy,
+    WorldBootstrapPlan,
+};
 pub use protocol::{
     ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage,
 };

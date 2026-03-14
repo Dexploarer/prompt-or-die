@@ -189,11 +189,11 @@ integration targets available today:
   `build_runtime_bundle_manifest`, and `materialize_runtime_bundle_manifest`.
 - `pod-net` plus `pod-core` export the authoritative transport/debug seam through
   `ClientMessage`, `ServerMessage`, and `ShardTransportSummary`.
-- `pod-server` now exports a dedicated-authority lifecycle seam from
-  [`apps/pod-server/src/lib.rs`](/Users/home/Desktop/prompt-or-die/apps/pod-server/src/lib.rs)
-  through `ServerConfig`, `TransportPolicy`, `WorldBootstrapPlan`, and
-  `build_authoritative_world(...)`, so the binary no longer owns those
-  contracts inline.
+- `pod-net` now exports a shared authority-host lifecycle seam from
+  [`crates/pod-net/src/authority.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-net/src/authority.rs)
+  through `AuthorityRuntimeConfig`, `TransportPolicy`, `WorldBootstrapPlan`,
+  and `build_authoritative_world(...)`, so dedicated authority hosts no longer
+  depend on `apps/pod-server` for bootstrap/transport composition.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -205,7 +205,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `pod-server` still keeps its new authority lifecycle seam in the app crate instead of pushing that host contract down into a shared engine/runtime crate.
+- The authority lifecycle seam now lives in `pod-net`, but it still is not in a transport-neutral engine/runtime crate that non-networked hosts could reuse without depending on the networking layer.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

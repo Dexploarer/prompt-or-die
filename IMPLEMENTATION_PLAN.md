@@ -2092,7 +2092,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-server`
   - `git diff --check`
 
-**Next focus**: Push the exported `pod-server` authority lifecycle contract down into a shared engine/runtime crate so dedicated authority hosts beyond `pod-server` can reuse it without depending on an app crate.
+### Iteration 205
+- [x] Added `crates/pod-net/src/authority.rs`, moving the authority-host lifecycle contract into a shared runtime crate with `AuthorityRuntimeConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)`.
+- [x] Re-exported that authority surface from `crates/pod-net/src/lib.rs`, updated `apps/pod-server/src/main.rs` to consume `pod-net` directly, and reduced `apps/pod-server/src/lib.rs` to a compatibility re-export so the app crate is no longer the source of truth for authority composition.
+- [x] Moved the authority seam tests into `pod-net`, updated the architecture/plugin docs to point at `crates/pod-net/src/authority.rs`, and clarified that the remaining gap is a transport-neutral engine/runtime host contract rather than an app-crate export.
+- [x] Validation:
+  - `cargo test -p pod-net authority -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cargo check -p pod-net -p pod-server`
+  - `git diff --check`
+
+**Next focus**: Split the authority-host lifecycle contract away from `pod-net` into a transport-neutral engine/runtime crate or `pod-core`-adjacent host module so non-networked authority hosts can reuse it without depending on the networking layer.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

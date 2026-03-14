@@ -15,7 +15,7 @@
 
 use log::{error, info, warn};
 use pod_core::World;
-use pod_server::{build_authoritative_world, ServerConfig};
+use pod_net::{build_authoritative_world, AuthorityRuntimeConfig as ServerConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

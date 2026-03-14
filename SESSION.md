@@ -260,9 +260,11 @@
 - [x] Added deterministic `pod-server` runtime coverage for bootstrap population and transport-policy composition, and updated `docs/plugin-model.md` plus `docs/architecture.md` so the lifecycle docs reflect the new `pod-server` seam accurately
 - [x] Added `apps/pod-server/src/lib.rs` and moved the dedicated-server lifecycle seam onto that exported crate surface, so `ServerConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)` are now reusable outside the binary entry point
 - [x] Simplified `apps/pod-server/src/main.rs` to consume the exported library contract and moved the seam tests onto the `pod-server` library target, keeping the binary focused on startup/shutdown plus runtime loop composition
+- [x] Added `crates/pod-net/src/authority.rs` and moved the authority-host lifecycle contract into the shared networking/runtime crate, then updated `crates/pod-net/src/lib.rs` to re-export `AuthorityRuntimeConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)`
+- [x] Updated `apps/pod-server/src/main.rs` to consume the shared `pod-net` authority surface directly, reduced `apps/pod-server/src/lib.rs` to a compatibility re-export, and moved the seam tests into `pod-net`
 
 **Next Action**:
-- Push the exported `pod-server` authority lifecycle contract down into a shared engine/runtime crate so dedicated authority hosts beyond `pod-server` can reuse it without depending on an app crate.
+- Split the authority-host lifecycle contract away from `pod-net` into a transport-neutral engine/runtime crate so non-networked authority hosts can reuse it without depending on the networking layer.
 
 ## Audit Backlog (2026-03-13)
 
