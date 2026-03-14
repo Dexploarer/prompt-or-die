@@ -262,9 +262,11 @@
 - [x] Simplified `apps/pod-server/src/main.rs` to consume the exported library contract and moved the seam tests onto the `pod-server` library target, keeping the binary focused on startup/shutdown plus runtime loop composition
 - [x] Added `crates/pod-net/src/authority.rs` and moved the authority-host lifecycle contract into the shared networking/runtime crate, then updated `crates/pod-net/src/lib.rs` to re-export `AuthorityRuntimeConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)`
 - [x] Updated `apps/pod-server/src/main.rs` to consume the shared `pod-net` authority surface directly, reduced `apps/pod-server/src/lib.rs` to a compatibility re-export, and moved the seam tests into `pod-net`
+- [x] Added `crates/pod-core/src/authority.rs` and moved the transport-neutral world/bootstrap half of the authority lifecycle contract into the core runtime as `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)`
+- [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Split the authority-host lifecycle contract away from `pod-net` into a transport-neutral engine/runtime crate so non-networked authority hosts can reuse it without depending on the networking layer.
+- Introduce a single neutral host crate or lifecycle API that composes the `pod-core` authority world contract with selectable authority transports so apps stop stitching `pod-core` and `pod-net` together manually.
 
 ## Audit Backlog (2026-03-13)
 

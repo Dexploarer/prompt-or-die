@@ -927,7 +927,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         shutdown_flag_ctrlc.store(true, Ordering::SeqCst);
     })?;
 
-    let mut world = build_authoritative_world(&config, map::load_default_map);
+    let mut world = build_authoritative_world(&config.world, map::load_default_map);
 
     // Initialize server stats
     let mut stats = ServerStats::new(config.tick_rate as u32);
@@ -1089,9 +1089,9 @@ Configuration:
         },
         config.tick_rate,
         config.max_clients,
-        config.world_seed,
-        config.map_name,
-        config.initial_idle_agents,
+        config.world.world_seed,
+        config.world.map_name,
+        config.world.initial_idle_agents,
         config.runtime_mode,
         config.transport_policy.snapshot_interval,
         config.transport_policy.client_inactivity_timeout_ticks,

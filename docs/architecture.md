@@ -189,11 +189,15 @@ integration targets available today:
   `build_runtime_bundle_manifest`, and `materialize_runtime_bundle_manifest`.
 - `pod-net` plus `pod-core` export the authoritative transport/debug seam through
   `ClientMessage`, `ServerMessage`, and `ShardTransportSummary`.
-- `pod-net` now exports a shared authority-host lifecycle seam from
+- `pod-core` now exports a transport-neutral authority world seam from
+  [`crates/pod-core/src/authority.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/authority.rs)
+  through `AuthorityWorldConfig`, `WorldBootstrapPlan`, and
+  `build_authoritative_world(...)`.
+- `pod-net` now exports the transport-side authority adapter from
   [`crates/pod-net/src/authority.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-net/src/authority.rs)
-  through `AuthorityRuntimeConfig`, `TransportPolicy`, `WorldBootstrapPlan`,
-  and `build_authoritative_world(...)`, so dedicated authority hosts no longer
-  depend on `apps/pod-server` for bootstrap/transport composition.
+  through `AuthorityRuntimeConfig`, `TransportPolicy`, and
+  `parse_bind_target(...)`, composing the `pod-core` authority world contract
+  into direct-connect server config.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -205,7 +209,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- The authority lifecycle seam now lives in `pod-net`, but it still is not in a transport-neutral engine/runtime crate that non-networked hosts could reuse without depending on the networking layer.
+- The authority lifecycle seam is now split between `pod-core` and `pod-net`, but there is still no single neutral host crate that composes bootstrap plus transport selection behind one engine-wide lifecycle surface.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

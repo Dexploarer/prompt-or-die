@@ -1,5 +1,3 @@
-use pod_core::World;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransportPolicy {
     pub snapshot_interval: u64,
@@ -17,31 +15,6 @@ impl Default for TransportPolicy {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorldBootstrapPlan {
-    pub map_name: String,
-    pub initial_idle_agents: usize,
-}
-
-impl WorldBootstrapPlan {
-    pub fn apply<F>(&self, world: &mut World, load_map: F)
-    where
-        F: FnOnce(&mut World, &str),
-    {
-        log::info!("Loading map: {}", self.map_name);
-        load_map(world, &self.map_name);
-
-        log::info!(
-            "Applying authoritative bootstrap: {} idle NPCs",
-            self.initial_idle_agents
-        );
-        for index in 0..self.initial_idle_agents {
-            world.add_agent(Box::new(pod_core::IdleAgent::new()));
-            log::info!("Spawned bootstrap NPC #{}", index + 1);
-        }
-    }
-}
-
 /// Shared authority-host configuration for dedicated server runtimes.
 #[derive(Clone, Debug)]
 pub struct AuthorityRuntimeConfig {
@@ -55,12 +28,8 @@ pub struct AuthorityRuntimeConfig {
     pub max_clients: usize,
     /// Target tick rate in Hz (e.g., 60)
     pub tick_rate: usize,
-    /// Seed for deterministic world generation
-    pub world_seed: u64,
-    /// Map name to load
-    pub map_name: String,
-    /// Number of initial idle NPC agents to inject into the authoritative shard.
-    pub initial_idle_agents: usize,
+    /// Transport-neutral world/bootstrap configuration.
+    pub world: pod_core::AuthorityWorldConfig,
     /// Runtime mode: "local" (in-process loop) or "network" (pod-net QUIC server)
     pub runtime_mode: String,
     /// Dedicated transport policy composed into the direct-connect server.
@@ -86,17 +55,7 @@ impl AuthorityRuntimeConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(32);
-        let initial_idle_agents = std::env::var("POD_INITIAL_IDLE_AGENTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(3);
-
-        let world_seed = std::env::var("POD_WORLD_SEED")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(42);
-
-        let map_name = std::env::var("POD_MAP_NAME").unwrap_or_else(|_| "default".to_string());
+        let world = pod_core::AuthorityWorldConfig::from_env();
         let runtime_mode =
             std::env::var("POD_RUNTIME_MODE").unwrap_or_else(|_| "network".to_string());
         let enable_websocket = std::env::var("POD_ENABLE_WEBSOCKET")
@@ -133,18 +92,9 @@ impl AuthorityRuntimeConfig {
             websocket_port,
             max_clients,
             tick_rate,
-            world_seed,
-            map_name,
-            initial_idle_agents,
+            world,
             runtime_mode,
             transport_policy,
-        }
-    }
-
-    pub fn world_bootstrap(&self) -> WorldBootstrapPlan {
-        WorldBootstrapPlan {
-            map_name: self.map_name.clone(),
-            initial_idle_agents: self.initial_idle_agents,
         }
     }
 
@@ -166,16 +116,6 @@ impl AuthorityRuntimeConfig {
     }
 }
 
-pub fn build_authoritative_world<F>(config: &AuthorityRuntimeConfig, load_map: F) -> World
-where
-    F: FnOnce(&mut World, &str),
-{
-    log::info!("Initializing world with seed={}", config.world_seed);
-    let mut world = World::new(config.world_seed);
-    config.world_bootstrap().apply(&mut world, load_map);
-    world
-}
-
 pub fn parse_bind_target(
     bind: &str,
 ) -> Result<(String, u16), Box<dyn std::error::Error + Send + Sync>> {
@@ -190,10 +130,7 @@ pub fn parse_bind_target(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_authoritative_world, parse_bind_target, AuthorityRuntimeConfig, TransportPolicy,
-    };
-    use std::cell::RefCell;
+    use super::{parse_bind_target, AuthorityRuntimeConfig};
 
     #[test]
     fn parse_bind_target_splits_host_and_port() {
@@ -251,39 +188,6 @@ mod tests {
         restore_var("POD_SNAPSHOT_INTERVAL", original_snapshot_interval);
         restore_var("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS", original_timeout);
         restore_var("POD_QUEUE_PRESSURE_WARN_DEPTH", original_queue_warn);
-    }
-
-    #[test]
-    fn build_authoritative_world_applies_bootstrap_contract() {
-        let config = sample_server_config();
-        let loaded_map = RefCell::new(None::<String>);
-
-        let world = build_authoritative_world(&config, |world, map_name| {
-            *loaded_map.borrow_mut() = Some(map_name.to_string());
-            world
-                .spawn_at(0.0, 0.0)
-                .with_label("bootstrap-marker", pod_core::component::Team::None)
-                .build();
-        });
-
-        assert_eq!(loaded_map.borrow().as_deref(), Some("default"));
-        assert_eq!(world.agent_count(), config.initial_idle_agents);
-        assert!(world.entity_count() >= 1);
-    }
-
-    fn sample_server_config() -> AuthorityRuntimeConfig {
-        AuthorityRuntimeConfig {
-            bind_address: "127.0.0.1:7777".to_string(),
-            enable_websocket: true,
-            websocket_port: 7778,
-            max_clients: 32,
-            tick_rate: 60,
-            world_seed: 7,
-            map_name: "default".to_string(),
-            initial_idle_agents: 3,
-            runtime_mode: "network".to_string(),
-            transport_policy: TransportPolicy::default(),
-        }
     }
 
     fn restore_var(key: &str, value: Option<std::ffi::OsString>) {

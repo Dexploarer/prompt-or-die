@@ -34,6 +34,7 @@
 pub mod acceptance;
 pub mod action;
 pub mod agent;
+pub mod authority;
 pub mod app;
 pub mod component;
 pub mod constraint;
@@ -56,6 +57,7 @@ pub use acceptance::{
 };
 pub use action::*;
 pub use agent::*;
+pub use authority::{build_authoritative_world, AuthorityWorldConfig, WorldBootstrapPlan};
 pub use app::{
     App, AppContext, LastTickResult, Plugin, RegisteredTypeCategory, ResourceStore, SchedulePhase,
     TypeMetadata, TypeRegistry,
