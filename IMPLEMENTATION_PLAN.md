@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 201
-**Current focus**: Iteration 202 surface top regressions and changed metrics directly in the retained shard-target history report
+**Last updated**: Iteration 209
+**Current focus**: Iteration 210 carry shard incident summaries and coordinated lifecycle commands into the shared `pod-host` control-plane
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2135,7 +2135,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check --workspace`
   - `git diff --check`
 
-**Next focus**: Aggregate live shard transport/incident health above `pod-host` so a supervised shard set can expose one control-plane view instead of requiring per-shard log scraping.
+### Iteration 209
+- [x] Extended `crates/pod-net/src/server.rs` with shard-aware `GameServer::new_with_shard_id(...)` construction plus optional `ShardTransportSummary` watch publication, so live direct-connect transport health now reports under real shard ids instead of a hardcoded `direct-connect` label.
+- [x] Added `AuthorityShardControlPlaneHandle`, `AuthorityShardControlPlaneSummary`, `ShardSupervisorControlPlaneHandle`, and `ShardSupervisorControlPlaneSummary` in `crates/pod-host/src/lib.rs`, wiring `DirectConnectAuthorityRuntime`, `PreparedAuthorityShard`, and `PreparedShardSupervisor` to expose aggregate live transport/control-plane snapshots across the supervised shard set.
+- [x] Updated the `pod-server` compatibility exports and lifecycle docs to point at the new shared control-plane surface, narrowing the remaining MMO gap to incident rollups and coordinated shard lifecycle commands instead of raw transport visibility.
+- [x] Validation:
+  - `cargo test -p pod-net test_transport_summary -- --nocapture`
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Carry shard incident summaries and coordinated lifecycle commands into the `pod-host` control-plane so supervised shard sets expose one operational surface for health, alerts, and lifecycle control.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

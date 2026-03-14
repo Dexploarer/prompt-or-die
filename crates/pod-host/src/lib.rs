@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 
-use pod_core::{build_authoritative_world, AuthorityWorldConfig, World};
+use pod_core::{
+    build_authoritative_world, AuthorityWorldConfig, IncidentSeverity, ShardTransportSummary, World,
+};
+use tokio::sync::watch;
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
 
@@ -80,10 +83,21 @@ impl AuthorityHostConfig {
     where
         F: FnOnce(&mut World, &str),
     {
+        self.prepare_runtime_with_shard_id("direct-connect", load_map)
+    }
+
+    pub fn prepare_runtime_with_shard_id<F>(
+        &self,
+        shard_id: impl Into<String>,
+        load_map: F,
+    ) -> Result<AuthorityHostRuntime, AuthorityHostError>
+    where
+        F: FnOnce(&mut World, &str),
+    {
         let world = self.build_world(load_map);
 
         if self.uses_direct_connect() {
-            let runtime = DirectConnectAuthorityRuntime::new(self, world)?;
+            let runtime = DirectConnectAuthorityRuntime::new_with_shard_id(self, world, shard_id)?;
             Ok(AuthorityHostRuntime::DirectConnect(runtime))
         } else {
             Ok(AuthorityHostRuntime::Local { world })
@@ -202,15 +216,19 @@ impl ShardSupervisorConfig {
             .shards
             .iter()
             .map(|shard| {
+                let shard_summary = shard.summary();
                 let runtime = shard
                     .host
-                    .prepare_runtime(|world, map_name| load_map(world, map_name))
+                    .prepare_runtime_with_shard_id(&shard.shard_id, |world, map_name| {
+                        load_map(world, map_name)
+                    })
                     .map_err(|source| ShardSupervisorError::PrepareRuntime {
                         shard_id: shard.shard_id.clone(),
                         source,
                     })?;
                 Ok(PreparedAuthorityShard {
-                    summary: shard.summary(),
+                    control_plane: runtime.control_plane_handle(shard_summary.clone()),
+                    summary: shard_summary,
                     runtime,
                 })
             })
@@ -257,25 +275,247 @@ pub struct ShardSupervisorSummary {
     pub shards: Vec<AuthorityShardSummary>,
 }
 
+#[derive(Clone, Debug)]
+pub struct AuthorityShardControlPlaneHandle {
+    shard: AuthorityShardSummary,
+    transport_summary_rx: Option<watch::Receiver<Option<ShardTransportSummary>>>,
+}
+
+impl AuthorityShardControlPlaneHandle {
+    pub fn snapshot(&self) -> AuthorityShardControlPlaneSummary {
+        let transport_summary = self
+            .transport_summary_rx
+            .as_ref()
+            .and_then(|rx| rx.borrow().clone());
+        let severity = shard_transport_severity(&self.shard, transport_summary.as_ref());
+        let mut notes = Vec::new();
+
+        match (&self.shard.transport_mode, &transport_summary) {
+            (AuthorityTransportMode::DirectConnect, None) => {
+                notes.push("waiting for first direct-connect transport summary".to_string());
+            }
+            (AuthorityTransportMode::Local, None) => {
+                notes.push(
+                    "local runtime does not emit direct-connect transport telemetry".to_string(),
+                );
+            }
+            (_, Some(summary)) => {
+                if summary.queue_pressure_client_count > 0 {
+                    notes.push(format!(
+                        "{} clients currently exceed queue-pressure depth",
+                        summary.queue_pressure_client_count
+                    ));
+                }
+                if summary.timed_out_clients > 0 {
+                    notes.push(format!(
+                        "{} clients have timed out on this shard",
+                        summary.timed_out_clients
+                    ));
+                }
+                if summary.recovery_delivery_failures > 0 {
+                    notes.push(format!(
+                        "{} recovery snapshot deliveries have failed",
+                        summary.recovery_delivery_failures
+                    ));
+                }
+            }
+        }
+
+        AuthorityShardControlPlaneSummary {
+            shard: self.shard.clone(),
+            severity,
+            latest_tick: transport_summary
+                .as_ref()
+                .map(|summary| summary.latest_tick),
+            has_live_transport: transport_summary.is_some(),
+            transport_summary,
+            notes,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthorityShardControlPlaneSummary {
+    pub shard: AuthorityShardSummary,
+    pub severity: IncidentSeverity,
+    pub latest_tick: Option<u64>,
+    pub has_live_transport: bool,
+    pub transport_summary: Option<ShardTransportSummary>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorControlPlaneHandle {
+    shards: Vec<AuthorityShardControlPlaneHandle>,
+}
+
+impl ShardSupervisorControlPlaneHandle {
+    pub fn snapshot(&self) -> ShardSupervisorControlPlaneSummary {
+        let shards = self
+            .shards
+            .iter()
+            .map(AuthorityShardControlPlaneHandle::snapshot)
+            .collect::<Vec<_>>();
+
+        ShardSupervisorControlPlaneSummary {
+            shard_count: shards.len(),
+            healthy_shard_count: shards
+                .iter()
+                .filter(|summary| summary.severity == IncidentSeverity::Healthy)
+                .count(),
+            warning_shard_count: shards
+                .iter()
+                .filter(|summary| summary.severity == IncidentSeverity::Warning)
+                .count(),
+            critical_shard_count: shards
+                .iter()
+                .filter(|summary| summary.severity == IncidentSeverity::Critical)
+                .count(),
+            direct_connect_shard_count: shards
+                .iter()
+                .filter(|summary| summary.shard.transport_mode.uses_direct_connect())
+                .count(),
+            local_shard_count: shards
+                .iter()
+                .filter(|summary| !summary.shard.transport_mode.uses_direct_connect())
+                .count(),
+            reporting_transport_shard_count: shards
+                .iter()
+                .filter(|summary| summary.has_live_transport)
+                .count(),
+            total_client_count: shards
+                .iter()
+                .filter_map(|summary| summary.transport_summary.as_ref())
+                .map(|summary| summary.client_count)
+                .sum(),
+            total_queue_pressure_client_count: shards
+                .iter()
+                .filter_map(|summary| summary.transport_summary.as_ref())
+                .map(|summary| summary.queue_pressure_client_count)
+                .sum(),
+            total_timed_out_clients: shards
+                .iter()
+                .filter_map(|summary| summary.transport_summary.as_ref())
+                .map(|summary| summary.timed_out_clients)
+                .sum(),
+            total_recovery_delivery_failures: shards
+                .iter()
+                .filter_map(|summary| summary.transport_summary.as_ref())
+                .map(|summary| summary.recovery_delivery_failures)
+                .sum(),
+            latest_tick: shards
+                .iter()
+                .filter_map(|summary| summary.latest_tick)
+                .max(),
+            shards,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorControlPlaneSummary {
+    pub shard_count: usize,
+    pub healthy_shard_count: usize,
+    pub warning_shard_count: usize,
+    pub critical_shard_count: usize,
+    pub direct_connect_shard_count: usize,
+    pub local_shard_count: usize,
+    pub reporting_transport_shard_count: usize,
+    pub total_client_count: usize,
+    pub total_queue_pressure_client_count: usize,
+    pub total_timed_out_clients: u64,
+    pub total_recovery_delivery_failures: u64,
+    pub latest_tick: Option<u64>,
+    pub shards: Vec<AuthorityShardControlPlaneSummary>,
+}
+
+fn shard_transport_severity(
+    shard: &AuthorityShardSummary,
+    transport_summary: Option<&ShardTransportSummary>,
+) -> IncidentSeverity {
+    match transport_summary {
+        Some(summary) if summary.recovery_delivery_failures > 0 => IncidentSeverity::Critical,
+        Some(summary)
+            if summary.queue_pressure_client_count > 0 || summary.timed_out_clients > 0 =>
+        {
+            IncidentSeverity::Warning
+        }
+        Some(_) => IncidentSeverity::Healthy,
+        None if shard.transport_mode.uses_direct_connect() => IncidentSeverity::Warning,
+        None => IncidentSeverity::Healthy,
+    }
+}
+
 pub enum AuthorityHostRuntime {
     Local { world: World },
     DirectConnect(DirectConnectAuthorityRuntime),
 }
 
+impl AuthorityHostRuntime {
+    fn control_plane_handle(
+        &self,
+        shard: AuthorityShardSummary,
+    ) -> AuthorityShardControlPlaneHandle {
+        match self {
+            Self::Local { .. } => AuthorityShardControlPlaneHandle {
+                shard,
+                transport_summary_rx: None,
+            },
+            Self::DirectConnect(runtime) => {
+                let mut handle = runtime.control_plane_handle();
+                handle.shard = shard;
+                handle
+            }
+        }
+    }
+}
+
 pub struct DirectConnectAuthorityRuntime {
     server: pod_net::GameServer,
+    control_plane: AuthorityShardControlPlaneHandle,
 }
 
 impl DirectConnectAuthorityRuntime {
     pub fn new(config: &AuthorityHostConfig, world: World) -> Result<Self, AuthorityHostError> {
+        Self::new_with_shard_id(config, world, "direct-connect")
+    }
+
+    pub fn new_with_shard_id(
+        config: &AuthorityHostConfig,
+        world: World,
+        shard_id: impl Into<String>,
+    ) -> Result<Self, AuthorityHostError> {
+        let shard_id = shard_id.into();
         let server_config = config
             .direct_connect
             .server_config(config.tick_rate)
             .map_err(|err| AuthorityHostError::TransportConfig(err.to_string()))?;
+        let (transport_summary_tx, transport_summary_rx) = watch::channel(None);
+        let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
+        server.install_transport_summary_watch(transport_summary_tx);
 
         Ok(Self {
-            server: pod_net::GameServer::new(server_config, world),
+            server,
+            control_plane: AuthorityShardControlPlaneHandle {
+                shard: AuthorityShardSummary {
+                    shard_id,
+                    linked_shard_ids: Vec::new(),
+                    transport_mode: AuthorityTransportMode::DirectConnect,
+                    tick_rate: config.tick_rate,
+                    world_seed: config.world.world_seed,
+                    map_name: config.world.map_name.clone(),
+                    initial_idle_agents: config.world.initial_idle_agents,
+                    direct_connect_bind_address: Some(config.bind_address().to_string()),
+                    direct_connect_websocket_port: Some(config.websocket_port()),
+                    direct_connect_max_clients: Some(config.max_clients()),
+                },
+                transport_summary_rx: Some(transport_summary_rx),
+            },
         })
+    }
+
+    pub fn control_plane_handle(&self) -> AuthorityShardControlPlaneHandle {
+        self.control_plane.clone()
     }
 
     pub async fn run(mut self) -> Result<(), AuthorityHostError> {
@@ -317,6 +557,7 @@ impl std::error::Error for AuthorityHostError {}
 pub struct PreparedAuthorityShard {
     pub summary: AuthorityShardSummary,
     pub runtime: AuthorityHostRuntime,
+    control_plane: AuthorityShardControlPlaneHandle,
 }
 
 pub struct PreparedShardSupervisor {
@@ -331,6 +572,16 @@ impl PreparedShardSupervisor {
 
     pub fn shards(&self) -> &[PreparedAuthorityShard] {
         &self.shards
+    }
+
+    pub fn control_plane_handle(&self) -> ShardSupervisorControlPlaneHandle {
+        ShardSupervisorControlPlaneHandle {
+            shards: self
+                .shards
+                .iter()
+                .map(PreparedAuthorityShard::control_plane_handle)
+                .collect(),
+        }
     }
 
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
@@ -372,6 +623,12 @@ impl PreparedShardSupervisor {
                 }
             })
             .await
+    }
+}
+
+impl PreparedAuthorityShard {
+    pub fn control_plane_handle(&self) -> AuthorityShardControlPlaneHandle {
+        self.control_plane.clone()
     }
 }
 
@@ -440,12 +697,14 @@ impl std::error::Error for ShardSupervisorError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthorityHostConfig, AuthorityHostRuntime, AuthorityShardConfig, AuthorityTransportMode,
-        DirectConnectAuthorityRuntime, PreparedAuthorityShard, ShardSupervisorConfig,
-        ShardSupervisorError,
+        AuthorityHostConfig, AuthorityHostRuntime, AuthorityShardConfig,
+        AuthorityShardControlPlaneHandle, AuthorityTransportMode, DirectConnectAuthorityRuntime,
+        PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
+        ShardSupervisorError, ShardSupervisorSummary,
     };
-    use pod_core::AuthorityWorldConfig;
+    use pod_core::{AuthorityWorldConfig, IncidentSeverity, ShardTransportSummary};
     use pod_net::{DirectConnectTransportConfig, TransportPolicy};
+    use tokio::sync::watch;
 
     #[test]
     fn authority_host_config_reads_runtime_mode_from_env() {
@@ -613,12 +872,94 @@ mod tests {
             .shards()
             .iter()
             .all(|shard| matches!(shard.runtime, AuthorityHostRuntime::Local { .. })));
+
+        let control_plane = prepared.control_plane_handle().snapshot();
+        assert_eq!(control_plane.shard_count, 2);
+        assert_eq!(control_plane.reporting_transport_shard_count, 0);
+        assert_eq!(control_plane.healthy_shard_count, 2);
+    }
+
+    #[test]
+    fn shard_control_plane_rolls_up_live_transport_health() {
+        let shard = AuthorityShardConfig {
+            shard_id: "alpha-1".into(),
+            linked_shard_ids: vec!["alpha-2".into()],
+            host: sample_config(AuthorityTransportMode::DirectConnect),
+        }
+        .summary();
+        let (tx, rx) = watch::channel(Some(ShardTransportSummary {
+            shard_id: "alpha-1".into(),
+            latest_tick: 77,
+            client_count: 3,
+            resumed_sessions: 1,
+            recovery_snapshots_sent: 2,
+            recovery_delivery_failures: 1,
+            client_inactivity_timeout_ticks: 600,
+            queue_pressure_warn_depth: 192,
+            total_pending_action_queue_depth: 4,
+            peak_pending_action_queue_depth: 8,
+            queue_pressure_client_count: 1,
+            total_inbound_messages: 10,
+            total_outbound_messages: 20,
+            total_inbound_bytes: 100,
+            total_outbound_bytes: 200,
+            action_batches_received: 4,
+            full_snapshots_sent: 2,
+            total_full_snapshot_bytes: 4096,
+            max_full_snapshot_bytes: 2048,
+            total_recovery_snapshot_bytes: 1024,
+            full_snapshot_requests: 1,
+            ping_requests: 3,
+            state_deltas_sent: 9,
+            delta_messages_sent: 9,
+            total_delta_bytes: 512,
+            max_delta_bytes: 128,
+            total_delta_entities_updated: 20,
+            total_delta_entities_destroyed: 2,
+            event_batches_sent: 3,
+            debug_documents_sent: 5,
+            rejected_messages_sent: 1,
+            timed_out_clients: 2,
+            queue_pressure_events: 4,
+            clients: Vec::new(),
+        }));
+
+        let handle = AuthorityShardControlPlaneHandle {
+            shard,
+            transport_summary_rx: Some(rx),
+        };
+        let snapshot = handle.snapshot();
+        assert_eq!(snapshot.severity, IncidentSeverity::Critical);
+        assert_eq!(snapshot.latest_tick, Some(77));
+        assert!(snapshot.has_live_transport);
+        assert_eq!(
+            snapshot
+                .transport_summary
+                .as_ref()
+                .map(|summary| summary.client_count),
+            Some(3)
+        );
+        assert!(snapshot
+            .notes
+            .iter()
+            .any(|note| note.contains("recovery snapshot deliveries")));
+
+        let supervisor = ShardSupervisorControlPlaneHandle {
+            shards: vec![handle],
+        }
+        .snapshot();
+        assert_eq!(supervisor.critical_shard_count, 1);
+        assert_eq!(supervisor.total_client_count, 3);
+        assert_eq!(supervisor.total_timed_out_clients, 2);
+        assert_eq!(supervisor.total_recovery_delivery_failures, 1);
+
+        drop(tx);
     }
 
     #[tokio::test]
     async fn shard_supervisor_run_rejects_local_runtimes() {
         let prepared = super::PreparedShardSupervisor {
-            summary: super::ShardSupervisorSummary {
+            summary: ShardSupervisorSummary {
                 shard_count: 1,
                 local_shard_count: 1,
                 direct_connect_shard_count: 0,
@@ -640,6 +981,15 @@ mod tests {
                 runtime: AuthorityHostRuntime::Local {
                     world: sample_config(AuthorityTransportMode::Local)
                         .build_world(|_world, _map_name| {}),
+                },
+                control_plane: AuthorityShardControlPlaneHandle {
+                    shard: AuthorityShardConfig {
+                        shard_id: "alpha-1".into(),
+                        linked_shard_ids: vec![],
+                        host: sample_config(AuthorityTransportMode::Local),
+                    }
+                    .summary(),
+                    transport_summary_rx: None,
                 },
             }],
         };

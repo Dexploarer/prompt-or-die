@@ -14,7 +14,7 @@ use log::{debug, error, info, warn};
 use quinn::Endpoint;
 use serde::Serialize;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
@@ -148,6 +148,8 @@ const TRANSPORT_SUMMARY_INTERVAL_TICKS: u64 = 60;
 
 /// Authoritative game server
 pub struct GameServer {
+    /// Stable shard identifier used in transport/debug summaries.
+    shard_id: String,
     /// Server configuration
     config: ProtoServerConfig,
     /// Authoritative world state
@@ -189,13 +191,25 @@ pub struct GameServer {
     recovery_snapshots_sent: u64,
     /// Total number of recovery snapshot delivery failures.
     recovery_delivery_failures: u64,
+    /// Optional watch sink for live shard transport summaries.
+    transport_summary_tx: Option<watch::Sender<Option<ShardTransportSummary>>>,
 }
 
 impl GameServer {
     /// Create a new game server
     pub fn new(config: ProtoServerConfig, world: World) -> Self {
+        Self::new_with_shard_id(config, world, "direct-connect")
+    }
+
+    /// Create a new game server with an explicit shard identifier.
+    pub fn new_with_shard_id(
+        config: ProtoServerConfig,
+        world: World,
+        shard_id: impl Into<String>,
+    ) -> Self {
         let (inbound_tx, inbound_rx) = mpsc::channel(1024);
         Self {
+            shard_id: shard_id.into(),
             config,
             world,
             clients: Arc::new(RwLock::new(HashMap::new())),
@@ -219,7 +233,19 @@ impl GameServer {
             resumed_sessions: 0,
             recovery_snapshots_sent: 0,
             recovery_delivery_failures: 0,
+            transport_summary_tx: None,
         }
+    }
+
+    pub fn shard_id(&self) -> &str {
+        &self.shard_id
+    }
+
+    pub fn install_transport_summary_watch(
+        &mut self,
+        tx: watch::Sender<Option<ShardTransportSummary>>,
+    ) {
+        self.transport_summary_tx = Some(tx);
     }
 
     /// Initialize the server (bind to network)
@@ -294,6 +320,7 @@ impl GameServer {
 
             if (self.tick - self.last_transport_log_tick) >= TRANSPORT_SUMMARY_INTERVAL_TICKS {
                 let transport = self.transport_summary().await;
+                self.publish_transport_summary(&transport);
                 info!(
                     "[NET] tick={} clients={} resumes={} recoveries={}/fail={} in={} msgs/{} B out={} msgs/{} B snaps={}/{}B/{}Bmax deltas={}/{}B/{}Bmax churn=+{}/-{} queue={}/{} pressure={} events={} batches={} full_resync={} debug_docs={} timeouts={}",
                     transport.latest_tick,
@@ -1044,7 +1071,7 @@ impl GameServer {
                     interest.is_unbounded() || interested_entities.contains(entity_id)
                 }) {
                     if let Some(summary) = summarize_focused_entity_debug(
-                        "direct-connect",
+                        self.shard_id.clone(),
                         &self.debug_archive,
                         focus_entity,
                     ) {
@@ -1231,6 +1258,12 @@ impl GameServer {
         true
     }
 
+    fn publish_transport_summary(&self, summary: &ShardTransportSummary) {
+        if let Some(tx) = &self.transport_summary_tx {
+            let _ = tx.send(Some(summary.clone()));
+        }
+    }
+
     pub async fn transport_summary(&self) -> ShardTransportSummary {
         let clients = self.clients.read().await;
         let mut client_summaries = clients
@@ -1280,7 +1313,7 @@ impl GameServer {
         client_summaries.sort_by(|left, right| left.client_id.cmp(&right.client_id));
 
         ShardTransportSummary {
-            shard_id: "direct-connect".to_string(),
+            shard_id: self.shard_id.clone(),
             latest_tick: self.tick,
             client_count: client_summaries.len(),
             resumed_sessions: self.resumed_sessions,
@@ -2890,6 +2923,25 @@ mod tests {
         assert_eq!(summary.full_snapshots_sent, 0);
         assert_eq!(summary.delta_messages_sent, 0);
         assert_eq!(summary.clients[0].client_id, client_id.0.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_transport_summary_uses_custom_shard_id_and_publishes_to_watch() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
+        let (summary_tx, summary_rx) = watch::channel(None);
+        server.install_transport_summary_watch(summary_tx);
+
+        let summary = server.transport_summary().await;
+        assert_eq!(summary.shard_id, "alpha-1");
+
+        server.publish_transport_summary(&summary);
+        let observed = summary_rx
+            .borrow()
+            .clone()
+            .expect("transport summary watch should receive the latest snapshot");
+        assert_eq!(observed.shard_id, "alpha-1");
     }
 
     #[tokio::test]

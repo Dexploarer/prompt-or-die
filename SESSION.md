@@ -266,7 +266,7 @@
 - [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Aggregate live shard transport/incident health above `pod-host` so a supervised shard set can expose one control-plane view instead of requiring per-shard log scraping.
+- Carry shard incident summaries and coordinated lifecycle commands into the `pod-host` control-plane so a supervised shard set exposes one operational surface for health, alerts, and lifecycle control.
 
 ## Iteration 207 Progress
 
@@ -279,6 +279,12 @@
 - [x] Added `AuthorityShardConfig`, `AuthorityShardSummary`, `ShardSupervisorConfig`, `ShardSupervisorSummary`, `PreparedAuthorityShard`, and `PreparedShardSupervisor` in `crates/pod-host/src/lib.rs`, so multi-shard authority topology can now be validated, summarized, and prepared from one crate-level seam.
 - [x] Added `PreparedShardSupervisor::run_direct_connect_until_failure()` using a Tokio `LocalSet`, which means multiple direct-connect shard runtimes can now be launched concurrently even though the current `GameServer` stack is not `Send`.
 - [x] Updated the compatibility re-exports and lifecycle docs to point at the new supervisor surface, moving the next MMO blocker up to shared shard-health/control-plane aggregation instead of basic multi-shard launch configuration.
+
+## Iteration 209 Progress
+
+- [x] Added shard-aware `GameServer::new_with_shard_id(...)` construction plus live `ShardTransportSummary` watch publication in `crates/pod-net/src/server.rs`, so direct-connect authority runtimes now publish transport state under the real shard id instead of a fixed `direct-connect` label.
+- [x] Added `AuthorityShardControlPlaneHandle`, `AuthorityShardControlPlaneSummary`, `ShardSupervisorControlPlaneHandle`, and `ShardSupervisorControlPlaneSummary` in `crates/pod-host/src/lib.rs`, so supervised shard sets can snapshot aggregate live transport health without per-shard log scraping.
+- [x] Updated the compatibility exports and lifecycle docs to point at the new shared control-plane surface, moving the next MMO blocker up to shared incident rollups and coordinated lifecycle commands.
 
 ## Audit Backlog (2026-03-13)
 

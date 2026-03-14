@@ -110,10 +110,13 @@ The current seams are usable, but several hooks are still missing and force
 integrators back into app composition roots:
 
 - Multi-shard authority control-plane hook:
-  `crates/pod-host/src/lib.rs` now exposes `ShardSupervisorConfig` and can
-  prepare or launch more than one authority host, but it still has no shared
-  live health/control plane for aggregating shard transport pressure, incidents,
-  or coordinated shutdown across the supervised shard set.
+  `crates/pod-host/src/lib.rs` now exposes
+  `AuthorityShardControlPlaneHandle` and
+  `ShardSupervisorControlPlaneHandle`, so supervised shard sets can snapshot
+  live direct-connect transport pressure and aggregate shard health without
+  per-shard log scraping. What is still missing is a fuller control plane for
+  shared incident rollups and coordinated lifecycle commands across the
+  supervised shard set.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
