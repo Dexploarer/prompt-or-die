@@ -66,9 +66,7 @@ pub mod client_web;
 pub mod client_stdb;
 
 // Re-export common types
-pub use authority::{
-    parse_bind_target, AuthorityRuntimeConfig, TransportPolicy,
-};
+pub use authority::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
 pub use pod_core::{build_authoritative_world, AuthorityWorldConfig, WorldBootstrapPlan};
 pub use protocol::{
     ClientConfig, ClientId, ClientMessage, ReconnectToken, ServerConfig, ServerMessage,

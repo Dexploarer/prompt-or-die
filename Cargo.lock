@@ -4095,6 +4095,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pod-host"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "pod-core",
+ "pod-net",
+]
+
+[[package]]
 name = "pod-net"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -4189,7 +4197,7 @@ dependencies = [
  "glam",
  "log",
  "pod-core",
- "pod-net",
+ "pod-host",
  "serde",
  "serde_json",
  "tokio",

@@ -2113,7 +2113,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-core -p pod-net -p pod-server`
   - `git diff --check`
 
-**Next focus**: Introduce a single transport-neutral host crate or lifecycle API that composes the `pod-core` authority world contract with selectable authority transports, so apps stop stitching `pod-core` and `pod-net` together manually.
+### Iteration 207
+- [x] Narrowed `crates/pod-net/src/authority.rs` to a pure direct-connect transport adapter by renaming the host-facing config to `DirectConnectTransportConfig`, dropping world/runtime-mode ownership, and keeping only bind/websocket/client/policy composition plus `server_config(tick_rate)`.
+- [x] Added `crates/pod-host/src/lib.rs` as the neutral authority host lifecycle crate with `AuthorityHostConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, and `DirectConnectAuthorityRuntime`, so one public surface now composes `pod-core` world bootstrap with the selected authority transport.
+- [x] Updated `apps/pod-server` to consume `pod-host` instead of stitching `pod-core` and `pod-net` together manually, and refreshed the lifecycle docs so the remaining MMO gap is now multi-shard supervision rather than single-host composition.
+- [x] Validation:
+  - `cargo test -p pod-net authority -- --nocapture`
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check -p pod-host -p pod-server`
+  - `git diff --check`
+
+**Next focus**: Add a shard supervisor surface above `pod-host` so one runtime can configure, launch, and observe multiple authority hosts instead of only a single shard/process contract.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

@@ -1,4 +1,6 @@
-pub use pod_net::{
-    build_authoritative_world, parse_bind_target, AuthorityRuntimeConfig as ServerConfig,
-    AuthorityWorldConfig, TransportPolicy, WorldBootstrapPlan,
+pub use pod_core::{build_authoritative_world, AuthorityWorldConfig, WorldBootstrapPlan};
+pub use pod_host::{
+    parse_bind_target, AuthorityHostConfig as ServerConfig, AuthorityHostError,
+    AuthorityHostRuntime, AuthorityTransportMode, DirectConnectAuthorityRuntime,
+    DirectConnectTransportConfig, TransportPolicy,
 };

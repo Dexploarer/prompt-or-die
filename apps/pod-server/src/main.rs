@@ -15,7 +15,7 @@
 
 use log::{error, info, warn};
 use pod_core::World;
-use pod_net::{build_authoritative_world, AuthorityRuntimeConfig as ServerConfig};
+use pod_host::{AuthorityHostConfig as ServerConfig, AuthorityHostRuntime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -927,15 +927,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         shutdown_flag_ctrlc.store(true, Ordering::SeqCst);
     })?;
 
-    let mut world = build_authoritative_world(&config.world, map::load_default_map);
-
     // Initialize server stats
     let mut stats = ServerStats::new(config.tick_rate as u32);
-
-    let result = if config.runtime_mode.eq_ignore_ascii_case("network") {
-        run_network_server(world, &config).await
-    } else {
-        run_game_loop(&mut world, &config, &mut stats, &shutdown_flag).await
+    let result = match config.prepare_runtime(map::load_default_map)? {
+        AuthorityHostRuntime::DirectConnect(runtime) => runtime
+            .run()
+            .await
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { Box::new(err) }),
+        AuthorityHostRuntime::Local { mut world } => {
+            run_game_loop(&mut world, &config, &mut stats, &shutdown_flag).await
+        }
     };
 
     // Print final stats and shutdown message
@@ -945,7 +946,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     info!("Server stopped cleanly");
-    if !config.runtime_mode.eq_ignore_ascii_case("network") {
+    if !config.uses_direct_connect() {
         stats.print_final();
     }
 
@@ -967,13 +968,14 @@ async fn run_game_loop(
 
     info!(
         "Starting game loop: tick_rate={} Hz, bind={}",
-        config.tick_rate, config.bind_address
+        config.tick_rate,
+        config.bind_address()
     );
     info!(
         "Entities: {}, Agents: {}, Max clients: {}",
         world.entity_count(),
         world.agent_count(),
-        config.max_clients
+        config.max_clients()
     );
 
     loop {
@@ -1028,24 +1030,6 @@ fn broadcast_local_tick_update(_tick_result: &pod_core::tick::TickResult) {
     // Local mode does not publish network updates.
 }
 
-async fn run_network_server(
-    world: World,
-    config: &ServerConfig,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let net_config = config.network_server_config()?;
-
-    let mut server = pod_net::GameServer::new(net_config, world);
-    server
-        .initialize()
-        .await
-        .map_err(|err| std::io::Error::other(err.to_string()))?;
-    server
-        .run()
-        .await
-        .map_err(|err| std::io::Error::other(err.to_string()))?;
-    Ok(())
-}
-
 // ============================================================================
 // BANNER & FORMATTING
 // ============================================================================
@@ -1076,25 +1060,25 @@ Configuration:
   Queue Warn:     {}
 
 "#,
-        config.bind_address,
-        if config.enable_websocket {
+        config.bind_address(),
+        if config.enable_websocket() {
             "enabled"
         } else {
             "disabled"
         },
-        if config.enable_websocket {
-            format!(" (port {})", config.websocket_port)
+        if config.enable_websocket() {
+            format!(" (port {})", config.websocket_port())
         } else {
             String::new()
         },
         config.tick_rate,
-        config.max_clients,
+        config.max_clients(),
         config.world.world_seed,
         config.world.map_name,
         config.world.initial_idle_agents,
-        config.runtime_mode,
-        config.transport_policy.snapshot_interval,
-        config.transport_policy.client_inactivity_timeout_ticks,
-        config.transport_policy.queue_pressure_warn_depth
+        config.transport_mode.as_str(),
+        config.transport_policy().snapshot_interval,
+        config.transport_policy().client_inactivity_timeout_ticks,
+        config.transport_policy().queue_pressure_warn_depth
     );
 }

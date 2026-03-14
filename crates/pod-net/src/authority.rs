@@ -15,9 +15,9 @@ impl Default for TransportPolicy {
     }
 }
 
-/// Shared authority-host configuration for dedicated server runtimes.
+/// Direct-connect transport configuration for authoritative hosts.
 #[derive(Clone, Debug)]
-pub struct AuthorityRuntimeConfig {
+pub struct DirectConnectTransportConfig {
     /// Address to bind to (e.g., "0.0.0.0:7777")
     pub bind_address: String,
     /// Whether to expose the WebSocket fallback for browser direct-connect clients.
@@ -26,17 +26,11 @@ pub struct AuthorityRuntimeConfig {
     pub websocket_port: u16,
     /// Maximum number of concurrent clients
     pub max_clients: usize,
-    /// Target tick rate in Hz (e.g., 60)
-    pub tick_rate: usize,
-    /// Transport-neutral world/bootstrap configuration.
-    pub world: pod_core::AuthorityWorldConfig,
-    /// Runtime mode: "local" (in-process loop) or "network" (pod-net QUIC server)
-    pub runtime_mode: String,
     /// Dedicated transport policy composed into the direct-connect server.
     pub transport_policy: TransportPolicy,
 }
 
-impl AuthorityRuntimeConfig {
+impl DirectConnectTransportConfig {
     pub fn from_env() -> Self {
         let bind_address =
             std::env::var("POD_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:7777".to_string());
@@ -46,18 +40,10 @@ impl AuthorityRuntimeConfig {
             .and_then(|port| port.checked_add(1))
             .unwrap_or(7778);
 
-        let tick_rate = std::env::var("POD_TICK_RATE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(60);
-
         let max_clients = std::env::var("POD_MAX_CLIENTS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(32);
-        let world = pod_core::AuthorityWorldConfig::from_env();
-        let runtime_mode =
-            std::env::var("POD_RUNTIME_MODE").unwrap_or_else(|_| "network".to_string());
         let enable_websocket = std::env::var("POD_ENABLE_WEBSOCKET")
             .ok()
             .and_then(|value| match value.to_ascii_lowercase().as_str() {
@@ -65,7 +51,7 @@ impl AuthorityRuntimeConfig {
                 "0" | "false" | "no" | "off" => Some(false),
                 _ => None,
             })
-            .unwrap_or_else(|| runtime_mode.eq_ignore_ascii_case("network"));
+            .unwrap_or(true);
         let websocket_port = std::env::var("POD_WEBSOCKET_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -91,20 +77,18 @@ impl AuthorityRuntimeConfig {
             enable_websocket,
             websocket_port,
             max_clients,
-            tick_rate,
-            world,
-            runtime_mode,
             transport_policy,
         }
     }
 
-    pub fn network_server_config(
+    pub fn server_config(
         &self,
+        tick_rate: usize,
     ) -> Result<crate::protocol::ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
         let (bind_addr, bind_port) = parse_bind_target(&self.bind_address)?;
         Ok(crate::protocol::ServerConfig {
             max_clients: self.max_clients,
-            tick_rate: self.tick_rate as u32,
+            tick_rate: tick_rate as u32,
             snapshot_interval: self.transport_policy.snapshot_interval,
             bind_addr,
             bind_port,
@@ -130,7 +114,7 @@ pub fn parse_bind_target(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bind_target, AuthorityRuntimeConfig};
+    use super::{parse_bind_target, DirectConnectTransportConfig};
 
     #[test]
     fn parse_bind_target_splits_host_and_port() {
@@ -140,29 +124,26 @@ mod tests {
     }
 
     #[test]
-    fn authority_runtime_config_defaults_websocket_to_bind_port_plus_one_in_network_mode() {
+    fn direct_connect_transport_config_defaults_websocket_to_bind_port_plus_one() {
         let original_bind = std::env::var_os("POD_BIND_ADDRESS");
-        let original_runtime = std::env::var_os("POD_RUNTIME_MODE");
         let original_ws_enabled = std::env::var_os("POD_ENABLE_WEBSOCKET");
         let original_ws_port = std::env::var_os("POD_WEBSOCKET_PORT");
 
         std::env::set_var("POD_BIND_ADDRESS", "127.0.0.1:8123");
-        std::env::set_var("POD_RUNTIME_MODE", "network");
         std::env::remove_var("POD_ENABLE_WEBSOCKET");
         std::env::remove_var("POD_WEBSOCKET_PORT");
 
-        let config = AuthorityRuntimeConfig::from_env();
+        let config = DirectConnectTransportConfig::from_env();
         assert!(config.enable_websocket);
         assert_eq!(config.websocket_port, 8124);
 
         restore_var("POD_BIND_ADDRESS", original_bind);
-        restore_var("POD_RUNTIME_MODE", original_runtime);
         restore_var("POD_ENABLE_WEBSOCKET", original_ws_enabled);
         restore_var("POD_WEBSOCKET_PORT", original_ws_port);
     }
 
     #[test]
-    fn authority_runtime_config_builds_network_transport_policy_contract() {
+    fn direct_connect_transport_config_builds_server_transport_policy_contract() {
         let original_bind = std::env::var_os("POD_BIND_ADDRESS");
         let original_snapshot_interval = std::env::var_os("POD_SNAPSHOT_INTERVAL");
         let original_timeout = std::env::var_os("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS");
@@ -173,13 +154,14 @@ mod tests {
         std::env::set_var("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS", "900");
         std::env::set_var("POD_QUEUE_PRESSURE_WARN_DEPTH", "255");
 
-        let config = AuthorityRuntimeConfig::from_env();
+        let config = DirectConnectTransportConfig::from_env();
         let net_config = config
-            .network_server_config()
+            .server_config(60)
             .expect("network transport policy should compose");
 
         assert_eq!(net_config.bind_addr, "127.0.0.1");
         assert_eq!(net_config.bind_port, 8123);
+        assert_eq!(net_config.tick_rate, 60);
         assert_eq!(net_config.snapshot_interval, 24);
         assert_eq!(net_config.client_inactivity_timeout_ticks, 900);
         assert_eq!(net_config.queue_pressure_warn_depth, 255);

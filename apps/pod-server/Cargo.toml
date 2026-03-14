@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 pod-core = { path = "../../crates/pod-core" }
-pod-net = { path = "../../crates/pod-net" }
+pod-host = { path = "../../crates/pod-host" }
 log.workspace = true
 env_logger.workspace = true
 glam.workspace = true

@@ -266,7 +266,13 @@
 - [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Introduce a single neutral host crate or lifecycle API that composes the `pod-core` authority world contract with selectable authority transports so apps stop stitching `pod-core` and `pod-net` together manually.
+- Add a shard supervisor surface above `pod-host` so one runtime can configure, launch, and observe multiple authority hosts instead of only a single shard/process contract.
+
+## Iteration 207 Progress
+
+- [x] Narrowed `crates/pod-net/src/authority.rs` to the direct-connect transport adapter only, renaming the transport config to `DirectConnectTransportConfig` and keeping just bind/websocket/client/policy composition plus `server_config(tick_rate)`.
+- [x] Added `crates/pod-host/src/lib.rs` as the neutral authority host lifecycle crate with `AuthorityHostConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, and `DirectConnectAuthorityRuntime`, so apps now get one reusable surface that composes `pod-core` world bootstrap with the selected transport.
+- [x] Updated `apps/pod-server` to consume `pod-host`, kept the binary focused on process startup plus local-loop stats, and revalidated the host/transport/server seams with deterministic crate-level coverage.
 
 ## Audit Backlog (2026-03-13)
 

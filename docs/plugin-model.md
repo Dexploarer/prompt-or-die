@@ -96,7 +96,8 @@ treated as composition roots rather than extension APIs.
 | `apps/pod-web/src/main.ts` | Internal composition root | Do not add feature-specific hooks here if the behavior belongs in `pod-scene`, `pod-assets`, `pod-net`, or shared browser contracts. |
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
 | `crates/pod-core/src/authority.rs` | Current transport-neutral authority world contract | Safe place to compose `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` without depending on transport-layer types. |
-| `crates/pod-net/src/authority.rs` | Current authority transport adapter contract | Safe place to compose `AuthorityRuntimeConfig`, `TransportPolicy`, `parse_bind_target(...)`, and `network_server_config()` on top of the transport-neutral `pod-core` world contract. |
+| `crates/pod-net/src/authority.rs` | Current direct-connect transport adapter contract | Safe place to compose `DirectConnectTransportConfig`, `TransportPolicy`, `parse_bind_target(...)`, and `server_config(tick_rate)` without re-owning world/bootstrap state. |
+| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `AuthorityTransportMode`, and `AuthorityHostRuntime` so apps can select local vs direct-connect authority hosts without stitching `pod-core` and `pod-net` together manually. |
 | `apps/pod-server/src/main.rs` | Thin internal entry point | Keep it focused on process startup, shutdown wiring, and calling the exported authority lifecycle surface. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
@@ -108,11 +109,11 @@ touch app bootstrap when you are composing existing subsystems together.
 The current seams are usable, but several hooks are still missing and force
 integrators back into app composition roots:
 
-- Engine-wide authority lifecycle hook:
-  the authority host contract now splits cleanly between
-  `crates/pod-core/src/authority.rs` and `crates/pod-net/src/authority.rs`, but
-  there is still no single neutral host crate or lifecycle API that composes
-  world bootstrap plus a chosen authority transport in one reusable surface.
+- Multi-shard authority supervisor hook:
+  `crates/pod-host/src/lib.rs` now composes a single authority world plus a
+  selected transport in one reusable surface, but there is still no higher-level
+  shard supervisor API for running, coordinating, and observing more than one
+  authority host from one process or orchestration layer.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

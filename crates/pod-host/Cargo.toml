@@ -1,0 +1,8 @@
+[package]
+name = "pod-host"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+pod-net = { path = "../pod-net" }
