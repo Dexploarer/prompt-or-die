@@ -24,11 +24,11 @@ import type { PublishedMoatSnapshot } from "./publish_moat_snapshots";
 const repoRoot = resolve(import.meta.dir, "..");
 const baselineSnapshotPath = resolve(
   repoRoot,
-  "docs/benchmark-snapshots/2026-03-shard-target.json",
+  "docs/benchmark-snapshots/2026-W11-shard-target.json",
 );
 const baselineComparisonPath = resolve(
   repoRoot,
-  "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+  "docs/benchmark-snapshots/2026-W11-shard-target-comparison.json",
 );
 
 function loadBaselineSnapshot(): PublishedMoatSnapshot {
@@ -86,14 +86,14 @@ describe("index benchmark snapshots", () => {
       const candidateSnapshot = structuredClone(baselineSnapshot);
       const candidateComparison = structuredClone(baselineComparison);
 
-      candidateSnapshot.label = "2026-04";
+      candidateSnapshot.label = "2026-W12";
       candidateSnapshot.transport.aggregate.total_delta_bytes += 64;
-      candidateComparison.baselineLabel = "2026-03";
-      candidateComparison.candidateLabel = "2026-04";
+      candidateComparison.baselineLabel = "2026-W11";
+      candidateComparison.candidateLabel = "2026-W12";
       candidateComparison.baselinePath =
-        "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json";
+        "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json";
       candidateComparison.candidatePath =
-        "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-04-shard-target.json";
+        "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W12-shard-target.json";
       candidateComparison.summary = {
         regressions: 1,
         improvements: 0,
@@ -117,27 +117,27 @@ describe("index benchmark snapshots", () => {
           metric: "label",
           direction: "informational",
           status: "changed",
-          baseline: "2026-03",
-          candidate: "2026-04",
+          baseline: "2026-W11",
+          candidate: "2026-W12",
           delta: null,
           envelope: null,
         },
       ];
 
       writeFileSync(
-        join(snapshotDir, "2026-03-shard-target.json"),
+        join(snapshotDir, "2026-W11-shard-target.json"),
         `${JSON.stringify(baselineSnapshot, null, 2)}\n`,
       );
       writeFileSync(
-        join(snapshotDir, "2026-03-shard-target-comparison.json"),
+        join(snapshotDir, "2026-W11-shard-target-comparison.json"),
         `${JSON.stringify(baselineComparison, null, 2)}\n`,
       );
       writeFileSync(
-        join(snapshotDir, "2026-04-shard-target.json"),
+        join(snapshotDir, "2026-W12-shard-target.json"),
         `${JSON.stringify(candidateSnapshot, null, 2)}\n`,
       );
       writeFileSync(
-        join(snapshotDir, "2026-04-shard-target-comparison.json"),
+        join(snapshotDir, "2026-W12-shard-target-comparison.json"),
         `${JSON.stringify(candidateComparison, null, 2)}\n`,
       );
       writeFileSync(join(snapshotDir, "notes.md"), "# ignore\n");
@@ -149,17 +149,17 @@ describe("index benchmark snapshots", () => {
       const index = buildBenchmarkSnapshotHistoryIndex(entries, 123);
       const markdown = buildBenchmarkSnapshotHistoryMarkdown(index);
 
-      expect(index.latestLabel).toBe("2026-04");
+      expect(index.latestLabel).toBe("2026-W12");
       expect(index.latestSnapshotPath).toBe(
-        "docs/benchmark-snapshots/2026-04-shard-target.json",
+        "docs/benchmark-snapshots/2026-W12-shard-target.json",
       );
       expect(index.latestComparisonPath).toBe(
-        "docs/benchmark-snapshots/2026-04-shard-target-comparison.json",
+        "docs/benchmark-snapshots/2026-W12-shard-target-comparison.json",
       );
       expect(index.entries).toHaveLength(2);
       expect(index.entries[0]).toMatchObject({
-        label: "2026-04",
-        comparedAgainstLabel: "2026-03",
+        label: "2026-W12",
+        comparedAgainstLabel: "2026-W11",
         comparisonSummary: {
           regressions: 1,
           changed: 1,
@@ -183,9 +183,9 @@ describe("index benchmark snapshots", () => {
             baselineSnapshot.transport.aggregate.total_delta_bytes + 64,
         },
       });
-      expect(markdown).toContain("[snapshot](./2026-04-shard-target.json)");
-      expect(markdown).toContain("[comparison](./2026-04-shard-target-comparison.json)");
-      expect(markdown).toContain("| 2026-04 |");
+      expect(markdown).toContain("[snapshot](./2026-W12-shard-target.json)");
+      expect(markdown).toContain("[comparison](./2026-W12-shard-target-comparison.json)");
+      expect(markdown).toContain("| 2026-W12 |");
       expect(markdown).toContain("## Latest Snapshot Metrics");
       expect(markdown).toContain("## Latest Comparison Highlights");
       expect(markdown).toContain(
@@ -206,11 +206,11 @@ describe("index benchmark snapshots", () => {
       mkdirSync(snapshotDir, { recursive: true });
 
       writeFileSync(
-        join(snapshotDir, "2026-03-shard-target.json"),
+        join(snapshotDir, "2026-W11-shard-target.json"),
         readFileSync(baselineSnapshotPath, "utf8"),
       );
       writeFileSync(
-        join(snapshotDir, "2026-03-shard-target-comparison.json"),
+        join(snapshotDir, "2026-W11-shard-target-comparison.json"),
         readFileSync(baselineComparisonPath, "utf8"),
       );
 
@@ -239,7 +239,7 @@ describe("index benchmark snapshots", () => {
           typeof buildBenchmarkSnapshotHistoryIndex
         >,
       ).toMatchObject({
-        latestLabel: "2026-03",
+        latestLabel: "2026-W11",
         snapshotCount: 1,
       });
       expect(readFileSync(outputMarkdown, "utf8")).toContain(

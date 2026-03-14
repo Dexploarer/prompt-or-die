@@ -1935,10 +1935,10 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Ran `pod-headless` to export `/tmp/pod-headless-topology.json`, started a local in-memory SpacetimeDB on `127.0.0.1:3100`, published `pod_stdb.wasm` to `deadman-prime`, `deadman-shadow`, and `sanctuary-echo`, and executed `topology_feed_benchmark_suite --generated-sdk-host http://127.0.0.1:3100 --fail-on-checks`.
 - [x] Captured the first live generated SDK parity artifact at `artifacts/topology-feed-live-local.json`; all `30/30` checks passed across authority-row and generated-runtime resolution for the three benchmark worlds.
 - [x] Refreshed the published shard-target transport baselines in `crates/pod-net/src/server.rs` to the current deterministic benchmark output, with `steady-delta total/max = 1392/174` and aggregate full/recovery/delta totals of `1220/234/1904`.
-- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target monthly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts.
-- [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`.
-- [x] Added `scripts/run_shard_target_snapshot.ts` plus `scripts/run_shard_target_snapshot.test.ts`, so the previously manual shard-target topology capture, local SpacetimeDB publish, live generated-SDK benchmark, and monthly snapshot publication flow now runs through one reproducible Bun command.
-- [x] Documented the new one-command monthly routine in `README.md` and `docs/benchmark-suite.md`, including the current `artifact_only` behavior when browser render-route gates fail but still write an artifact.
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target weekly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts.
+- [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed weekly snapshot at `docs/benchmark-snapshots/2026-W11-shard-target.json`.
+- [x] Added `scripts/run_shard_target_snapshot.ts` plus `scripts/run_shard_target_snapshot.test.ts`, so the previously manual shard-target topology capture, local SpacetimeDB publish, live generated-SDK benchmark, and weekly snapshot publication flow now runs through one reproducible Bun command.
+- [x] Documented the new one-command weekly routine in `README.md` and `docs/benchmark-suite.md`, including the current `artifact_only` behavior when browser render-route gates fail but still write an artifact.
 - [x] Added `crates/pod-agents/src/controller_harness.rs` plus `crates/pod-agents/examples/controller_parity_benchmark.rs`, so scripted, LLM, hybrid, and neural agents now run through the same curated evaluation harness with published validity, objective, encounter, latency, tool-call, and parity metrics.
 - [x] Added deterministic `pod-agents` coverage for the controller parity harness and documented the standalone benchmark command in `README.md` and `docs/benchmark-suite.md`.
 - [x] Added shared remote-agent gameplay contract types in `crates/pod-core/src/contract.rs`, including explicit observation budgets, action budgets, heartbeat limits, and fallback/runtime-status state for SpacetimeDB-backed remote agents.
@@ -1946,7 +1946,7 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Extended `crates/pod-stdb/src/client.rs` with cached observation ticks, enabling remote clients to measure stale-authority age from the authoritative observation stream instead of inferring freshness indirectly.
 - [x] Extended `crates/pod-net/src/client_stdb.rs` with `connect_remote_agent(...)`, explicit remote-agent contract/status accessors, and client-side rejection of budget-overflow, missing-observation, stale-observation, and heartbeat-timeout action batches before they hit the reducer path.
 - [x] Added deterministic remote-agent stale-decision coverage in `crates/pod-net/src/client_stdb.rs` plus the supporting `pod-stdb` cache assertion, and revalidated with targeted `pod-core`, `pod-stdb`, and `pod-net` tests plus `cargo check`.
-- [x] Added `scripts/compare_moat_snapshots.ts` plus `scripts/compare_moat_snapshots.test.ts`, so committed shard-target monthly snapshots can now be compared as a structured report instead of manual JSON inspection.
+- [x] Added `scripts/compare_moat_snapshots.ts` plus `scripts/compare_moat_snapshots.test.ts`, so committed shard-target weekly snapshots can now be compared as a structured report instead of manual JSON inspection.
 - [x] Documented the comparison command in `README.md` and `docs/benchmark-suite.md`, and moved the roadmap backlog forward so the remaining missed item is the red browser render-route gate.
 - [x] Added `WorldAdmissionAssignment`, `WorldAdmissionSummary`, `assign_roster_to_world_teams(...)`, and `build_world_admission_summary(...)` in `crates/pod-core/src/contract.rs`, so admitted team-slot assignment is now a shared topology contract instead of `apps/pod-headless` private logic.
 - [x] Extended `RemoteTopologyBundle` and `RemoteTopologyParitySummary` with `world_admissions`, then moved `apps/pod-headless`, `crates/pod-stdb`, and `crates/pod-net` onto that shared admission surface.
@@ -2013,12 +2013,12 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
 ### Iteration 196
 - [x] Extended `scripts/run_moat_benchmarks.ts` and `scripts/run_moat_benchmarks.test.ts` so the moat artifact now preserves `headlessTopology.tournamentOrchestration` plus the new `tournament_control_plane_match` / `tournament_orchestration_match` parity checks instead of dropping them from the TypeScript layer.
-- [x] Extended `scripts/publish_moat_snapshots.ts`, `scripts/publish_moat_snapshots.test.ts`, `scripts/compare_moat_snapshots.ts`, and `scripts/compare_moat_snapshots.test.ts` so committed monthly shard-target snapshots and structured comparisons now preserve and report tournament/swarm orchestration drift, including topology-feed orchestration parity flags on both authority-row and generated-runtime paths.
-- [x] Regenerated `artifacts/moat-benchmarks-shard-local.json`, `artifacts/topology-feed-live-shard-local.json`, and `docs/benchmark-snapshots/2026-03-shard-target.json` through the scripted shard-target flow, so the committed history now actually contains the new orchestration metrics instead of only the code paths to emit them.
+- [x] Extended `scripts/publish_moat_snapshots.ts`, `scripts/publish_moat_snapshots.test.ts`, `scripts/compare_moat_snapshots.ts`, and `scripts/compare_moat_snapshots.test.ts` so committed weekly shard-target snapshots and structured comparisons now preserve and report tournament/swarm orchestration drift, including topology-feed orchestration parity flags on both authority-row and generated-runtime paths.
+- [x] Regenerated `artifacts/moat-benchmarks-shard-local.json`, `artifacts/topology-feed-live-shard-local.json`, and `docs/benchmark-snapshots/2026-W11-shard-target.json` through the scripted shard-target flow, so the committed history now actually contains the new orchestration metrics instead of only the code paths to emit them.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts`
   - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`
   - `git diff --check`
 
 ### Iteration 197
@@ -2026,49 +2026,51 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Extended `scripts/run_moat_benchmarks.test.ts`, `scripts/publish_moat_snapshots.test.ts`, and the regenerated shard-target artifact path so the published moat/snapshot history reflects the widened headless parity check set instead of silently dropping those shared admission/control-plane invariants.
 - [x] Turned tournament/swarm orchestration history from informational-only into an explicit regression gate in `scripts/compare_moat_snapshots.ts`, using exact baseline envelopes for `phase`, `activeWorldCount`, `contestedWorldCount`, `activeLinkCount`, `leadingTeamCount`, `atRiskTeamCount`, `pressureWorldCount`, and `neuralSwarmWorldCount`.
 - [x] Extended `scripts/compare_moat_snapshots.test.ts` so orchestration drift now fails as a regression instead of being reported as a generic changed metric, and added explicit envelope metadata to the structured comparison output.
-- [x] Revalidated by regenerating the shard-target moat/snapshot artifacts and running a self-compare against `docs/benchmark-snapshots/2026-03-shard-target.json`, confirming zero regressions while the new orchestration envelopes are active.
+- [x] Revalidated by regenerating the shard-target moat/snapshot artifacts and running a self-compare against `docs/benchmark-snapshots/2026-W11-shard-target.json`, confirming zero regressions while the new orchestration envelopes are active.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
   - `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --skip-browser --skip-creator --output artifacts/moat-benchmarks-shard-local.json`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
-  - `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-03-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`
+  - `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W11-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions`
   - `git diff --check`
 
 ### Iteration 198
 - [x] Extended `scripts/run_shard_target_snapshot.ts` and `scripts/run_shard_target_snapshot.test.ts` with `--compare-baseline`, a structured `comparison` summary block, and automatic snapshot-comparison execution after publication, so the one-command shard-target workflow can now fail on orchestration regressions instead of requiring a separate manual compare command.
-- [x] Taught the shard-target wrapper to reuse an existing same-label snapshot as a temporary baseline when `--compare-baseline` is omitted, so deterministic reruns of the current monthly snapshot also pass through the same regression envelope gate.
-- [x] Revalidated the integrated workflow by running `scripts/run_shard_target_snapshot.ts` with `--compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json --reuse-browser-routes`, confirming the wrapper now emits `comparison.status = \"passed\"` and records `compare-shard-snapshot` in the command history.
+- [x] Taught the shard-target wrapper to reuse an existing same-label snapshot as a temporary baseline when `--compare-baseline` is omitted, so deterministic reruns of the current weekly snapshot also pass through the same regression envelope gate.
+- [x] Revalidated the integrated workflow by running `scripts/run_shard_target_snapshot.ts` with `--compare-baseline docs/benchmark-snapshots/2026-W11-shard-target.json --reuse-browser-routes`, confirming the wrapper now emits `comparison.status = \"passed\"` and records `compare-shard-snapshot` in the command history.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json --reuse-browser-routes`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --compare-baseline docs/benchmark-snapshots/2026-W11-shard-target.json --reuse-browser-routes`
   - `git diff --check`
 
 ### Iteration 199
-- [x] Added `findLatestPriorSnapshotFilename(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the wrapper can auto-discover the latest prior monthly shard-target snapshot instead of relying only on a manual `--compare-baseline` path.
-- [x] Fixed the baseline-copy bug in `scripts/run_shard_target_snapshot.ts` by snapshotting the selected baseline into a temporary file before publish, so explicit same-label baselines and auto-selected prior-month baselines cannot be overwritten by the candidate snapshot before comparison runs.
-- [x] Revalidated the live wrapper without `--compare-baseline` by running `scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`, confirming the command history now compares against the temporary copied baseline instead of the post-publish output path.
+- [x] Added `findLatestPriorSnapshotFilename(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the wrapper can auto-discover the latest prior weekly shard-target snapshot instead of relying only on a manual `--compare-baseline` path.
+- [x] Fixed the baseline-copy bug in `scripts/run_shard_target_snapshot.ts` by snapshotting the selected baseline into a temporary file before publish, so explicit same-label baselines and auto-selected prior-week baselines cannot be overwritten by the candidate snapshot before comparison runs.
+- [x] Revalidated the live wrapper without `--compare-baseline` by running `scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`, confirming the command history now compares against the temporary copied baseline instead of the post-publish output path.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`
   - `git diff --check`
 
 ### Iteration 200
-- [x] Added `buildPublishedComparisonOutputPath(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the shard-target wrapper now retains each successful comparison as `docs/benchmark-snapshots/YYYY-MM-shard-target-comparison.json` instead of leaving the diff report only in `artifacts/`.
+- [x] Added `buildPublishedComparisonOutputPath(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the shard-target wrapper now retains each successful comparison as `docs/benchmark-snapshots/YYYY-Www-shard-target-comparison.json` instead of leaving the diff report only in `artifacts/`.
 - [x] Updated `scripts/run_shard_target_snapshot.ts` to copy the generated comparison artifact into the published benchmark-snapshot directory, normalize the retained baseline/candidate paths back to the published snapshot history, and point both `comparison.report` and `paths.comparisonReport` at that retained path, so historical review keeps the same published location the workflow reports back to operators.
-- [x] Revalidated the live wrapper by running `scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`, confirming the retained comparison artifact is published beside the monthly snapshot and recorded in the run summary.
+- [x] Revalidated the live wrapper by running `scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`, confirming the retained comparison artifact is published beside the weekly snapshot and recorded in the run summary.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`
   - `git diff --check`
 
 ### Iteration 201
 - [x] Added `scripts/index_benchmark_snapshots.ts` plus deterministic coverage in `scripts/index_benchmark_snapshots.test.ts`, so the retained shard-target benchmark history now publishes both a machine-readable index at `docs/benchmark-snapshots/index.json` and a human-readable report at `docs/benchmark-snapshots/README.md`.
-- [x] Wired `scripts/run_shard_target_snapshot.ts` to refresh that retained history index/report automatically after snapshot and comparison publication, so the one-command monthly workflow now keeps the published history surface up to date instead of depending on a separate manual rebuild step.
-- [x] Revalidated the retained history path by regenerating the current 2026-03 shard-target run, confirming the committed comparison artifact, history index, and Markdown report all refresh together.
+- [x] Wired `scripts/run_shard_target_snapshot.ts` to refresh that retained history index/report automatically after snapshot and comparison publication, so the one-command weekly workflow now keeps the published history surface up to date instead of depending on a separate manual rebuild step.
+- [x] Revalidated the retained history path by regenerating the current 2026-W11 shard-target run, confirming the committed comparison artifact, history index, and Markdown report all refresh together.
 - [x] Validation:
   - `bun test scripts/index_benchmark_snapshots.test.ts scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
   - `bun ./scripts/index_benchmark_snapshots.ts`
-  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11 --reuse-browser-routes`
+### Iteration 202
+- [x] Switched the retained shard-target benchmark cadence from monthly labels to ISO week labels, republished the committed weekly baseline as `docs/benchmark-snapshots/2026-W11-shard-target.json`, and updated the wrapper/tests/docs so week-over-week review now uses `YYYY-Www` labels consistently.
   - `git diff --check`
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "profile": "shard-target",
-  "baselineLabel": "2026-03",
-  "candidateLabel": "2026-03",
-  "baselinePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json",
-  "candidatePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json",
+  "baselineLabel": "2026-W11",
+  "candidateLabel": "2026-W11",
+  "baselinePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json",
+  "candidatePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json",
   "summary": {
     "regressions": 0,
     "improvements": 0,
@@ -18,8 +18,8 @@
       "metric": "label",
       "direction": "informational",
       "status": "unchanged",
-      "baseline": "2026-03",
-      "candidate": "2026-03",
+      "baseline": "2026-W11",
+      "candidate": "2026-W11",
       "delta": null,
       "envelope": null
     },

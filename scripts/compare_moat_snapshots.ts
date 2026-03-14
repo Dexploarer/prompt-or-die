@@ -58,7 +58,7 @@ const DEFAULT_OUTPUT = "artifacts/benchmark-snapshot-comparison.json";
 
 function printHelp() {
   console.error(
-    "Usage: bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-04-shard-target.json [--output artifacts/benchmark-snapshot-comparison.json] [--fail-on-regressions]",
+    "Usage: bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W10-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json [--output artifacts/benchmark-snapshot-comparison.json] [--fail-on-regressions]",
   );
 }
 

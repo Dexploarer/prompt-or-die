@@ -322,7 +322,7 @@
 
 **Tasks**:
 - [x] Add authority-published remote-topology feed rows, generated/runtime ingestion paths, and parity measurement/report surfaces for exported `RemoteTopologyBundle` artifacts
-- [x] Capture deterministic local and live generated-SDK topology parity artifacts plus the first committed shard-target monthly snapshot
+- [x] Capture deterministic local and live generated-SDK topology parity artifacts plus the first committed shard-target weekly snapshot
 - [x] Define the observation/action envelope and budget contract for remote agents over SpacetimeDB
 - [x] Clarify admission, heartbeat, timeout, and fallback rules for remote neural/LLM agents
 - [x] Ensure transport preserves the same gameplay contract as local in-process agents
@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Surface the top regressions and changed metrics directly in the retained shard-target history report, so monthly review does not stop at counts and links.
+1. All benchmark-history cadence work is closed. Keep the retained shard-target history on weekly labels and use the published comparison artifacts for week-over-week review.
 
 ## Audit Backlog (2026-03-13)
 

@@ -3,20 +3,20 @@ import { describe, expect, it } from "bun:test";
 import {
   buildPublishedComparisonOutputPath,
   findLatestPriorSnapshotFilename,
-  formatMonthLabel,
+  formatIsoWeekLabel,
   normalizeComparisonReportForPublication,
   parseArgs,
   resolveBrowserRouteStatus,
 } from "./run_shard_target_snapshot";
 
 describe("run shard target snapshot", () => {
-  it("formats month labels deterministically", () => {
-    expect(formatMonthLabel(new Date("2026-03-13T12:00:00Z"))).toBe("2026-03");
+  it("formats ISO week labels deterministically", () => {
+    expect(formatIsoWeekLabel(new Date("2026-03-13T12:00:00Z"))).toBe("2026-W11");
   });
 
   it("builds the retained published comparison output path", () => {
-    expect(buildPublishedComparisonOutputPath("2026-03")).toBe(
-      "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+    expect(buildPublishedComparisonOutputPath("2026-W11")).toBe(
+      "docs/benchmark-snapshots/2026-W11-shard-target-comparison.json",
     );
   });
 
@@ -27,44 +27,44 @@ describe("run shard target snapshot", () => {
         candidatePath: "/tmp/candidate.json",
         summary: { regressions: 0 },
       }),
-      "docs/benchmark-snapshots/2026-02-shard-target.json",
-      "docs/benchmark-snapshots/2026-03-shard-target.json",
+      "docs/benchmark-snapshots/2026-W10-shard-target.json",
+      "docs/benchmark-snapshots/2026-W11-shard-target.json",
     );
 
     expect(JSON.parse(normalized)).toEqual({
-      baselinePath: "docs/benchmark-snapshots/2026-02-shard-target.json",
-      candidatePath: "docs/benchmark-snapshots/2026-03-shard-target.json",
+      baselinePath: "docs/benchmark-snapshots/2026-W10-shard-target.json",
+      candidatePath: "docs/benchmark-snapshots/2026-W11-shard-target.json",
       summary: { regressions: 0 },
     });
   });
 
-  it("selects the latest prior monthly shard-target snapshot", () => {
+  it("selects the latest prior weekly shard-target snapshot", () => {
     expect(
       findLatestPriorSnapshotFilename(
         [
-          "2026-01-shard-target.json",
-          "2026-03-shard-target.json",
+          "2026-W09-shard-target.json",
+          "2026-W11-shard-target.json",
           "notes.md",
-          "2026-03-ci-smoke.json",
+          "2026-W11-ci-smoke.json",
         ],
-        "2026-04",
+        "2026-W12",
       ),
-    ).toBe("2026-03-shard-target.json");
+    ).toBe("2026-W11-shard-target.json");
 
     expect(
       findLatestPriorSnapshotFilename(
         [
-          "2026-01-shard-target.json",
-          "2026-03-shard-target.json",
+          "2026-W09-shard-target.json",
+          "2026-W11-shard-target.json",
         ],
-        "2026-03",
+        "2026-W11",
       ),
-    ).toBe("2026-01-shard-target.json");
+    ).toBe("2026-W09-shard-target.json");
 
     expect(
       findLatestPriorSnapshotFilename(
-        ["2026-03-shard-target.json"],
-        "2026-03",
+        ["2026-W11-shard-target.json"],
+        "2026-W11",
       ),
     ).toBeNull();
   });
@@ -72,7 +72,7 @@ describe("run shard target snapshot", () => {
   it("parses explicit runtime options", () => {
     const options = parseArgs([
       "--label",
-      "2026-04",
+      "2026-W12",
       "--host",
       "127.0.0.2",
       "--port",
@@ -80,19 +80,19 @@ describe("run shard target snapshot", () => {
       "--generated-sdk-timeout-ms",
       "9000",
       "--compare-baseline",
-      "docs/benchmark-snapshots/2026-03-shard-target.json",
+      "docs/benchmark-snapshots/2026-W11-shard-target.json",
       "--reuse-browser-routes",
       "--keep-spacetime",
       "--output",
       "artifacts/custom-run.json",
     ]);
 
-    expect(options.label).toBe("2026-04");
+    expect(options.label).toBe("2026-W12");
     expect(options.host).toBe("127.0.0.2");
     expect(options.port).toBe(3200);
     expect(options.generatedSdkTimeoutMs).toBe(9000);
     expect(options.compareBaseline).toBe(
-      "docs/benchmark-snapshots/2026-03-shard-target.json",
+      "docs/benchmark-snapshots/2026-W11-shard-target.json",
     );
     expect(options.reuseBrowserRoutes).toBe(true);
     expect(options.keepSpacetime).toBe(true);

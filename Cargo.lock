@@ -4001,7 +4001,7 @@ dependencies = [
 
 [[package]]
 name = "pod-agents"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "log",
@@ -4018,7 +4018,7 @@ dependencies = [
 
 [[package]]
 name = "pod-animation"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "hecs",
@@ -4029,7 +4029,7 @@ dependencies = [
 
 [[package]]
 name = "pod-assets"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "log",
@@ -4044,7 +4044,7 @@ dependencies = [
 
 [[package]]
 name = "pod-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bincode",
  "glam",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "pod-desktop"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "env_logger",
  "glam",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "pod-editor"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "eframe",
  "egui",
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "pod-headless"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "env_logger",
  "log",
@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "pod-net"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bincode",
  "criterion",
@@ -4120,7 +4120,7 @@ dependencies = [
 
 [[package]]
 name = "pod-physics"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "hecs",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "pod-render"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bytemuck",
  "criterion",
@@ -4153,7 +4153,7 @@ dependencies = [
 
 [[package]]
 name = "pod-scene"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bincode",
  "glam",
@@ -4168,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "pod-scripting"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "log",
@@ -4182,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "pod-server"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ctrlc",
  "env_logger",
@@ -4197,7 +4197,7 @@ dependencies = [
 
 [[package]]
 name = "pod-spatial"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "hecs",
@@ -4210,7 +4210,7 @@ dependencies = [
 
 [[package]]
 name = "pod-stdb"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "getrandom 0.2.17",
  "glam",

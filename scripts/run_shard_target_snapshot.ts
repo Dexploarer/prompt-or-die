@@ -65,12 +65,18 @@ const DEFAULT_BROWSER_ROUTE_OUTPUT =
   "apps/pod-web/artifacts/render-route-measurements.json";
 const DEFAULT_LIVE_TOPOLOGY_OUTPUT =
   "artifacts/topology-feed-live-shard-local.json";
-const SNAPSHOT_FILENAME_PATTERN = /^(\d{4}-\d{2})-shard-target\.json$/;
+const SNAPSHOT_FILENAME_PATTERN = /^(\d{4}-W\d{2})-shard-target\.json$/;
 
-export function formatMonthLabel(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
+export function formatIsoWeekLabel(date: Date): string {
+  const utcDate = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+  const weekYear = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(weekYear, 0, 1));
+  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+  return `${weekYear}-W${String(week).padStart(2, "0")}`;
 }
 
 export function findLatestPriorSnapshotFilename(
@@ -109,7 +115,7 @@ export function normalizeComparisonReportForPublication(
 
 export function parseArgs(argv: string[]): Options {
   const options: Options = {
-    label: formatMonthLabel(new Date()),
+    label: formatIsoWeekLabel(new Date()),
     host: "127.0.0.1",
     port: 3110,
     generatedSdkTimeoutMs: 5_000,
@@ -190,7 +196,7 @@ export function resolveBrowserRouteStatus(
 
 function printHelp() {
   console.error(
-    "Usage: bun ./scripts/run_shard_target_snapshot.ts [--label YYYY-MM] [--host 127.0.0.1] [--port 3110] [--generated-sdk-timeout-ms 5000] [--compare-baseline docs/benchmark-snapshots/2026-03-shard-target.json] [--reuse-browser-routes] [--keep-spacetime] [--output artifacts/shard-target-snapshot-run.json]",
+    "Usage: bun ./scripts/run_shard_target_snapshot.ts [--label YYYY-Www] [--host 127.0.0.1] [--port 3110] [--generated-sdk-timeout-ms 5000] [--compare-baseline docs/benchmark-snapshots/2026-W11-shard-target.json] [--reuse-browser-routes] [--keep-spacetime] [--output artifacts/shard-target-snapshot-run.json]",
   );
 }
 
@@ -544,7 +550,7 @@ async function main() {
     );
     if (!publishSnapshot.summary.ok) {
       throw new Error(
-        `monthly snapshot publish failed:\n${publishSnapshot.summary.stderrSnippet ?? "no stderr captured"}`,
+        `weekly snapshot publish failed:\n${publishSnapshot.summary.stderrSnippet ?? "no stderr captured"}`,
       );
     }
 

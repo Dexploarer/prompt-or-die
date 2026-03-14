@@ -69,7 +69,7 @@ Historical snapshot comparison:
 
 ```bash
 cd /Users/home/Desktop/prompt-or-die
-bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-04-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions
+bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W10-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions
 ```
 
 Retained snapshot history index/report:
@@ -271,8 +271,8 @@ with `30/30` checks passing across `deadman-prime`, `deadman-shadow`, and
 `sanctuary-echo`. The same live path has now also been exercised on the
 `shard-target` profile, producing
 `/Users/home/Desktop/prompt-or-die/artifacts/topology-feed-live-shard-local.json`
-and the first committed monthly snapshot at
-`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
+and the first committed weekly snapshot at
+`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json`.
 `pod-core` also owns the shared `build_remote_topology_bundle(...)`,
 `RemoteTopologyParitySummary`, and parity/binding builder helpers now, so
 headless and moat parity checks compare exported topology artifacts through one
@@ -341,13 +341,13 @@ Those counters remain exposed through the browser debug transport summary and
 are still exercised by targeted reconnect/recovery regression tests in
 `apps/pod-web/src/direct-connect.test.ts` and `crates/pod-net/src/server.rs`.
 Historical drift tracking is now live too: the first committed shard-target
-snapshot at
-`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`
+weekly snapshot at
+`/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json`
 captures transport, browser-route, headless topology, topology feed, and live
-topology feed data together. The next follow-on gap is workflow, not contract:
-the live shard-target topology capture and snapshot publication path still
-needs to be wrapped in one reproducible local script instead of a manual
-command chain.
+topology feed data together. The workflow gap is closed too:
+`scripts/run_shard_target_snapshot.ts` now wraps the full capture, publication,
+comparison, and retained-history refresh flow into one reproducible local
+command.
 
 ### Creator time-to-first-agent-world
 
@@ -370,14 +370,14 @@ Guidance:
 
 - Use `ci-smoke` for correctness smoke only.
 - Use `shard-target` for comparable cost baselines.
-- Keep the same host-cost assumption across monthly comparisons unless the
+- Keep the same host-cost assumption across weekly comparisons unless the
   infrastructure profile changes.
 
-## Monthly benchmark routine
+## Weekly benchmark routine
 
-Run this every month before updating the competitor matrix:
+Run this every week before updating the competitor matrix:
 
-1. Run `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`.
+1. Run `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-Www`.
 2. Inspect the retained history report at `docs/benchmark-snapshots/README.md`.
 3. Inspect the generated summary artifact at `artifacts/shard-target-snapshot-run.json` when you need the exact command history or chosen baseline.
 4. Record any required responses from the retained comparison/history report in `IMPLEMENTATION_PLAN.md`.
@@ -389,7 +389,7 @@ Run this every month before updating the competitor matrix:
 - headless topology export
 - local SpacetimeDB startup plus module publish
 - live generated-SDK topology benchmark
-- monthly snapshot publication
+- weekly snapshot publication
 - retained history index/report publication
 
 If the browser render-route gate fails again but `apps/pod-web/artifacts/render-route-measurements.json`
@@ -412,19 +412,19 @@ metrics shows up as a regression instead of a generic changed value. Use
 `--fail-on-regressions` when you want the comparison itself to act as a gate.
 
 `run_shard_target_snapshot.ts` now wires that compare step into the one-command
-monthly workflow. Pass `--compare-baseline <snapshot>` for an explicit
-month-over-month review, or rerun an existing month label and the wrapper will
+weekly workflow. Pass `--compare-baseline <snapshot>` for an explicit
+week-over-week review, or rerun an existing week label and the wrapper will
 reuse the current same-label snapshot as a temporary baseline before it
-publishes the refreshed artifact. When a later month exists, the wrapper now
-auto-selects the latest prior `docs/benchmark-snapshots/YYYY-MM-shard-target.json`
-file as the baseline, so month-over-month review no longer depends on always
+publishes the refreshed artifact. When a later week exists, the wrapper now
+auto-selects the latest prior `docs/benchmark-snapshots/YYYY-Www-shard-target.json`
+file as the baseline, so week-over-week review no longer depends on always
 passing `--compare-baseline` by hand. When comparison runs, the wrapper also
 retains the generated report as
-`docs/benchmark-snapshots/YYYY-MM-shard-target-comparison.json` and records
-that published path in the run summary, so the monthly history now keeps both
+`docs/benchmark-snapshots/YYYY-Www-shard-target-comparison.json` and records
+that published path in the run summary, so the weekly history now keeps both
 the snapshot and the diff artifact. The wrapper now also refreshes
 `docs/benchmark-snapshots/index.json` and `docs/benchmark-snapshots/README.md`,
-so monthly review has a stable retained history surface instead of raw JSON
+so weekly review has a stable retained history surface instead of raw JSON
 inspection.
 
 ## Interpretation rules

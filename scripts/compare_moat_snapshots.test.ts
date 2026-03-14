@@ -13,7 +13,7 @@ import type { PublishedMoatSnapshot } from "./publish_moat_snapshots";
 const repoRoot = resolve(import.meta.dir, "..");
 const baselineSnapshotPath = resolve(
   repoRoot,
-  "docs/benchmark-snapshots/2026-03-shard-target.json",
+  "docs/benchmark-snapshots/2026-W11-shard-target.json",
 );
 
 function loadBaselineSnapshot(): PublishedMoatSnapshot {
@@ -65,7 +65,7 @@ describe("compare moat snapshots", () => {
     const baseline = loadBaselineSnapshot();
     const candidate = structuredClone(baseline);
 
-    candidate.label = "2026-04";
+    candidate.label = "2026-W12";
     candidate.transport.aggregate.total_delta_bytes += 128;
     candidate.transport.aggregate.total_queue_pressure_events = Math.max(
       0,
@@ -133,7 +133,7 @@ describe("compare moat snapshots", () => {
       ),
     ).toMatchObject({
       status: "changed",
-      candidate: "2026-04",
+      candidate: "2026-W12",
     });
 
     expect(

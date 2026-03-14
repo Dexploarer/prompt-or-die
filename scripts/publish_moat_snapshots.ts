@@ -316,9 +316,15 @@ function roundMetric(value: number | null): number | null {
 }
 
 function defaultSnapshotLabel(now = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
+  const utcDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+  const weekYear = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(weekYear, 0, 1));
+  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+  return `${weekYear}-W${String(week).padStart(2, "0")}`;
 }
 
 export function buildDefaultSnapshotOutputPath(label: string): string {
@@ -393,7 +399,7 @@ function parseArgs(argv: string[]): Options {
       case "--help":
       case "-h":
         console.error(
-          "Usage: bun ./scripts/publish_moat_snapshots.ts [--input PATH] [--label YYYY-MM] [--output PATH] [--browser-route-input PATH] [--skip-browser-routes] [--live-topology-feed-input PATH] [--skip-live-topology-feed]",
+          "Usage: bun ./scripts/publish_moat_snapshots.ts [--input PATH] [--label YYYY-Www] [--output PATH] [--browser-route-input PATH] [--skip-browser-routes] [--live-topology-feed-input PATH] [--skip-live-topology-feed]",
         );
         process.exit(0);
       default:

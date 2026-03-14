@@ -123,8 +123,8 @@
 - [apps/pod-web/src/hud.ts](/Users/home/Desktop/prompt-or-die/apps/pod-web/src/hud.ts)
 
 **Known Issues**:
-- The original historical-snapshot gap is closed by `/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json`.
-- The live shard-target capture/publication path is now wrapped by `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`, and `bun ./scripts/compare_moat_snapshots.ts --baseline ... --candidate ...` now turns published snapshot history into structured drift data.
+- The original historical-snapshot gap is closed by `/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-W11-shard-target.json`.
+- The live shard-target capture/publication path is now wrapped by `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-Www`, and `bun ./scripts/compare_moat_snapshots.ts --baseline ... --candidate ...` now turns published snapshot history into structured drift data.
 
 ## Phase 7: Plugin and Runtime Boundary Hardening ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -136,7 +136,7 @@
 - [x] Identified the remaining missing lifecycle/registration hooks that still force integrators into app bootstrap code
 
 **Next Action**:
-- Historical follow-on closed by the first committed shard-target monthly snapshot. Any further work here belongs to snapshot comparison tooling, not snapshot existence.
+- Historical follow-on closed by the first committed shard-target weekly snapshot. Any further work here belongs to snapshot comparison tooling, not snapshot existence.
 
 ## Phase 8: CI and Regression Gates ✅
 **Spec**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md)
@@ -254,11 +254,11 @@
 - [x] Exported a fresh `pod-headless` topology artifact, started a local in-memory SpacetimeDB on `127.0.0.1:3100`, published `pod_stdb.wasm` to `deadman-prime`, `deadman-shadow`, and `sanctuary-echo`, and ran the live generated SDK topology benchmark successfully
 - [x] Wrote the first live parity artifact to `artifacts/topology-feed-live-local.json`; all `30/30` checks passed across the three benchmark worlds
 - [x] Refreshed the shard-target transport benchmark baselines in `crates/pod-net/src/server.rs` to the current deterministic byte envelopes, with `steady-delta total/max = 1392/174` and aggregate full/recovery/delta totals of `1220/234/1904`
-- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target monthly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts
-- [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
+- [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target weekly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts
+- [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed weekly shard-target snapshot at `docs/benchmark-snapshots/2026-W11-shard-target.json`
 
 **Next Action**:
-- All audited backlog items are closed. The next runtime slice should surface the top regressions and changed metrics directly in the retained shard-target history report, so monthly review no longer stops at counts and links.
+- All audited backlog items are closed. The retained shard-target history now runs on weekly labels and publishes retained week-over-week comparison artifacts with real benchmark values in the report.
 
 ## Audit Backlog (2026-03-13)
 

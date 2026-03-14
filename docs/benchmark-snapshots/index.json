@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "profile": "shard-target",
-  "generatedAtUnixMs": 1773459419120,
+  "generatedAtUnixMs": 1773460352711,
   "snapshotCount": 1,
-  "latestLabel": "2026-03",
-  "latestSnapshotPath": "docs/benchmark-snapshots/2026-03-shard-target.json",
-  "latestComparisonPath": "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+  "latestLabel": "2026-W11",
+  "latestSnapshotPath": "docs/benchmark-snapshots/2026-W11-shard-target.json",
+  "latestComparisonPath": "docs/benchmark-snapshots/2026-W11-shard-target-comparison.json",
   "entries": [
     {
-      "label": "2026-03",
-      "snapshotPath": "docs/benchmark-snapshots/2026-03-shard-target.json",
-      "comparisonPath": "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
-      "comparedAgainstLabel": "2026-03",
+      "label": "2026-W11",
+      "snapshotPath": "docs/benchmark-snapshots/2026-W11-shard-target.json",
+      "comparisonPath": "docs/benchmark-snapshots/2026-W11-shard-target-comparison.json",
+      "comparedAgainstLabel": "2026-W11",
       "snapshotSummary": {
         "transportChecksPassed": true,
         "workerRouteGatesPassed": true,
@@ -24,8 +24,8 @@
         "totalQueuePressureEvents": 1
       },
       "comparisonSummary": {
-        "baselineLabel": "2026-03",
-        "candidateLabel": "2026-03",
+        "baselineLabel": "2026-W11",
+        "candidateLabel": "2026-W11",
         "regressions": 0,
         "improvements": 0,
         "changed": 0,

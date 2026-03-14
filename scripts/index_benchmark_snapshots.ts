@@ -65,9 +65,7 @@ export type BenchmarkSnapshotHistoryIndex = {
 };
 
 const DEFAULT_INPUT_DIR = "docs/benchmark-snapshots";
-const SNAPSHOT_FILENAME_PATTERN = /^(\d{4}-\d{2})-shard-target\.json$/;
-const COMPARISON_FILENAME_PATTERN =
-  /^(\d{4}-\d{2})-shard-target-comparison\.json$/;
+const SNAPSHOT_FILENAME_PATTERN = /^(\d{4}-W\d{2})-shard-target\.json$/;
 
 export function buildBenchmarkHistoryIndexOutputPath(): string {
   return `${DEFAULT_INPUT_DIR}/index.json`;

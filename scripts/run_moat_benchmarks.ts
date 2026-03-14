@@ -449,7 +449,7 @@ function buildCreatorReport(repoRoot: string, options: Options): CreatorTimeRepo
       benchmarkSeconds: options.creatorSeconds,
       notes: [
         "Manual creator benchmark supplied at invocation time.",
-        "Use the protocol in docs/benchmark-suite.md for consistent monthly measurements.",
+        "Use the protocol in docs/benchmark-suite.md for consistent weekly measurements.",
       ],
     };
   }

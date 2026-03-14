@@ -258,7 +258,7 @@ describe("publish moat snapshots", () => {
           },
         },
       },
-      "2026-03",
+      "2026-W11",
       null,
       {
         schema_version: 1,
@@ -302,7 +302,7 @@ describe("publish moat snapshots", () => {
     );
 
     expect(snapshot.schemaVersion).toBe(4);
-    expect(snapshot.label).toBe("2026-03");
+    expect(snapshot.label).toBe("2026-W11");
     expect(snapshot.transport.aggregate.published_baseline_profile).toBe(
       "shard-target",
     );
@@ -345,7 +345,7 @@ describe("publish moat snapshots", () => {
           topologyFeedMeasurements: null,
           browserRouteMeasurements: null,
         },
-        "2026-03",
+        "2026-W11",
       ),
     ).toThrow("expected shard-target moat report");
   });
@@ -422,7 +422,7 @@ describe("publish moat snapshots", () => {
         },
         browserRouteMeasurements: null,
       },
-      "2026-03",
+      "2026-W11",
       {
         schemaVersion: 2,
         routes: [
@@ -504,9 +504,9 @@ describe("publish moat snapshots", () => {
     );
   });
 
-  test("builds the default month-labeled output path", () => {
-    expect(buildDefaultSnapshotOutputPath("2026-03")).toBe(
-      "docs/benchmark-snapshots/2026-03-shard-target.json",
+  test("builds the default ISO-week-labeled output path", () => {
+    expect(buildDefaultSnapshotOutputPath("2026-W11")).toBe(
+      "docs/benchmark-snapshots/2026-W11-shard-target.json",
     );
   });
 });
