@@ -4,9 +4,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
@@ -180,6 +180,60 @@ pub enum ServerLifecycleCommand {
     Shutdown { reason: String },
 }
 
+#[derive(Clone, Debug)]
+pub struct OpsDocumentStream {
+    history_limit: usize,
+    history: Arc<Mutex<VecDeque<String>>>,
+    tx: broadcast::Sender<String>,
+}
+
+impl OpsDocumentStream {
+    pub fn new(history_limit: usize, live_capacity: usize) -> Self {
+        let live_capacity = live_capacity.max(1);
+        Self {
+            history_limit,
+            history: Arc::new(Mutex::new(VecDeque::with_capacity(history_limit.max(1)))),
+            tx: broadcast::channel(live_capacity).0,
+        }
+    }
+
+    pub fn publish(&self, document: String) {
+        {
+            let mut history = self.history.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            history.push_back(document.clone());
+            while history.len() > self.history_limit {
+                history.pop_front();
+            }
+        }
+
+        let _ = self.tx.send(document);
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+        self.tx.subscribe()
+    }
+
+    pub fn recent_documents(&self) -> Vec<String> {
+        self.history
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    pub fn retained_document_count(&self) -> usize {
+        self.history
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
+    }
+
+    pub fn receiver_count(&self) -> usize {
+        self.tx.receiver_count()
+    }
+}
+
 // ============================================================
 // GAME SERVER
 // ============================================================
@@ -235,8 +289,8 @@ pub struct GameServer {
     gameplay_incident_tracker: ShardGameplayIncidentTracker,
     /// Optional watch sink for live shard gameplay incident summaries.
     incident_summary_tx: Option<watch::Sender<Option<ShardIncidentSummary>>>,
-    /// Optional broadcast sink for unfiltered shard ops TOON documents.
-    ops_document_tx: Option<broadcast::Sender<String>>,
+    /// Optional retained stream for unfiltered shard ops TOON documents.
+    ops_document_stream: Option<OpsDocumentStream>,
     /// Optional runtime lifecycle command receiver.
     lifecycle_command_rx: Option<mpsc::UnboundedReceiver<ServerLifecycleCommand>>,
     /// Optional watch sink for live shard lifecycle state.
@@ -287,7 +341,7 @@ impl GameServer {
             transport_summary_tx: None,
             gameplay_incident_tracker: ShardGameplayIncidentTracker::new(),
             incident_summary_tx: None,
-            ops_document_tx: None,
+            ops_document_stream: None,
             lifecycle_command_rx: None,
             lifecycle_state_tx: None,
             lifecycle_state: ServerLifecycleState::running(shard_id),
@@ -312,8 +366,8 @@ impl GameServer {
         self.incident_summary_tx = Some(tx);
     }
 
-    pub fn install_ops_document_broadcast(&mut self, tx: broadcast::Sender<String>) {
-        self.ops_document_tx = Some(tx);
+    pub fn install_ops_document_stream(&mut self, stream: OpsDocumentStream) {
+        self.ops_document_stream = Some(stream);
     }
 
     pub fn install_lifecycle_control(
@@ -1150,16 +1204,12 @@ impl GameServer {
         let has_debug_subscribers = client_targets
             .iter()
             .any(|target| target.debug_telemetry_enabled);
-        let has_ops_subscribers = self
-            .ops_document_tx
-            .as_ref()
-            .map(|tx| tx.receiver_count() > 0)
-            .unwrap_or(false);
+        let has_ops_stream = self.ops_document_stream.is_some();
 
         if !has_authoritative_baseline
             && client_targets.is_empty()
             && !has_debug_subscribers
-            && !has_ops_subscribers
+            && !has_ops_stream
             && !has_event_update
         {
             self.pending_events.clear();
@@ -1173,7 +1223,7 @@ impl GameServer {
             .any(|target| target.last_sent_snapshot.is_none());
         let mut any_state_update = !has_authoritative_baseline;
 
-        if (has_debug_subscribers || has_ops_subscribers)
+        if (has_debug_subscribers || has_ops_stream)
             && self.tick.is_multiple_of(TRANSPORT_SUMMARY_INTERVAL_TICKS)
         {
             self.pending_debug_documents
@@ -1295,13 +1345,13 @@ impl GameServer {
         if any_state_update {
             self.last_snapshot = Some(authoritative_snapshot);
         }
-        if let Some(tx) = &self.ops_document_tx {
+        if let Some(stream) = &self.ops_document_stream {
             for document in self
                 .pending_debug_documents
                 .iter()
                 .map(PendingDebugDocument::to_toon_document)
             {
-                let _ = tx.send(document);
+                stream.publish(document);
             }
         }
         self.pending_events.clear();
@@ -2937,8 +2987,9 @@ mod tests {
         let config = ProtoServerConfig::default();
         let world = World::new(42);
         let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
-        let (ops_tx, mut ops_rx) = tokio::sync::broadcast::channel(16);
-        server.install_ops_document_broadcast(ops_tx);
+        let ops_stream = OpsDocumentStream::new(8, 16);
+        let mut ops_rx = ops_stream.subscribe();
+        server.install_ops_document_stream(ops_stream.clone());
 
         server.step_tick().await.unwrap();
         server.broadcast_updates().await.unwrap();
@@ -2949,6 +3000,13 @@ mod tests {
         let value = decode_toon_value(&document).expect("ops document should decode");
         assert_eq!(value["document_type"], "versioned_tick_telemetry");
         assert_eq!(value["payload"]["payload"]["tick"], 0);
+        assert_eq!(ops_stream.retained_document_count(), 2);
+        assert!(ops_stream
+            .recent_documents()
+            .iter()
+            .any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
     }
 
     #[tokio::test]

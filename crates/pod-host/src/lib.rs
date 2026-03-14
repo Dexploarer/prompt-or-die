@@ -10,9 +10,10 @@ use pod_core::{
 use tokio::sync::{broadcast, mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
-use pod_net::{ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState};
+use pod_net::{OpsDocumentStream, ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState};
 
 const OPS_DOCUMENT_CHANNEL_CAPACITY: usize = 256;
+const OPS_DOCUMENT_HISTORY_LIMIT: usize = 256;
 const ROLLUP_WINDOW_TICKS: u64 = 60;
 const INCIDENT_EMIT_INTERVAL_TICKS: u64 = 60;
 
@@ -348,7 +349,7 @@ pub struct ShardSupervisorLifecycleCommandResult {
 #[derive(Clone, Debug)]
 pub struct AuthorityShardOpsHandle {
     shard: AuthorityShardSummary,
-    document_tx: broadcast::Sender<String>,
+    stream: OpsDocumentStream,
 }
 
 impl AuthorityShardOpsHandle {
@@ -357,8 +358,31 @@ impl AuthorityShardOpsHandle {
     }
 
     pub fn subscribe_documents(&self) -> broadcast::Receiver<String> {
-        self.document_tx.subscribe()
+        self.stream.subscribe()
     }
+
+    pub fn recent_documents(&self) -> Vec<String> {
+        self.stream.recent_documents()
+    }
+
+    pub fn retained_document_count(&self) -> usize {
+        self.stream.retained_document_count()
+    }
+
+    pub fn snapshot(&self) -> AuthorityShardOpsSnapshot {
+        AuthorityShardOpsSnapshot {
+            shard: self.shard.clone(),
+            retained_document_count: self.retained_document_count(),
+            recent_documents: self.recent_documents(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthorityShardOpsSnapshot {
+    pub shard: AuthorityShardSummary,
+    pub retained_document_count: usize,
+    pub recent_documents: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -716,6 +740,30 @@ impl ShardSupervisorOpsHandle {
             .iter()
             .find(|handle| handle.shard.shard_id == shard_id)
     }
+
+    pub fn snapshot(&self) -> ShardSupervisorOpsSnapshot {
+        let shards = self
+            .shards
+            .iter()
+            .map(AuthorityShardOpsHandle::snapshot)
+            .collect::<Vec<_>>();
+
+        ShardSupervisorOpsSnapshot {
+            shard_count: shards.len(),
+            total_retained_document_count: shards
+                .iter()
+                .map(|summary| summary.retained_document_count)
+                .sum(),
+            shards,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsSnapshot {
+    pub shard_count: usize,
+    pub total_retained_document_count: usize,
+    pub shards: Vec<AuthorityShardOpsSnapshot>,
 }
 
 fn authority_lifecycle_state_from_server_state(
@@ -980,7 +1028,7 @@ pub struct LocalAuthorityRuntime {
     ops_stream: LocalAuthorityOpsStream,
     gameplay_incident_summary_tx: watch::Sender<Option<ShardIncidentSummary>>,
     lifecycle_state_tx: watch::Sender<ServerLifecycleState>,
-    ops_document_tx: broadcast::Sender<String>,
+    ops_document_stream: OpsDocumentStream,
     control_plane: AuthorityShardControlPlaneHandle,
     ops_handle: AuthorityShardOpsHandle,
 }
@@ -1012,7 +1060,8 @@ impl LocalAuthorityRuntime {
             latest_tick: 0,
             reason: None,
         });
-        let (ops_document_tx, _) = broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY);
+        let ops_document_stream =
+            OpsDocumentStream::new(OPS_DOCUMENT_HISTORY_LIMIT, OPS_DOCUMENT_CHANNEL_CAPACITY);
 
         Self {
             world,
@@ -1021,7 +1070,7 @@ impl LocalAuthorityRuntime {
             ops_stream: LocalAuthorityOpsStream::new(shard_id),
             gameplay_incident_summary_tx,
             lifecycle_state_tx,
-            ops_document_tx: ops_document_tx.clone(),
+            ops_document_stream: ops_document_stream.clone(),
             control_plane: AuthorityShardControlPlaneHandle {
                 shard: shard.clone(),
                 transport_summary_rx: None,
@@ -1031,7 +1080,7 @@ impl LocalAuthorityRuntime {
             },
             ops_handle: AuthorityShardOpsHandle {
                 shard,
-                document_tx: ops_document_tx,
+                stream: ops_document_stream,
             },
         }
     }
@@ -1076,7 +1125,7 @@ impl LocalAuthorityRuntime {
             reason: None,
         });
         for document in self.ops_stream.drain_documents() {
-            let _ = self.ops_document_tx.send(document);
+            self.ops_document_stream.publish(document);
         }
 
         LocalAuthorityTickOutcome {
@@ -1153,12 +1202,13 @@ impl DirectConnectAuthorityRuntime {
         let (lifecycle_command_tx, lifecycle_command_rx) = mpsc::unbounded_channel();
         let (lifecycle_state_tx, lifecycle_state_rx) =
             watch::channel(ServerLifecycleState::running(&shard_id));
-        let (ops_document_tx, _) = broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY);
+        let ops_document_stream =
+            OpsDocumentStream::new(OPS_DOCUMENT_HISTORY_LIMIT, OPS_DOCUMENT_CHANNEL_CAPACITY);
         let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
         server.install_transport_summary_watch(transport_summary_tx);
         server.install_incident_summary_watch(gameplay_incident_summary_tx);
         server.install_lifecycle_control(lifecycle_command_rx, lifecycle_state_tx);
-        server.install_ops_document_broadcast(ops_document_tx.clone());
+        server.install_ops_document_stream(ops_document_stream.clone());
         let shard = AuthorityShardSummary {
             shard_id,
             linked_shard_ids: Vec::new(),
@@ -1183,7 +1233,7 @@ impl DirectConnectAuthorityRuntime {
             },
             ops_handle: AuthorityShardOpsHandle {
                 shard,
-                document_tx: ops_document_tx,
+                stream: ops_document_stream,
             },
         })
     }
@@ -1403,10 +1453,11 @@ mod tests {
         ShardTransportSummary, TickTelemetryFrame,
     };
     use pod_net::{
-        DirectConnectTransportConfig, ServerLifecycleCommand, ServerLifecycleState, TransportPolicy,
+        DirectConnectTransportConfig, OpsDocumentStream, ServerLifecycleCommand,
+        ServerLifecycleState, TransportPolicy,
     };
     use std::time::Duration;
-    use tokio::sync::{broadcast, mpsc, watch};
+    use tokio::sync::{mpsc, watch};
 
     #[test]
     fn authority_host_config_reads_runtime_mode_from_env() {
@@ -1485,6 +1536,14 @@ mod tests {
             .expect("local runtime should publish a TOON ops document");
         let value = decode_toon_value(&first_document).expect("ops document should decode as TOON");
         assert_eq!(value["document_type"], "versioned_tick_telemetry");
+        assert!(runtime.ops_handle().retained_document_count() >= 1);
+        assert!(runtime
+            .ops_handle()
+            .recent_documents()
+            .iter()
+            .any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
 
         let snapshot = runtime.control_plane_handle().snapshot();
         assert_eq!(snapshot.latest_tick, Some(0));
@@ -1496,6 +1555,60 @@ mod tests {
             Some(0)
         );
         assert_eq!(snapshot.shard.transport_mode, AuthorityTransportMode::Local);
+    }
+
+    #[test]
+    fn shard_supervisor_ops_snapshot_rolls_up_retained_documents() {
+        let config = sample_config(AuthorityTransportMode::Local);
+        let mut runtime = LocalAuthorityRuntime::new_with_shard_id(
+            &config,
+            config.build_world(|world, _map_name| {
+                world
+                    .spawn_at(2.0, 2.0)
+                    .with_label("ops-rollup-marker", pod_core::Team::None)
+                    .build();
+            }),
+            "alpha-1",
+        );
+
+        runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
+
+        let prepared = super::PreparedShardSupervisor {
+            summary: ShardSupervisorSummary {
+                shard_count: 1,
+                local_shard_count: 1,
+                direct_connect_shard_count: 0,
+                total_direct_connect_capacity: 0,
+                shards: vec![AuthorityShardConfig {
+                    shard_id: "alpha-1".into(),
+                    linked_shard_ids: vec![],
+                    host: sample_config(AuthorityTransportMode::Local),
+                }
+                .summary()],
+            },
+            shards: vec![PreparedAuthorityShard {
+                summary: AuthorityShardConfig {
+                    shard_id: "alpha-1".into(),
+                    linked_shard_ids: vec![],
+                    host: sample_config(AuthorityTransportMode::Local),
+                }
+                .summary(),
+                control_plane: runtime.control_plane_handle(),
+                ops_handle: runtime.ops_handle(),
+                runtime: AuthorityHostRuntime::Local(runtime),
+            }],
+        };
+
+        let snapshot = prepared.ops_handle().snapshot();
+        assert_eq!(snapshot.shard_count, 1);
+        assert!(snapshot.total_retained_document_count >= 1);
+        assert_eq!(snapshot.shards[0].shard.shard_id, "alpha-1");
+        assert!(snapshot.shards[0]
+            .recent_documents
+            .iter()
+            .any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
     }
 
     #[test]
@@ -1877,7 +1990,10 @@ mod tests {
                         host: sample_config(AuthorityTransportMode::Local),
                     }
                     .summary(),
-                    document_tx: broadcast::channel(OPS_DOCUMENT_CHANNEL_CAPACITY).0,
+                    stream: OpsDocumentStream::new(
+                        OPS_DOCUMENT_CHANNEL_CAPACITY,
+                        OPS_DOCUMENT_CHANNEL_CAPACITY,
+                    ),
                 },
             }],
         };

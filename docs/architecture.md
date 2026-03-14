@@ -188,7 +188,8 @@ integration targets available today:
 - `pod-assets` exports the source-to-runtime asset seam through `import_asset`,
   `build_runtime_bundle_manifest`, and `materialize_runtime_bundle_manifest`.
 - `pod-net` plus `pod-core` export the authoritative transport/debug seam through
-  `ClientMessage`, `ServerMessage`, and `ShardTransportSummary`.
+  `ClientMessage`, `ServerMessage`, `ShardTransportSummary`, and
+  `OpsDocumentStream`.
 - `pod-core` now exports a transport-neutral authority world seam from
   [`crates/pod-core/src/authority.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-core/src/authority.rs)
   through `AuthorityWorldConfig`, `WorldBootstrapPlan`, and
@@ -202,8 +203,10 @@ integration targets available today:
   [`crates/pod-host/src/lib.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-host/src/lib.rs)
   through `AuthorityHostConfig`, `AuthorityTransportMode`,
   `AuthorityHostRuntime`, `AuthorityShardConfig`, and
-  `ShardSupervisorConfig`, so app binaries can select single-host or
-  multi-shard authority hosting through one crate-level seam.
+  `ShardSupervisorConfig`, plus retained `AuthorityShardOpsSnapshot` and
+  `ShardSupervisorOpsSnapshot` views over the shared ops feed, so app binaries
+  can select single-host or multi-shard authority hosting through one
+  crate-level seam.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -215,7 +218,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, and publishes live shard/supervisor ops feeds, but it still does not retain or aggregate that feed into a durable supervisor-level history surface at MMO scale.
+- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, and retains recent shard/supervisor ops history in-memory through shared snapshot handles, but it still does not publish that retained history durably beyond the current host process.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

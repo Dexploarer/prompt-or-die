@@ -304,6 +304,12 @@
 - [x] Extended `crates/pod-net/src/server.rs` with host-facing ops-document broadcasts that stay active without debug clients, and wired `DirectConnectAuthorityRuntime` onto that path.
 - [x] Removed the app-private shard ops stream from `apps/pod-server/src/main.rs`, updated the compatibility exports, and moved the next MMO blocker up to retained multi-shard ops aggregation instead of basic live publication.
 
+## Iteration 213 Progress
+
+- [x] Added `pod_net::OpsDocumentStream` in `crates/pod-net/src/server.rs`, so host-facing TOON ops publication now has one shared retained ring-buffer plus live subscription surface instead of a raw broadcast-only sink.
+- [x] Updated `crates/pod-host/src/lib.rs` with retained `AuthorityShardOpsSnapshot` and `ShardSupervisorOpsSnapshot` views over that shared stream, so late-joining shard/supervisor consumers can inspect recent MMO ops history without app-private buffering.
+- [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to durable ops persistence/export beyond the current in-memory retained history surface.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

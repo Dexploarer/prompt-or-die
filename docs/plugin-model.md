@@ -26,7 +26,7 @@ contract today. If a seam is not in this table, assume it is still internal.
 | --- | --- | --- | --- |
 | Authoring to runtime translation | `pod_scene::NativeComponentBinding`, `pod_scene::Prefab`, `pod_scene::PrefabRegistry`, `pod_scene::Scene`, `pod_scene::SceneManager` | New authored component schemas, prefab composition, scene instantiation rules | `cargo test -p pod-scene test_scene_instantiation_tracks_component_provenance_across_prefab_and_scene_layers -- --nocapture` |
 | Asset import to shipped runtime bundle | `pod_assets::import_asset`, `pod_assets::build_runtime_bundle_manifest`, `pod_assets::materialize_runtime_bundle_manifest` | New source imports, bundle specs, staged-to-runtime materialization rules | `cargo test -p pod-assets build_runtime_bundle_manifest_maps_staged_imports_to_runtime_paths -- --nocapture` |
-| Direct-connect debug transport | `pod_core::ShardTransportSummary`, `pod_net::protocol::{ClientMessage, ServerMessage}` | New typed debug documents, transport counters, recovery/resume behavior | `cargo test -p pod-net handle_connections -- --nocapture` |
+| Direct-connect debug transport | `pod_core::ShardTransportSummary`, `pod_net::protocol::{ClientMessage, ServerMessage}`, `pod_net::OpsDocumentStream` | New typed debug documents, transport counters, recovery/resume behavior, retained shard ops history | `cargo test -p pod-net broadcast_updates -- --nocapture` |
 | Browser debug/runtime consumer | `apps/pod-web/src/contracts.ts`, `apps/pod-web/src/direct-connect.ts`, `apps/pod-web/src/hud.ts` | Runtime HUD/debug summaries and browser-side degraded-path handling | `cd apps/pod-web && bun test src/direct-connect.test.ts src/contracts.test.ts src/hud.test.ts` |
 
 These are the seams to extend if you need something now. They already have
@@ -97,7 +97,7 @@ treated as composition roots rather than extension APIs.
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
 | `crates/pod-core/src/authority.rs` | Current transport-neutral authority world contract | Safe place to compose `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` without depending on transport-layer types. |
 | `crates/pod-net/src/authority.rs` | Current direct-connect transport adapter contract | Safe place to compose `DirectConnectTransportConfig`, `TransportPolicy`, `parse_bind_target(...)`, and `server_config(tick_rate)` without re-owning world/bootstrap state. |
-| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, and `ShardSupervisorConfig` so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
+| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, `ShardSupervisorConfig`, and the shared shard/supervisor ops snapshot handles so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
 | `apps/pod-server/src/main.rs` | Thin internal entry point | Keep it focused on process startup, shutdown wiring, and calling the exported authority lifecycle surface. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
@@ -111,15 +111,17 @@ integrators back into app composition roots:
 
 - Multi-shard authority control-plane hook:
   `crates/pod-host/src/lib.rs` now exposes
-  `AuthorityShardControlPlaneHandle` and
-  `ShardSupervisorControlPlaneHandle`, plus derived shard incident summaries,
-  coordinated drain/shutdown commands, and live `AuthorityShardOpsHandle` /
-  `ShardSupervisorOpsHandle` document subscriptions, so supervised shard sets
-  can snapshot control-plane state and subscribe to one shared MMO ops feed
-  without per-shard log scraping or `apps/pod-server` private wiring. What is
-  still missing is retained cross-shard ops aggregation above those live
-  broadcasts, so late-joining browser/editor/ops consumers still need a
-  higher-level sink if they want history instead of just the live stream.
+  `AuthorityShardControlPlaneHandle`,
+  `ShardSupervisorControlPlaneHandle`,
+  `AuthorityShardOpsHandle`,
+  `ShardSupervisorOpsHandle`,
+  `AuthorityShardOpsSnapshot`, and
+  `ShardSupervisorOpsSnapshot`, all backed by the shared
+  `pod_net::OpsDocumentStream` retention primitive. That means supervised shard
+  sets can now snapshot both live control-plane state and recent shard/supervisor
+  TOON ops history without per-shard log scraping or `apps/pod-server` private
+  wiring. What is still missing is durable export/persistence above those
+  in-memory ring buffers, so retained history still resets with the host process.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
