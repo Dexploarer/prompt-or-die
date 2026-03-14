@@ -2073,5 +2073,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Switched the retained shard-target benchmark cadence from monthly labels to ISO week labels, republished the committed weekly baseline as `docs/benchmark-snapshots/2026-W11-shard-target.json`, and updated the wrapper/tests/docs so week-over-week review now uses `YYYY-Www` labels consistently.
   - `git diff --check`
 
+### Iteration 203
+- [x] Extracted a typed dedicated-server bootstrap seam in `apps/pod-server/src/main.rs` via `WorldBootstrapPlan`, so map loading and initial idle-agent population now run through one explicit authority bootstrap contract instead of inline app-root logic.
+- [x] Extracted a typed dedicated-server transport seam in `apps/pod-server/src/main.rs` via `TransportPolicy` plus `ServerConfig::network_server_config()`, so direct-connect snapshot cadence, inactivity timeout, and queue-pressure thresholds are no longer hardcoded at the `GameServer` call site.
+- [x] Added deterministic `pod-server` coverage for transport-policy composition and authoritative bootstrap population, and updated `docs/plugin-model.md` plus `docs/architecture.md` so the current lifecycle docs reflect the new app-local seam instead of claiming the values are still fully hardcoded.
+- [x] Validation:
+  - `cargo test -p pod-server --bin pod-server runtime_tests -- --nocapture`
+  - `cargo check -p pod-server`
+  - `git diff --check`
+
+**Next focus**: Move the new `pod-server` bootstrap/transport seam out of the app-local binary and into a reusable crate/exported lifecycle surface so dedicated authority variants do not need to reimplement the same composition contract.
+
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

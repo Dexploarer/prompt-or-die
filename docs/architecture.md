@@ -189,6 +189,10 @@ integration targets available today:
   `build_runtime_bundle_manifest`, and `materialize_runtime_bundle_manifest`.
 - `pod-net` plus `pod-core` export the authoritative transport/debug seam through
   `ClientMessage`, `ServerMessage`, and `ShardTransportSummary`.
+- `apps/pod-server` now has typed app-local authority composition through
+  `ServerConfig::world_bootstrap()` and `ServerConfig::network_server_config()`,
+  which removes the last inline map/bootstrap and transport-policy literals from
+  the dedicated server entry point.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -198,9 +202,9 @@ teaching app bootstrap files new ad hoc registration rules.
 
 The remaining blockers are also concrete now:
 
-- `apps/pod-server/src/main.rs` still owns world bootstrap and transport policy composition.
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
+- `apps/pod-server/src/main.rs` still keeps its new bootstrap/transport seam app-local instead of exporting a crate-level lifecycle/registration surface.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

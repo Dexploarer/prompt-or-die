@@ -95,7 +95,7 @@ treated as composition roots rather than extension APIs.
 | --- | --- | --- |
 | `apps/pod-web/src/main.ts` | Internal composition root | Do not add feature-specific hooks here if the behavior belongs in `pod-scene`, `pod-assets`, `pod-net`, or shared browser contracts. |
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
-| `apps/pod-server/src/main.rs` | Internal composition root | Use it to wire modes together, not as the primary place to author gameplay or extension rules. |
+| `apps/pod-server/src/main.rs` | Internal composition root with typed app-local seams | Use it to wire modes together through `ServerConfig::world_bootstrap()` and `ServerConfig::network_server_config()`, not as the primary place to author gameplay or extension rules. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
 This is the near-term rule: extend exported crate boundaries first, and only
@@ -106,10 +106,11 @@ touch app bootstrap when you are composing existing subsystems together.
 The current seams are usable, but several hooks are still missing and force
 integrators back into app composition roots:
 
-- World/bootstrap hook:
-  `apps/pod-server/src/main.rs` still hardcodes map loading, initial NPC spawn,
-  and runtime-mode branching before the server starts. There is no typed
-  startup hook for “prepare world before authority begins.”
+- Dedicated-server lifecycle export hook:
+  `apps/pod-server/src/main.rs` now routes map/bootstrap composition through
+  `WorldBootstrapPlan` and transport tuning through `TransportPolicy`, but that
+  seam is still app-local instead of a crate-level registration surface shared
+  across dedicated server entry points.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
@@ -119,12 +120,6 @@ integrators back into app composition roots:
   `crates/pod-editor/src/lib.rs` still uses a closed `EditorPanel` enum plus
   hardcoded `render_*panel` dispatch, so new panels require editing the editor
   shell instead of registering themselves.
-- Transport policy hook:
-  `apps/pod-server/src/main.rs` still hardcodes direct-connect snapshot
-  interval, inactivity timeout, and queue-pressure thresholds when composing
-  `pod_net::GameServer`. There is no reusable policy object or registration
-  hook for transport tuning.
-
 These are the next seams to formalize if POD wants real plugin/app lifecycle
 parity instead of “extend the crate, then patch the app root.”
 

@@ -256,9 +256,11 @@
 - [x] Refreshed the shard-target transport benchmark baselines in `crates/pod-net/src/server.rs` to the current deterministic byte envelopes, with `steady-delta total/max = 1392/174` and aggregate full/recovery/delta totals of `1220/234/1904`
 - [x] Extended `scripts/publish_moat_snapshots.ts` and `scripts/publish_moat_snapshots.test.ts` so shard-target weekly snapshots can merge a moat report with separately generated browser render-route and live topology-feed artifacts
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed weekly shard-target snapshot at `docs/benchmark-snapshots/2026-W11-shard-target.json`
+- [x] Extracted `WorldBootstrapPlan`, `TransportPolicy`, and `ServerConfig::network_server_config()` in `apps/pod-server/src/main.rs`, so dedicated-server world/bootstrap and direct-connect transport composition now run through typed app-local contracts instead of inline literals in the binary entry point
+- [x] Added deterministic `pod-server` runtime coverage for bootstrap population and transport-policy composition, and updated `docs/plugin-model.md` plus `docs/architecture.md` so the lifecycle docs reflect the new `pod-server` seam accurately
 
 **Next Action**:
-- All audited backlog items are closed. The retained shard-target history now runs on weekly labels and publishes retained week-over-week comparison artifacts with real benchmark values in the report.
+- Move the new pod-server bootstrap/transport seam into a reusable crate/exported lifecycle contract so dedicated authority variants do not have to patch `apps/pod-server/src/main.rs` directly.
 
 ## Audit Backlog (2026-03-13)
 

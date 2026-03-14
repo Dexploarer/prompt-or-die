@@ -14,7 +14,7 @@
 #![allow(clippy::wildcard_in_or_patterns)]
 
 use log::{error, info, warn};
-use pod_core::{IdleAgent, World};
+use pod_core::World;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,6 +25,45 @@ use std::time::{Duration, Instant};
 
 #[allow(dead_code)]
 mod config {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TransportPolicy {
+        pub snapshot_interval: u64,
+        pub client_inactivity_timeout_ticks: u64,
+        pub queue_pressure_warn_depth: usize,
+    }
+
+    impl Default for TransportPolicy {
+        fn default() -> Self {
+            Self {
+                snapshot_interval: 10,
+                client_inactivity_timeout_ticks: 600,
+                queue_pressure_warn_depth: 192,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct WorldBootstrapPlan {
+        pub map_name: String,
+        pub initial_idle_agents: usize,
+    }
+
+    impl WorldBootstrapPlan {
+        pub fn apply(&self, world: &mut pod_core::World) {
+            log::info!("Loading map: {}", self.map_name);
+            super::map::load_default_map(world, &self.map_name);
+
+            log::info!(
+                "Applying authoritative bootstrap: {} idle NPCs",
+                self.initial_idle_agents
+            );
+            for index in 0..self.initial_idle_agents {
+                world.add_agent(Box::new(pod_core::IdleAgent::new()));
+                log::info!("Spawned bootstrap NPC #{}", index + 1);
+            }
+        }
+    }
+
     /// Server configuration
     #[derive(Clone, Debug)]
     pub struct ServerConfig {
@@ -42,8 +81,12 @@ mod config {
         pub world_seed: u64,
         /// Map name to load
         pub map_name: String,
+        /// Number of initial idle NPC agents to inject into the authoritative shard.
+        pub initial_idle_agents: usize,
         /// Runtime mode: "local" (in-process loop) or "network" (pod-net QUIC server)
         pub runtime_mode: String,
+        /// Dedicated transport policy composed into the direct-connect server.
+        pub transport_policy: TransportPolicy,
     }
 
     impl ServerConfig {
@@ -67,6 +110,10 @@ mod config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(32);
+            let initial_idle_agents = std::env::var("POD_INITIAL_IDLE_AGENTS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3);
 
             let world_seed = std::env::var("POD_WORLD_SEED")
                 .ok()
@@ -88,6 +135,23 @@ mod config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(default_websocket_port);
+            let defaults = TransportPolicy::default();
+            let transport_policy = TransportPolicy {
+                snapshot_interval: std::env::var("POD_SNAPSHOT_INTERVAL")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(defaults.snapshot_interval),
+                client_inactivity_timeout_ticks: std::env::var(
+                    "POD_CLIENT_INACTIVITY_TIMEOUT_TICKS",
+                )
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(defaults.client_inactivity_timeout_ticks),
+                queue_pressure_warn_depth: std::env::var("POD_QUEUE_PRESSURE_WARN_DEPTH")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(defaults.queue_pressure_warn_depth),
+            };
 
             ServerConfig {
                 bind_address,
@@ -97,8 +161,37 @@ mod config {
                 max_clients,
                 world_seed,
                 map_name,
+                initial_idle_agents,
                 runtime_mode,
+                transport_policy,
             }
+        }
+
+        pub fn world_bootstrap(&self) -> WorldBootstrapPlan {
+            WorldBootstrapPlan {
+                map_name: self.map_name.clone(),
+                initial_idle_agents: self.initial_idle_agents,
+            }
+        }
+
+        pub fn network_server_config(
+            &self,
+        ) -> Result<pod_net::protocol::ServerConfig, Box<dyn std::error::Error + Send + Sync>>
+        {
+            let (bind_addr, bind_port) = super::parse_bind_target(&self.bind_address)?;
+            Ok(pod_net::protocol::ServerConfig {
+                max_clients: self.max_clients,
+                tick_rate: self.tick_rate as u32,
+                snapshot_interval: self.transport_policy.snapshot_interval,
+                bind_addr,
+                bind_port,
+                enable_websocket: self.enable_websocket,
+                websocket_port: self.websocket_port,
+                client_inactivity_timeout_ticks: self
+                    .transport_policy
+                    .client_inactivity_timeout_ticks,
+                queue_pressure_warn_depth: self.transport_policy.queue_pressure_warn_depth,
+            })
         }
     }
 }
@@ -975,7 +1068,6 @@ mod stats {
 }
 
 use config::ServerConfig;
-use map::load_default_map;
 use stats::ServerStats;
 
 // ============================================================================
@@ -1012,17 +1104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Initializing world with seed={}", config.world_seed);
     let mut world = World::new(config.world_seed as u64);
 
-    // Load the default map
-    info!("Loading map: {}", config.map_name);
-    load_default_map(&mut world, &config.map_name);
-
-    // Add some initial AI agents for testing
-    info!("Spawning initial NPCs...");
-    for i in 0..3 {
-        let agent = Box::new(IdleAgent::new());
-        world.add_agent(agent);
-        info!("Spawned NPC #{}", i + 1);
-    }
+    config.world_bootstrap().apply(&mut world);
 
     // Initialize server stats
     let mut stats = ServerStats::new(config.tick_rate as u32);
@@ -1127,18 +1209,7 @@ async fn run_network_server(
     world: World,
     config: &ServerConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (bind_addr, bind_port) = parse_bind_target(&config.bind_address)?;
-    let net_config = pod_net::protocol::ServerConfig {
-        max_clients: config.max_clients,
-        tick_rate: config.tick_rate as u32,
-        snapshot_interval: 10,
-        bind_addr,
-        bind_port,
-        enable_websocket: config.enable_websocket,
-        websocket_port: config.websocket_port,
-        client_inactivity_timeout_ticks: 600,
-        queue_pressure_warn_depth: 192,
-    };
+    let net_config = config.network_server_config()?;
 
     let mut server = pod_net::GameServer::new(net_config, world);
     server
@@ -1187,7 +1258,11 @@ Configuration:
   Max Clients:    {}
   World Seed:     {}
   Map:            {}
+  Bootstrap NPCs: {}
   Runtime Mode:   {}
+  Snapshot Every: {} ticks
+  Client Timeout: {} ticks
+  Queue Warn:     {}
 
 "#,
         config.bind_address,
@@ -1205,14 +1280,21 @@ Configuration:
         config.max_clients,
         config.world_seed,
         config.map_name,
-        config.runtime_mode
+        config.initial_idle_agents,
+        config.runtime_mode,
+        config.transport_policy.snapshot_interval,
+        config.transport_policy.client_inactivity_timeout_ticks,
+        config.transport_policy.queue_pressure_warn_depth
     );
 }
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{config::ServerConfig, map::load_default_map, parse_bind_target};
-    use pod_core::{IdleAgent, World};
+    use super::{
+        config::{ServerConfig, TransportPolicy},
+        parse_bind_target,
+    };
+    use pod_core::World;
 
     #[test]
     fn parse_bind_target_splits_host_and_port() {
@@ -1244,12 +1326,43 @@ mod runtime_tests {
     }
 
     #[test]
-    fn default_map_seeds_streamed_population_for_authoritative_worlds() {
-        let mut world = World::new(7);
-        load_default_map(&mut world, "default");
-        world.add_agent(Box::new(IdleAgent::new()));
+    fn server_config_builds_network_transport_policy_contract() {
+        let original_bind = std::env::var_os("POD_BIND_ADDRESS");
+        let original_snapshot_interval = std::env::var_os("POD_SNAPSHOT_INTERVAL");
+        let original_timeout = std::env::var_os("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS");
+        let original_queue_warn = std::env::var_os("POD_QUEUE_PRESSURE_WARN_DEPTH");
+
+        std::env::set_var("POD_BIND_ADDRESS", "127.0.0.1:8123");
+        std::env::set_var("POD_SNAPSHOT_INTERVAL", "24");
+        std::env::set_var("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS", "900");
+        std::env::set_var("POD_QUEUE_PRESSURE_WARN_DEPTH", "255");
+
+        let config = ServerConfig::from_env();
+        let net_config = config
+            .network_server_config()
+            .expect("network transport policy should compose");
+
+        assert_eq!(net_config.bind_addr, "127.0.0.1");
+        assert_eq!(net_config.bind_port, 8123);
+        assert_eq!(net_config.snapshot_interval, 24);
+        assert_eq!(net_config.client_inactivity_timeout_ticks, 900);
+        assert_eq!(net_config.queue_pressure_warn_depth, 255);
+
+        restore_var("POD_BIND_ADDRESS", original_bind);
+        restore_var("POD_SNAPSHOT_INTERVAL", original_snapshot_interval);
+        restore_var("POD_CLIENT_INACTIVITY_TIMEOUT_TICKS", original_timeout);
+        restore_var("POD_QUEUE_PRESSURE_WARN_DEPTH", original_queue_warn);
+    }
+
+    #[test]
+    fn authoritative_world_bootstrap_seeds_streamed_population_and_idle_agents() {
+        let config = sample_server_config();
+        let mut world = World::new(config.world_seed);
+
+        config.world_bootstrap().apply(&mut world);
         world.reconcile_streaming_population();
 
+        assert_eq!(world.agent_count(), config.initial_idle_agents);
         let population = world.population_state();
         assert!(!population.regions.is_empty());
         assert!(!population.chunks.is_empty());
@@ -1257,6 +1370,21 @@ mod runtime_tests {
             .chunks
             .iter()
             .any(|chunk| chunk.counts.wild_creatures > 0 || chunk.counts.resource_nodes > 0));
+    }
+
+    fn sample_server_config() -> ServerConfig {
+        ServerConfig {
+            bind_address: "127.0.0.1:7777".to_string(),
+            enable_websocket: true,
+            websocket_port: 7778,
+            max_clients: 32,
+            tick_rate: 60,
+            world_seed: 7,
+            map_name: "default".to_string(),
+            initial_idle_agents: 3,
+            runtime_mode: "network".to_string(),
+            transport_policy: TransportPolicy::default(),
+        }
     }
 
     fn restore_var(key: &str, value: Option<std::ffi::OsString>) {
