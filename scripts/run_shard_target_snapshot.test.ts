@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+  buildPublishedComparisonOutputPath,
   findLatestPriorSnapshotFilename,
   formatMonthLabel,
+  normalizeComparisonReportForPublication,
   parseArgs,
   resolveBrowserRouteStatus,
 } from "./run_shard_target_snapshot";
@@ -10,6 +12,30 @@ import {
 describe("run shard target snapshot", () => {
   it("formats month labels deterministically", () => {
     expect(formatMonthLabel(new Date("2026-03-13T12:00:00Z"))).toBe("2026-03");
+  });
+
+  it("builds the retained published comparison output path", () => {
+    expect(buildPublishedComparisonOutputPath("2026-03")).toBe(
+      "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+    );
+  });
+
+  it("normalizes retained comparison report paths for publication", () => {
+    const normalized = normalizeComparisonReportForPublication(
+      JSON.stringify({
+        baselinePath: "/tmp/comparison-baseline.json",
+        candidatePath: "/tmp/candidate.json",
+        summary: { regressions: 0 },
+      }),
+      "docs/benchmark-snapshots/2026-02-shard-target.json",
+      "docs/benchmark-snapshots/2026-03-shard-target.json",
+    );
+
+    expect(JSON.parse(normalized)).toEqual({
+      baselinePath: "docs/benchmark-snapshots/2026-02-shard-target.json",
+      candidatePath: "docs/benchmark-snapshots/2026-03-shard-target.json",
+      summary: { regressions: 0 },
+    });
   });
 
   it("selects the latest prior monthly shard-target snapshot", () => {

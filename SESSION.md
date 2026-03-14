@@ -258,7 +258,7 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed monthly shard-target snapshot at `docs/benchmark-snapshots/2026-03-shard-target.json`
 
 **Next Action**:
-- All audited backlog items are closed. The next runtime slice should publish and retain month-over-month snapshot comparison artifacts alongside the monthly shard-target snapshot, instead of only keeping the latest point-in-time artifact.
+- All audited backlog items are closed. The next runtime slice should build a lightweight index/report over the retained monthly shard-target snapshots and comparison artifacts, so historical review no longer depends on opening raw JSON files one by one.
 
 ## Audit Backlog (2026-03-13)
 

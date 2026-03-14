@@ -164,9 +164,9 @@ This lets us support:
 
 In order:
 
-1. Publish and retain the month-over-month comparison artifact alongside the
-   monthly shard-target snapshot, so orchestration drift review keeps the diff
-   report instead of only the refreshed snapshot JSON.
+1. Build a lightweight index/report over the retained monthly shard-target
+   snapshots and comparison artifacts, so orchestration drift review does not
+   require opening raw JSON files one by one.
 2. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 

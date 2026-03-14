@@ -1,0 +1,1827 @@
+{
+  "schemaVersion": 2,
+  "profile": "shard-target",
+  "baselineLabel": "2026-03",
+  "candidateLabel": "2026-03",
+  "baselinePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json",
+  "candidatePath": "/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/2026-03-shard-target.json",
+  "summary": {
+    "regressions": 0,
+    "improvements": 0,
+    "changed": 0,
+    "unchanged": 181,
+    "comparedMetrics": 181
+  },
+  "comparisons": [
+    {
+      "category": "snapshot",
+      "metric": "label",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "2026-03",
+      "candidate": "2026-03",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "snapshot",
+      "metric": "schemaVersion",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "4",
+      "candidate": "4",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "snapshot",
+      "metric": "profile",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "shard-target",
+      "candidate": "shard-target",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_full_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1220",
+      "candidate": "1220",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "234",
+      "candidate": "234",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1904",
+      "candidate": "1904",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_queue_pressure_events",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_timed_out_clients",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.total_recovery_delivery_failures",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport",
+      "metric": "aggregate.scenarios_passed",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "5",
+      "candidate": "5",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.steady-delta",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.steady-delta",
+      "metric": "all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.steady-delta",
+      "metric": "summary.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "1392",
+      "candidate": "1392",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.steady-delta",
+      "metric": "summary.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.steady-delta",
+      "metric": "summary.peak_pending_action_queue_depth",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-success",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-success",
+      "metric": "all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-success",
+      "metric": "summary.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-success",
+      "metric": "summary.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "234",
+      "candidate": "234",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-success",
+      "metric": "summary.peak_pending_action_queue_depth",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-failure",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-failure",
+      "metric": "all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-failure",
+      "metric": "summary.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-failure",
+      "metric": "summary.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.recovery-failure",
+      "metric": "summary.peak_pending_action_queue_depth",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.resume-connect",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.resume-connect",
+      "metric": "all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.resume-connect",
+      "metric": "summary.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "512",
+      "candidate": "512",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.resume-connect",
+      "metric": "summary.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.resume-connect",
+      "metric": "summary.peak_pending_action_queue_depth",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.queue-pressure-timeout",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.queue-pressure-timeout",
+      "metric": "all_checks_passed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "transport.queue-pressure-timeout",
+      "metric": "summary.total_delta_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.queue-pressure-timeout",
+      "metric": "summary.total_recovery_snapshot_bytes",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "transport.queue-pressure-timeout",
+      "metric": "summary.peak_pending_action_queue_depth",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "6",
+      "candidate": "6",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.workerGatesPassed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.frameSubmissionReductionPercent",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "89.5",
+      "candidate": "89.5",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.mainStableFramePercent",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "47.4",
+      "candidate": "47.4",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.workerStableFramePercent",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.mainSlowFrames",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "60",
+      "candidate": "60",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes",
+      "metric": "comparison.workerSlowFrames",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "11",
+      "candidate": "11",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "runtimePerf.stableFramePercent",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "47.4",
+      "candidate": "47.4",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "runtimePerf.slowFrames",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "60",
+      "candidate": "60",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "assetLoadPerf.averageGeometryLoadMs",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "2452.5",
+      "candidate": "2452.5",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "assetLoadPerf.averageSpriteLoadMs",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "4252.3",
+      "candidate": "4252.3",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "mainThreadPerf.byKind.control.submissionsCompleted",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.main",
+      "metric": "mainThreadPerf.byKind.resize.submissionsCompleted",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "runtimePerf.stableFramePercent",
+      "direction": "higher_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "runtimePerf.slowFrames",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "11",
+      "candidate": "11",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "assetLoadPerf.averageGeometryLoadMs",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "9658",
+      "candidate": "9658",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "assetLoadPerf.averageSpriteLoadMs",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "2.5",
+      "candidate": "2.5",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "mainThreadPerf.byKind.control.submissionsCompleted",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "browserRoutes.worker",
+      "metric": "mainThreadPerf.byKind.resize.submissionsCompleted",
+      "direction": "lower_is_better",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "allChecksPassed",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.consistent",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.world_quest_bindings_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.world_admissions_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.world_control_planes_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.applied_world_states_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.evaluation_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.tournament_control_plane_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "topologyParity.tournament_orchestration_match",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "worldCount",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology",
+      "metric": "linkCount",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "phase",
+      "direction": "must_match_baseline",
+      "status": "unchanged",
+      "baseline": "SuddenDeath",
+      "candidate": "SuddenDeath",
+      "delta": null,
+      "envelope": "SuddenDeath"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "activeWorldCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": "[3, 3]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "contestedWorldCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "2",
+      "candidate": "2",
+      "delta": 0,
+      "envelope": "[2, 2]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "activeLinkCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": "[3, 3]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "leadingTeamCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": "[1, 1]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "atRiskTeamCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": "[1, 1]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "pressureWorldCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "1",
+      "candidate": "1",
+      "delta": 0,
+      "envelope": "[1, 1]"
+    },
+    {
+      "category": "headlessTopology.tournamentOrchestration",
+      "metric": "neuralSwarmWorldCount",
+      "direction": "must_stay_within_envelope",
+      "status": "unchanged",
+      "baseline": "0",
+      "candidate": "0",
+      "delta": 0,
+      "envelope": "[0, 0]"
+    },
+    {
+      "category": "topologyFeed",
+      "metric": "worldCount",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-prime",
+      "candidate": "deadman-prime",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-prime.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-prime",
+      "candidate": "deadman-prime",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-shadow",
+      "candidate": "deadman-shadow",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.deadman-shadow.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-shadow",
+      "candidate": "deadman-shadow",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "sanctuary-echo",
+      "candidate": "sanctuary-echo",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "topologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "sanctuary-echo",
+      "candidate": "sanctuary-echo",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed",
+      "metric": "worldCount",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "3",
+      "candidate": "3",
+      "delta": 0,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-prime",
+      "candidate": "deadman-prime",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-prime.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-prime",
+      "candidate": "deadman-prime",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-shadow",
+      "candidate": "deadman-shadow",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.deadman-shadow.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "deadman-shadow",
+      "candidate": "deadman-shadow",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo",
+      "metric": "present",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.authority_row",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "sanctuary-echo",
+      "candidate": "sanctuary-echo",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "resolved_world_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "quest_binding_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "applied_world_state_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "evaluation_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "world_tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "tournament_control_plane_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "tournament_orchestration_matches",
+      "direction": "must_stay_true",
+      "status": "unchanged",
+      "baseline": "true",
+      "candidate": "true",
+      "delta": null,
+      "envelope": null
+    },
+    {
+      "category": "liveTopologyFeed.sanctuary-echo.generated_runtime",
+      "metric": "resolved_world_id",
+      "direction": "informational",
+      "status": "unchanged",
+      "baseline": "sanctuary-echo",
+      "candidate": "sanctuary-echo",
+      "delta": null,
+      "envelope": null
+    }
+  ]
+}

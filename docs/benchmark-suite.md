@@ -410,7 +410,11 @@ reuse the current same-label snapshot as a temporary baseline before it
 publishes the refreshed artifact. When a later month exists, the wrapper now
 auto-selects the latest prior `docs/benchmark-snapshots/YYYY-MM-shard-target.json`
 file as the baseline, so month-over-month review no longer depends on always
-passing `--compare-baseline` by hand.
+passing `--compare-baseline` by hand. When comparison runs, the wrapper also
+retains the generated report as
+`docs/benchmark-snapshots/YYYY-MM-shard-target-comparison.json` and records
+that published path in the run summary, so the monthly history now keeps both
+the snapshot and the diff artifact.
 
 ## Interpretation rules
 

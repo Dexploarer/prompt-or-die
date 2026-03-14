@@ -87,6 +87,26 @@ export function findLatestPriorSnapshotFilename(
   return latestLabel == null ? null : `${latestLabel}-shard-target.json`;
 }
 
+export function buildPublishedComparisonOutputPath(label: string): string {
+  return `docs/benchmark-snapshots/${label}-shard-target-comparison.json`;
+}
+
+export function normalizeComparisonReportForPublication(
+  reportText: string,
+  baselinePath: string,
+  candidatePath: string,
+): string {
+  const parsed = JSON.parse(reportText);
+  if (typeof parsed !== "object" || parsed == null || Array.isArray(parsed)) {
+    throw new Error("snapshot comparison report must be a JSON object");
+  }
+
+  const report = parsed as Record<string, unknown>;
+  report.baselinePath = baselinePath;
+  report.candidatePath = candidatePath;
+  return `${JSON.stringify(report, null, 2)}\n`;
+}
+
 export function parseArgs(argv: string[]): Options {
   const options: Options = {
     label: formatMonthLabel(new Date()),
@@ -240,6 +260,10 @@ async function main() {
     repoRoot,
     "artifacts/benchmark-snapshot-comparison.json",
   );
+  const publishedComparisonOutput = resolve(
+    repoRoot,
+    buildPublishedComparisonOutputPath(options.label),
+  );
   const summaryOutput = resolve(repoRoot, options.output);
   const snapshotOutput = resolve(
     repoRoot,
@@ -259,6 +283,7 @@ async function main() {
   mkdirSync(dirname(moatOutput), { recursive: true });
   mkdirSync(dirname(liveTopologyOutput), { recursive: true });
   mkdirSync(dirname(comparisonOutput), { recursive: true });
+  mkdirSync(dirname(publishedComparisonOutput), { recursive: true });
   mkdirSync(spacetimeDataDir, { recursive: true });
 
   const commands: CommandSummary[] = [];
@@ -273,7 +298,7 @@ async function main() {
   const record = (result: { summary: CommandSummary; stdout: string }) => {
     commands.push(result.summary);
     return result;
-    };
+  };
 
   try {
     if (options.compareBaseline) {
@@ -526,11 +551,11 @@ async function main() {
     if (comparisonBaselinePath) {
       const compare = record(
         runCommand(
-        "compare-shard-snapshot",
-        [
-          "bun",
-          "./scripts/compare_moat_snapshots.ts",
-          "--baseline",
+          "compare-shard-snapshot",
+          [
+            "bun",
+            "./scripts/compare_moat_snapshots.ts",
+            "--baseline",
             comparisonBaselinePath,
             "--candidate",
             snapshotOutput,
@@ -546,6 +571,14 @@ async function main() {
           `snapshot comparison failed:\n${compare.summary.stderrSnippet ?? "no stderr captured"}`,
         );
       }
+      writeFileSync(
+        publishedComparisonOutput,
+        normalizeComparisonReportForPublication(
+          readFileSync(comparisonOutput, "utf8"),
+          comparisonBaselineSource,
+          snapshotOutput,
+        ),
+      );
       comparisonStatus = "passed";
     }
 
@@ -559,14 +592,16 @@ async function main() {
       comparison: {
         status: comparisonStatus,
         baseline: comparisonBaselineSource,
-        report: comparisonBaselinePath ? comparisonOutput : null,
+        report: comparisonBaselinePath ? publishedComparisonOutput : null,
       },
       paths: {
         moatReport: moatOutput,
         browserRoutes: browserRouteOutput,
         liveTopologyFeed: liveTopologyOutput,
         snapshot: snapshotOutput,
-        comparisonReport: comparisonBaselinePath ? comparisonOutput : null,
+        comparisonReport: comparisonBaselinePath
+          ? publishedComparisonOutput
+          : null,
         topologyExport: topologyOutput,
         runSummary: summaryOutput,
       },

@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 199
-**Current focus**: Iteration 200 publish month-over-month snapshot comparison artifacts alongside the monthly shard-target history
+**Last updated**: Iteration 200
+**Current focus**: Iteration 201 build a lightweight retained-history index/report for monthly shard-target snapshots and comparison artifacts
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2047,6 +2047,15 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `findLatestPriorSnapshotFilename(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the wrapper can auto-discover the latest prior monthly shard-target snapshot instead of relying only on a manual `--compare-baseline` path.
 - [x] Fixed the baseline-copy bug in `scripts/run_shard_target_snapshot.ts` by snapshotting the selected baseline into a temporary file before publish, so explicit same-label baselines and auto-selected prior-month baselines cannot be overwritten by the candidate snapshot before comparison runs.
 - [x] Revalidated the live wrapper without `--compare-baseline` by running `scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`, confirming the command history now compares against the temporary copied baseline instead of the post-publish output path.
+- [x] Validation:
+  - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `git diff --check`
+
+### Iteration 200
+- [x] Added `buildPublishedComparisonOutputPath(...)` in `scripts/run_shard_target_snapshot.ts` plus deterministic coverage in `scripts/run_shard_target_snapshot.test.ts`, so the shard-target wrapper now retains each successful comparison as `docs/benchmark-snapshots/YYYY-MM-shard-target-comparison.json` instead of leaving the diff report only in `artifacts/`.
+- [x] Updated `scripts/run_shard_target_snapshot.ts` to copy the generated comparison artifact into the published benchmark-snapshot directory, normalize the retained baseline/candidate paths back to the published snapshot history, and point both `comparison.report` and `paths.comparisonReport` at that retained path, so historical review keeps the same published location the workflow reports back to operators.
+- [x] Revalidated the live wrapper by running `scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`, confirming the retained comparison artifact is published beside the monthly snapshot and recorded in the run summary.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
   - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`

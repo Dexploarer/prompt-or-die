@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Publish month-over-month snapshot comparison artifacts alongside the monthly shard-target snapshot, so historical review keeps the diff report instead of only the latest point-in-time snapshot.
+1. All audit backlog items are closed. Build a lightweight index/report over the retained monthly shard-target snapshots and comparison artifacts, so historical review does not require manually opening JSON files one by one.
 
 ## Audit Backlog (2026-03-13)
 
