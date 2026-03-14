@@ -5,7 +5,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::collections::{HashMap, VecDeque};
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -185,6 +188,7 @@ pub struct OpsDocumentStream {
     history_limit: usize,
     history: Arc<Mutex<VecDeque<String>>>,
     tx: broadcast::Sender<String>,
+    archive: Option<OpsDocumentArchive>,
 }
 
 impl OpsDocumentStream {
@@ -194,7 +198,27 @@ impl OpsDocumentStream {
             history_limit,
             history: Arc::new(Mutex::new(VecDeque::with_capacity(history_limit.max(1)))),
             tx: broadcast::channel(live_capacity).0,
+            archive: None,
         }
+    }
+
+    pub fn with_persistent_archive(
+        history_limit: usize,
+        live_capacity: usize,
+        archive_path: impl Into<PathBuf>,
+    ) -> std::io::Result<Self> {
+        let live_capacity = live_capacity.max(1);
+        let archive_path = archive_path.into();
+        let (archive, recent_documents) =
+            OpsDocumentArchive::open(&archive_path, history_limit.max(1))?;
+        let history = recent_documents.into_iter().collect::<VecDeque<_>>();
+
+        Ok(Self {
+            history_limit,
+            history: Arc::new(Mutex::new(history)),
+            tx: broadcast::channel(live_capacity).0,
+            archive: Some(archive),
+        })
     }
 
     pub fn publish(&self, document: String) {
@@ -203,6 +227,15 @@ impl OpsDocumentStream {
             history.push_back(document.clone());
             while history.len() > self.history_limit {
                 history.pop_front();
+            }
+        }
+
+        if let Some(archive) = &self.archive {
+            if let Err(err) = archive.append(&document) {
+                warn!(
+                    "failed to append ops document to persistent archive {}: {err}",
+                    archive.path().display()
+                );
             }
         }
 
@@ -229,8 +262,116 @@ impl OpsDocumentStream {
             .len()
     }
 
+    pub fn persisted_document_count(&self) -> usize {
+        self.archive
+            .as_ref()
+            .map(OpsDocumentArchive::persisted_document_count)
+            .unwrap_or(0)
+    }
+
+    pub fn archive_path(&self) -> Option<PathBuf> {
+        self.archive.as_ref().map(|archive| archive.path().to_path_buf())
+    }
+
     pub fn receiver_count(&self) -> usize {
         self.tx.receiver_count()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct OpsDocumentArchive {
+    path: Arc<PathBuf>,
+    state: Arc<Mutex<OpsDocumentArchiveState>>,
+}
+
+#[derive(Debug)]
+struct OpsDocumentArchiveState {
+    writer: BufWriter<File>,
+    persisted_document_count: usize,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct PersistedOpsDocumentRecord {
+    document: String,
+}
+
+impl OpsDocumentArchive {
+    fn open(path: &Path, history_limit: usize) -> std::io::Result<(Self, Vec<String>)> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut recent_documents = VecDeque::with_capacity(history_limit.max(1));
+        let mut persisted_document_count = 0;
+
+        if path.exists() {
+            let reader = BufReader::new(File::open(path)?);
+            for line in reader.lines() {
+                let line = line?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                let record: PersistedOpsDocumentRecord = serde_json::from_str(&line).map_err(
+                    |err| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "failed to decode persisted ops document from {}: {err}",
+                                path.display()
+                            ),
+                        )
+                    },
+                )?;
+                persisted_document_count += 1;
+                recent_documents.push_back(record.document);
+                while recent_documents.len() > history_limit {
+                    recent_documents.pop_front();
+                }
+            }
+        }
+
+        let writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
+        Ok((
+            Self {
+                path: Arc::new(path.to_path_buf()),
+                state: Arc::new(Mutex::new(OpsDocumentArchiveState {
+                    writer,
+                    persisted_document_count,
+                })),
+            },
+            recent_documents.into_iter().collect(),
+        ))
+    }
+
+    fn append(&self, document: &str) -> std::io::Result<()> {
+        let record = PersistedOpsDocumentRecord {
+            document: document.to_string(),
+        };
+        let encoded = serde_json::to_string(&record).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to encode ops document for persistence: {err}"),
+            )
+        })?;
+
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.writer.write_all(encoded.as_bytes())?;
+        state.writer.write_all(b"\n")?;
+        state.writer.flush()?;
+        state.persisted_document_count += 1;
+        Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
+    fn persisted_document_count(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .persisted_document_count
     }
 }
 
@@ -3007,6 +3148,35 @@ mod tests {
             .any(|document| decode_toon_value(document)
                 .map(|value| value["document_type"] == "versioned_tick_telemetry")
                 .unwrap_or(false)));
+    }
+
+    #[test]
+    fn ops_document_stream_persistent_archive_reloads_recent_history() {
+        let archive_root = std::env::temp_dir().join(format!(
+            "pod-net-ops-archive-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let archive_path = archive_root.join("alpha-1-ops.jsonl");
+
+        let stream = OpsDocumentStream::with_persistent_archive(2, 16, &archive_path)
+            .expect("persistent stream should initialize");
+        stream.publish("doc-1".to_string());
+        stream.publish("doc-2".to_string());
+        stream.publish("doc-3".to_string());
+        assert_eq!(stream.retained_document_count(), 2);
+        assert_eq!(stream.persisted_document_count(), 3);
+        assert_eq!(stream.archive_path(), Some(archive_path.clone()));
+        drop(stream);
+
+        let reloaded_stream = OpsDocumentStream::with_persistent_archive(2, 16, &archive_path)
+            .expect("reloaded stream should restore recent docs");
+        assert_eq!(reloaded_stream.persisted_document_count(), 3);
+        assert_eq!(
+            reloaded_stream.recent_documents(),
+            vec!["doc-2".to_string(), "doc-3".to_string()]
+        );
+
+        fs::remove_dir_all(&archive_root).expect("archive root should be removable");
     }
 
     #[tokio::test]

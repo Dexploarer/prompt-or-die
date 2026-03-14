@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use pod_core::{
@@ -53,6 +54,7 @@ pub struct AuthorityHostConfig {
     pub world: AuthorityWorldConfig,
     pub transport_mode: AuthorityTransportMode,
     pub direct_connect: DirectConnectTransportConfig,
+    pub ops_persistence: Option<OpsPersistenceConfig>,
 }
 
 impl AuthorityHostConfig {
@@ -66,12 +68,19 @@ impl AuthorityHostConfig {
             .map(|value| AuthorityTransportMode::from_env_value(&value))
             .unwrap_or(AuthorityTransportMode::DirectConnect);
         let direct_connect = DirectConnectTransportConfig::from_env();
+        let ops_persistence = std::env::var("POD_OPS_ARCHIVE_DIR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|archive_root_dir| OpsPersistenceConfig {
+                archive_root_dir: PathBuf::from(archive_root_dir),
+            });
 
         Self {
             tick_rate,
             world,
             transport_mode,
             direct_connect,
+            ops_persistence,
         }
     }
 
@@ -111,7 +120,7 @@ impl AuthorityHostConfig {
             Ok(AuthorityHostRuntime::DirectConnect(runtime))
         } else {
             Ok(AuthorityHostRuntime::Local(
-                LocalAuthorityRuntime::new_with_shard_id(self, world, shard_id),
+                LocalAuthorityRuntime::try_new_with_shard_id(self, world, shard_id)?,
             ))
         }
     }
@@ -134,6 +143,43 @@ impl AuthorityHostConfig {
 
     pub fn transport_policy(&self) -> &TransportPolicy {
         &self.direct_connect.transport_policy
+    }
+
+    fn build_ops_document_stream(
+        &self,
+        shard_id: &str,
+    ) -> Result<OpsDocumentStream, AuthorityHostError> {
+        match &self.ops_persistence {
+            Some(config) => OpsDocumentStream::with_persistent_archive(
+                OPS_DOCUMENT_HISTORY_LIMIT,
+                OPS_DOCUMENT_CHANNEL_CAPACITY,
+                config.archive_path_for_shard(shard_id),
+            )
+            .map_err(|err| {
+                AuthorityHostError::OpsPersistence(format!(
+                    "failed to open shard ops archive for `{shard_id}`: {err}"
+                ))
+            }),
+            None => Ok(OpsDocumentStream::new(
+                OPS_DOCUMENT_HISTORY_LIMIT,
+                OPS_DOCUMENT_CHANNEL_CAPACITY,
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsPersistenceConfig {
+    pub archive_root_dir: PathBuf,
+}
+
+impl OpsPersistenceConfig {
+    pub fn archive_path_for_shard(&self, shard_id: &str) -> PathBuf {
+        self.archive_root_dir.join(format!("{shard_id}-ops.jsonl"))
+    }
+
+    pub fn archive_root_dir(&self) -> &Path {
+        &self.archive_root_dir
     }
 }
 
@@ -369,10 +415,20 @@ impl AuthorityShardOpsHandle {
         self.stream.retained_document_count()
     }
 
+    pub fn persisted_document_count(&self) -> usize {
+        self.stream.persisted_document_count()
+    }
+
+    pub fn archive_path(&self) -> Option<PathBuf> {
+        self.stream.archive_path()
+    }
+
     pub fn snapshot(&self) -> AuthorityShardOpsSnapshot {
         AuthorityShardOpsSnapshot {
             shard: self.shard.clone(),
             retained_document_count: self.retained_document_count(),
+            persisted_document_count: self.persisted_document_count(),
+            archive_path: self.archive_path(),
             recent_documents: self.recent_documents(),
         }
     }
@@ -382,6 +438,8 @@ impl AuthorityShardOpsHandle {
 pub struct AuthorityShardOpsSnapshot {
     pub shard: AuthorityShardSummary,
     pub retained_document_count: usize,
+    pub persisted_document_count: usize,
+    pub archive_path: Option<PathBuf>,
     pub recent_documents: Vec<String>,
 }
 
@@ -754,6 +812,10 @@ impl ShardSupervisorOpsHandle {
                 .iter()
                 .map(|summary| summary.retained_document_count)
                 .sum(),
+            total_persisted_document_count: shards
+                .iter()
+                .map(|summary| summary.persisted_document_count)
+                .sum(),
             shards,
         }
     }
@@ -763,6 +825,7 @@ impl ShardSupervisorOpsHandle {
 pub struct ShardSupervisorOpsSnapshot {
     pub shard_count: usize,
     pub total_retained_document_count: usize,
+    pub total_persisted_document_count: usize,
     pub shards: Vec<AuthorityShardOpsSnapshot>,
 }
 
@@ -1034,10 +1097,39 @@ pub struct LocalAuthorityRuntime {
 }
 
 impl LocalAuthorityRuntime {
+    pub fn try_new_with_shard_id(
+        config: &AuthorityHostConfig,
+        world: World,
+        shard_id: impl Into<String>,
+    ) -> Result<Self, AuthorityHostError> {
+        let shard_id = shard_id.into();
+        let ops_document_stream = config.build_ops_document_stream(&shard_id)?;
+        Ok(Self::new_with_ops_document_stream(
+            config,
+            world,
+            shard_id,
+            ops_document_stream,
+        ))
+    }
+
     pub fn new_with_shard_id(
         config: &AuthorityHostConfig,
         world: World,
         shard_id: impl Into<String>,
+    ) -> Self {
+        Self::new_with_ops_document_stream(
+            config,
+            world,
+            shard_id,
+            OpsDocumentStream::new(OPS_DOCUMENT_HISTORY_LIMIT, OPS_DOCUMENT_CHANNEL_CAPACITY),
+        )
+    }
+
+    fn new_with_ops_document_stream(
+        config: &AuthorityHostConfig,
+        world: World,
+        shard_id: impl Into<String>,
+        ops_document_stream: OpsDocumentStream,
     ) -> Self {
         let shard_id = shard_id.into();
         let shard = AuthorityShardSummary {
@@ -1060,8 +1152,6 @@ impl LocalAuthorityRuntime {
             latest_tick: 0,
             reason: None,
         });
-        let ops_document_stream =
-            OpsDocumentStream::new(OPS_DOCUMENT_HISTORY_LIMIT, OPS_DOCUMENT_CHANNEL_CAPACITY);
 
         Self {
             world,
@@ -1202,8 +1292,7 @@ impl DirectConnectAuthorityRuntime {
         let (lifecycle_command_tx, lifecycle_command_rx) = mpsc::unbounded_channel();
         let (lifecycle_state_tx, lifecycle_state_rx) =
             watch::channel(ServerLifecycleState::running(&shard_id));
-        let ops_document_stream =
-            OpsDocumentStream::new(OPS_DOCUMENT_HISTORY_LIMIT, OPS_DOCUMENT_CHANNEL_CAPACITY);
+        let ops_document_stream = config.build_ops_document_stream(&shard_id)?;
         let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
         server.install_transport_summary_watch(transport_summary_tx);
         server.install_incident_summary_watch(gameplay_incident_summary_tx);
@@ -1262,6 +1351,7 @@ impl DirectConnectAuthorityRuntime {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorityHostError {
     TransportConfig(String),
+    OpsPersistence(String),
     Initialize(String),
     Run(String),
 }
@@ -1271,6 +1361,9 @@ impl std::fmt::Display for AuthorityHostError {
         match self {
             Self::TransportConfig(message) => {
                 write!(f, "invalid direct-connect transport config: {message}")
+            }
+            Self::OpsPersistence(message) => {
+                write!(f, "failed to initialize ops persistence: {message}")
             }
             Self::Initialize(message) => {
                 write!(f, "failed to initialize direct-connect runtime: {message}")
@@ -1444,8 +1537,9 @@ mod tests {
         AuthorityShardControlPlaneHandle, AuthorityShardLifecycleCommandKind,
         AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
         DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
-        PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
-        ShardSupervisorError, ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
+        OpsPersistenceConfig, PreparedAuthorityShard, ShardSupervisorConfig,
+        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorSummary,
+        OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -1456,6 +1550,7 @@ mod tests {
         DirectConnectTransportConfig, OpsDocumentStream, ServerLifecycleCommand,
         ServerLifecycleState, TransportPolicy,
     };
+    use std::fs;
     use std::time::Duration;
     use tokio::sync::{mpsc, watch};
 
@@ -1466,6 +1561,7 @@ mod tests {
         let original_world_seed = std::env::var_os("POD_WORLD_SEED");
         let original_map_name = std::env::var_os("POD_MAP_NAME");
         let original_idle_agents = std::env::var_os("POD_INITIAL_IDLE_AGENTS");
+        let original_ops_archive_dir = std::env::var_os("POD_OPS_ARCHIVE_DIR");
 
         std::env::set_var("POD_TICK_RATE", "30");
         std::env::set_var("POD_RUNTIME_MODE", "local");
@@ -1479,12 +1575,14 @@ mod tests {
         assert_eq!(config.world.world_seed, 17);
         assert_eq!(config.world.map_name, "verdant-hollow");
         assert_eq!(config.world.initial_idle_agents, 4);
+        assert_eq!(config.ops_persistence, None);
 
         restore_var("POD_TICK_RATE", original_tick_rate);
         restore_var("POD_RUNTIME_MODE", original_runtime_mode);
         restore_var("POD_WORLD_SEED", original_world_seed);
         restore_var("POD_MAP_NAME", original_map_name);
         restore_var("POD_INITIAL_IDLE_AGENTS", original_idle_agents);
+        restore_var("POD_OPS_ARCHIVE_DIR", original_ops_archive_dir);
     }
 
     #[test]
@@ -1537,6 +1635,8 @@ mod tests {
         let value = decode_toon_value(&first_document).expect("ops document should decode as TOON");
         assert_eq!(value["document_type"], "versioned_tick_telemetry");
         assert!(runtime.ops_handle().retained_document_count() >= 1);
+        assert_eq!(runtime.ops_handle().persisted_document_count(), 0);
+        assert_eq!(runtime.ops_handle().archive_path(), None);
         assert!(runtime
             .ops_handle()
             .recent_documents()
@@ -1602,6 +1702,7 @@ mod tests {
         let snapshot = prepared.ops_handle().snapshot();
         assert_eq!(snapshot.shard_count, 1);
         assert!(snapshot.total_retained_document_count >= 1);
+        assert_eq!(snapshot.total_persisted_document_count, 0);
         assert_eq!(snapshot.shards[0].shard.shard_id, "alpha-1");
         assert!(snapshot.shards[0]
             .recent_documents
@@ -1609,6 +1710,66 @@ mod tests {
             .any(|document| decode_toon_value(document)
                 .map(|value| value["document_type"] == "versioned_tick_telemetry")
                 .unwrap_or(false)));
+    }
+
+    #[test]
+    fn local_runtime_persists_and_reloads_ops_history_from_archive() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-archive-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut config = sample_config(AuthorityTransportMode::Local);
+        config.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let archive_path = config
+            .ops_persistence
+            .as_ref()
+            .expect("ops persistence should be configured")
+            .archive_path_for_shard("alpha-1");
+
+        let mut runtime = match config
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(3.0, 3.0)
+                    .with_label("persistent-ops-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("persistent local host runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+
+        runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
+        assert!(archive_path.exists());
+        assert!(runtime.ops_handle().persisted_document_count() >= 1);
+        assert_eq!(runtime.ops_handle().archive_path(), Some(archive_path.clone()));
+
+        drop(runtime);
+
+        let reloaded_runtime = LocalAuthorityRuntime::try_new_with_shard_id(
+            &config,
+            config.build_world(|_world, _map_name| {}),
+            "alpha-1",
+        )
+        .expect("reloaded runtime should restore archive-backed ops stream");
+        let reloaded_snapshot = reloaded_runtime.ops_handle().snapshot();
+        assert!(reloaded_snapshot.persisted_document_count >= 1);
+        assert_eq!(reloaded_snapshot.archive_path, Some(archive_path.clone()));
+        assert!(reloaded_snapshot
+            .recent_documents
+            .iter()
+            .any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
+
+        drop(reloaded_runtime);
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
     #[test]
@@ -2022,6 +2183,7 @@ mod tests {
                 max_clients: 32,
                 transport_policy: TransportPolicy::default(),
             },
+            ops_persistence: None,
         }
     }
 

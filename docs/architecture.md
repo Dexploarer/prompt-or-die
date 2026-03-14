@@ -201,12 +201,13 @@ integration targets available today:
   re-owning the `pod-core` authority world contract.
 - `pod-host` now exports the neutral authority host lifecycle from
   [`crates/pod-host/src/lib.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-host/src/lib.rs)
-  through `AuthorityHostConfig`, `AuthorityTransportMode`,
+  through `AuthorityHostConfig`, `OpsPersistenceConfig`, `AuthorityTransportMode`,
   `AuthorityHostRuntime`, `AuthorityShardConfig`, and
   `ShardSupervisorConfig`, plus retained `AuthorityShardOpsSnapshot` and
-  `ShardSupervisorOpsSnapshot` views over the shared ops feed, so app binaries
-  can select single-host or multi-shard authority hosting through one
-  crate-level seam.
+  `ShardSupervisorOpsSnapshot` views over the shared ops feed, plus optional
+  per-shard JSONL persistence via `POD_OPS_ARCHIVE_DIR`, so app binaries can
+  select single-host or multi-shard authority hosting through one crate-level
+  seam.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -218,7 +219,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, and retains recent shard/supervisor ops history in-memory through shared snapshot handles, but it still does not publish that retained history durably beyond the current host process.
+- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, and retains recent shard/supervisor ops history both in-memory and in optional per-shard JSONL archives, but it still does not provide a shared query/relay layer above those persisted files for browser/editor/ops consumers.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

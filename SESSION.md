@@ -310,6 +310,12 @@
 - [x] Updated `crates/pod-host/src/lib.rs` with retained `AuthorityShardOpsSnapshot` and `ShardSupervisorOpsSnapshot` views over that shared stream, so late-joining shard/supervisor consumers can inspect recent MMO ops history without app-private buffering.
 - [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to durable ops persistence/export beyond the current in-memory retained history surface.
 
+## Iteration 214 Progress
+
+- [x] Extended `pod_net::OpsDocumentStream` with an optional durable JSONL archive that flushes each TOON document and reloads the recent tail on startup, so retained ops history can survive host restarts instead of only the current process lifetime.
+- [x] Added `OpsPersistenceConfig` plus `POD_OPS_ARCHIVE_DIR` wiring in `crates/pod-host/src/lib.rs`, and surfaced archive path plus persisted counts through `AuthorityShardOpsSnapshot` / `ShardSupervisorOpsSnapshot` for both local and direct-connect runtimes.
+- [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to a shared archive query/relay surface above the per-shard persisted files.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

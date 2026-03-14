@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 213
-**Current focus**: Iteration 214 add durable shard/supervisor ops persistence/export above the new in-memory retained history surface
+**Last updated**: Iteration 214
+**Current focus**: Iteration 215 add a shared query/relay surface above the new per-shard ops archives so external consumers can inspect retained history without direct file access
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2194,7 +2194,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check --workspace`
   - `git diff --check`
 
-**Next focus**: Add durable shard/supervisor ops persistence or export above `AuthorityShardOpsSnapshot` and `ShardSupervisorOpsSnapshot` so retained MMO history survives beyond the current authority-host process.
+### Iteration 214
+- [x] Extended `pod_net::OpsDocumentStream` in `crates/pod-net/src/server.rs` with optional persistent JSONL archives that flush each TOON document durably and reload the recent tail on startup, so retained ops history can survive authority-host restarts instead of living only in RAM.
+- [x] Updated `crates/pod-host/src/lib.rs` with `OpsPersistenceConfig`, `POD_OPS_ARCHIVE_DIR` wiring, and persisted-count/archive-path fields on `AuthorityShardOpsSnapshot` / `ShardSupervisorOpsSnapshot`, so local and direct-connect hosts now share one durable ops-persistence surface.
+- [x] Refreshed the `pod-server` compatibility exports plus the architecture/plugin docs so the new archive-backed shard/supervisor ops surface is the documented source of truth, narrowing the next MMO gap to a shared query/relay layer above those per-shard archives.
+- [x] Validation:
+  - `cargo test -p pod-net ops_document_stream_persistent_archive_reloads_recent_history -- --nocapture`
+  - `cargo test -p pod-host local_runtime_persists_and_reloads_ops_history_from_archive -- --nocapture`
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Add a shared shard/supervisor archive query or relay surface above `OpsPersistenceConfig` so browser/editor/ops consumers can inspect retained history without bespoke per-host file access.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.
