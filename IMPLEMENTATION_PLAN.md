@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 215
-**Current focus**: Iteration 216 add a process-external relay/service surface above the new shard/supervisor archive handles so browser/editor/ops consumers can inspect retained history without living in the authority process
+**Last updated**: Iteration 216
+**Current focus**: Iteration 217 add an authenticated or streaming consumer-facing relay above the new process-external shard/supervisor archive query service so browser/editor/ops clients can do more than point-in-time retained-history fetches
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2221,6 +2221,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Next focus**: Add a process-external shard/supervisor archive relay or service layer above the new archive handles so browser/editor/ops consumers can inspect retained history without running inside the authority host.
+
+### Iteration 216
+- [x] Added a minimal process-external archive query surface in `crates/pod-host/src/lib.rs` through `OpsArchiveServiceConfig`, `OpsArchiveServiceRequest`, `OpsArchiveServiceResponse`, `OpsArchiveServiceClient`, and `ShardSupervisorOpsArchiveService`, so retained shard/supervisor ops history can now be queried over a bounded JSON-over-TCP request/response seam instead of only through in-process handles.
+- [x] Extended the existing shard/supervisor archive surfaces with `archive_service(...)` / `service(...)` constructors and refreshed `apps/pod-server/src/lib.rs` re-exports, so app binaries and external tooling can build against one shared authority-host API instead of bespoke bridge code.
+- [x] Added deterministic `pod-host` coverage for end-to-end archive-service querying over TCP and refreshed the architecture/plugin docs so the new process-external query service is the documented source of truth.
+- [x] Validation:
+  - `cargo test -p pod-host supervisor_archive_service_queries_persisted_history_over_tcp -- --nocapture`
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Add an authenticated or streaming consumer-facing relay above the new process-external archive query service so browser/editor/ops clients can follow retained history without embedding raw TCP request/response logic.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

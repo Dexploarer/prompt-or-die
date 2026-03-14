@@ -97,7 +97,7 @@ treated as composition roots rather than extension APIs.
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
 | `crates/pod-core/src/authority.rs` | Current transport-neutral authority world contract | Safe place to compose `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` without depending on transport-layer types. |
 | `crates/pod-net/src/authority.rs` | Current direct-connect transport adapter contract | Safe place to compose `DirectConnectTransportConfig`, `TransportPolicy`, `parse_bind_target(...)`, and `server_config(tick_rate)` without re-owning world/bootstrap state. |
-| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `OpsPersistenceConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, `ShardSupervisorConfig`, the shared shard/supervisor ops snapshot handles, and the typed archive-query handles so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
+| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `OpsPersistenceConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, `ShardSupervisorConfig`, the shared shard/supervisor ops snapshot handles, the typed archive-query handles, and the minimal process-external archive query service so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
 | `apps/pod-server/src/main.rs` | Thin internal entry point | Keep it focused on process startup, shutdown wiring, and calling the exported authority lifecycle surface. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
@@ -126,9 +126,13 @@ integrators back into app composition roots:
   persistence through `OpsPersistenceConfig` / `POD_OPS_ARCHIVE_DIR`. The repo
   now also exposes typed archive readers above those files, so consumers no
   longer need bespoke file parsing to inspect retained shard history after a
-  host restart. What is still missing is a process-external relay or service
-  surface above those handles, so browser/editor/ops consumers outside the
-  authority process still need an app-specific bridge.
+  host restart. It now also exposes a minimal process-external
+  `ShardSupervisorOpsArchiveService` / `OpsArchiveServiceClient`
+  request/response surface above those handles, so external consumers no
+  longer need an app-specific file bridge just to query retained history. What
+  is still missing is an authenticated or streaming consumer-facing relay above
+  that service for browser/editor/ops clients that need more than point-in-time
+  archive snapshots.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

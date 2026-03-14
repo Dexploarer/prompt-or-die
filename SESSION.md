@@ -322,6 +322,12 @@
 - [x] Added `AuthorityShardOpsArchiveHandle` and `ShardSupervisorOpsArchiveHandle` in `crates/pod-host/src/lib.rs`, plus `ops_archive_handle()` helpers on shard/supervisor configs and live ops handles, so retained archive queries now ride one crate-level authority seam.
 - [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to a process-external relay/service surface above the in-process archive handles.
 
+## Iteration 216 Progress
+
+- [x] Added a bounded JSON-over-TCP archive query service in `crates/pod-host/src/lib.rs` through `OpsArchiveServiceConfig`, `OpsArchiveServiceRequest`, `OpsArchiveServiceResponse`, `OpsArchiveServiceClient`, and `ShardSupervisorOpsArchiveService`, so external consumers can query retained shard/supervisor ops history without running inside the authority host.
+- [x] Extended the shard/supervisor archive surfaces with `archive_service(...)` / `service(...)` constructors and refreshed the `apps/pod-server/src/lib.rs` compatibility exports, so app binaries and tooling can build against one shared process-external archive-query seam.
+- [x] Added deterministic Tokio coverage that persists shard ops history, serves it over the new socket path, and validates the returned supervisor snapshot end to end.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

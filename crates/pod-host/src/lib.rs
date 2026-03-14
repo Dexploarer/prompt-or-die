@@ -8,12 +8,15 @@ use pod_core::{
     ShardGameplayIncidentTracker, ShardIncidentSummary, ShardTransportSummary, TelemetryArchive,
     TelemetryConfig, VersionedTickTelemetry, World,
 };
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
 use pod_net::{
-    OpsDocumentArchiveSnapshot, OpsDocumentStream, ServerLifecycleCommand,
-    ServerLifecyclePhase, ServerLifecycleState,
+    OpsDocumentArchiveSnapshot, OpsDocumentStream, ServerLifecycleCommand, ServerLifecyclePhase,
+    ServerLifecycleState,
 };
 
 const OPS_DOCUMENT_CHANNEL_CAPACITY: usize = 256;
@@ -21,7 +24,7 @@ const OPS_DOCUMENT_HISTORY_LIMIT: usize = 256;
 const ROLLUP_WINDOW_TICKS: u64 = 60;
 const INCIDENT_EMIT_INTERVAL_TICKS: u64 = 60;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthorityTransportMode {
     Local,
     DirectConnect,
@@ -244,7 +247,7 @@ impl AuthorityShardConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityShardSummary {
     pub shard_id: String,
     pub linked_shard_ids: Vec<String>,
@@ -332,6 +335,13 @@ impl ShardSupervisorConfig {
                 .map(AuthorityShardConfig::ops_archive_handle)
                 .collect(),
         }
+    }
+
+    pub fn archive_service(
+        &self,
+        config: OpsArchiveServiceConfig,
+    ) -> ShardSupervisorOpsArchiveService {
+        self.ops_archive_handle().service(config)
     }
 
     fn validate(&self) -> Result<(), ShardSupervisorError> {
@@ -523,13 +533,14 @@ impl AuthorityShardOpsArchiveHandle {
             });
         };
 
-        let snapshot = OpsDocumentArchiveSnapshot::load(&archive_path, recent_limit).map_err(
-            |source| AuthorityOpsArchiveError::ReadArchive {
-                shard_id: self.shard_id.clone(),
-                path: archive_path.clone(),
-                source,
-            },
-        )?;
+        let snapshot =
+            OpsDocumentArchiveSnapshot::load(&archive_path, recent_limit).map_err(|source| {
+                AuthorityOpsArchiveError::ReadArchive {
+                    shard_id: self.shard_id.clone(),
+                    path: archive_path.clone(),
+                    source,
+                }
+            })?;
 
         Ok(AuthorityShardOpsArchiveSnapshot {
             shard_id: self.shard_id.clone(),
@@ -541,7 +552,7 @@ impl AuthorityShardOpsArchiveHandle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityShardOpsArchiveSnapshot {
     pub shard_id: String,
     pub shard: Option<AuthorityShardSummary>,
@@ -1018,14 +1029,386 @@ impl ShardSupervisorOpsArchiveHandle {
             shards,
         })
     }
+
+    pub fn service(&self, config: OpsArchiveServiceConfig) -> ShardSupervisorOpsArchiveService {
+        ShardSupervisorOpsArchiveService {
+            archive: self.clone(),
+            config,
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardSupervisorOpsArchiveSnapshot {
     pub shard_count: usize,
     pub archived_shard_count: usize,
     pub total_persisted_document_count: usize,
     pub shards: Vec<AuthorityShardOpsArchiveSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsArchiveServiceConfig {
+    pub bind_address: String,
+    pub max_request_bytes: usize,
+    pub max_response_bytes: usize,
+}
+
+impl Default for OpsArchiveServiceConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: "127.0.0.1:7610".to_string(),
+            max_request_bytes: 64 * 1024,
+            max_response_bytes: 512 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsArchiveServiceClient {
+    pub address: String,
+    pub max_response_bytes: usize,
+}
+
+impl Default for OpsArchiveServiceClient {
+    fn default() -> Self {
+        Self {
+            address: "127.0.0.1:7610".to_string(),
+            max_response_bytes: 512 * 1024,
+        }
+    }
+}
+
+impl OpsArchiveServiceClient {
+    pub async fn query(
+        &self,
+        request: OpsArchiveServiceRequest,
+    ) -> Result<OpsArchiveServiceResponse, OpsArchiveServiceError> {
+        let mut socket = TcpStream::connect(&self.address).await.map_err(|source| {
+            OpsArchiveServiceError::Connect {
+                address: self.address.clone(),
+                source,
+            }
+        })?;
+        let encoded =
+            serde_json::to_vec(&request).map_err(OpsArchiveServiceError::EncodeRequest)?;
+        socket
+            .write_all(&encoded)
+            .await
+            .map_err(OpsArchiveServiceError::WriteRequest)?;
+        socket
+            .shutdown()
+            .await
+            .map_err(OpsArchiveServiceError::WriteRequest)?;
+
+        let response_bytes = match read_capped(&mut socket, self.max_response_bytes).await {
+            Ok(bytes) => bytes,
+            Err(ReadCappedError::Io(source)) => {
+                return Err(OpsArchiveServiceError::ReadResponse(source))
+            }
+            Err(ReadCappedError::TooLarge) => {
+                return Err(OpsArchiveServiceError::ResponseTooLarge {
+                    max_response_bytes: self.max_response_bytes,
+                })
+            }
+        };
+        let response = serde_json::from_slice::<OpsArchiveServiceResponse>(&response_bytes)
+            .map_err(OpsArchiveServiceError::DecodeResponse)?;
+        match response {
+            OpsArchiveServiceResponse::Error { message } => {
+                Err(OpsArchiveServiceError::Remote { message })
+            }
+            response => Ok(response),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpsArchiveServiceRequest {
+    Shard {
+        shard_id: String,
+        recent_limit: usize,
+    },
+    Supervisor {
+        recent_limit_per_shard: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpsArchiveServiceResponse {
+    Shard(AuthorityShardOpsArchiveSnapshot),
+    Supervisor(ShardSupervisorOpsArchiveSnapshot),
+    Error { message: String },
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsArchiveService {
+    archive: ShardSupervisorOpsArchiveHandle,
+    config: OpsArchiveServiceConfig,
+}
+
+impl ShardSupervisorOpsArchiveService {
+    pub async fn serve(self) -> Result<(), OpsArchiveServiceError> {
+        let listener = self.bind_listener().await?;
+        self.serve_listener(listener).await
+    }
+
+    pub async fn serve_once(self) -> Result<(), OpsArchiveServiceError> {
+        let listener = self.bind_listener().await?;
+        self.serve_once_listener(listener).await
+    }
+
+    async fn bind_listener(&self) -> Result<TcpListener, OpsArchiveServiceError> {
+        TcpListener::bind(&self.config.bind_address)
+            .await
+            .map_err(|source| OpsArchiveServiceError::Bind {
+                address: self.config.bind_address.clone(),
+                source,
+            })
+    }
+
+    async fn serve_listener(self, listener: TcpListener) -> Result<(), OpsArchiveServiceError> {
+        loop {
+            let (mut socket, _) = listener
+                .accept()
+                .await
+                .map_err(OpsArchiveServiceError::Accept)?;
+            self.handle_socket(&mut socket).await?;
+        }
+    }
+
+    async fn serve_once_listener(
+        self,
+        listener: TcpListener,
+    ) -> Result<(), OpsArchiveServiceError> {
+        let (mut socket, _) = listener
+            .accept()
+            .await
+            .map_err(OpsArchiveServiceError::Accept)?;
+        self.handle_socket(&mut socket).await
+    }
+
+    async fn handle_socket<S>(&self, socket: &mut S) -> Result<(), OpsArchiveServiceError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let response = match read_capped(socket, self.config.max_request_bytes).await {
+            Ok(request_bytes) => {
+                match serde_json::from_slice::<OpsArchiveServiceRequest>(&request_bytes) {
+                    Ok(request) => match self.query(request) {
+                        Ok(response) => response,
+                        Err(err) => OpsArchiveServiceResponse::Error {
+                            message: err.to_string(),
+                        },
+                    },
+                    Err(err) => OpsArchiveServiceResponse::Error {
+                        message: format!("failed to decode ops archive request: {err}"),
+                    },
+                }
+            }
+            Err(ReadCappedError::Io(source)) => {
+                return Err(OpsArchiveServiceError::ReadRequest(source))
+            }
+            Err(ReadCappedError::TooLarge) => OpsArchiveServiceResponse::Error {
+                message: format!(
+                    "ops archive request exceeded {} bytes",
+                    self.config.max_request_bytes
+                ),
+            },
+        };
+
+        self.write_response(socket, response).await
+    }
+
+    async fn write_response<S>(
+        &self,
+        socket: &mut S,
+        response: OpsArchiveServiceResponse,
+    ) -> Result<(), OpsArchiveServiceError>
+    where
+        S: AsyncWrite + Unpin,
+    {
+        let encoded =
+            serde_json::to_vec(&response).map_err(OpsArchiveServiceError::EncodeResponse)?;
+        if encoded.len() > self.config.max_response_bytes {
+            return Err(OpsArchiveServiceError::ResponseTooLarge {
+                max_response_bytes: self.config.max_response_bytes,
+            });
+        }
+
+        socket
+            .write_all(&encoded)
+            .await
+            .map_err(OpsArchiveServiceError::WriteResponse)?;
+        socket
+            .shutdown()
+            .await
+            .map_err(OpsArchiveServiceError::WriteResponse)?;
+        Ok(())
+    }
+
+    fn query(
+        &self,
+        request: OpsArchiveServiceRequest,
+    ) -> Result<OpsArchiveServiceResponse, OpsArchiveServiceError> {
+        match request {
+            OpsArchiveServiceRequest::Shard {
+                shard_id,
+                recent_limit,
+            } => {
+                let shard = self.archive.shard(&shard_id).ok_or_else(|| {
+                    OpsArchiveServiceError::UnknownShard {
+                        shard_id: shard_id.clone(),
+                    }
+                })?;
+                let snapshot = shard
+                    .snapshot(recent_limit)
+                    .map_err(OpsArchiveServiceError::ArchiveQuery)?;
+                Ok(OpsArchiveServiceResponse::Shard(snapshot))
+            }
+            OpsArchiveServiceRequest::Supervisor {
+                recent_limit_per_shard,
+            } => {
+                let snapshot = self
+                    .archive
+                    .snapshot(recent_limit_per_shard)
+                    .map_err(OpsArchiveServiceError::ArchiveQuery)?;
+                Ok(OpsArchiveServiceResponse::Supervisor(snapshot))
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum OpsArchiveServiceError {
+    Bind {
+        address: String,
+        source: std::io::Error,
+    },
+    Accept(std::io::Error),
+    Connect {
+        address: String,
+        source: std::io::Error,
+    },
+    ReadRequest(std::io::Error),
+    ReadResponse(std::io::Error),
+    WriteRequest(std::io::Error),
+    WriteResponse(std::io::Error),
+    EncodeRequest(serde_json::Error),
+    EncodeResponse(serde_json::Error),
+    DecodeResponse(serde_json::Error),
+    ResponseTooLarge {
+        max_response_bytes: usize,
+    },
+    UnknownShard {
+        shard_id: String,
+    },
+    Remote {
+        message: String,
+    },
+    ArchiveQuery(AuthorityOpsArchiveError),
+}
+
+impl std::fmt::Display for OpsArchiveServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bind { address, source } => {
+                write!(
+                    f,
+                    "failed to bind ops archive service on {address}: {source}"
+                )
+            }
+            Self::Accept(source) => {
+                write!(f, "failed to accept ops archive service client: {source}")
+            }
+            Self::Connect { address, source } => {
+                write!(
+                    f,
+                    "failed to connect to ops archive service at {address}: {source}"
+                )
+            }
+            Self::ReadRequest(source) => {
+                write!(f, "failed to read ops archive service request: {source}")
+            }
+            Self::ReadResponse(source) => {
+                write!(f, "failed to read ops archive service response: {source}")
+            }
+            Self::WriteRequest(source) => {
+                write!(f, "failed to write ops archive service request: {source}")
+            }
+            Self::WriteResponse(source) => {
+                write!(f, "failed to write ops archive service response: {source}")
+            }
+            Self::EncodeRequest(source) => {
+                write!(f, "failed to encode ops archive service request: {source}")
+            }
+            Self::EncodeResponse(source) => {
+                write!(f, "failed to encode ops archive service response: {source}")
+            }
+            Self::DecodeResponse(source) => {
+                write!(f, "failed to decode ops archive service response: {source}")
+            }
+            Self::ResponseTooLarge { max_response_bytes } => write!(
+                f,
+                "ops archive service response exceeded {max_response_bytes} bytes"
+            ),
+            Self::UnknownShard { shard_id } => {
+                write!(f, "unknown shard '{shard_id}'")
+            }
+            Self::Remote { message } => {
+                write!(f, "ops archive service returned an error: {message}")
+            }
+            Self::ArchiveQuery(source) => write!(f, "{source}"),
+        }
+    }
+}
+
+impl std::error::Error for OpsArchiveServiceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Bind { source, .. }
+            | Self::Accept(source)
+            | Self::Connect { source, .. }
+            | Self::ReadRequest(source)
+            | Self::ReadResponse(source)
+            | Self::WriteRequest(source)
+            | Self::WriteResponse(source) => Some(source),
+            Self::EncodeRequest(source)
+            | Self::EncodeResponse(source)
+            | Self::DecodeResponse(source) => Some(source),
+            Self::ArchiveQuery(source) => Some(source),
+            Self::ResponseTooLarge { .. } | Self::UnknownShard { .. } | Self::Remote { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ReadCappedError {
+    Io(std::io::Error),
+    TooLarge,
+}
+
+async fn read_capped<R>(reader: &mut R, max_bytes: usize) -> Result<Vec<u8>, ReadCappedError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .await
+            .map_err(ReadCappedError::Io)?;
+        if read == 0 {
+            break;
+        }
+        if bytes.len() + read > max_bytes {
+            return Err(ReadCappedError::TooLarge);
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+
+    Ok(bytes)
 }
 
 fn authority_lifecycle_state_from_server_state(
@@ -1625,6 +2008,13 @@ impl PreparedShardSupervisor {
         }
     }
 
+    pub fn archive_service(
+        &self,
+        config: OpsArchiveServiceConfig,
+    ) -> ShardSupervisorOpsArchiveService {
+        self.archive_handle().service(config)
+    }
+
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
         let local_set = tokio::task::LocalSet::new();
 
@@ -1750,9 +2140,10 @@ mod tests {
         AuthorityShardControlPlaneHandle, AuthorityShardLifecycleCommandKind,
         AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
         DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
-        OpsPersistenceConfig, PreparedAuthorityShard, ShardSupervisorConfig,
-        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorSummary,
-        OPS_DOCUMENT_CHANNEL_CAPACITY,
+        OpsArchiveServiceClient, OpsArchiveServiceConfig, OpsArchiveServiceRequest,
+        OpsArchiveServiceResponse, OpsPersistenceConfig, PreparedAuthorityShard,
+        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
+        ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -1961,7 +2352,10 @@ mod tests {
         runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
         assert!(archive_path.exists());
         assert!(runtime.ops_handle().persisted_document_count() >= 1);
-        assert_eq!(runtime.ops_handle().archive_path(), Some(archive_path.clone()));
+        assert_eq!(
+            runtime.ops_handle().archive_path(),
+            Some(archive_path.clone())
+        );
 
         drop(runtime);
 
@@ -2042,6 +2436,92 @@ mod tests {
         assert_eq!(supervisor_snapshot.archived_shard_count, 1);
         assert!(supervisor_snapshot.total_persisted_document_count >= 1);
 
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[tokio::test]
+    async fn supervisor_archive_service_queries_persisted_history_over_tcp() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-service-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+        let shard_config = AuthorityShardConfig {
+            shard_id: "alpha-1".into(),
+            linked_shard_ids: vec![],
+            host: host.clone(),
+        };
+
+        let mut runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(5.0, 5.0)
+                    .with_label("archive-service-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("archive-backed local runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        drop(runtime);
+
+        let service = ShardSupervisorConfig {
+            shards: vec![shard_config],
+        }
+        .archive_service(OpsArchiveServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+        });
+
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("archive service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("archive service listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_once_listener(listener));
+
+        let response = OpsArchiveServiceClient {
+            address,
+            max_response_bytes: 256 * 1024,
+        }
+        .query(OpsArchiveServiceRequest::Supervisor {
+            recent_limit_per_shard: 8,
+        })
+        .await
+        .expect("archive service client should receive a supervisor snapshot");
+
+        match response {
+            OpsArchiveServiceResponse::Supervisor(snapshot) => {
+                assert_eq!(snapshot.shard_count, 1);
+                assert_eq!(snapshot.archived_shard_count, 1);
+                assert!(snapshot.total_persisted_document_count >= 1);
+                assert!(snapshot.shards[0].recent_documents.iter().any(|document| {
+                    decode_toon_value(document)
+                        .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                        .unwrap_or(false)
+                }));
+            }
+            OpsArchiveServiceResponse::Shard(_) | OpsArchiveServiceResponse::Error { .. } => {
+                panic!("expected supervisor archive snapshot response")
+            }
+        }
+
+        service_task
+            .await
+            .expect("archive service task should join")
+            .expect("archive service should exit cleanly after one request");
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
