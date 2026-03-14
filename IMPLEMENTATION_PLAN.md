@@ -2124,7 +2124,18 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-host -p pod-server`
   - `git diff --check`
 
-**Next focus**: Add a shard supervisor surface above `pod-host` so one runtime can configure, launch, and observe multiple authority hosts instead of only a single shard/process contract.
+### Iteration 208
+- [x] Extended `crates/pod-host/src/lib.rs` with `AuthorityShardConfig`, `AuthorityShardSummary`, `ShardSupervisorConfig`, `ShardSupervisorSummary`, `PreparedAuthorityShard`, and `PreparedShardSupervisor`, so one crate-level seam can now validate shard topology, summarize planned capacity, and prepare multiple authority hosts at once.
+- [x] Added supervisor launch support in `pod-host` through `PreparedShardSupervisor::run_direct_connect_until_failure()`, using a Tokio `LocalSet` so non-`Send` direct-connect shard runtimes can still be launched concurrently from one orchestrating runtime thread.
+- [x] Updated the compatibility re-exports and lifecycle docs so the remaining MMO gap is now aggregated shard health/control-plane supervision rather than merely multi-shard configuration.
+- [x] Validation:
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo check -p pod-host`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Aggregate live shard transport/incident health above `pod-host` so a supervised shard set can expose one control-plane view instead of requiring per-shard log scraping.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

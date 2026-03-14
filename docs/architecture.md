@@ -200,9 +200,10 @@ integration targets available today:
   re-owning the `pod-core` authority world contract.
 - `pod-host` now exports the neutral authority host lifecycle from
   [`crates/pod-host/src/lib.rs`](/Users/home/Desktop/prompt-or-die/crates/pod-host/src/lib.rs)
-  through `AuthorityHostConfig`, `AuthorityTransportMode`, and
-  `AuthorityHostRuntime`, so app binaries can select local vs direct-connect
-  authority hosting through one crate-level seam.
+  through `AuthorityHostConfig`, `AuthorityTransportMode`,
+  `AuthorityHostRuntime`, `AuthorityShardConfig`, and
+  `ShardSupervisorConfig`, so app binaries can select single-host or
+  multi-shard authority hosting through one crate-level seam.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
   (`apps/pod-web/src/main.ts`) is still an app composition root, not a general
   extension API.
@@ -214,7 +215,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `crates/pod-host/src/lib.rs` now composes a single authority host cleanly, but there is still no multi-shard supervisor surface above it for coordinating more than one authoritative world/process contract at MMO scale.
+- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, but there is still no aggregated shard-health/control-plane surface above it for transport pressure, incident rollups, and coordinated supervision at MMO scale.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.
