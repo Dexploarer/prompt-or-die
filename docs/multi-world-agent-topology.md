@@ -164,9 +164,9 @@ This lets us support:
 
 In order:
 
-1. Auto-select the latest prior monthly snapshot as the comparison baseline, so
-   month-over-month orchestration review does not depend on a manual
-   `--compare-baseline` argument.
+1. Publish and retain the month-over-month comparison artifact alongside the
+   monthly shard-target snapshot, so orchestration drift review keeps the diff
+   report instead of only the refreshed snapshot JSON.
 2. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 

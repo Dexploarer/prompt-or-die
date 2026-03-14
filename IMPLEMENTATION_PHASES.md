@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Teach the shard-target publication flow to auto-select the latest prior monthly snapshot as the comparison baseline, so month-over-month orchestration review does not require a manual `--compare-baseline` path.
+1. All audit backlog items are closed. Publish month-over-month snapshot comparison artifacts alongside the monthly shard-target snapshot, so historical review keeps the diff report instead of only the latest point-in-time snapshot.
 
 ## Audit Backlog (2026-03-13)
 

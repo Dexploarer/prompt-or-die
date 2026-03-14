@@ -407,7 +407,10 @@ metrics shows up as a regression instead of a generic changed value. Use
 monthly workflow. Pass `--compare-baseline <snapshot>` for an explicit
 month-over-month review, or rerun an existing month label and the wrapper will
 reuse the current same-label snapshot as a temporary baseline before it
-publishes the refreshed artifact.
+publishes the refreshed artifact. When a later month exists, the wrapper now
+auto-selects the latest prior `docs/benchmark-snapshots/YYYY-MM-shard-target.json`
+file as the baseline, so month-over-month review no longer depends on always
+passing `--compare-baseline` by hand.
 
 ## Interpretation rules
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+  findLatestPriorSnapshotFilename,
   formatMonthLabel,
   parseArgs,
   resolveBrowserRouteStatus,
@@ -9,6 +10,37 @@ import {
 describe("run shard target snapshot", () => {
   it("formats month labels deterministically", () => {
     expect(formatMonthLabel(new Date("2026-03-13T12:00:00Z"))).toBe("2026-03");
+  });
+
+  it("selects the latest prior monthly shard-target snapshot", () => {
+    expect(
+      findLatestPriorSnapshotFilename(
+        [
+          "2026-01-shard-target.json",
+          "2026-03-shard-target.json",
+          "notes.md",
+          "2026-03-ci-smoke.json",
+        ],
+        "2026-04",
+      ),
+    ).toBe("2026-03-shard-target.json");
+
+    expect(
+      findLatestPriorSnapshotFilename(
+        [
+          "2026-01-shard-target.json",
+          "2026-03-shard-target.json",
+        ],
+        "2026-03",
+      ),
+    ).toBe("2026-01-shard-target.json");
+
+    expect(
+      findLatestPriorSnapshotFilename(
+        ["2026-03-shard-target.json"],
+        "2026-03",
+      ),
+    ).toBeNull();
   });
 
   it("parses explicit runtime options", () => {

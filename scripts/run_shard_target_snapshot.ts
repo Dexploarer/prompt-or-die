@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -57,11 +65,26 @@ const DEFAULT_BROWSER_ROUTE_OUTPUT =
   "apps/pod-web/artifacts/render-route-measurements.json";
 const DEFAULT_LIVE_TOPOLOGY_OUTPUT =
   "artifacts/topology-feed-live-shard-local.json";
+const SNAPSHOT_FILENAME_PATTERN = /^(\d{4}-\d{2})-shard-target\.json$/;
 
 export function formatMonthLabel(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
+}
+
+export function findLatestPriorSnapshotFilename(
+  filenames: string[],
+  label: string,
+): string | null {
+  const candidateLabels = filenames
+    .map((filename) => SNAPSHOT_FILENAME_PATTERN.exec(filename)?.[1] ?? null)
+    .filter((candidate): candidate is string => candidate != null)
+    .filter((candidate) => candidate < label)
+    .sort();
+
+  const latestLabel = candidateLabels.at(-1);
+  return latestLabel == null ? null : `${latestLabel}-shard-target.json`;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -208,6 +231,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const repoRoot = resolve(import.meta.dir, "..");
   const podWebRoot = resolve(repoRoot, "apps/pod-web");
+  const snapshotDirectory = resolve(repoRoot, "docs/benchmark-snapshots");
   const tempDir = mkdtempSync(join(tmpdir(), "pod-shard-target-"));
   const moatOutput = resolve(repoRoot, DEFAULT_MOAT_OUTPUT);
   const browserRouteOutput = resolve(repoRoot, DEFAULT_BROWSER_ROUTE_OUTPUT);
@@ -242,6 +266,7 @@ async function main() {
   let browserRouteStatus: BrowserRouteCaptureStatus = "reused";
   let browserRouteGatePassed = true;
   let comparisonStatus: RunSummary["comparison"]["status"] = "skipped";
+  let comparisonBaselineSource: string | null = null;
   let comparisonBaselinePath: string | null = null;
   let server: Bun.Subprocess | null = null;
 
@@ -252,18 +277,33 @@ async function main() {
 
   try {
     if (options.compareBaseline) {
-      comparisonBaselinePath = resolve(repoRoot, options.compareBaseline);
-      if (!existsSync(comparisonBaselinePath)) {
+      comparisonBaselineSource = resolve(repoRoot, options.compareBaseline);
+      if (!existsSync(comparisonBaselineSource)) {
         throw new Error(
-          `comparison baseline snapshot is missing at ${comparisonBaselinePath}`,
+          `comparison baseline snapshot is missing at ${comparisonBaselineSource}`,
         );
       }
-    } else if (existsSync(snapshotOutput)) {
-      comparisonBaselinePath = resolve(tempDir, "existing-shard-baseline.json");
-      writeFileSync(comparisonBaselinePath, readFileSync(snapshotOutput));
     } else {
-      warnings.push(
-        `No existing shard-target snapshot baseline was found for ${options.label}; skipped snapshot regression comparison.`,
+      const priorSnapshotFilename = findLatestPriorSnapshotFilename(
+        readdirSync(snapshotDirectory),
+        options.label,
+      );
+      if (priorSnapshotFilename) {
+        comparisonBaselineSource = resolve(snapshotDirectory, priorSnapshotFilename);
+      } else if (existsSync(snapshotOutput)) {
+        comparisonBaselineSource = snapshotOutput;
+      } else {
+        warnings.push(
+          `No prior shard-target snapshot baseline was found for ${options.label}; skipped snapshot regression comparison.`,
+        );
+      }
+    }
+
+    if (comparisonBaselineSource) {
+      comparisonBaselinePath = resolve(tempDir, "comparison-baseline.json");
+      writeFileSync(
+        comparisonBaselinePath,
+        readFileSync(comparisonBaselineSource),
       );
     }
 
@@ -486,11 +526,11 @@ async function main() {
     if (comparisonBaselinePath) {
       const compare = record(
         runCommand(
-          "compare-shard-snapshot",
-          [
-            "bun",
-            "./scripts/compare_moat_snapshots.ts",
-            "--baseline",
+        "compare-shard-snapshot",
+        [
+          "bun",
+          "./scripts/compare_moat_snapshots.ts",
+          "--baseline",
             comparisonBaselinePath,
             "--candidate",
             snapshotOutput,
@@ -518,7 +558,7 @@ async function main() {
       browserRouteGatePassed,
       comparison: {
         status: comparisonStatus,
-        baseline: comparisonBaselinePath,
+        baseline: comparisonBaselineSource,
         report: comparisonBaselinePath ? comparisonOutput : null,
       },
       paths: {
