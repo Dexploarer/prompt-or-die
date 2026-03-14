@@ -82,10 +82,10 @@ pub use snapshot::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use server::{
-    run_transport_benchmark_suite, GameServer, OpsDocumentStream, ServerError,
-    ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState, TransportBenchmarkAggregate,
-    TransportBenchmarkCheck, TransportBenchmarkProfile, TransportBenchmarkReport,
-    TransportBenchmarkScenarioReport,
+    run_transport_benchmark_suite, GameServer, OpsDocumentArchiveSnapshot, OpsDocumentStream,
+    ServerError, ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState,
+    TransportBenchmarkAggregate, TransportBenchmarkCheck, TransportBenchmarkProfile,
+    TransportBenchmarkReport, TransportBenchmarkScenarioReport,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

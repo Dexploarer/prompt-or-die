@@ -278,6 +278,29 @@ impl OpsDocumentStream {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsDocumentArchiveSnapshot {
+    pub archive_path: PathBuf,
+    pub persisted_document_count: usize,
+    pub recent_documents: Vec<String>,
+}
+
+impl OpsDocumentArchiveSnapshot {
+    pub fn load(
+        archive_path: impl Into<PathBuf>,
+        recent_limit: usize,
+    ) -> std::io::Result<Self> {
+        let archive_path = archive_path.into();
+        let (persisted_document_count, recent_documents) =
+            read_ops_document_archive_snapshot(&archive_path, recent_limit)?;
+        Ok(Self {
+            archive_path,
+            persisted_document_count,
+            recent_documents,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 struct OpsDocumentArchive {
     path: Arc<PathBuf>,
@@ -301,35 +324,8 @@ impl OpsDocumentArchive {
             fs::create_dir_all(parent)?;
         }
 
-        let mut recent_documents = VecDeque::with_capacity(history_limit.max(1));
-        let mut persisted_document_count = 0;
-
-        if path.exists() {
-            let reader = BufReader::new(File::open(path)?);
-            for line in reader.lines() {
-                let line = line?;
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                let record: PersistedOpsDocumentRecord = serde_json::from_str(&line).map_err(
-                    |err| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "failed to decode persisted ops document from {}: {err}",
-                                path.display()
-                            ),
-                        )
-                    },
-                )?;
-                persisted_document_count += 1;
-                recent_documents.push_back(record.document);
-                while recent_documents.len() > history_limit {
-                    recent_documents.pop_front();
-                }
-            }
-        }
+        let (persisted_document_count, recent_documents) =
+            read_ops_document_archive_snapshot(path, history_limit)?;
 
         let writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
         Ok((
@@ -340,7 +336,7 @@ impl OpsDocumentArchive {
                     persisted_document_count,
                 })),
             },
-            recent_documents.into_iter().collect(),
+            recent_documents,
         ))
     }
 
@@ -373,6 +369,45 @@ impl OpsDocumentArchive {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .persisted_document_count
     }
+}
+
+fn read_ops_document_archive_snapshot(
+    path: &Path,
+    recent_limit: usize,
+) -> std::io::Result<(usize, Vec<String>)> {
+    let mut recent_documents = VecDeque::with_capacity(recent_limit.max(1));
+    let mut persisted_document_count = 0;
+
+    if !path.exists() {
+        return Ok((0, Vec::new()));
+    }
+
+    let reader = BufReader::new(File::open(path)?);
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let record: PersistedOpsDocumentRecord = serde_json::from_str(&line).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "failed to decode persisted ops document from {}: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        persisted_document_count += 1;
+        if recent_limit > 0 {
+            recent_documents.push_back(record.document);
+            while recent_documents.len() > recent_limit {
+                recent_documents.pop_front();
+            }
+        }
+    }
+
+    Ok((persisted_document_count, recent_documents.into_iter().collect()))
 }
 
 // ============================================================

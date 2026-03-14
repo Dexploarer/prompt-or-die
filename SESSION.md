@@ -316,6 +316,12 @@
 - [x] Added `OpsPersistenceConfig` plus `POD_OPS_ARCHIVE_DIR` wiring in `crates/pod-host/src/lib.rs`, and surfaced archive path plus persisted counts through `AuthorityShardOpsSnapshot` / `ShardSupervisorOpsSnapshot` for both local and direct-connect runtimes.
 - [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to a shared archive query/relay surface above the per-shard persisted files.
 
+## Iteration 215 Progress
+
+- [x] Added `pod_net::OpsDocumentArchiveSnapshot`, so persisted shard ops archives now have one shared typed loader instead of forcing downstream crates to parse the JSONL format directly.
+- [x] Added `AuthorityShardOpsArchiveHandle` and `ShardSupervisorOpsArchiveHandle` in `crates/pod-host/src/lib.rs`, plus `ops_archive_handle()` helpers on shard/supervisor configs and live ops handles, so retained archive queries now ride one crate-level authority seam.
+- [x] Updated the compatibility exports and lifecycle docs, moving the next MMO blocker up to a process-external relay/service surface above the in-process archive handles.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

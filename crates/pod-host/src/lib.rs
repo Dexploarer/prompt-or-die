@@ -11,7 +11,10 @@ use pod_core::{
 use tokio::sync::{broadcast, mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
-use pod_net::{OpsDocumentStream, ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState};
+use pod_net::{
+    OpsDocumentArchiveSnapshot, OpsDocumentStream, ServerLifecycleCommand,
+    ServerLifecyclePhase, ServerLifecycleState,
+};
 
 const OPS_DOCUMENT_CHANNEL_CAPACITY: usize = 256;
 const OPS_DOCUMENT_HISTORY_LIMIT: usize = 256;
@@ -181,6 +184,18 @@ impl OpsPersistenceConfig {
     pub fn archive_root_dir(&self) -> &Path {
         &self.archive_root_dir
     }
+
+    pub fn archive_handle_for_shard(
+        &self,
+        shard: AuthorityShardSummary,
+    ) -> AuthorityShardOpsArchiveHandle {
+        let shard_id = shard.shard_id.clone();
+        AuthorityShardOpsArchiveHandle {
+            shard_id: shard_id.clone(),
+            shard: Some(shard),
+            archive_path: Some(self.archive_path_for_shard(&shard_id)),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -213,6 +228,19 @@ impl AuthorityShardConfig {
                 .uses_direct_connect()
                 .then(|| self.host.max_clients()),
         }
+    }
+
+    pub fn ops_archive_handle(&self) -> AuthorityShardOpsArchiveHandle {
+        let shard = self.summary();
+        self.host
+            .ops_persistence
+            .as_ref()
+            .map(|config| config.archive_handle_for_shard(shard.clone()))
+            .unwrap_or_else(|| AuthorityShardOpsArchiveHandle {
+                shard_id: shard.shard_id.clone(),
+                shard: Some(shard),
+                archive_path: None,
+            })
     }
 }
 
@@ -294,6 +322,16 @@ impl ShardSupervisorConfig {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PreparedShardSupervisor { summary, shards })
+    }
+
+    pub fn ops_archive_handle(&self) -> ShardSupervisorOpsArchiveHandle {
+        ShardSupervisorOpsArchiveHandle {
+            shards: self
+                .shards
+                .iter()
+                .map(AuthorityShardConfig::ops_archive_handle)
+                .collect(),
+        }
     }
 
     fn validate(&self) -> Result<(), ShardSupervisorError> {
@@ -432,6 +470,14 @@ impl AuthorityShardOpsHandle {
             recent_documents: self.recent_documents(),
         }
     }
+
+    pub fn archive_handle(&self) -> AuthorityShardOpsArchiveHandle {
+        AuthorityShardOpsArchiveHandle {
+            shard_id: self.shard.shard_id.clone(),
+            shard: Some(self.shard.clone()),
+            archive_path: self.archive_path(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -441,6 +487,100 @@ pub struct AuthorityShardOpsSnapshot {
     pub persisted_document_count: usize,
     pub archive_path: Option<PathBuf>,
     pub recent_documents: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthorityShardOpsArchiveHandle {
+    shard_id: String,
+    shard: Option<AuthorityShardSummary>,
+    archive_path: Option<PathBuf>,
+}
+
+impl AuthorityShardOpsArchiveHandle {
+    pub fn shard_id(&self) -> &str {
+        &self.shard_id
+    }
+
+    pub fn shard(&self) -> Option<&AuthorityShardSummary> {
+        self.shard.as_ref()
+    }
+
+    pub fn archive_path(&self) -> Option<&Path> {
+        self.archive_path.as_deref()
+    }
+
+    pub fn snapshot(
+        &self,
+        recent_limit: usize,
+    ) -> Result<AuthorityShardOpsArchiveSnapshot, AuthorityOpsArchiveError> {
+        let Some(archive_path) = self.archive_path.clone() else {
+            return Ok(AuthorityShardOpsArchiveSnapshot {
+                shard_id: self.shard_id.clone(),
+                shard: self.shard.clone(),
+                archive_path: None,
+                persisted_document_count: 0,
+                recent_documents: Vec::new(),
+            });
+        };
+
+        let snapshot = OpsDocumentArchiveSnapshot::load(&archive_path, recent_limit).map_err(
+            |source| AuthorityOpsArchiveError::ReadArchive {
+                shard_id: self.shard_id.clone(),
+                path: archive_path.clone(),
+                source,
+            },
+        )?;
+
+        Ok(AuthorityShardOpsArchiveSnapshot {
+            shard_id: self.shard_id.clone(),
+            shard: self.shard.clone(),
+            archive_path: Some(snapshot.archive_path),
+            persisted_document_count: snapshot.persisted_document_count,
+            recent_documents: snapshot.recent_documents,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthorityShardOpsArchiveSnapshot {
+    pub shard_id: String,
+    pub shard: Option<AuthorityShardSummary>,
+    pub archive_path: Option<PathBuf>,
+    pub persisted_document_count: usize,
+    pub recent_documents: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum AuthorityOpsArchiveError {
+    ReadArchive {
+        shard_id: String,
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for AuthorityOpsArchiveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadArchive {
+                shard_id,
+                path,
+                source,
+            } => write!(
+                f,
+                "failed to read ops archive for shard '{shard_id}' at {}: {source}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AuthorityOpsArchiveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ReadArchive { source, .. } => Some(source),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -819,6 +959,16 @@ impl ShardSupervisorOpsHandle {
             shards,
         }
     }
+
+    pub fn archive_handle(&self) -> ShardSupervisorOpsArchiveHandle {
+        ShardSupervisorOpsArchiveHandle {
+            shards: self
+                .shards
+                .iter()
+                .map(AuthorityShardOpsHandle::archive_handle)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -827,6 +977,55 @@ pub struct ShardSupervisorOpsSnapshot {
     pub total_retained_document_count: usize,
     pub total_persisted_document_count: usize,
     pub shards: Vec<AuthorityShardOpsSnapshot>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsArchiveHandle {
+    shards: Vec<AuthorityShardOpsArchiveHandle>,
+}
+
+impl ShardSupervisorOpsArchiveHandle {
+    pub fn shards(&self) -> &[AuthorityShardOpsArchiveHandle] {
+        &self.shards
+    }
+
+    pub fn shard(&self, shard_id: &str) -> Option<&AuthorityShardOpsArchiveHandle> {
+        self.shards
+            .iter()
+            .find(|handle| handle.shard_id() == shard_id)
+    }
+
+    pub fn snapshot(
+        &self,
+        recent_limit_per_shard: usize,
+    ) -> Result<ShardSupervisorOpsArchiveSnapshot, AuthorityOpsArchiveError> {
+        let shards = self
+            .shards
+            .iter()
+            .map(|handle| handle.snapshot(recent_limit_per_shard))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ShardSupervisorOpsArchiveSnapshot {
+            shard_count: shards.len(),
+            archived_shard_count: shards
+                .iter()
+                .filter(|snapshot| snapshot.archive_path.is_some())
+                .count(),
+            total_persisted_document_count: shards
+                .iter()
+                .map(|snapshot| snapshot.persisted_document_count)
+                .sum(),
+            shards,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsArchiveSnapshot {
+    pub shard_count: usize,
+    pub archived_shard_count: usize,
+    pub total_persisted_document_count: usize,
+    pub shards: Vec<AuthorityShardOpsArchiveSnapshot>,
 }
 
 fn authority_lifecycle_state_from_server_state(
@@ -1416,6 +1615,16 @@ impl PreparedShardSupervisor {
         }
     }
 
+    pub fn archive_handle(&self) -> ShardSupervisorOpsArchiveHandle {
+        ShardSupervisorOpsArchiveHandle {
+            shards: self
+                .shards
+                .iter()
+                .map(PreparedAuthorityShard::archive_handle)
+                .collect(),
+        }
+    }
+
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
         let local_set = tokio::task::LocalSet::new();
 
@@ -1465,6 +1674,10 @@ impl PreparedAuthorityShard {
 
     pub fn ops_handle(&self) -> AuthorityShardOpsHandle {
         self.ops_handle.clone()
+    }
+
+    pub fn archive_handle(&self) -> AuthorityShardOpsArchiveHandle {
+        self.ops_handle.archive_handle()
     }
 }
 
@@ -1769,6 +1982,66 @@ mod tests {
                 .unwrap_or(false)));
 
         drop(reloaded_runtime);
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[test]
+    fn shard_and_supervisor_archive_handles_query_persisted_history() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-query-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+        let shard_config = AuthorityShardConfig {
+            shard_id: "alpha-1".into(),
+            linked_shard_ids: vec![],
+            host: host.clone(),
+        };
+
+        let mut runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(4.0, 4.0)
+                    .with_label("archive-query-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("archive-backed local host runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        drop(runtime);
+
+        let shard_snapshot = shard_config
+            .ops_archive_handle()
+            .snapshot(8)
+            .expect("shard archive handle should query persisted history");
+        assert_eq!(shard_snapshot.shard_id, "alpha-1");
+        assert!(shard_snapshot.persisted_document_count >= 1);
+        assert!(shard_snapshot
+            .recent_documents
+            .iter()
+            .any(|document| decode_toon_value(document)
+                .map(|value| value["document_type"] == "versioned_tick_telemetry")
+                .unwrap_or(false)));
+
+        let supervisor_snapshot = ShardSupervisorConfig {
+            shards: vec![shard_config],
+        }
+        .ops_archive_handle()
+        .snapshot(8)
+        .expect("supervisor archive handle should query shard archives");
+        assert_eq!(supervisor_snapshot.shard_count, 1);
+        assert_eq!(supervisor_snapshot.archived_shard_count, 1);
+        assert!(supervisor_snapshot.total_persisted_document_count >= 1);
+
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
