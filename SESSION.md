@@ -266,7 +266,7 @@
 - [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Carry shard incident summaries and coordinated lifecycle commands into the `pod-host` control-plane so a supervised shard set exposes one operational surface for health, alerts, and lifecycle control.
+- Move `pod-server` gameplay/tick-budget/tool-call incident summaries out of app-private stats and into a shared shard control-plane/output surface so transport, lifecycle, and gameplay incidents publish through one MMO ops contract.
 
 ## Iteration 207 Progress
 
@@ -285,6 +285,12 @@
 - [x] Added shard-aware `GameServer::new_with_shard_id(...)` construction plus live `ShardTransportSummary` watch publication in `crates/pod-net/src/server.rs`, so direct-connect authority runtimes now publish transport state under the real shard id instead of a fixed `direct-connect` label.
 - [x] Added `AuthorityShardControlPlaneHandle`, `AuthorityShardControlPlaneSummary`, `ShardSupervisorControlPlaneHandle`, and `ShardSupervisorControlPlaneSummary` in `crates/pod-host/src/lib.rs`, so supervised shard sets can snapshot aggregate live transport health without per-shard log scraping.
 - [x] Updated the compatibility exports and lifecycle docs to point at the new shared control-plane surface, moving the next MMO blocker up to shared incident rollups and coordinated lifecycle commands.
+
+## Iteration 210 Progress
+
+- [x] Added lifecycle command/state plumbing in `crates/pod-net/src/server.rs`, so direct-connect shard runtimes can now be drained or shut down through a supervised control path instead of only by killing the process.
+- [x] Added `AuthorityShardLifecycleState`, derived `ShardIncidentSummary` output, and coordinated `request_drain*` / `request_shutdown*` fan-out in `crates/pod-host/src/lib.rs`, so the shard/supervisor control-plane now exposes both health state and lifecycle control from one surface.
+- [x] Updated the compatibility exports and lifecycle docs to point at the new incident-plus-lifecycle surface, moving the next MMO blocker up to shared gameplay/tick incident publication instead of raw shard command/control support.
 
 ## Audit Backlog (2026-03-13)
 

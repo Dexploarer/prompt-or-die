@@ -1,11 +1,13 @@
 use std::collections::BTreeSet;
 
 use pod_core::{
-    build_authoritative_world, AuthorityWorldConfig, IncidentSeverity, ShardTransportSummary, World,
+    build_authoritative_world, AuthorityWorldConfig, IncidentSeverity, ShardIncidentSummary,
+    ShardTransportSummary, World,
 };
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
+use pod_net::{ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthorityTransportMode {
@@ -275,31 +277,122 @@ pub struct ShardSupervisorSummary {
     pub shards: Vec<AuthorityShardSummary>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthorityShardLifecyclePhase {
+    Running,
+    Draining,
+    Stopped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorityShardLifecycleState {
+    pub phase: AuthorityShardLifecyclePhase,
+    pub accepting_new_connections: bool,
+    pub latest_tick: u64,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthorityShardLifecycleCommandKind {
+    Drain,
+    Shutdown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthorityShardControlPlaneCommandError {
+    UnsupportedLocalRuntime { shard_id: String },
+    CommandChannelClosed { shard_id: String },
+}
+
+impl std::fmt::Display for AuthorityShardControlPlaneCommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedLocalRuntime { shard_id } => write!(
+                f,
+                "shard '{shard_id}' uses a local runtime and does not accept direct-connect lifecycle commands"
+            ),
+            Self::CommandChannelClosed { shard_id } => write!(
+                f,
+                "shard '{shard_id}' is no longer accepting lifecycle commands"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AuthorityShardControlPlaneCommandError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorityShardCommandRejection {
+    pub shard_id: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShardSupervisorLifecycleCommandResult {
+    pub command: AuthorityShardLifecycleCommandKind,
+    pub targeted_shard_count: usize,
+    pub accepted_shard_ids: Vec<String>,
+    pub rejected: Vec<AuthorityShardCommandRejection>,
+}
+
 #[derive(Clone, Debug)]
 pub struct AuthorityShardControlPlaneHandle {
     shard: AuthorityShardSummary,
     transport_summary_rx: Option<watch::Receiver<Option<ShardTransportSummary>>>,
+    lifecycle_state_rx: Option<watch::Receiver<ServerLifecycleState>>,
+    lifecycle_command_tx: Option<mpsc::UnboundedSender<ServerLifecycleCommand>>,
 }
 
 impl AuthorityShardControlPlaneHandle {
     pub fn snapshot(&self) -> AuthorityShardControlPlaneSummary {
+        let lifecycle_state = self.lifecycle_state();
         let transport_summary = self
             .transport_summary_rx
             .as_ref()
             .and_then(|rx| rx.borrow().clone());
-        let severity = shard_transport_severity(&self.shard, transport_summary.as_ref());
+        let severity =
+            shard_control_plane_severity(&self.shard, &lifecycle_state, transport_summary.as_ref());
         let mut notes = Vec::new();
 
-        match (&self.shard.transport_mode, &transport_summary) {
-            (AuthorityTransportMode::DirectConnect, None) => {
+        match lifecycle_state.phase {
+            AuthorityShardLifecyclePhase::Draining => notes.push(format!(
+                "shard is draining{}",
+                lifecycle_state
+                    .reason
+                    .as_deref()
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default()
+            )),
+            AuthorityShardLifecyclePhase::Stopped => notes.push(format!(
+                "shard is stopped{}",
+                lifecycle_state
+                    .reason
+                    .as_deref()
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default()
+            )),
+            AuthorityShardLifecyclePhase::Running => {}
+        }
+
+        match (
+            &self.shard.transport_mode,
+            &transport_summary,
+            lifecycle_state.phase,
+        ) {
+            (
+                AuthorityTransportMode::DirectConnect,
+                None,
+                AuthorityShardLifecyclePhase::Running,
+            ) => {
                 notes.push("waiting for first direct-connect transport summary".to_string());
             }
-            (AuthorityTransportMode::Local, None) => {
+            (AuthorityTransportMode::DirectConnect, None, _) => {}
+            (AuthorityTransportMode::Local, None, _) => {
                 notes.push(
                     "local runtime does not emit direct-connect transport telemetry".to_string(),
                 );
             }
-            (_, Some(summary)) => {
+            (_, Some(summary), _) => {
                 if summary.queue_pressure_client_count > 0 {
                     notes.push(format!(
                         "{} clients currently exceed queue-pressure depth",
@@ -321,16 +414,77 @@ impl AuthorityShardControlPlaneHandle {
             }
         }
 
+        let latest_tick = transport_summary
+            .as_ref()
+            .map(|summary| summary.latest_tick)
+            .or((lifecycle_state.latest_tick > 0).then_some(lifecycle_state.latest_tick));
+        let incident_summary = build_control_plane_incident_summary(
+            &self.shard,
+            &lifecycle_state,
+            latest_tick.unwrap_or_default(),
+            severity,
+            &notes,
+        );
+
         AuthorityShardControlPlaneSummary {
             shard: self.shard.clone(),
             severity,
-            latest_tick: transport_summary
-                .as_ref()
-                .map(|summary| summary.latest_tick),
+            lifecycle_state,
+            latest_tick,
             has_live_transport: transport_summary.is_some(),
             transport_summary,
+            incident_summary,
             notes,
         }
+    }
+
+    pub fn request_drain(
+        &self,
+        reason: impl Into<String>,
+    ) -> Result<(), AuthorityShardControlPlaneCommandError> {
+        self.send_lifecycle_command(ServerLifecycleCommand::BeginDrain {
+            reason: reason.into(),
+        })
+    }
+
+    pub fn request_shutdown(
+        &self,
+        reason: impl Into<String>,
+    ) -> Result<(), AuthorityShardControlPlaneCommandError> {
+        self.send_lifecycle_command(ServerLifecycleCommand::Shutdown {
+            reason: reason.into(),
+        })
+    }
+
+    fn lifecycle_state(&self) -> AuthorityShardLifecycleState {
+        self.lifecycle_state_rx
+            .as_ref()
+            .map(|rx| authority_lifecycle_state_from_server_state(&rx.borrow()))
+            .unwrap_or_else(|| AuthorityShardLifecycleState {
+                phase: AuthorityShardLifecyclePhase::Running,
+                accepting_new_connections: false,
+                latest_tick: 0,
+                reason: None,
+            })
+    }
+
+    fn send_lifecycle_command(
+        &self,
+        command: ServerLifecycleCommand,
+    ) -> Result<(), AuthorityShardControlPlaneCommandError> {
+        let Some(tx) = self.lifecycle_command_tx.as_ref() else {
+            return Err(
+                AuthorityShardControlPlaneCommandError::UnsupportedLocalRuntime {
+                    shard_id: self.shard.shard_id.clone(),
+                },
+            );
+        };
+
+        tx.send(command).map_err(
+            |_| AuthorityShardControlPlaneCommandError::CommandChannelClosed {
+                shard_id: self.shard.shard_id.clone(),
+            },
+        )
     }
 }
 
@@ -338,9 +492,11 @@ impl AuthorityShardControlPlaneHandle {
 pub struct AuthorityShardControlPlaneSummary {
     pub shard: AuthorityShardSummary,
     pub severity: IncidentSeverity,
+    pub lifecycle_state: AuthorityShardLifecycleState,
     pub latest_tick: Option<u64>,
     pub has_live_transport: bool,
     pub transport_summary: Option<ShardTransportSummary>,
+    pub incident_summary: ShardIncidentSummary,
     pub notes: Vec<String>,
 }
 
@@ -370,6 +526,24 @@ impl ShardSupervisorControlPlaneHandle {
             critical_shard_count: shards
                 .iter()
                 .filter(|summary| summary.severity == IncidentSeverity::Critical)
+                .count(),
+            running_shard_count: shards
+                .iter()
+                .filter(|summary| {
+                    summary.lifecycle_state.phase == AuthorityShardLifecyclePhase::Running
+                })
+                .count(),
+            draining_shard_count: shards
+                .iter()
+                .filter(|summary| {
+                    summary.lifecycle_state.phase == AuthorityShardLifecyclePhase::Draining
+                })
+                .count(),
+            stopped_shard_count: shards
+                .iter()
+                .filter(|summary| {
+                    summary.lifecycle_state.phase == AuthorityShardLifecyclePhase::Stopped
+                })
                 .count(),
             direct_connect_shard_count: shards
                 .iter()
@@ -410,6 +584,56 @@ impl ShardSupervisorControlPlaneHandle {
             shards,
         }
     }
+
+    pub fn request_drain_all(
+        &self,
+        reason: impl Into<String>,
+    ) -> ShardSupervisorLifecycleCommandResult {
+        self.broadcast_lifecycle_command(AuthorityShardLifecycleCommandKind::Drain, reason.into())
+    }
+
+    pub fn request_shutdown_all(
+        &self,
+        reason: impl Into<String>,
+    ) -> ShardSupervisorLifecycleCommandResult {
+        self.broadcast_lifecycle_command(
+            AuthorityShardLifecycleCommandKind::Shutdown,
+            reason.into(),
+        )
+    }
+
+    fn broadcast_lifecycle_command(
+        &self,
+        command: AuthorityShardLifecycleCommandKind,
+        reason: String,
+    ) -> ShardSupervisorLifecycleCommandResult {
+        let mut accepted_shard_ids = Vec::new();
+        let mut rejected = Vec::new();
+
+        for shard in &self.shards {
+            let result = match command {
+                AuthorityShardLifecycleCommandKind::Drain => shard.request_drain(reason.clone()),
+                AuthorityShardLifecycleCommandKind::Shutdown => {
+                    shard.request_shutdown(reason.clone())
+                }
+            };
+
+            match result {
+                Ok(()) => accepted_shard_ids.push(shard.shard.shard_id.clone()),
+                Err(err) => rejected.push(AuthorityShardCommandRejection {
+                    shard_id: shard.shard.shard_id.clone(),
+                    reason: err.to_string(),
+                }),
+            }
+        }
+
+        ShardSupervisorLifecycleCommandResult {
+            command,
+            targeted_shard_count: self.shards.len(),
+            accepted_shard_ids,
+            rejected,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -418,6 +642,9 @@ pub struct ShardSupervisorControlPlaneSummary {
     pub healthy_shard_count: usize,
     pub warning_shard_count: usize,
     pub critical_shard_count: usize,
+    pub running_shard_count: usize,
+    pub draining_shard_count: usize,
+    pub stopped_shard_count: usize,
     pub direct_connect_shard_count: usize,
     pub local_shard_count: usize,
     pub reporting_transport_shard_count: usize,
@@ -429,20 +656,114 @@ pub struct ShardSupervisorControlPlaneSummary {
     pub shards: Vec<AuthorityShardControlPlaneSummary>,
 }
 
-fn shard_transport_severity(
+fn authority_lifecycle_state_from_server_state(
+    state: &ServerLifecycleState,
+) -> AuthorityShardLifecycleState {
+    AuthorityShardLifecycleState {
+        phase: match state.phase {
+            ServerLifecyclePhase::Running => AuthorityShardLifecyclePhase::Running,
+            ServerLifecyclePhase::Draining => AuthorityShardLifecyclePhase::Draining,
+            ServerLifecyclePhase::Stopped => AuthorityShardLifecyclePhase::Stopped,
+        },
+        accepting_new_connections: state.accepting_new_connections,
+        latest_tick: state.latest_tick,
+        reason: state.reason.clone(),
+    }
+}
+
+fn shard_control_plane_severity(
     shard: &AuthorityShardSummary,
+    lifecycle_state: &AuthorityShardLifecycleState,
     transport_summary: Option<&ShardTransportSummary>,
 ) -> IncidentSeverity {
-    match transport_summary {
-        Some(summary) if summary.recovery_delivery_failures > 0 => IncidentSeverity::Critical,
+    if matches!(
+        transport_summary,
+        Some(summary) if summary.recovery_delivery_failures > 0
+    ) {
+        return IncidentSeverity::Critical;
+    }
+
+    if matches!(
+        transport_summary,
         Some(summary)
-            if summary.queue_pressure_client_count > 0 || summary.timed_out_clients > 0 =>
-        {
-            IncidentSeverity::Warning
-        }
+            if summary.queue_pressure_client_count > 0 || summary.timed_out_clients > 0
+    ) {
+        return IncidentSeverity::Warning;
+    }
+
+    if matches!(
+        lifecycle_state.phase,
+        AuthorityShardLifecyclePhase::Draining | AuthorityShardLifecyclePhase::Stopped
+    ) {
+        return IncidentSeverity::Warning;
+    }
+
+    match transport_summary {
         Some(_) => IncidentSeverity::Healthy,
         None if shard.transport_mode.uses_direct_connect() => IncidentSeverity::Warning,
         None => IncidentSeverity::Healthy,
+    }
+}
+
+fn build_control_plane_incident_summary(
+    shard: &AuthorityShardSummary,
+    lifecycle_state: &AuthorityShardLifecycleState,
+    latest_tick: u64,
+    severity: IncidentSeverity,
+    notes: &[String],
+) -> ShardIncidentSummary {
+    let summary = if notes.is_empty() {
+        format!(
+            "Shard {} is healthy at tick {}",
+            shard.shard_id, latest_tick
+        )
+    } else {
+        match lifecycle_state.phase {
+            AuthorityShardLifecyclePhase::Draining => format!(
+                "Shard {} is draining{}",
+                shard.shard_id,
+                lifecycle_state
+                    .reason
+                    .as_deref()
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default()
+            ),
+            AuthorityShardLifecyclePhase::Stopped => format!(
+                "Shard {} has stopped{}",
+                shard.shard_id,
+                lifecycle_state
+                    .reason
+                    .as_deref()
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default()
+            ),
+            AuthorityShardLifecyclePhase::Running => {
+                format!(
+                    "Shard {} requires attention: {}",
+                    shard.shard_id,
+                    notes.join("; ")
+                )
+            }
+        }
+    };
+
+    ShardIncidentSummary {
+        shard_id: shard.shard_id.clone(),
+        latest_tick,
+        severity,
+        summary,
+        tick_budget_overrun_rate: 0.0,
+        action_rejection_rate: 0.0,
+        tool_call_error_rate: 0.0,
+        average_tool_latency_ms: 0.0,
+        average_trajectory_distance: 0.0,
+        peak_entity_count: 0,
+        peak_agent_count: 0,
+        capture_actions: 0,
+        summon_actions: 0,
+        gather_actions: 0,
+        loot_actions: 0,
+        notes: notes.to_vec(),
     }
 }
 
@@ -460,6 +781,8 @@ impl AuthorityHostRuntime {
             Self::Local { .. } => AuthorityShardControlPlaneHandle {
                 shard,
                 transport_summary_rx: None,
+                lifecycle_state_rx: None,
+                lifecycle_command_tx: None,
             },
             Self::DirectConnect(runtime) => {
                 let mut handle = runtime.control_plane_handle();
@@ -491,8 +814,12 @@ impl DirectConnectAuthorityRuntime {
             .server_config(config.tick_rate)
             .map_err(|err| AuthorityHostError::TransportConfig(err.to_string()))?;
         let (transport_summary_tx, transport_summary_rx) = watch::channel(None);
+        let (lifecycle_command_tx, lifecycle_command_rx) = mpsc::unbounded_channel();
+        let (lifecycle_state_tx, lifecycle_state_rx) =
+            watch::channel(ServerLifecycleState::running(&shard_id));
         let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
         server.install_transport_summary_watch(transport_summary_tx);
+        server.install_lifecycle_control(lifecycle_command_rx, lifecycle_state_tx);
 
         Ok(Self {
             server,
@@ -510,6 +837,8 @@ impl DirectConnectAuthorityRuntime {
                     direct_connect_max_clients: Some(config.max_clients()),
                 },
                 transport_summary_rx: Some(transport_summary_rx),
+                lifecycle_state_rx: Some(lifecycle_state_rx),
+                lifecycle_command_tx: Some(lifecycle_command_tx),
             },
         })
     }
@@ -698,13 +1027,16 @@ impl std::error::Error for ShardSupervisorError {
 mod tests {
     use super::{
         AuthorityHostConfig, AuthorityHostRuntime, AuthorityShardConfig,
-        AuthorityShardControlPlaneHandle, AuthorityTransportMode, DirectConnectAuthorityRuntime,
+        AuthorityShardControlPlaneHandle, AuthorityShardLifecycleCommandKind,
+        AuthorityShardLifecyclePhase, AuthorityTransportMode, DirectConnectAuthorityRuntime,
         PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
         ShardSupervisorError, ShardSupervisorSummary,
     };
     use pod_core::{AuthorityWorldConfig, IncidentSeverity, ShardTransportSummary};
-    use pod_net::{DirectConnectTransportConfig, TransportPolicy};
-    use tokio::sync::watch;
+    use pod_net::{
+        DirectConnectTransportConfig, ServerLifecycleCommand, ServerLifecycleState, TransportPolicy,
+    };
+    use tokio::sync::{mpsc, watch};
 
     #[test]
     fn authority_host_config_reads_runtime_mode_from_env() {
@@ -877,6 +1209,7 @@ mod tests {
         assert_eq!(control_plane.shard_count, 2);
         assert_eq!(control_plane.reporting_transport_shard_count, 0);
         assert_eq!(control_plane.healthy_shard_count, 2);
+        assert_eq!(control_plane.running_shard_count, 2);
     }
 
     #[test]
@@ -923,15 +1256,32 @@ mod tests {
             queue_pressure_events: 4,
             clients: Vec::new(),
         }));
+        let (_command_tx, command_rx) = mpsc::unbounded_channel();
+        let (lifecycle_tx, lifecycle_rx) = watch::channel(ServerLifecycleState::running("alpha-1"));
+        lifecycle_tx
+            .send(ServerLifecycleState {
+                shard_id: "alpha-1".into(),
+                phase: pod_net::ServerLifecyclePhase::Draining,
+                accepting_new_connections: false,
+                latest_tick: 77,
+                reason: Some("deploy rollout".into()),
+            })
+            .expect("lifecycle watch should accept updated drain state");
 
         let handle = AuthorityShardControlPlaneHandle {
             shard,
             transport_summary_rx: Some(rx),
+            lifecycle_state_rx: Some(lifecycle_rx),
+            lifecycle_command_tx: Some(_command_tx),
         };
         let snapshot = handle.snapshot();
         assert_eq!(snapshot.severity, IncidentSeverity::Critical);
         assert_eq!(snapshot.latest_tick, Some(77));
         assert!(snapshot.has_live_transport);
+        assert_eq!(
+            snapshot.lifecycle_state.phase,
+            AuthorityShardLifecyclePhase::Draining
+        );
         assert_eq!(
             snapshot
                 .transport_summary
@@ -943,17 +1293,54 @@ mod tests {
             .notes
             .iter()
             .any(|note| note.contains("recovery snapshot deliveries")));
+        assert!(snapshot.incident_summary.summary.contains("draining"));
 
         let supervisor = ShardSupervisorControlPlaneHandle {
             shards: vec![handle],
         }
         .snapshot();
         assert_eq!(supervisor.critical_shard_count, 1);
+        assert_eq!(supervisor.draining_shard_count, 1);
         assert_eq!(supervisor.total_client_count, 3);
         assert_eq!(supervisor.total_timed_out_clients, 2);
         assert_eq!(supervisor.total_recovery_delivery_failures, 1);
 
         drop(tx);
+        drop(command_rx);
+    }
+
+    #[test]
+    fn shard_supervisor_control_plane_broadcasts_shutdown_commands() {
+        let shard = AuthorityShardConfig {
+            shard_id: "alpha-1".into(),
+            linked_shard_ids: vec![],
+            host: sample_config(AuthorityTransportMode::DirectConnect),
+        }
+        .summary();
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let handle = AuthorityShardControlPlaneHandle {
+            shard,
+            transport_summary_rx: None,
+            lifecycle_state_rx: Some(watch::channel(ServerLifecycleState::running("alpha-1")).1),
+            lifecycle_command_tx: Some(command_tx),
+        };
+
+        let result = ShardSupervisorControlPlaneHandle {
+            shards: vec![handle],
+        }
+        .request_shutdown_all("maintenance window");
+
+        assert_eq!(result.command, AuthorityShardLifecycleCommandKind::Shutdown);
+        assert_eq!(result.accepted_shard_ids, vec!["alpha-1".to_string()]);
+        assert!(result.rejected.is_empty());
+        assert_eq!(
+            command_rx
+                .try_recv()
+                .expect("shutdown command should be queued"),
+            ServerLifecycleCommand::Shutdown {
+                reason: "maintenance window".into()
+            }
+        );
     }
 
     #[tokio::test]
@@ -990,6 +1377,8 @@ mod tests {
                     }
                     .summary(),
                     transport_summary_rx: None,
+                    lifecycle_state_rx: None,
+                    lifecycle_command_tx: None,
                 },
             }],
         };

@@ -112,11 +112,12 @@ integrators back into app composition roots:
 - Multi-shard authority control-plane hook:
   `crates/pod-host/src/lib.rs` now exposes
   `AuthorityShardControlPlaneHandle` and
-  `ShardSupervisorControlPlaneHandle`, so supervised shard sets can snapshot
-  live direct-connect transport pressure and aggregate shard health without
-  per-shard log scraping. What is still missing is a fuller control plane for
-  shared incident rollups and coordinated lifecycle commands across the
-  supervised shard set.
+  `ShardSupervisorControlPlaneHandle`, plus derived shard incident summaries and
+  coordinated drain/shutdown commands, so supervised shard sets can snapshot
+  live direct-connect transport pressure and issue basic lifecycle control
+  without per-shard log scraping. What is still missing is a shared gameplay
+  incident feed and durable ops publication surface above the supervised shard
+  set.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

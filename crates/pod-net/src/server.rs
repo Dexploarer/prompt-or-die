@@ -142,6 +142,40 @@ const ACTION_WINDOW_BACKWARD_TICKS: u64 = 2;
 const ACTION_WINDOW_FORWARD_TICKS: u64 = 2;
 const TRANSPORT_SUMMARY_INTERVAL_TICKS: u64 = 60;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerLifecyclePhase {
+    Running,
+    Draining,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerLifecycleState {
+    pub shard_id: String,
+    pub phase: ServerLifecyclePhase,
+    pub accepting_new_connections: bool,
+    pub latest_tick: u64,
+    pub reason: Option<String>,
+}
+
+impl ServerLifecycleState {
+    pub fn running(shard_id: impl Into<String>) -> Self {
+        Self {
+            shard_id: shard_id.into(),
+            phase: ServerLifecyclePhase::Running,
+            accepting_new_connections: true,
+            latest_tick: 0,
+            reason: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerLifecycleCommand {
+    BeginDrain { reason: String },
+    Shutdown { reason: String },
+}
+
 // ============================================================
 // GAME SERVER
 // ============================================================
@@ -193,6 +227,12 @@ pub struct GameServer {
     recovery_delivery_failures: u64,
     /// Optional watch sink for live shard transport summaries.
     transport_summary_tx: Option<watch::Sender<Option<ShardTransportSummary>>>,
+    /// Optional runtime lifecycle command receiver.
+    lifecycle_command_rx: Option<mpsc::UnboundedReceiver<ServerLifecycleCommand>>,
+    /// Optional watch sink for live shard lifecycle state.
+    lifecycle_state_tx: Option<watch::Sender<ServerLifecycleState>>,
+    /// Current server lifecycle state.
+    lifecycle_state: ServerLifecycleState,
 }
 
 impl GameServer {
@@ -207,9 +247,10 @@ impl GameServer {
         world: World,
         shard_id: impl Into<String>,
     ) -> Self {
+        let shard_id = shard_id.into();
         let (inbound_tx, inbound_rx) = mpsc::channel(1024);
         Self {
-            shard_id: shard_id.into(),
+            shard_id: shard_id.clone(),
             config,
             world,
             clients: Arc::new(RwLock::new(HashMap::new())),
@@ -234,6 +275,9 @@ impl GameServer {
             recovery_snapshots_sent: 0,
             recovery_delivery_failures: 0,
             transport_summary_tx: None,
+            lifecycle_command_rx: None,
+            lifecycle_state_tx: None,
+            lifecycle_state: ServerLifecycleState::running(shard_id),
         }
     }
 
@@ -246,6 +290,16 @@ impl GameServer {
         tx: watch::Sender<Option<ShardTransportSummary>>,
     ) {
         self.transport_summary_tx = Some(tx);
+    }
+
+    pub fn install_lifecycle_control(
+        &mut self,
+        rx: mpsc::UnboundedReceiver<ServerLifecycleCommand>,
+        tx: watch::Sender<ServerLifecycleState>,
+    ) {
+        self.lifecycle_command_rx = Some(rx);
+        self.lifecycle_state_tx = Some(tx);
+        self.publish_lifecycle_state();
     }
 
     /// Initialize the server (bind to network)
@@ -304,6 +358,10 @@ impl GameServer {
         let tick_duration = std::time::Duration::from_secs_f32(1.0 / self.config.tick_rate as f32);
 
         loop {
+            if self.apply_lifecycle_commands().await {
+                break;
+            }
+
             let frame_start = std::time::Instant::now();
 
             // Step the world
@@ -352,6 +410,19 @@ impl GameServer {
                 self.last_transport_log_tick = self.tick;
             }
 
+            if self.lifecycle_state.phase == ServerLifecyclePhase::Draining
+                && self.client_count().await == 0
+            {
+                self.lifecycle_state.phase = ServerLifecyclePhase::Stopped;
+                self.lifecycle_state.latest_tick = self.tick;
+                self.publish_lifecycle_state();
+                info!(
+                    "Shard {} drained cleanly at tick {}",
+                    self.shard_id, self.tick
+                );
+                break;
+            }
+
             // Sleep to maintain tick rate
             let elapsed = frame_start.elapsed();
             if elapsed < tick_duration {
@@ -365,6 +436,8 @@ impl GameServer {
 
             self.tick += 1;
         }
+
+        Ok(())
     }
 
     /// Process one game tick
@@ -484,6 +557,69 @@ impl GameServer {
         }
     }
 
+    async fn apply_lifecycle_commands(&mut self) -> bool {
+        let mut commands = Vec::new();
+        if let Some(rx) = self.lifecycle_command_rx.as_mut() {
+            while let Ok(command) = rx.try_recv() {
+                commands.push(command);
+            }
+        }
+
+        for command in commands {
+            match command {
+                ServerLifecycleCommand::BeginDrain { reason } => {
+                    if self.lifecycle_state.phase == ServerLifecyclePhase::Stopped {
+                        continue;
+                    }
+                    self.lifecycle_state.phase = ServerLifecyclePhase::Draining;
+                    self.lifecycle_state.accepting_new_connections = false;
+                    self.lifecycle_state.latest_tick = self.tick;
+                    self.lifecycle_state.reason = Some(reason.clone());
+                    self.publish_lifecycle_state();
+                    info!(
+                        "Shard {} entering drain mode at tick {}: {}",
+                        self.shard_id, self.tick, reason
+                    );
+                }
+                ServerLifecycleCommand::Shutdown { reason } => {
+                    self.lifecycle_state.phase = ServerLifecyclePhase::Stopped;
+                    self.lifecycle_state.accepting_new_connections = false;
+                    self.lifecycle_state.latest_tick = self.tick;
+                    self.lifecycle_state.reason = Some(reason.clone());
+                    self.publish_lifecycle_state();
+                    self.disconnect_all_clients(&format!("server shutdown: {reason}"))
+                        .await;
+                    info!(
+                        "Shard {} shutting down at tick {}: {}",
+                        self.shard_id, self.tick, reason
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn publish_lifecycle_state(&self) {
+        if let Some(tx) = &self.lifecycle_state_tx {
+            let _ = tx.send(self.lifecycle_state.clone());
+        }
+    }
+
+    async fn disconnect_all_clients(&mut self, reason: &str) {
+        let client_ids = self
+            .clients
+            .read()
+            .await
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for client_id in client_ids {
+            self.disconnect_client(client_id, reason).await;
+        }
+    }
+
     async fn register_pending_client(
         &mut self,
         client_id: ClientId,
@@ -498,244 +634,248 @@ impl GameServer {
 
     /// Accept incoming client connections
     async fn handle_connections(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        loop {
-            let websocket_accepted = {
-                let Some(listener) = self.websocket_listener.as_ref() else {
-                    break;
-                };
-                match tokio::time::timeout(Duration::from_millis(1), listener.accept()).await {
-                    Ok(Ok(accepted)) => accepted,
-                    Ok(Err(err)) => {
-                        warn!("Failed to accept websocket client: {err}");
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            };
-
-            let (stream, _remote_addr) = websocket_accepted;
-
-            let websocket = match accept_async(stream).await {
-                Ok(websocket) => websocket,
-                Err(err) => {
-                    warn!("Failed to complete websocket handshake: {err}");
-                    continue;
-                }
-            };
-
-            let client_id = ClientId::new();
-            info!("Accepted new websocket client connection: {}", client_id.0);
-
-            let mut outbound_rx = self.register_pending_client(client_id).await;
-            let inbound_tx = self.inbound_tx.clone();
-            let (mut ws_write, mut ws_read) = websocket.split();
-
-            tokio::spawn(async move {
-                while let Some(message) = ws_read.next().await {
-                    match message {
-                        Ok(Message::Text(text)) => {
-                            let message = match ClientMessage::decode_json(text.as_ref()) {
-                                Ok(message) => message,
-                                Err(err) => {
-                                    warn!(
-                                        "WebSocket client {} sent invalid JSON message: {}",
-                                        client_id.0, err
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            if inbound_tx
-                                .send(InboundPacket::Message {
-                                    client_id,
-                                    encoded_len: text.len(),
-                                    message,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        Ok(Message::Binary(bytes)) => {
-                            let text = match String::from_utf8(bytes.to_vec()) {
-                                Ok(text) => text,
-                                Err(err) => {
-                                    warn!(
-                                        "WebSocket client {} sent non-UTF8 binary payload: {}",
-                                        client_id.0, err
-                                    );
-                                    continue;
-                                }
-                            };
-                            let message = match ClientMessage::decode_json(&text) {
-                                Ok(message) => message,
-                                Err(err) => {
-                                    warn!(
-                                        "WebSocket client {} sent invalid binary JSON message: {}",
-                                        client_id.0, err
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            if inbound_tx
-                                .send(InboundPacket::Message {
-                                    client_id,
-                                    encoded_len: text.len(),
-                                    message,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        Ok(Message::Close(frame)) => {
-                            let reason = frame
-                                .map(|frame| frame.reason.to_string())
-                                .unwrap_or_else(|| "websocket closed".to_string());
-                            let _ = inbound_tx
-                                .send(InboundPacket::Disconnected { client_id, reason })
-                                .await;
-                            break;
-                        }
-                        Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
-                        Ok(Message::Frame(_)) => {}
-                        Err(err) => {
-                            let _ = inbound_tx
-                                .send(InboundPacket::Disconnected {
-                                    client_id,
-                                    reason: format!("websocket receive failed: {err}"),
-                                })
-                                .await;
-                            break;
-                        }
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                while let Some(message) = outbound_rx.recv().await {
-                    let payload = match message.encode_json() {
-                        Ok(payload) => payload,
-                        Err(err) => {
-                            error!("Failed to encode websocket outbound message: {}", err);
-                            continue;
-                        }
-                    };
-
-                    if let Err(err) = ws_write.send(Message::Text(payload)).await {
-                        error!("Failed to send websocket outbound message: {}", err);
-                        break;
-                    }
-                }
-
-                let _ = ws_write.close().await;
-            });
-        }
-
-        if self.endpoint.is_some() {
+        if self.lifecycle_state.accepting_new_connections {
             loop {
-                let incoming = {
-                    let endpoint = self.endpoint.as_ref().expect("checked above");
-                    match tokio::time::timeout(Duration::from_millis(1), endpoint.accept()).await {
-                        Ok(Some(incoming)) => incoming,
-                        Ok(None) => break,
+                let websocket_accepted = {
+                    let Some(listener) = self.websocket_listener.as_ref() else {
+                        break;
+                    };
+                    match tokio::time::timeout(Duration::from_millis(1), listener.accept()).await {
+                        Ok(Ok(accepted)) => accepted,
+                        Ok(Err(err)) => {
+                            warn!("Failed to accept websocket client: {err}");
+                            break;
+                        }
                         Err(_) => break,
                     }
                 };
 
-                let connection = match incoming.await {
-                    Ok(conn) => conn,
+                let (stream, _remote_addr) = websocket_accepted;
+
+                let websocket = match accept_async(stream).await {
+                    Ok(websocket) => websocket,
                     Err(err) => {
-                        warn!("Failed to accept client connection: {err}");
+                        warn!("Failed to complete websocket handshake: {err}");
                         continue;
                     }
                 };
 
                 let client_id = ClientId::new();
-                info!("Accepted new client connection: {}", client_id.0);
+                info!("Accepted new websocket client connection: {}", client_id.0);
 
                 let mut outbound_rx = self.register_pending_client(client_id).await;
-
-                let read_conn = connection.clone();
-                let write_conn = connection.clone();
                 let inbound_tx = self.inbound_tx.clone();
+                let (mut ws_write, mut ws_read) = websocket.split();
 
                 tokio::spawn(async move {
-                    loop {
-                        let mut recv = match read_conn.accept_uni().await {
-                            Ok(recv) => recv,
+                    while let Some(message) = ws_read.next().await {
+                        match message {
+                            Ok(Message::Text(text)) => {
+                                let message = match ClientMessage::decode_json(text.as_ref()) {
+                                    Ok(message) => message,
+                                    Err(err) => {
+                                        warn!(
+                                            "WebSocket client {} sent invalid JSON message: {}",
+                                            client_id.0, err
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                if inbound_tx
+                                    .send(InboundPacket::Message {
+                                        client_id,
+                                        encoded_len: text.len(),
+                                        message,
+                                    })
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Ok(Message::Binary(bytes)) => {
+                                let text = match String::from_utf8(bytes.to_vec()) {
+                                    Ok(text) => text,
+                                    Err(err) => {
+                                        warn!(
+                                            "WebSocket client {} sent non-UTF8 binary payload: {}",
+                                            client_id.0, err
+                                        );
+                                        continue;
+                                    }
+                                };
+                                let message = match ClientMessage::decode_json(&text) {
+                                    Ok(message) => message,
+                                    Err(err) => {
+                                        warn!(
+                                            "WebSocket client {} sent invalid binary JSON message: {}",
+                                            client_id.0, err
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                if inbound_tx
+                                    .send(InboundPacket::Message {
+                                        client_id,
+                                        encoded_len: text.len(),
+                                        message,
+                                    })
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Ok(Message::Close(frame)) => {
+                                let reason = frame
+                                    .map(|frame| frame.reason.to_string())
+                                    .unwrap_or_else(|| "websocket closed".to_string());
+                                let _ = inbound_tx
+                                    .send(InboundPacket::Disconnected { client_id, reason })
+                                    .await;
+                                break;
+                            }
+                            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+                            Ok(Message::Frame(_)) => {}
                             Err(err) => {
                                 let _ = inbound_tx
                                     .send(InboundPacket::Disconnected {
                                         client_id,
-                                        reason: format!("receive failed: {err}"),
+                                        reason: format!("websocket receive failed: {err}"),
                                     })
                                     .await;
                                 break;
                             }
-                        };
-
-                        let bytes = match recv.read_to_end(64 * 1024).await {
-                            Ok(bytes) => bytes,
-                            Err(err) => {
-                                warn!("Client {} stream read failed: {}", client_id.0, err);
-                                continue;
-                            }
-                        };
-
-                        let message = match ClientMessage::decode(&bytes) {
-                            Ok(message) => message,
-                            Err(err) => {
-                                warn!("Client {} sent invalid message: {}", client_id.0, err);
-                                continue;
-                            }
-                        };
-
-                        if inbound_tx
-                            .send(InboundPacket::Message {
-                                client_id,
-                                encoded_len: bytes.len(),
-                                message,
-                            })
-                            .await
-                            .is_err()
-                        {
-                            break;
                         }
                     }
                 });
 
                 tokio::spawn(async move {
                     while let Some(message) = outbound_rx.recv().await {
-                        let payload = match message.encode() {
+                        let payload = match message.encode_json() {
                             Ok(payload) => payload,
                             Err(err) => {
-                                error!("Failed to encode outbound message: {}", err);
+                                error!("Failed to encode websocket outbound message: {}", err);
                                 continue;
                             }
                         };
 
-                        let mut send = match write_conn.open_uni().await {
-                            Ok(send) => send,
-                            Err(err) => {
-                                error!("Failed to open outbound stream: {}", err);
-                                break;
-                            }
-                        };
-
-                        if let Err(err) = send.write_all(&payload).await {
-                            error!("Failed to write outbound payload: {}", err);
-                            break;
-                        }
-                        if let Err(err) = send.finish() {
-                            error!("Failed to finish outbound stream: {}", err);
+                        if let Err(err) = ws_write.send(Message::Text(payload)).await {
+                            error!("Failed to send websocket outbound message: {}", err);
                             break;
                         }
                     }
+
+                    let _ = ws_write.close().await;
                 });
+            }
+
+            if self.endpoint.is_some() {
+                loop {
+                    let incoming = {
+                        let endpoint = self.endpoint.as_ref().expect("checked above");
+                        match tokio::time::timeout(Duration::from_millis(1), endpoint.accept())
+                            .await
+                        {
+                            Ok(Some(incoming)) => incoming,
+                            Ok(None) => break,
+                            Err(_) => break,
+                        }
+                    };
+
+                    let connection = match incoming.await {
+                        Ok(conn) => conn,
+                        Err(err) => {
+                            warn!("Failed to accept client connection: {err}");
+                            continue;
+                        }
+                    };
+
+                    let client_id = ClientId::new();
+                    info!("Accepted new client connection: {}", client_id.0);
+
+                    let mut outbound_rx = self.register_pending_client(client_id).await;
+
+                    let read_conn = connection.clone();
+                    let write_conn = connection.clone();
+                    let inbound_tx = self.inbound_tx.clone();
+
+                    tokio::spawn(async move {
+                        loop {
+                            let mut recv = match read_conn.accept_uni().await {
+                                Ok(recv) => recv,
+                                Err(err) => {
+                                    let _ = inbound_tx
+                                        .send(InboundPacket::Disconnected {
+                                            client_id,
+                                            reason: format!("receive failed: {err}"),
+                                        })
+                                        .await;
+                                    break;
+                                }
+                            };
+
+                            let bytes = match recv.read_to_end(64 * 1024).await {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    warn!("Client {} stream read failed: {}", client_id.0, err);
+                                    continue;
+                                }
+                            };
+
+                            let message = match ClientMessage::decode(&bytes) {
+                                Ok(message) => message,
+                                Err(err) => {
+                                    warn!("Client {} sent invalid message: {}", client_id.0, err);
+                                    continue;
+                                }
+                            };
+
+                            if inbound_tx
+                                .send(InboundPacket::Message {
+                                    client_id,
+                                    encoded_len: bytes.len(),
+                                    message,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    });
+
+                    tokio::spawn(async move {
+                        while let Some(message) = outbound_rx.recv().await {
+                            let payload = match message.encode() {
+                                Ok(payload) => payload,
+                                Err(err) => {
+                                    error!("Failed to encode outbound message: {}", err);
+                                    continue;
+                                }
+                            };
+
+                            let mut send = match write_conn.open_uni().await {
+                                Ok(send) => send,
+                                Err(err) => {
+                                    error!("Failed to open outbound stream: {}", err);
+                                    break;
+                                }
+                            };
+
+                            if let Err(err) = send.write_all(&payload).await {
+                                error!("Failed to write outbound payload: {}", err);
+                                break;
+                            }
+                            if let Err(err) = send.finish() {
+                                error!("Failed to finish outbound stream: {}", err);
+                                break;
+                            }
+                        }
+                    });
+                }
             }
         }
 
@@ -2942,6 +3082,78 @@ mod tests {
             .clone()
             .expect("transport summary watch should receive the latest snapshot");
         assert_eq!(observed.shard_id, "alpha-1");
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_control_publishes_drain_state() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (state_tx, state_rx) = watch::channel(ServerLifecycleState::running("alpha-1"));
+        server.install_lifecycle_control(command_rx, state_tx);
+
+        command_tx
+            .send(ServerLifecycleCommand::BeginDrain {
+                reason: "deploy rollout".into(),
+            })
+            .expect("drain command should send");
+        let should_exit = server.apply_lifecycle_commands().await;
+
+        assert!(!should_exit);
+        assert_eq!(server.lifecycle_state.phase, ServerLifecyclePhase::Draining);
+        assert!(!server.lifecycle_state.accepting_new_connections);
+        assert_eq!(
+            state_rx.borrow().clone(),
+            ServerLifecycleState {
+                shard_id: "alpha-1".into(),
+                phase: ServerLifecyclePhase::Draining,
+                accepting_new_connections: false,
+                latest_tick: 0,
+                reason: Some("deploy rollout".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_control_shutdown_disconnects_clients() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
+        let client_id = ClientId::new();
+        let (tx, _rx) = mpsc::channel(8);
+        server.client_tx.write().await.insert(client_id, tx);
+        server.clients.write().await.insert(
+            client_id,
+            ClientSession {
+                player_name: Some("debug".into()),
+                agent_id: None,
+                pending_actions: Vec::new(),
+                reconnect_token: ReconnectToken::new(),
+                last_action_tick: None,
+                last_processed_action_tick: None,
+                debug_telemetry_enabled: false,
+                debug_focus_entity: None,
+                last_sent_snapshot: None,
+                transport: ClientTransportCounters::default(),
+            },
+        );
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (state_tx, state_rx) = watch::channel(ServerLifecycleState::running("alpha-1"));
+        server.install_lifecycle_control(command_rx, state_tx);
+
+        command_tx
+            .send(ServerLifecycleCommand::Shutdown {
+                reason: "operator stop".into(),
+            })
+            .expect("shutdown command should send");
+        let should_exit = server.apply_lifecycle_commands().await;
+
+        assert!(should_exit);
+        assert_eq!(server.client_count().await, 0);
+        assert_eq!(server.lifecycle_state.phase, ServerLifecyclePhase::Stopped);
+        assert_eq!(state_rx.borrow().phase, ServerLifecyclePhase::Stopped);
+        assert_eq!(state_rx.borrow().reason.as_deref(), Some("operator stop"));
     }
 
     #[tokio::test]
