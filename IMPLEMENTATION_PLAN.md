@@ -2082,7 +2082,17 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo check -p pod-server`
   - `git diff --check`
 
-**Next focus**: Move the new `pod-server` bootstrap/transport seam out of the app-local binary and into a reusable crate/exported lifecycle surface so dedicated authority variants do not need to reimplement the same composition contract.
+### Iteration 204
+- [x] Added `apps/pod-server/src/lib.rs`, exporting `ServerConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)` so dedicated authority composition now lives on a reusable crate surface instead of only inside the binary entry point.
+- [x] Simplified `apps/pod-server/src/main.rs` to consume that exported library contract for config parsing, authoritative world creation, and network-config composition, leaving the binary focused on process startup, runtime loop wiring, and shutdown behavior.
+- [x] Moved the dedicated-server seam tests onto the `pod-server` library target and updated the lifecycle docs to point at `apps/pod-server/src/lib.rs` as the current dedicated-authority contract while clarifying that the next remaining gap is pushing that host seam down into a shared engine/runtime crate.
+- [x] Validation:
+  - `cargo test -p pod-server --lib -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server`
+  - `cargo check -p pod-server`
+  - `git diff --check`
+
+**Next focus**: Push the exported `pod-server` authority lifecycle contract down into a shared engine/runtime crate so dedicated authority hosts beyond `pod-server` can reuse it without depending on an app crate.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

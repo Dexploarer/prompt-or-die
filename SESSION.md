@@ -258,9 +258,11 @@
 - [x] Captured the first live shard-target topology artifact at `artifacts/topology-feed-live-shard-local.json` and published the first committed weekly shard-target snapshot at `docs/benchmark-snapshots/2026-W11-shard-target.json`
 - [x] Extracted `WorldBootstrapPlan`, `TransportPolicy`, and `ServerConfig::network_server_config()` in `apps/pod-server/src/main.rs`, so dedicated-server world/bootstrap and direct-connect transport composition now run through typed app-local contracts instead of inline literals in the binary entry point
 - [x] Added deterministic `pod-server` runtime coverage for bootstrap population and transport-policy composition, and updated `docs/plugin-model.md` plus `docs/architecture.md` so the lifecycle docs reflect the new `pod-server` seam accurately
+- [x] Added `apps/pod-server/src/lib.rs` and moved the dedicated-server lifecycle seam onto that exported crate surface, so `ServerConfig`, `TransportPolicy`, `WorldBootstrapPlan`, `parse_bind_target(...)`, and `build_authoritative_world(...)` are now reusable outside the binary entry point
+- [x] Simplified `apps/pod-server/src/main.rs` to consume the exported library contract and moved the seam tests onto the `pod-server` library target, keeping the binary focused on startup/shutdown plus runtime loop composition
 
 **Next Action**:
-- Move the new pod-server bootstrap/transport seam into a reusable crate/exported lifecycle contract so dedicated authority variants do not have to patch `apps/pod-server/src/main.rs` directly.
+- Push the exported `pod-server` authority lifecycle contract down into a shared engine/runtime crate so dedicated authority hosts beyond `pod-server` can reuse it without depending on an app crate.
 
 ## Audit Backlog (2026-03-13)
 

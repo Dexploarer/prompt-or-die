@@ -95,7 +95,8 @@ treated as composition roots rather than extension APIs.
 | --- | --- | --- |
 | `apps/pod-web/src/main.ts` | Internal composition root | Do not add feature-specific hooks here if the behavior belongs in `pod-scene`, `pod-assets`, `pod-net`, or shared browser contracts. |
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
-| `apps/pod-server/src/main.rs` | Internal composition root with typed app-local seams | Use it to wire modes together through `ServerConfig::world_bootstrap()` and `ServerConfig::network_server_config()`, not as the primary place to author gameplay or extension rules. |
+| `apps/pod-server/src/lib.rs` | Current dedicated-server lifecycle contract | Safe place to compose `ServerConfig`, `TransportPolicy`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` for dedicated authority variants, but not yet a general engine-wide plugin lifecycle. |
+| `apps/pod-server/src/main.rs` | Thin internal entry point | Keep it focused on process startup, shutdown wiring, and calling the exported `pod-server` library surface. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
 This is the near-term rule: extend exported crate boundaries first, and only
@@ -106,11 +107,10 @@ touch app bootstrap when you are composing existing subsystems together.
 The current seams are usable, but several hooks are still missing and force
 integrators back into app composition roots:
 
-- Dedicated-server lifecycle export hook:
-  `apps/pod-server/src/main.rs` now routes map/bootstrap composition through
-  `WorldBootstrapPlan` and transport tuning through `TransportPolicy`, but that
-  seam is still app-local instead of a crate-level registration surface shared
-  across dedicated server entry points.
+- Engine-wide authority lifecycle hook:
+  `apps/pod-server/src/lib.rs` now exports dedicated-server bootstrap and
+  transport composition, but that seam still lives in the `pod-server` crate
+  instead of a shared engine/runtime crate that every authority host can reuse.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
