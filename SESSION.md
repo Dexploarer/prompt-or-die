@@ -266,7 +266,7 @@
 - [x] Reduced `crates/pod-net/src/authority.rs` to the transport adapter half of the contract, updated `apps/pod-server` to build worlds from `config.world`, and refreshed the docs to point at the split `pod-core` + `pod-net` authority lifecycle surface
 
 **Next Action**:
-- Move `pod-server` gameplay/tick-budget/tool-call incident summaries out of app-private stats and into a shared shard control-plane/output surface so transport, lifecycle, and gameplay incidents publish through one MMO ops contract.
+- Move shared shard/supervisor ops document publication out of `apps/pod-server` and into a reusable crate surface so direct-connect and local authority hosts can emit the same MMO ops feed without app-private debug-stream wiring.
 
 ## Iteration 207 Progress
 
@@ -291,6 +291,12 @@
 - [x] Added lifecycle command/state plumbing in `crates/pod-net/src/server.rs`, so direct-connect shard runtimes can now be drained or shut down through a supervised control path instead of only by killing the process.
 - [x] Added `AuthorityShardLifecycleState`, derived `ShardIncidentSummary` output, and coordinated `request_drain*` / `request_shutdown*` fan-out in `crates/pod-host/src/lib.rs`, so the shard/supervisor control-plane now exposes both health state and lifecycle control from one surface.
 - [x] Updated the compatibility exports and lifecycle docs to point at the new incident-plus-lifecycle surface, moving the next MMO blocker up to shared gameplay/tick incident publication instead of raw shard command/control support.
+
+## Iteration 211 Progress
+
+- [x] Added `ShardGameplayIncidentTracker` in `crates/pod-core/src/ops.rs`, so tick-budget, tool-call, trajectory, and flagship MMO action counters now live on a shared runtime surface instead of `apps/pod-server` private stats.
+- [x] Extended `crates/pod-net/src/server.rs` with gameplay incident watch publication and shard incident debug documents, so `GameServer` now emits transport, lifecycle, and gameplay summaries from one authority runtime path.
+- [x] Updated `crates/pod-host/src/lib.rs` control-plane snapshots plus the architecture/plugin docs, moving the next MMO blocker up to durable shared ops publication instead of missing gameplay telemetry on the shard surface.
 
 ## Audit Backlog (2026-03-13)
 

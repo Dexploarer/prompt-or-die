@@ -19,8 +19,9 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use pod_core::{
     summarize_focused_entity_debug, Action, AgentTickRollup, AgentToolCallEvent,
-    ClientTransportSummary, GameEvent, IdleAgent, ShardTransportSummary, TelemetryArchive,
-    TelemetryConfig, TickTelemetryFrame, VersionedTickTelemetry, World,
+    ClientTransportSummary, GameEvent, IdleAgent, ShardGameplayIncidentTracker,
+    ShardIncidentSummary, ShardTransportSummary, TelemetryArchive, TelemetryConfig,
+    TickTelemetryFrame, VersionedTickTelemetry, World,
 };
 
 use crate::protocol::{
@@ -110,6 +111,7 @@ enum PendingDebugDocument {
     TickTelemetry(VersionedTickTelemetry),
     AgentToolCallEvent(AgentToolCallEvent),
     AgentTickRollup(AgentTickRollup),
+    ShardIncidentSummary(ShardIncidentSummary),
     ShardTransportSummary(ShardTransportSummary),
 }
 
@@ -119,6 +121,7 @@ impl PendingDebugDocument {
             Self::TickTelemetry(document) => document.to_toon_document(),
             Self::AgentToolCallEvent(document) => document.to_toon_document(),
             Self::AgentTickRollup(document) => document.to_toon_document(),
+            Self::ShardIncidentSummary(document) => document.to_toon_document(),
             Self::ShardTransportSummary(document) => document.to_toon_document(),
         }
     }
@@ -140,6 +143,7 @@ enum InboundPacket {
 const ACTION_QUEUE_MAX_DEPTH: usize = 256;
 const ACTION_WINDOW_BACKWARD_TICKS: u64 = 2;
 const ACTION_WINDOW_FORWARD_TICKS: u64 = 2;
+const INCIDENT_SUMMARY_INTERVAL_TICKS: u64 = 60;
 const TRANSPORT_SUMMARY_INTERVAL_TICKS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +231,10 @@ pub struct GameServer {
     recovery_delivery_failures: u64,
     /// Optional watch sink for live shard transport summaries.
     transport_summary_tx: Option<watch::Sender<Option<ShardTransportSummary>>>,
+    /// Shared gameplay/tick incident tracker for this shard.
+    gameplay_incident_tracker: ShardGameplayIncidentTracker,
+    /// Optional watch sink for live shard gameplay incident summaries.
+    incident_summary_tx: Option<watch::Sender<Option<ShardIncidentSummary>>>,
     /// Optional runtime lifecycle command receiver.
     lifecycle_command_rx: Option<mpsc::UnboundedReceiver<ServerLifecycleCommand>>,
     /// Optional watch sink for live shard lifecycle state.
@@ -275,6 +283,8 @@ impl GameServer {
             recovery_snapshots_sent: 0,
             recovery_delivery_failures: 0,
             transport_summary_tx: None,
+            gameplay_incident_tracker: ShardGameplayIncidentTracker::new(),
+            incident_summary_tx: None,
             lifecycle_command_rx: None,
             lifecycle_state_tx: None,
             lifecycle_state: ServerLifecycleState::running(shard_id),
@@ -290,6 +300,13 @@ impl GameServer {
         tx: watch::Sender<Option<ShardTransportSummary>>,
     ) {
         self.transport_summary_tx = Some(tx);
+    }
+
+    pub fn install_incident_summary_watch(
+        &mut self,
+        tx: watch::Sender<Option<ShardIncidentSummary>>,
+    ) {
+        self.incident_summary_tx = Some(tx);
     }
 
     pub fn install_lifecycle_control(
@@ -472,7 +489,15 @@ impl GameServer {
         }
 
         // Step the world
+        let tick_budget = std::time::Duration::from_secs_f32(1.0 / self.config.tick_rate as f32);
+        let tick_start = std::time::Instant::now();
         let tick_result = self.world.step();
+        let tick_over_budget = tick_start.elapsed() > tick_budget;
+        self.gameplay_incident_tracker.record_tick(
+            &tick_result,
+            self.world.agent_count(),
+            tick_over_budget,
+        );
         self.debug_archive
             .record_tick(tick_result.telemetry.clone());
         self.pending_debug_documents.clear();
@@ -500,6 +525,17 @@ impl GameServer {
                 self.pending_debug_documents
                     .push(PendingDebugDocument::AgentTickRollup(rollup));
             }
+        }
+
+        let incident = self
+            .gameplay_incident_tracker
+            .incident_summary(self.shard_id.clone(), tick_result.tick);
+        self.publish_incident_summary(&incident);
+        let emit_incident = !matches!(incident.severity, pod_core::IncidentSeverity::Healthy)
+            || (tick_result.tick + 1).is_multiple_of(INCIDENT_SUMMARY_INTERVAL_TICKS);
+        if emit_incident {
+            self.pending_debug_documents
+                .push(PendingDebugDocument::ShardIncidentSummary(incident));
         }
 
         debug!(
@@ -1404,6 +1440,12 @@ impl GameServer {
         }
     }
 
+    fn publish_incident_summary(&self, summary: &ShardIncidentSummary) {
+        if let Some(tx) = &self.incident_summary_tx {
+            let _ = tx.send(Some(summary.clone()));
+        }
+    }
+
     pub async fn transport_summary(&self) -> ShardTransportSummary {
         let clients = self.clients.read().await;
         let mut client_summaries = clients
@@ -1746,6 +1788,9 @@ impl GameServer {
                 PendingDebugDocument::AgentTickRollup(rollup) => interested_entities
                     .contains(&rollup.agent_entity_id)
                     .then(|| rollup.to_toon_document()),
+                PendingDebugDocument::ShardIncidentSummary(summary) => {
+                    Some(summary.to_toon_document())
+                }
                 PendingDebugDocument::ShardTransportSummary(summary) => {
                     Some(summary.to_toon_document())
                 }
@@ -3154,6 +3199,24 @@ mod tests {
         assert_eq!(server.lifecycle_state.phase, ServerLifecyclePhase::Stopped);
         assert_eq!(state_rx.borrow().phase, ServerLifecyclePhase::Stopped);
         assert_eq!(state_rx.borrow().reason.as_deref(), Some("operator stop"));
+    }
+
+    #[tokio::test]
+    async fn test_gameplay_incident_summary_watch_publishes_after_tick() {
+        let config = ProtoServerConfig::default();
+        let world = World::new(42);
+        let mut server = GameServer::new_with_shard_id(config, world, "alpha-1");
+        let (incident_tx, incident_rx) = watch::channel(None);
+        server.install_incident_summary_watch(incident_tx);
+
+        server.step_tick().await.unwrap();
+
+        let summary = incident_rx
+            .borrow()
+            .clone()
+            .expect("incident summary watch should receive the latest gameplay summary");
+        assert_eq!(summary.shard_id, "alpha-1");
+        assert_eq!(summary.latest_tick, 0);
     }
 
     #[tokio::test]

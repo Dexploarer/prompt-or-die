@@ -114,10 +114,11 @@ integrators back into app composition roots:
   `AuthorityShardControlPlaneHandle` and
   `ShardSupervisorControlPlaneHandle`, plus derived shard incident summaries and
   coordinated drain/shutdown commands, so supervised shard sets can snapshot
-  live direct-connect transport pressure and issue basic lifecycle control
-  without per-shard log scraping. What is still missing is a shared gameplay
-  incident feed and durable ops publication surface above the supervised shard
-  set.
+  live direct-connect transport pressure, gameplay/tick incident state, and
+  lifecycle control without per-shard log scraping. What is still missing is a
+  durable supervisor-level ops publication surface above the supervised shard
+  set, so browser/editor/ops consumers still depend on `apps/pod-server`
+  private debug-stream wiring for one shared document feed.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::action::Action;
+use crate::tick::TickResult;
 use crate::toon::encode_toon_document;
 use crate::{ActionLifecycleStage, TelemetryArchive, ToolCallStatus};
 
@@ -34,6 +36,228 @@ pub struct ShardIncidentSummary {
 impl ShardIncidentSummary {
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("shard_incident_summary", self)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ShardGameplayIncidentTracker {
+    ticks_completed: u64,
+    total_actions: usize,
+    total_actions_rejected: usize,
+    peak_entity_count: usize,
+    peak_agent_count: usize,
+    tick_budget_overruns: u64,
+    total_tool_calls: usize,
+    total_tool_call_errors: usize,
+    total_tool_latency_ms: u64,
+    total_trajectory_distance: f32,
+    total_agents_sampled: usize,
+    capture_actions: usize,
+    summon_actions: usize,
+    gather_actions: usize,
+    loot_actions: usize,
+}
+
+impl ShardGameplayIncidentTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_tick(
+        &mut self,
+        tick_result: &TickResult,
+        agent_count: usize,
+        tick_over_budget: bool,
+    ) {
+        self.ticks_completed += 1;
+        self.total_actions += tick_result.actions_processed;
+        self.total_actions_rejected += tick_result.actions_rejected;
+        self.peak_entity_count = self.peak_entity_count.max(tick_result.entity_count);
+        self.peak_agent_count = self.peak_agent_count.max(agent_count);
+        if tick_over_budget {
+            self.tick_budget_overruns += 1;
+        }
+
+        for agent in &tick_result.telemetry.agents {
+            self.total_agents_sampled += 1;
+            if let Some(trajectory) = &agent.trajectory {
+                self.total_trajectory_distance += trajectory.distance_travelled;
+            }
+
+            for trace in &agent.tool_calls {
+                self.total_tool_calls += 1;
+                self.total_tool_latency_ms += trace.latency_ms as u64;
+                if !matches!(
+                    trace.status,
+                    ToolCallStatus::Succeeded | ToolCallStatus::Requested
+                ) {
+                    self.total_tool_call_errors += 1;
+                }
+            }
+
+            for trace in &agent.action_trace {
+                if !matches!(trace.stage, ActionLifecycleStage::Executed) {
+                    continue;
+                }
+
+                match &trace.action {
+                    Action::CaptureCreature { .. } => self.capture_actions += 1,
+                    Action::SummonCompanion { .. } => self.summon_actions += 1,
+                    Action::GatherResource { .. } => self.gather_actions += 1,
+                    Action::Loot { .. } => self.loot_actions += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn action_rejection_rate(&self) -> f32 {
+        let total = self.total_actions + self.total_actions_rejected;
+        if total == 0 {
+            return 0.0;
+        }
+        self.total_actions_rejected as f32 / total as f32
+    }
+
+    pub fn tool_call_error_rate(&self) -> f32 {
+        if self.total_tool_calls == 0 {
+            return 0.0;
+        }
+        self.total_tool_call_errors as f32 / self.total_tool_calls as f32
+    }
+
+    pub fn average_tool_latency_ms(&self) -> f32 {
+        if self.total_tool_calls == 0 {
+            return 0.0;
+        }
+        self.total_tool_latency_ms as f32 / self.total_tool_calls as f32
+    }
+
+    pub fn average_trajectory_distance(&self) -> f32 {
+        if self.total_agents_sampled == 0 {
+            return 0.0;
+        }
+        self.total_trajectory_distance / self.total_agents_sampled as f32
+    }
+
+    pub fn tick_budget_overrun_rate(&self) -> f32 {
+        if self.ticks_completed == 0 {
+            return 0.0;
+        }
+        self.tick_budget_overruns as f32 / self.ticks_completed as f32
+    }
+
+    pub fn incident_summary(
+        &self,
+        shard_id: impl Into<String>,
+        latest_tick: u64,
+    ) -> ShardIncidentSummary {
+        let shard_id = shard_id.into();
+        let tick_budget_overrun_rate = self.tick_budget_overrun_rate();
+        let action_rejection_rate = self.action_rejection_rate();
+        let tool_call_error_rate = self.tool_call_error_rate();
+        let average_tool_latency_ms = self.average_tool_latency_ms();
+        let average_trajectory_distance = self.average_trajectory_distance();
+
+        let mut notes = Vec::new();
+        if tick_budget_overrun_rate >= 0.05 {
+            notes.push("tick budget overruns exceed 5%".to_string());
+        }
+        if action_rejection_rate >= 0.15 {
+            notes.push("action rejection rate exceeds 15%".to_string());
+        }
+        if tool_call_error_rate >= 0.10 {
+            notes.push("tool-call error rate exceeds 10%".to_string());
+        }
+        if average_tool_latency_ms >= 750.0 {
+            notes.push("tool-call latency exceeds 750ms".to_string());
+        }
+
+        let sustained_critical = self.ticks_completed >= 10
+            && (tick_budget_overrun_rate >= 0.10
+                || action_rejection_rate >= 0.25
+                || tool_call_error_rate >= 0.20);
+
+        let severity = if sustained_critical {
+            IncidentSeverity::Critical
+        } else if !notes.is_empty() {
+            IncidentSeverity::Warning
+        } else {
+            IncidentSeverity::Healthy
+        };
+
+        let summary = if notes.is_empty() {
+            format!("Shard {shard_id} is healthy at tick {latest_tick}")
+        } else {
+            format!("Shard {shard_id} requires attention: {}", notes.join("; "))
+        };
+
+        ShardIncidentSummary {
+            shard_id,
+            latest_tick,
+            severity,
+            summary,
+            tick_budget_overrun_rate,
+            action_rejection_rate,
+            tool_call_error_rate,
+            average_tool_latency_ms,
+            average_trajectory_distance,
+            peak_entity_count: self.peak_entity_count,
+            peak_agent_count: self.peak_agent_count,
+            capture_actions: self.capture_actions,
+            summon_actions: self.summon_actions,
+            gather_actions: self.gather_actions,
+            loot_actions: self.loot_actions,
+            notes,
+        }
+    }
+
+    pub fn ticks_completed(&self) -> u64 {
+        self.ticks_completed
+    }
+
+    pub fn total_actions(&self) -> usize {
+        self.total_actions
+    }
+
+    pub fn total_actions_rejected(&self) -> usize {
+        self.total_actions_rejected
+    }
+
+    pub fn peak_entity_count(&self) -> usize {
+        self.peak_entity_count
+    }
+
+    pub fn peak_agent_count(&self) -> usize {
+        self.peak_agent_count
+    }
+
+    pub fn tick_budget_overruns(&self) -> u64 {
+        self.tick_budget_overruns
+    }
+
+    pub fn total_tool_calls(&self) -> usize {
+        self.total_tool_calls
+    }
+
+    pub fn total_tool_call_errors(&self) -> usize {
+        self.total_tool_call_errors
+    }
+
+    pub fn capture_actions(&self) -> usize {
+        self.capture_actions
+    }
+
+    pub fn summon_actions(&self) -> usize {
+        self.summon_actions
+    }
+
+    pub fn gather_actions(&self) -> usize {
+        self.gather_actions
+    }
+
+    pub fn loot_actions(&self) -> usize {
+        self.loot_actions
     }
 }
 
@@ -239,12 +463,14 @@ pub fn summarize_focused_entity_debug(
 #[cfg(test)]
 mod tests {
     use crate::telemetry::{AgentTelemetryFrame, TickTelemetryFrame, TrajectorySample};
+    use crate::tick::TickResult;
     use crate::toon::decode_toon_value;
     use crate::{AgentId, AgentRuntimeProfile, EntityId, TelemetryArchive, ToolCallStatus};
 
     use super::{
         summarize_focused_entity_debug, ClientTransportSummary, FocusedEntityDebugSummary,
-        IncidentSeverity, ShardIncidentSummary, ShardTransportSummary,
+        IncidentSeverity, ShardGameplayIncidentTracker, ShardIncidentSummary,
+        ShardTransportSummary,
     };
 
     #[test]
@@ -273,6 +499,36 @@ mod tests {
         assert_eq!(value["document_type"], "shard_incident_summary");
         assert_eq!(value["payload"]["shard_id"], "verdant-hollow");
         assert_eq!(value["payload"]["severity"], "Warning");
+    }
+
+    #[test]
+    fn shard_gameplay_incident_tracker_builds_shared_summary() {
+        let mut tracker = ShardGameplayIncidentTracker::new();
+        let tick_result = TickResult {
+            tick: 9,
+            events: Vec::new(),
+            entity_count: 24,
+            actions_processed: 8,
+            actions_rejected: 2,
+            telemetry: TickTelemetryFrame {
+                tick: 9,
+                agents: Vec::new(),
+            },
+        };
+
+        tracker.record_tick(&tick_result, 5, true);
+        let summary = tracker.incident_summary("alpha-1", tick_result.tick);
+
+        assert_eq!(summary.shard_id, "alpha-1");
+        assert_eq!(summary.latest_tick, 9);
+        assert_eq!(summary.severity, IncidentSeverity::Warning);
+        assert!(summary
+            .notes
+            .iter()
+            .any(|note| note.contains("tick budget overruns exceed 5%")));
+        assert_eq!(summary.peak_entity_count, 24);
+        assert_eq!(summary.peak_agent_count, 5);
+        assert!(summary.tick_budget_overrun_rate > 0.0);
     }
 
     #[test]

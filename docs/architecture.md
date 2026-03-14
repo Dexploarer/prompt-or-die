@@ -215,7 +215,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport control-plane snapshots, and supports coordinated drain/shutdown commands, but it still does not carry the full gameplay/tick incident feed or a durable ops publication surface at MMO scale.
+- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, and supports coordinated drain/shutdown commands, but it still does not provide a durable supervisor-level ops publication surface at MMO scale.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.

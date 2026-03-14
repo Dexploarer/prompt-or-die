@@ -339,6 +339,7 @@ pub struct ShardSupervisorLifecycleCommandResult {
 pub struct AuthorityShardControlPlaneHandle {
     shard: AuthorityShardSummary,
     transport_summary_rx: Option<watch::Receiver<Option<ShardTransportSummary>>>,
+    gameplay_incident_summary_rx: Option<watch::Receiver<Option<ShardIncidentSummary>>>,
     lifecycle_state_rx: Option<watch::Receiver<ServerLifecycleState>>,
     lifecycle_command_tx: Option<mpsc::UnboundedSender<ServerLifecycleCommand>>,
 }
@@ -350,8 +351,10 @@ impl AuthorityShardControlPlaneHandle {
             .transport_summary_rx
             .as_ref()
             .and_then(|rx| rx.borrow().clone());
-        let severity =
-            shard_control_plane_severity(&self.shard, &lifecycle_state, transport_summary.as_ref());
+        let gameplay_incident_summary = self
+            .gameplay_incident_summary_rx
+            .as_ref()
+            .and_then(|rx| rx.borrow().clone());
         let mut notes = Vec::new();
 
         match lifecycle_state.phase {
@@ -414,16 +417,30 @@ impl AuthorityShardControlPlaneHandle {
             }
         }
 
+        if let Some(summary) = gameplay_incident_summary.as_ref() {
+            notes.extend(summary.notes.iter().cloned());
+        }
+
         let latest_tick = transport_summary
             .as_ref()
             .map(|summary| summary.latest_tick)
-            .or((lifecycle_state.latest_tick > 0).then_some(lifecycle_state.latest_tick));
+            .or((lifecycle_state.latest_tick > 0).then_some(lifecycle_state.latest_tick))
+            .or(gameplay_incident_summary
+                .as_ref()
+                .map(|summary| summary.latest_tick));
+        let severity = shard_control_plane_severity(
+            &self.shard,
+            &lifecycle_state,
+            transport_summary.as_ref(),
+            gameplay_incident_summary.as_ref(),
+        );
         let incident_summary = build_control_plane_incident_summary(
             &self.shard,
             &lifecycle_state,
             latest_tick.unwrap_or_default(),
             severity,
             &notes,
+            gameplay_incident_summary.as_ref(),
         );
 
         AuthorityShardControlPlaneSummary {
@@ -433,6 +450,7 @@ impl AuthorityShardControlPlaneHandle {
             latest_tick,
             has_live_transport: transport_summary.is_some(),
             transport_summary,
+            gameplay_incident_summary,
             incident_summary,
             notes,
         }
@@ -496,6 +514,7 @@ pub struct AuthorityShardControlPlaneSummary {
     pub latest_tick: Option<u64>,
     pub has_live_transport: bool,
     pub transport_summary: Option<ShardTransportSummary>,
+    pub gameplay_incident_summary: Option<ShardIncidentSummary>,
     pub incident_summary: ShardIncidentSummary,
     pub notes: Vec<String>,
 }
@@ -675,7 +694,15 @@ fn shard_control_plane_severity(
     shard: &AuthorityShardSummary,
     lifecycle_state: &AuthorityShardLifecycleState,
     transport_summary: Option<&ShardTransportSummary>,
+    gameplay_incident_summary: Option<&ShardIncidentSummary>,
 ) -> IncidentSeverity {
+    if matches!(
+        gameplay_incident_summary,
+        Some(summary) if summary.severity == IncidentSeverity::Critical
+    ) {
+        return IncidentSeverity::Critical;
+    }
+
     if matches!(
         transport_summary,
         Some(summary) if summary.recovery_delivery_failures > 0
@@ -698,6 +725,13 @@ fn shard_control_plane_severity(
         return IncidentSeverity::Warning;
     }
 
+    if matches!(
+        gameplay_incident_summary,
+        Some(summary) if summary.severity == IncidentSeverity::Warning
+    ) {
+        return IncidentSeverity::Warning;
+    }
+
     match transport_summary {
         Some(_) => IncidentSeverity::Healthy,
         None if shard.transport_mode.uses_direct_connect() => IncidentSeverity::Warning,
@@ -711,6 +745,7 @@ fn build_control_plane_incident_summary(
     latest_tick: u64,
     severity: IncidentSeverity,
     notes: &[String],
+    gameplay_incident_summary: Option<&ShardIncidentSummary>,
 ) -> ShardIncidentSummary {
     let summary = if notes.is_empty() {
         format!(
@@ -752,17 +787,39 @@ fn build_control_plane_incident_summary(
         latest_tick,
         severity,
         summary,
-        tick_budget_overrun_rate: 0.0,
-        action_rejection_rate: 0.0,
-        tool_call_error_rate: 0.0,
-        average_tool_latency_ms: 0.0,
-        average_trajectory_distance: 0.0,
-        peak_entity_count: 0,
-        peak_agent_count: 0,
-        capture_actions: 0,
-        summon_actions: 0,
-        gather_actions: 0,
-        loot_actions: 0,
+        tick_budget_overrun_rate: gameplay_incident_summary
+            .map(|summary| summary.tick_budget_overrun_rate)
+            .unwrap_or_default(),
+        action_rejection_rate: gameplay_incident_summary
+            .map(|summary| summary.action_rejection_rate)
+            .unwrap_or_default(),
+        tool_call_error_rate: gameplay_incident_summary
+            .map(|summary| summary.tool_call_error_rate)
+            .unwrap_or_default(),
+        average_tool_latency_ms: gameplay_incident_summary
+            .map(|summary| summary.average_tool_latency_ms)
+            .unwrap_or_default(),
+        average_trajectory_distance: gameplay_incident_summary
+            .map(|summary| summary.average_trajectory_distance)
+            .unwrap_or_default(),
+        peak_entity_count: gameplay_incident_summary
+            .map(|summary| summary.peak_entity_count)
+            .unwrap_or_default(),
+        peak_agent_count: gameplay_incident_summary
+            .map(|summary| summary.peak_agent_count)
+            .unwrap_or_default(),
+        capture_actions: gameplay_incident_summary
+            .map(|summary| summary.capture_actions)
+            .unwrap_or_default(),
+        summon_actions: gameplay_incident_summary
+            .map(|summary| summary.summon_actions)
+            .unwrap_or_default(),
+        gather_actions: gameplay_incident_summary
+            .map(|summary| summary.gather_actions)
+            .unwrap_or_default(),
+        loot_actions: gameplay_incident_summary
+            .map(|summary| summary.loot_actions)
+            .unwrap_or_default(),
         notes: notes.to_vec(),
     }
 }
@@ -781,6 +838,7 @@ impl AuthorityHostRuntime {
             Self::Local { .. } => AuthorityShardControlPlaneHandle {
                 shard,
                 transport_summary_rx: None,
+                gameplay_incident_summary_rx: None,
                 lifecycle_state_rx: None,
                 lifecycle_command_tx: None,
             },
@@ -814,11 +872,13 @@ impl DirectConnectAuthorityRuntime {
             .server_config(config.tick_rate)
             .map_err(|err| AuthorityHostError::TransportConfig(err.to_string()))?;
         let (transport_summary_tx, transport_summary_rx) = watch::channel(None);
+        let (gameplay_incident_summary_tx, gameplay_incident_summary_rx) = watch::channel(None);
         let (lifecycle_command_tx, lifecycle_command_rx) = mpsc::unbounded_channel();
         let (lifecycle_state_tx, lifecycle_state_rx) =
             watch::channel(ServerLifecycleState::running(&shard_id));
         let mut server = pod_net::GameServer::new_with_shard_id(server_config, world, &shard_id);
         server.install_transport_summary_watch(transport_summary_tx);
+        server.install_incident_summary_watch(gameplay_incident_summary_tx);
         server.install_lifecycle_control(lifecycle_command_rx, lifecycle_state_tx);
 
         Ok(Self {
@@ -837,6 +897,7 @@ impl DirectConnectAuthorityRuntime {
                     direct_connect_max_clients: Some(config.max_clients()),
                 },
                 transport_summary_rx: Some(transport_summary_rx),
+                gameplay_incident_summary_rx: Some(gameplay_incident_summary_rx),
                 lifecycle_state_rx: Some(lifecycle_state_rx),
                 lifecycle_command_tx: Some(lifecycle_command_tx),
             },
@@ -1032,7 +1093,9 @@ mod tests {
         PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
         ShardSupervisorError, ShardSupervisorSummary,
     };
-    use pod_core::{AuthorityWorldConfig, IncidentSeverity, ShardTransportSummary};
+    use pod_core::{
+        AuthorityWorldConfig, IncidentSeverity, ShardIncidentSummary, ShardTransportSummary,
+    };
     use pod_net::{
         DirectConnectTransportConfig, ServerLifecycleCommand, ServerLifecycleState, TransportPolicy,
     };
@@ -1258,6 +1321,24 @@ mod tests {
         }));
         let (_command_tx, command_rx) = mpsc::unbounded_channel();
         let (lifecycle_tx, lifecycle_rx) = watch::channel(ServerLifecycleState::running("alpha-1"));
+        let (gameplay_tx, gameplay_rx) = watch::channel(Some(ShardIncidentSummary {
+            shard_id: "alpha-1".into(),
+            latest_tick: 77,
+            severity: IncidentSeverity::Warning,
+            summary: "Shard alpha-1 requires attention: tool-call latency exceeds 750ms".into(),
+            tick_budget_overrun_rate: 0.0,
+            action_rejection_rate: 0.0,
+            tool_call_error_rate: 0.0,
+            average_tool_latency_ms: 900.0,
+            average_trajectory_distance: 0.0,
+            peak_entity_count: 12,
+            peak_agent_count: 3,
+            capture_actions: 0,
+            summon_actions: 0,
+            gather_actions: 0,
+            loot_actions: 0,
+            notes: vec!["tool-call latency exceeds 750ms".into()],
+        }));
         lifecycle_tx
             .send(ServerLifecycleState {
                 shard_id: "alpha-1".into(),
@@ -1271,6 +1352,7 @@ mod tests {
         let handle = AuthorityShardControlPlaneHandle {
             shard,
             transport_summary_rx: Some(rx),
+            gameplay_incident_summary_rx: Some(gameplay_rx),
             lifecycle_state_rx: Some(lifecycle_rx),
             lifecycle_command_tx: Some(_command_tx),
         };
@@ -1293,6 +1375,17 @@ mod tests {
             .notes
             .iter()
             .any(|note| note.contains("recovery snapshot deliveries")));
+        assert!(snapshot
+            .notes
+            .iter()
+            .any(|note| note.contains("tool-call latency exceeds 750ms")));
+        assert_eq!(
+            snapshot
+                .gameplay_incident_summary
+                .as_ref()
+                .map(|summary| summary.average_tool_latency_ms),
+            Some(900.0)
+        );
         assert!(snapshot.incident_summary.summary.contains("draining"));
 
         let supervisor = ShardSupervisorControlPlaneHandle {
@@ -1306,6 +1399,7 @@ mod tests {
         assert_eq!(supervisor.total_recovery_delivery_failures, 1);
 
         drop(tx);
+        drop(gameplay_tx);
         drop(command_rx);
     }
 
@@ -1321,6 +1415,7 @@ mod tests {
         let handle = AuthorityShardControlPlaneHandle {
             shard,
             transport_summary_rx: None,
+            gameplay_incident_summary_rx: None,
             lifecycle_state_rx: Some(watch::channel(ServerLifecycleState::running("alpha-1")).1),
             lifecycle_command_tx: Some(command_tx),
         };
@@ -1377,6 +1472,7 @@ mod tests {
                     }
                     .summary(),
                     transport_summary_rx: None,
+                    gameplay_incident_summary_rx: None,
                     lifecycle_state_rx: None,
                     lifecycle_command_tx: None,
                 },

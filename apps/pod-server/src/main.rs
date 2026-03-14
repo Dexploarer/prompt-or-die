@@ -301,12 +301,10 @@ mod map {
 
 #[allow(dead_code)]
 mod stats {
-    use pod_core::action::Action;
-    use pod_core::telemetry::ToolCallStatus;
     use pod_core::{
         summarize_focused_entity_debug, AgentTickRollup, AgentToolCallEvent,
-        FocusedEntityDebugSummary, IncidentSeverity, ShardIncidentSummary, TelemetryArchive,
-        TelemetryConfig, VersionedTickTelemetry,
+        FocusedEntityDebugSummary, IncidentSeverity, ShardGameplayIncidentTracker,
+        ShardIncidentSummary, TelemetryArchive, TelemetryConfig, VersionedTickTelemetry,
     };
     use std::collections::{HashMap, VecDeque};
     use std::time::Instant;
@@ -318,23 +316,9 @@ mod stats {
     #[derive(Debug)]
     pub struct ServerStats {
         pub target_tick_rate: u32,
-        pub ticks_completed: u64,
         pub last_second_start: Instant,
         pub ticks_this_second: u32,
-        pub total_actions: usize,
-        pub total_actions_rejected: usize,
-        pub peak_entity_count: usize,
-        pub peak_agent_count: usize,
-        pub tick_budget_overruns: u64,
-        pub total_tool_calls: usize,
-        pub total_tool_call_errors: usize,
-        pub total_tool_latency_ms: u64,
-        pub total_trajectory_distance: f32,
-        pub total_agents_sampled: usize,
-        pub capture_actions: usize,
-        pub summon_actions: usize,
-        pub gather_actions: usize,
-        pub loot_actions: usize,
+        tracker: ShardGameplayIncidentTracker,
     }
 
     impl ServerStats {
@@ -342,23 +326,9 @@ mod stats {
         pub fn new(target_tick_rate: u32) -> Self {
             Self {
                 target_tick_rate,
-                ticks_completed: 0,
                 last_second_start: Instant::now(),
                 ticks_this_second: 0,
-                total_actions: 0,
-                total_actions_rejected: 0,
-                peak_entity_count: 0,
-                peak_agent_count: 0,
-                tick_budget_overruns: 0,
-                total_tool_calls: 0,
-                total_tool_call_errors: 0,
-                total_tool_latency_ms: 0,
-                total_trajectory_distance: 0.0,
-                total_agents_sampled: 0,
-                capture_actions: 0,
-                summon_actions: 0,
-                gather_actions: 0,
-                loot_actions: 0,
+                tracker: ShardGameplayIncidentTracker::new(),
             }
         }
 
@@ -369,83 +339,29 @@ mod stats {
             agent_count: usize,
             tick_over_budget: bool,
         ) {
-            self.ticks_completed += 1;
             self.ticks_this_second += 1;
-            self.total_actions += tick_result.actions_processed;
-            self.total_actions_rejected += tick_result.actions_rejected;
-            self.peak_entity_count = self.peak_entity_count.max(tick_result.entity_count);
-            self.peak_agent_count = self.peak_agent_count.max(agent_count);
-            if tick_over_budget {
-                self.tick_budget_overruns += 1;
-            }
-
-            for agent in &tick_result.telemetry.agents {
-                self.total_agents_sampled += 1;
-                if let Some(trajectory) = &agent.trajectory {
-                    self.total_trajectory_distance += trajectory.distance_travelled;
-                }
-
-                for trace in &agent.tool_calls {
-                    self.total_tool_calls += 1;
-                    self.total_tool_latency_ms += trace.latency_ms as u64;
-                    if !matches!(
-                        trace.status,
-                        ToolCallStatus::Succeeded | ToolCallStatus::Requested
-                    ) {
-                        self.total_tool_call_errors += 1;
-                    }
-                }
-
-                for trace in &agent.action_trace {
-                    if !matches!(trace.stage, pod_core::ActionLifecycleStage::Executed) {
-                        continue;
-                    }
-
-                    match &trace.action {
-                        Action::CaptureCreature { .. } => self.capture_actions += 1,
-                        Action::SummonCompanion { .. } => self.summon_actions += 1,
-                        Action::GatherResource { .. } => self.gather_actions += 1,
-                        Action::Loot { .. } => self.loot_actions += 1,
-                        _ => {}
-                    }
-                }
-            }
+            self.tracker
+                .record_tick(tick_result, agent_count, tick_over_budget);
         }
 
         pub fn action_rejection_rate(&self) -> f32 {
-            let total = self.total_actions + self.total_actions_rejected;
-            if total == 0 {
-                return 0.0;
-            }
-            self.total_actions_rejected as f32 / total as f32
+            self.tracker.action_rejection_rate()
         }
 
         pub fn tool_call_error_rate(&self) -> f32 {
-            if self.total_tool_calls == 0 {
-                return 0.0;
-            }
-            self.total_tool_call_errors as f32 / self.total_tool_calls as f32
+            self.tracker.tool_call_error_rate()
         }
 
         pub fn average_tool_latency_ms(&self) -> f32 {
-            if self.total_tool_calls == 0 {
-                return 0.0;
-            }
-            self.total_tool_latency_ms as f32 / self.total_tool_calls as f32
+            self.tracker.average_tool_latency_ms()
         }
 
         pub fn average_trajectory_distance(&self) -> f32 {
-            if self.total_agents_sampled == 0 {
-                return 0.0;
-            }
-            self.total_trajectory_distance / self.total_agents_sampled as f32
+            self.tracker.average_trajectory_distance()
         }
 
         pub fn tick_budget_overrun_rate(&self) -> f32 {
-            if self.ticks_completed == 0 {
-                return 0.0;
-            }
-            self.tick_budget_overruns as f32 / self.ticks_completed as f32
+            self.tracker.tick_budget_overrun_rate()
         }
 
         pub fn incident_summary(
@@ -453,64 +369,7 @@ mod stats {
             shard_id: impl Into<String>,
             latest_tick: u64,
         ) -> ShardIncidentSummary {
-            let shard_id = shard_id.into();
-            let tick_budget_overrun_rate = self.tick_budget_overrun_rate();
-            let action_rejection_rate = self.action_rejection_rate();
-            let tool_call_error_rate = self.tool_call_error_rate();
-            let average_tool_latency_ms = self.average_tool_latency_ms();
-            let average_trajectory_distance = self.average_trajectory_distance();
-
-            let mut notes = Vec::new();
-            if tick_budget_overrun_rate >= 0.05 {
-                notes.push("tick budget overruns exceed 5%".to_string());
-            }
-            if action_rejection_rate >= 0.15 {
-                notes.push("action rejection rate exceeds 15%".to_string());
-            }
-            if tool_call_error_rate >= 0.10 {
-                notes.push("tool-call error rate exceeds 10%".to_string());
-            }
-            if average_tool_latency_ms >= 750.0 {
-                notes.push("tool-call latency exceeds 750ms".to_string());
-            }
-
-            let sustained_critical = self.ticks_completed >= 10
-                && (tick_budget_overrun_rate >= 0.10
-                    || action_rejection_rate >= 0.25
-                    || tool_call_error_rate >= 0.20);
-
-            let severity = if sustained_critical {
-                IncidentSeverity::Critical
-            } else if !notes.is_empty() {
-                IncidentSeverity::Warning
-            } else {
-                IncidentSeverity::Healthy
-            };
-
-            let summary = if notes.is_empty() {
-                format!("Shard {shard_id} is healthy at tick {latest_tick}")
-            } else {
-                format!("Shard {shard_id} requires attention: {}", notes.join("; "))
-            };
-
-            ShardIncidentSummary {
-                shard_id,
-                latest_tick,
-                severity,
-                summary,
-                tick_budget_overrun_rate,
-                action_rejection_rate,
-                tool_call_error_rate,
-                average_tool_latency_ms,
-                average_trajectory_distance,
-                peak_entity_count: self.peak_entity_count,
-                peak_agent_count: self.peak_agent_count,
-                capture_actions: self.capture_actions,
-                summon_actions: self.summon_actions,
-                gather_actions: self.gather_actions,
-                loot_actions: self.loot_actions,
-                notes,
-            }
+            self.tracker.incident_summary(shard_id, latest_tick)
         }
 
         /// Print periodic stats (called once per second)
@@ -530,15 +389,15 @@ mod stats {
                 efficiency,
                 world.entity_count(),
                 world.agent_count(),
-                self.total_actions,
+                self.tracker.total_actions(),
                 self.action_rejection_rate() * 100.0,
                 self.tool_call_error_rate() * 100.0,
                 self.average_tool_latency_ms(),
                 self.average_trajectory_distance(),
-                self.capture_actions,
-                self.summon_actions,
-                self.gather_actions,
-                self.loot_actions,
+                self.tracker.capture_actions(),
+                self.tracker.summon_actions(),
+                self.tracker.gather_actions(),
+                self.tracker.loot_actions(),
             );
 
             self.last_second_start = Instant::now();
@@ -552,21 +411,24 @@ mod stats {
             info!("═══════════════════════════════════════════════════════════");
             info!("FINAL SERVER STATISTICS");
             info!("═══════════════════════════════════════════════════════════");
-            info!("Total ticks:          {}", self.ticks_completed);
-            info!("Total actions:        {}", self.total_actions);
-            info!("Rejected actions:     {}", self.total_actions_rejected);
-            info!("Peak entity count:    {}", self.peak_entity_count);
-            info!("Peak agent count:     {}", self.peak_agent_count);
+            info!("Total ticks:          {}", self.tracker.ticks_completed());
+            info!("Total actions:        {}", self.tracker.total_actions());
+            info!(
+                "Rejected actions:     {}",
+                self.tracker.total_actions_rejected()
+            );
+            info!("Peak entity count:    {}", self.tracker.peak_entity_count());
+            info!("Peak agent count:     {}", self.tracker.peak_agent_count());
             info!("Target tick rate:     {} Hz", self.target_tick_rate);
             info!(
                 "Tick overruns:        {} ({:.1}%)",
-                self.tick_budget_overruns,
+                self.tracker.tick_budget_overruns(),
                 self.tick_budget_overrun_rate() * 100.0
             );
             info!(
                 "Tool calls/errors:    {}/{} ({:.1}%)",
-                self.total_tool_calls,
-                self.total_tool_call_errors,
+                self.tracker.total_tool_calls(),
+                self.tracker.total_tool_call_errors(),
                 self.tool_call_error_rate() * 100.0
             );
             info!(
@@ -579,7 +441,10 @@ mod stats {
             );
             info!(
                 "MMO loop C/S/G/L:     {}/{}/{}/{}",
-                self.capture_actions, self.summon_actions, self.gather_actions, self.loot_actions
+                self.tracker.capture_actions(),
+                self.tracker.summon_actions(),
+                self.tracker.gather_actions(),
+                self.tracker.loot_actions()
             );
             info!("═══════════════════════════════════════════════════════════");
         }
@@ -787,15 +652,15 @@ mod stats {
             let tick = sample_tick();
             stats.record_tick(&tick, 5, true);
 
-            assert_eq!(stats.total_actions, 3);
-            assert_eq!(stats.total_actions_rejected, 1);
-            assert_eq!(stats.peak_entity_count, 12);
-            assert_eq!(stats.peak_agent_count, 5);
-            assert_eq!(stats.tick_budget_overruns, 1);
-            assert_eq!(stats.total_tool_calls, 1);
-            assert_eq!(stats.total_tool_call_errors, 1);
-            assert_eq!(stats.capture_actions, 1);
-            assert_eq!(stats.gather_actions, 1);
+            assert_eq!(stats.tracker.total_actions(), 3);
+            assert_eq!(stats.tracker.total_actions_rejected(), 1);
+            assert_eq!(stats.tracker.peak_entity_count(), 12);
+            assert_eq!(stats.tracker.peak_agent_count(), 5);
+            assert_eq!(stats.tracker.tick_budget_overruns(), 1);
+            assert_eq!(stats.tracker.total_tool_calls(), 1);
+            assert_eq!(stats.tracker.total_tool_call_errors(), 1);
+            assert_eq!(stats.tracker.capture_actions(), 1);
+            assert_eq!(stats.tracker.gather_actions(), 1);
             assert!((stats.average_trajectory_distance() - 5.0).abs() < f32::EPSILON);
             assert!(stats.action_rejection_rate() > 0.0);
             assert!(stats.tool_call_error_rate() > 0.0);
@@ -811,16 +676,16 @@ mod stats {
                 stats.record_tick(tick, result.summary.total_agents, false);
             }
 
-            assert_eq!(stats.capture_actions, result.summary.capture_actions);
-            assert_eq!(stats.summon_actions, result.summary.summon_actions);
-            assert_eq!(stats.gather_actions, result.summary.gather_actions);
-            assert_eq!(stats.loot_actions, result.summary.loot_actions);
-            assert_eq!(stats.total_tool_calls, result.summary.tool_calls);
+            assert_eq!(stats.tracker.capture_actions(), result.summary.capture_actions);
+            assert_eq!(stats.tracker.summon_actions(), result.summary.summon_actions);
+            assert_eq!(stats.tracker.gather_actions(), result.summary.gather_actions);
+            assert_eq!(stats.tracker.loot_actions(), result.summary.loot_actions);
+            assert_eq!(stats.tracker.total_tool_calls(), result.summary.tool_calls);
             assert_eq!(
-                stats.total_tool_call_errors,
+                stats.tracker.total_tool_call_errors(),
                 result.summary.tool_call_errors
             );
-            assert_eq!(stats.ticks_completed, result.summary.ticks_completed);
+            assert_eq!(stats.tracker.ticks_completed(), result.summary.ticks_completed);
             assert!(result.parity_passed());
         }
 
