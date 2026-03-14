@@ -37,6 +37,20 @@ export type BenchmarkSnapshotHistoryEntry = {
     unchanged: number;
     comparedMetrics: number;
   } | null;
+  comparisonHighlights: {
+    regressions: BenchmarkSnapshotHistoryHighlight[];
+    improvements: BenchmarkSnapshotHistoryHighlight[];
+    changed: BenchmarkSnapshotHistoryHighlight[];
+  } | null;
+};
+
+export type BenchmarkSnapshotHistoryHighlight = {
+  category: string;
+  metric: string;
+  baseline: string;
+  candidate: string;
+  delta: number | null;
+  envelope: string | null;
 };
 
 export type BenchmarkSnapshotHistoryIndex = {
@@ -157,6 +171,29 @@ function formatNullableBoolean(value: boolean | null): string {
   return value ? "pass" : "fail";
 }
 
+function buildComparisonHighlights(
+  comparison: BenchmarkSnapshotComparisonReport,
+): NonNullable<BenchmarkSnapshotHistoryEntry["comparisonHighlights"]> {
+  const pick = (status: "regressed" | "improved" | "changed") =>
+    comparison.comparisons
+      .filter((item) => item.status === status)
+      .slice(0, 5)
+      .map((item) => ({
+        category: item.category,
+        metric: item.metric,
+        baseline: item.baseline,
+        candidate: item.candidate,
+        delta: item.delta,
+        envelope: item.envelope,
+      }));
+
+  return {
+    regressions: pick("regressed"),
+    improvements: pick("improved"),
+    changed: pick("changed"),
+  };
+}
+
 export function buildBenchmarkSnapshotHistoryEntry(
   snapshot: PublishedMoatSnapshot,
   snapshotPath: string,
@@ -194,6 +231,8 @@ export function buildBenchmarkSnapshotHistoryEntry(
           unchanged: comparison.summary.unchanged,
           comparedMetrics: comparison.summary.comparedMetrics,
         },
+    comparisonHighlights:
+      comparison == null ? null : buildComparisonHighlights(comparison),
   };
 }
 
@@ -245,6 +284,7 @@ export function buildBenchmarkSnapshotHistoryIndex(
 export function buildBenchmarkSnapshotHistoryMarkdown(
   index: BenchmarkSnapshotHistoryIndex,
 ): string {
+  const latestEntry = index.entries[0] ?? null;
   const lines = [
     "# Benchmark Snapshot History",
     "",
@@ -281,6 +321,76 @@ export function buildBenchmarkSnapshotHistoryMarkdown(
         entry.snapshotSummary.totalQueuePressureEvents
       } |`,
     );
+  }
+
+  if (latestEntry) {
+    lines.push(
+      "",
+      "## Latest Snapshot Metrics",
+      "",
+      `- Label: ${latestEntry.label}`,
+      `- Compared against: ${latestEntry.comparedAgainstLabel ?? "n/a"}`,
+      `- Tournament phase: ${latestEntry.snapshotSummary.tournamentPhase}`,
+      `- World count: ${latestEntry.snapshotSummary.worldCount}`,
+      `- Transport checks: ${
+        latestEntry.snapshotSummary.transportChecksPassed ? "pass" : "fail"
+      }`,
+      `- Worker route gates: ${formatNullableBoolean(
+        latestEntry.snapshotSummary.workerRouteGatesPassed,
+      )}`,
+      `- Headless topology checks: ${
+        latestEntry.snapshotSummary.headlessChecksPassed ? "pass" : "fail"
+      }`,
+      `- Topology feed checks: ${
+        latestEntry.snapshotSummary.topologyFeedChecksPassed ? "pass" : "fail"
+      }`,
+      `- Live topology feed checks: ${formatNullableBoolean(
+        latestEntry.snapshotSummary.liveTopologyFeedChecksPassed,
+      )}`,
+      `- Total delta bytes: ${latestEntry.snapshotSummary.totalDeltaBytes}`,
+      `- Queue pressure events: ${
+        latestEntry.snapshotSummary.totalQueuePressureEvents
+      }`,
+    );
+
+    if (latestEntry.comparisonSummary && latestEntry.comparisonHighlights) {
+      const pushHighlights = (
+        title: string,
+        highlights: BenchmarkSnapshotHistoryHighlight[],
+      ) => {
+        lines.push("", `### ${title}`, "");
+        if (highlights.length === 0) {
+          lines.push("- None.");
+          return;
+        }
+        for (const highlight of highlights) {
+          const delta =
+            highlight.delta == null ? "" : ` (delta ${highlight.delta})`;
+          const envelope =
+            highlight.envelope == null ? "" : ` within ${highlight.envelope}`;
+          lines.push(
+            `- ${highlight.category}.${highlight.metric}: ${highlight.baseline} -> ${highlight.candidate}${delta}${envelope}`,
+          );
+        }
+      };
+
+      lines.push(
+        "",
+        "## Latest Comparison Highlights",
+        "",
+        `- Compared metrics: ${latestEntry.comparisonSummary.comparedMetrics}`,
+        `- Regressions: ${latestEntry.comparisonSummary.regressions}`,
+        `- Improvements: ${latestEntry.comparisonSummary.improvements}`,
+        `- Changed: ${latestEntry.comparisonSummary.changed}`,
+        `- Unchanged: ${latestEntry.comparisonSummary.unchanged}`,
+      );
+      pushHighlights("Regressions", latestEntry.comparisonHighlights.regressions);
+      pushHighlights(
+        "Improvements",
+        latestEntry.comparisonHighlights.improvements,
+      );
+      pushHighlights("Changed", latestEntry.comparisonHighlights.changed);
+    }
   }
 
   lines.push("");

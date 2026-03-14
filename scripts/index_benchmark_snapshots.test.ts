@@ -101,6 +101,28 @@ describe("index benchmark snapshots", () => {
         unchanged: 180,
         comparedMetrics: 181,
       };
+      candidateComparison.comparisons = [
+        {
+          category: "transport",
+          metric: "aggregate.total_delta_bytes",
+          direction: "lower_is_better",
+          status: "regressed",
+          baseline: "1904",
+          candidate: "1968",
+          delta: 64,
+          envelope: null,
+        },
+        {
+          category: "snapshot",
+          metric: "label",
+          direction: "informational",
+          status: "changed",
+          baseline: "2026-03",
+          candidate: "2026-04",
+          delta: null,
+          envelope: null,
+        },
+      ];
 
       writeFileSync(
         join(snapshotDir, "2026-03-shard-target.json"),
@@ -142,6 +164,20 @@ describe("index benchmark snapshots", () => {
           regressions: 1,
           changed: 1,
         },
+        comparisonHighlights: {
+          regressions: [
+            {
+              category: "transport",
+              metric: "aggregate.total_delta_bytes",
+            },
+          ],
+          changed: [
+            {
+              category: "snapshot",
+              metric: "label",
+            },
+          ],
+        },
         snapshotSummary: {
           totalDeltaBytes:
             baselineSnapshot.transport.aggregate.total_delta_bytes + 64,
@@ -150,6 +186,11 @@ describe("index benchmark snapshots", () => {
       expect(markdown).toContain("[snapshot](./2026-04-shard-target.json)");
       expect(markdown).toContain("[comparison](./2026-04-shard-target-comparison.json)");
       expect(markdown).toContain("| 2026-04 |");
+      expect(markdown).toContain("## Latest Snapshot Metrics");
+      expect(markdown).toContain("## Latest Comparison Highlights");
+      expect(markdown).toContain(
+        "- transport.aggregate.total_delta_bytes: 1904 -> 1968 (delta 64)",
+      );
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

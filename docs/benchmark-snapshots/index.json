@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "shard-target",
-  "generatedAtUnixMs": 1773456431948,
+  "generatedAtUnixMs": 1773459419120,
   "snapshotCount": 1,
   "latestLabel": "2026-03",
   "latestSnapshotPath": "docs/benchmark-snapshots/2026-03-shard-target.json",
@@ -31,6 +31,11 @@
         "changed": 0,
         "unchanged": 181,
         "comparedMetrics": 181
+      },
+      "comparisonHighlights": {
+        "regressions": [],
+        "improvements": [],
+        "changed": []
       }
     }
   ]

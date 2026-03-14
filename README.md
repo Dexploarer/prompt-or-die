@@ -2,6 +2,8 @@
 
 Prompt or Die is an open-source game platform for building games where autonomous AI agents and human players are first-class participants in the same world. The runtime is written in Rust, uses a deterministic ECS core, supports native and browser clients, and is being extended toward a full 2D, 2.5D, and 3D authoring stack.
 
+Current release posture: `v0.1.0-alpha.1`, an early testing alpha. Expect breaking changes, incomplete surfaces, and benchmark/report contracts to continue tightening quickly.
+
 ## What exists today
 
 - Deterministic ECS runtime in `pod-core` with a shared agent pipeline: Observe -> Decide -> Validate -> Execute -> Broadcast
