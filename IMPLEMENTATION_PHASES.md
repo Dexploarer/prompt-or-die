@@ -388,7 +388,7 @@
 
 ## Immediate Next Actions
 
-1. All audit backlog items are closed. Build a lightweight index/report over the retained monthly shard-target snapshots and comparison artifacts, so historical review does not require manually opening JSON files one by one.
+1. All audit backlog items are closed. Surface the top regressions and changed metrics directly in the retained shard-target history report, so monthly review does not stop at counts and links.
 
 ## Audit Backlog (2026-03-13)
 

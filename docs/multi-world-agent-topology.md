@@ -164,9 +164,9 @@ This lets us support:
 
 In order:
 
-1. Build a lightweight index/report over the retained monthly shard-target
-   snapshots and comparison artifacts, so orchestration drift review does not
-   require opening raw JSON files one by one.
+1. Surface the top regressions and changed metrics directly in the retained
+   shard-target history report, so orchestration drift review does not stop at
+   counts and file links.
 2. Keep the browser optional: visualize the control plane later, after the
    authority/runtime path is shared and benchmarked.
 

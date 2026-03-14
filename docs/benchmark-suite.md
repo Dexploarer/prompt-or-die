@@ -72,6 +72,13 @@ cd /Users/home/Desktop/prompt-or-die
 bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-04-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions
 ```
 
+Retained snapshot history index/report:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+bun ./scripts/index_benchmark_snapshots.ts
+```
+
 Browser asset and render-route regression gates:
 
 ```bash
@@ -371,9 +378,9 @@ Guidance:
 Run this every month before updating the competitor matrix:
 
 1. Run `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-MM`.
-2. Inspect the generated summary artifact at `artifacts/shard-target-snapshot-run.json`.
-3. Run `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/PREVIOUS-shard-target.json --candidate docs/benchmark-snapshots/YYYY-MM-shard-target.json --output artifacts/benchmark-snapshot-comparison.json`.
-4. Record any required responses from the comparison report in `IMPLEMENTATION_PLAN.md`.
+2. Inspect the retained history report at `docs/benchmark-snapshots/README.md`.
+3. Inspect the generated summary artifact at `artifacts/shard-target-snapshot-run.json` when you need the exact command history or chosen baseline.
+4. Record any required responses from the retained comparison/history report in `IMPLEMENTATION_PLAN.md`.
 
 `run_shard_target_snapshot.ts` now wraps the previously manual chain:
 
@@ -383,6 +390,7 @@ Run this every month before updating the competitor matrix:
 - local SpacetimeDB startup plus module publish
 - live generated-SDK topology benchmark
 - monthly snapshot publication
+- retained history index/report publication
 
 If the browser render-route gate fails again but `apps/pod-web/artifacts/render-route-measurements.json`
 is still produced, the wrapper records that status as `artifact_only` and still
@@ -414,7 +422,10 @@ passing `--compare-baseline` by hand. When comparison runs, the wrapper also
 retains the generated report as
 `docs/benchmark-snapshots/YYYY-MM-shard-target-comparison.json` and records
 that published path in the run summary, so the monthly history now keeps both
-the snapshot and the diff artifact.
+the snapshot and the diff artifact. The wrapper now also refreshes
+`docs/benchmark-snapshots/index.json` and `docs/benchmark-snapshots/README.md`,
+so monthly review has a stable retained history surface instead of raw JSON
+inspection.
 
 ## Interpretation rules
 

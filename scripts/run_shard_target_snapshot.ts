@@ -582,6 +582,19 @@ async function main() {
       comparisonStatus = "passed";
     }
 
+    const publishHistory = record(
+      runCommand(
+        "publish-shard-snapshot-history",
+        ["bun", "./scripts/index_benchmark_snapshots.ts"],
+        repoRoot,
+      ),
+    );
+    if (!publishHistory.summary.ok) {
+      throw new Error(
+        `snapshot history publish failed:\n${publishHistory.summary.stderrSnippet ?? "no stderr captured"}`,
+      );
+    }
+
     const summary: RunSummary = {
       schemaVersion: 2,
       generatedAtUnixMs: Date.now(),

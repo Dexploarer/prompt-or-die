@@ -241,10 +241,10 @@ without custom per-test runtimes or auto-acked connect/subscription hooks.
 `install_generated_binding_runtime(...)` for the deterministic command-driven
 path and `install_generated_sdk_runtime(...)` for the live generated SDK path,
 so external generated hosts no longer need manual adapter injection. The
-remaining gap is no longer the topology contract itself. It is building a
-lightweight retained-history index/report over the published monthly snapshots
-and comparison artifacts, so orchestration history can be scanned without
-opening raw JSON files one by one. The topology
+remaining gap is no longer the topology contract itself. It is surfacing the
+top regressions and changed metrics directly in the retained shard-target
+history report, so orchestration history review does not stop at links and
+summary counts. The topology
 parity contract is shared now too: `pod-core` owns
 `assign_roster_to_world_teams(...)`, `build_world_admission_summary(...)`,
 `build_world_control_plane_summary(...)`, `build_remote_topology_bundle(...)`,

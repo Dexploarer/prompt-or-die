@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 200
-**Current focus**: Iteration 201 build a lightweight retained-history index/report for monthly shard-target snapshots and comparison artifacts
+**Last updated**: Iteration 201
+**Current focus**: Iteration 202 surface top regressions and changed metrics directly in the retained shard-target history report
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2058,6 +2058,16 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Revalidated the live wrapper by running `scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`, confirming the retained comparison artifact is published beside the monthly snapshot and recorded in the run summary.
 - [x] Validation:
   - `bun test scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
+  - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
+  - `git diff --check`
+
+### Iteration 201
+- [x] Added `scripts/index_benchmark_snapshots.ts` plus deterministic coverage in `scripts/index_benchmark_snapshots.test.ts`, so the retained shard-target benchmark history now publishes both a machine-readable index at `docs/benchmark-snapshots/index.json` and a human-readable report at `docs/benchmark-snapshots/README.md`.
+- [x] Wired `scripts/run_shard_target_snapshot.ts` to refresh that retained history index/report automatically after snapshot and comparison publication, so the one-command monthly workflow now keeps the published history surface up to date instead of depending on a separate manual rebuild step.
+- [x] Revalidated the retained history path by regenerating the current 2026-03 shard-target run, confirming the committed comparison artifact, history index, and Markdown report all refresh together.
+- [x] Validation:
+  - `bun test scripts/index_benchmark_snapshots.test.ts scripts/run_moat_benchmarks.test.ts scripts/publish_moat_snapshots.test.ts scripts/compare_moat_snapshots.test.ts scripts/run_shard_target_snapshot.test.ts`
+  - `bun ./scripts/index_benchmark_snapshots.ts`
   - `bun ./scripts/run_shard_target_snapshot.ts --label 2026-03 --reuse-browser-routes`
   - `git diff --check`
 

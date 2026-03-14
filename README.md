@@ -25,6 +25,7 @@ cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_su
 cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks
 bun ./scripts/run_shard_target_snapshot.ts --label 2026-03
 bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-03-shard-target.json --candidate docs/benchmark-snapshots/2026-03-shard-target.json --output /tmp/pod-benchmark-snapshot-comparison.json
+bun ./scripts/index_benchmark_snapshots.ts
 cargo run --bin pod-server
 cargo test --workspace
 cargo check --workspace

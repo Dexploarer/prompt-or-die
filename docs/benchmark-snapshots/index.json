@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "profile": "shard-target",
+  "generatedAtUnixMs": 1773456431948,
+  "snapshotCount": 1,
+  "latestLabel": "2026-03",
+  "latestSnapshotPath": "docs/benchmark-snapshots/2026-03-shard-target.json",
+  "latestComparisonPath": "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+  "entries": [
+    {
+      "label": "2026-03",
+      "snapshotPath": "docs/benchmark-snapshots/2026-03-shard-target.json",
+      "comparisonPath": "docs/benchmark-snapshots/2026-03-shard-target-comparison.json",
+      "comparedAgainstLabel": "2026-03",
+      "snapshotSummary": {
+        "transportChecksPassed": true,
+        "workerRouteGatesPassed": true,
+        "headlessChecksPassed": true,
+        "topologyFeedChecksPassed": true,
+        "liveTopologyFeedChecksPassed": true,
+        "tournamentPhase": "SuddenDeath",
+        "worldCount": 3,
+        "totalDeltaBytes": 1904,
+        "totalQueuePressureEvents": 1
+      },
+      "comparisonSummary": {
+        "baselineLabel": "2026-03",
+        "candidateLabel": "2026-03",
+        "regressions": 0,
+        "improvements": 0,
+        "changed": 0,
+        "unchanged": 181,
+        "comparedMetrics": 181
+      }
+    }
+  ]
+}
