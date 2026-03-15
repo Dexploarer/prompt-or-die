@@ -9,7 +9,9 @@ use pod_core::{
     TelemetryConfig, VersionedTickTelemetry, World,
 };
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -980,6 +982,14 @@ impl ShardSupervisorOpsHandle {
                 .collect(),
         }
     }
+
+    pub fn relay(&self, config: OpsRelayConfig) -> ShardSupervisorOpsRelayService {
+        ShardSupervisorOpsRelayService {
+            live: self.clone(),
+            archive: self.archive_handle(),
+            config,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1381,8 +1391,518 @@ impl std::error::Error for OpsArchiveServiceError {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsRelayConfig {
+    pub bind_address: String,
+    pub max_request_bytes: usize,
+    pub max_event_bytes: usize,
+    pub auth_token: Option<String>,
+}
+
+impl Default for OpsRelayConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: "127.0.0.1:7611".to_string(),
+            max_request_bytes: 64 * 1024,
+            max_event_bytes: 512 * 1024,
+            auth_token: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsRelayClient {
+    pub address: String,
+    pub auth_token: Option<String>,
+    pub max_event_bytes: usize,
+}
+
+impl Default for OpsRelayClient {
+    fn default() -> Self {
+        Self {
+            address: "127.0.0.1:7611".to_string(),
+            auth_token: None,
+            max_event_bytes: 512 * 1024,
+        }
+    }
+}
+
+impl OpsRelayClient {
+    pub async fn subscribe_supervisor(
+        &self,
+        recent_limit_per_shard: usize,
+    ) -> Result<OpsRelaySubscription, OpsRelayError> {
+        self.subscribe(OpsRelayRequest::SubscribeSupervisor {
+            recent_limit_per_shard,
+            auth_token: self.auth_token.clone(),
+        })
+        .await
+    }
+
+    pub async fn subscribe_shard(
+        &self,
+        shard_id: impl Into<String>,
+        recent_limit: usize,
+    ) -> Result<OpsRelaySubscription, OpsRelayError> {
+        self.subscribe(OpsRelayRequest::SubscribeShard {
+            shard_id: shard_id.into(),
+            recent_limit,
+            auth_token: self.auth_token.clone(),
+        })
+        .await
+    }
+
+    async fn subscribe(
+        &self,
+        request: OpsRelayRequest,
+    ) -> Result<OpsRelaySubscription, OpsRelayError> {
+        let mut socket =
+            TcpStream::connect(&self.address)
+                .await
+                .map_err(|source| OpsRelayError::Connect {
+                    address: self.address.clone(),
+                    source,
+                })?;
+        let encoded = serde_json::to_string(&request).map_err(OpsRelayError::EncodeRequest)?;
+        socket
+            .write_all(encoded.as_bytes())
+            .await
+            .map_err(OpsRelayError::WriteRequest)?;
+        socket
+            .write_all(b"\n")
+            .await
+            .map_err(OpsRelayError::WriteRequest)?;
+
+        Ok(OpsRelaySubscription {
+            reader: BufReader::new(socket),
+            max_event_bytes: self.max_event_bytes,
+        })
+    }
+}
+
+pub struct OpsRelaySubscription {
+    reader: BufReader<TcpStream>,
+    max_event_bytes: usize,
+}
+
+impl OpsRelaySubscription {
+    pub async fn next_event(&mut self) -> Result<Option<OpsRelayEvent>, OpsRelayError> {
+        let line = match read_capped_line(&mut self.reader, self.max_event_bytes).await {
+            Ok(Some(line)) => line,
+            Ok(None) => return Ok(None),
+            Err(ReadLineError::Io(source)) => return Err(OpsRelayError::ReadEvent(source)),
+            Err(ReadLineError::TooLarge) => {
+                return Err(OpsRelayError::EventTooLarge {
+                    max_event_bytes: self.max_event_bytes,
+                });
+            }
+        };
+        let event =
+            serde_json::from_str::<OpsRelayEvent>(&line).map_err(OpsRelayError::DecodeEvent)?;
+        match event {
+            OpsRelayEvent::Error { message } => Err(OpsRelayError::Remote { message }),
+            event => Ok(Some(event)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpsRelayRequest {
+    SubscribeShard {
+        shard_id: String,
+        recent_limit: usize,
+        auth_token: Option<String>,
+    },
+    SubscribeSupervisor {
+        recent_limit_per_shard: usize,
+        auth_token: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpsRelayEvent {
+    ShardSnapshot(AuthorityShardOpsArchiveSnapshot),
+    SupervisorSnapshot(ShardSupervisorOpsArchiveSnapshot),
+    ShardDocument {
+        shard_id: String,
+        document: String,
+        retained_document_count: usize,
+        persisted_document_count: usize,
+        archive_path: Option<PathBuf>,
+    },
+    Lagged {
+        shard_id: String,
+        skipped: u64,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsRelayService {
+    live: ShardSupervisorOpsHandle,
+    archive: ShardSupervisorOpsArchiveHandle,
+    config: OpsRelayConfig,
+}
+
+impl ShardSupervisorOpsRelayService {
+    pub async fn serve(self) -> Result<(), OpsRelayError> {
+        let listener = self.bind_listener().await?;
+        self.serve_listener(listener).await
+    }
+
+    pub async fn serve_once(self) -> Result<(), OpsRelayError> {
+        let listener = self.bind_listener().await?;
+        self.serve_once_listener(listener).await
+    }
+
+    async fn bind_listener(&self) -> Result<TcpListener, OpsRelayError> {
+        TcpListener::bind(&self.config.bind_address)
+            .await
+            .map_err(|source| OpsRelayError::Bind {
+                address: self.config.bind_address.clone(),
+                source,
+            })
+    }
+
+    async fn serve_listener(self, listener: TcpListener) -> Result<(), OpsRelayError> {
+        loop {
+            let (socket, _) = listener.accept().await.map_err(OpsRelayError::Accept)?;
+            self.handle_socket(socket).await?;
+        }
+    }
+
+    async fn serve_once_listener(self, listener: TcpListener) -> Result<(), OpsRelayError> {
+        let (socket, _) = listener.accept().await.map_err(OpsRelayError::Accept)?;
+        self.handle_socket(socket).await
+    }
+
+    async fn handle_socket(&self, socket: TcpStream) -> Result<(), OpsRelayError> {
+        let (read_half, mut write_half) = socket.into_split();
+        let mut reader = BufReader::new(read_half);
+        let request_line = match read_capped_line(&mut reader, self.config.max_request_bytes).await
+        {
+            Ok(Some(line)) => line,
+            Ok(None) => return Ok(()),
+            Err(ReadLineError::Io(source)) => return Err(OpsRelayError::ReadRequest(source)),
+            Err(ReadLineError::TooLarge) => {
+                self.write_event(
+                    &mut write_half,
+                    OpsRelayEvent::Error {
+                        message: format!(
+                            "ops relay request exceeded {} bytes",
+                            self.config.max_request_bytes
+                        ),
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+        let request = serde_json::from_str::<OpsRelayRequest>(&request_line)
+            .map_err(OpsRelayError::DecodeRequest)?;
+        let (initial_event, live_handles) = match self.build_subscription(request) {
+            Ok(subscription) => subscription,
+            Err(err) => {
+                self.write_event(
+                    &mut write_half,
+                    OpsRelayEvent::Error {
+                        message: err.to_string(),
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+        self.write_event(&mut write_half, initial_event).await?;
+
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        for handle in live_handles {
+            spawn_relay_forwarder(handle, event_tx.clone(), cancel_rx.clone());
+        }
+        drop(event_tx);
+
+        loop {
+            tokio::select! {
+                maybe_event = event_rx.recv() => {
+                    let Some(event) = maybe_event else {
+                        break;
+                    };
+                    if let Err(err) = self.write_event(&mut write_half, event).await {
+                        if err.is_disconnect() {
+                            break;
+                        }
+                        return Err(err);
+                    }
+                }
+                client_read = read_capped_line(&mut reader, self.config.max_request_bytes) => {
+                    match client_read {
+                        Ok(Some(_)) => {}
+                        Ok(None) => break,
+                        Err(ReadLineError::Io(source)) => return Err(OpsRelayError::ReadRequest(source)),
+                        Err(ReadLineError::TooLarge) => {
+                            return Err(OpsRelayError::RequestTooLarge {
+                                max_request_bytes: self.config.max_request_bytes,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = cancel_tx.send(true);
+        Ok(())
+    }
+
+    fn build_subscription(
+        &self,
+        request: OpsRelayRequest,
+    ) -> Result<(OpsRelayEvent, Vec<AuthorityShardOpsHandle>), OpsRelayError> {
+        match request {
+            OpsRelayRequest::SubscribeShard {
+                shard_id,
+                recent_limit,
+                auth_token,
+            } => {
+                self.authorize(auth_token.as_deref())?;
+                let archive_handle =
+                    self.archive
+                        .shard(&shard_id)
+                        .ok_or_else(|| OpsRelayError::UnknownShard {
+                            shard_id: shard_id.clone(),
+                        })?;
+                let live_handle =
+                    self.live
+                        .shard(&shard_id)
+                        .ok_or_else(|| OpsRelayError::UnknownShard {
+                            shard_id: shard_id.clone(),
+                        })?;
+                let snapshot = archive_handle
+                    .snapshot(recent_limit)
+                    .map_err(OpsRelayError::ArchiveQuery)?;
+                Ok((
+                    OpsRelayEvent::ShardSnapshot(snapshot),
+                    vec![live_handle.clone()],
+                ))
+            }
+            OpsRelayRequest::SubscribeSupervisor {
+                recent_limit_per_shard,
+                auth_token,
+            } => {
+                self.authorize(auth_token.as_deref())?;
+                let snapshot = self
+                    .archive
+                    .snapshot(recent_limit_per_shard)
+                    .map_err(OpsRelayError::ArchiveQuery)?;
+                Ok((
+                    OpsRelayEvent::SupervisorSnapshot(snapshot),
+                    self.live.shards().to_vec(),
+                ))
+            }
+        }
+    }
+
+    fn authorize(&self, provided_token: Option<&str>) -> Result<(), OpsRelayError> {
+        match (&self.config.auth_token, provided_token) {
+            (Some(expected), Some(provided)) if expected == provided => Ok(()),
+            (Some(_), _) => Err(OpsRelayError::Unauthorized),
+            (None, _) => Ok(()),
+        }
+    }
+
+    async fn write_event<W>(
+        &self,
+        writer: &mut W,
+        event: OpsRelayEvent,
+    ) -> Result<(), OpsRelayError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let encoded = serde_json::to_string(&event).map_err(OpsRelayError::EncodeEvent)?;
+        if encoded.len() + 1 > self.config.max_event_bytes {
+            return Err(OpsRelayError::EventTooLarge {
+                max_event_bytes: self.config.max_event_bytes,
+            });
+        }
+
+        writer
+            .write_all(encoded.as_bytes())
+            .await
+            .map_err(OpsRelayError::WriteEvent)?;
+        writer
+            .write_all(b"\n")
+            .await
+            .map_err(OpsRelayError::WriteEvent)?;
+        writer.flush().await.map_err(OpsRelayError::WriteEvent)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum OpsRelayError {
+    Bind {
+        address: String,
+        source: std::io::Error,
+    },
+    Accept(std::io::Error),
+    Connect {
+        address: String,
+        source: std::io::Error,
+    },
+    ReadRequest(std::io::Error),
+    ReadEvent(std::io::Error),
+    WriteRequest(std::io::Error),
+    WriteEvent(std::io::Error),
+    EncodeRequest(serde_json::Error),
+    EncodeEvent(serde_json::Error),
+    DecodeRequest(serde_json::Error),
+    DecodeEvent(serde_json::Error),
+    RequestTooLarge {
+        max_request_bytes: usize,
+    },
+    EventTooLarge {
+        max_event_bytes: usize,
+    },
+    Unauthorized,
+    UnknownShard {
+        shard_id: String,
+    },
+    Remote {
+        message: String,
+    },
+    ArchiveQuery(AuthorityOpsArchiveError),
+}
+
+impl OpsRelayError {
+    fn is_disconnect(&self) -> bool {
+        matches!(
+            self,
+            Self::WriteEvent(source)
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::UnexpectedEof
+                )
+        )
+    }
+}
+
+impl std::fmt::Display for OpsRelayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bind { address, source } => {
+                write!(f, "failed to bind ops relay on {address}: {source}")
+            }
+            Self::Accept(source) => write!(f, "failed to accept ops relay client: {source}"),
+            Self::Connect { address, source } => {
+                write!(f, "failed to connect to ops relay at {address}: {source}")
+            }
+            Self::ReadRequest(source) => write!(f, "failed to read ops relay request: {source}"),
+            Self::ReadEvent(source) => write!(f, "failed to read ops relay event: {source}"),
+            Self::WriteRequest(source) => write!(f, "failed to write ops relay request: {source}"),
+            Self::WriteEvent(source) => write!(f, "failed to write ops relay event: {source}"),
+            Self::EncodeRequest(source) => {
+                write!(f, "failed to encode ops relay request: {source}")
+            }
+            Self::EncodeEvent(source) => write!(f, "failed to encode ops relay event: {source}"),
+            Self::DecodeRequest(source) => {
+                write!(f, "failed to decode ops relay request: {source}")
+            }
+            Self::DecodeEvent(source) => write!(f, "failed to decode ops relay event: {source}"),
+            Self::RequestTooLarge { max_request_bytes } => {
+                write!(f, "ops relay request exceeded {max_request_bytes} bytes")
+            }
+            Self::EventTooLarge { max_event_bytes } => {
+                write!(f, "ops relay event exceeded {max_event_bytes} bytes")
+            }
+            Self::Unauthorized => write!(f, "ops relay auth token was rejected"),
+            Self::UnknownShard { shard_id } => write!(f, "unknown shard '{shard_id}'"),
+            Self::Remote { message } => write!(f, "ops relay returned an error: {message}"),
+            Self::ArchiveQuery(source) => write!(f, "{source}"),
+        }
+    }
+}
+
+impl std::error::Error for OpsRelayError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Bind { source, .. }
+            | Self::Accept(source)
+            | Self::Connect { source, .. }
+            | Self::ReadRequest(source)
+            | Self::ReadEvent(source)
+            | Self::WriteRequest(source)
+            | Self::WriteEvent(source) => Some(source),
+            Self::EncodeRequest(source)
+            | Self::EncodeEvent(source)
+            | Self::DecodeRequest(source)
+            | Self::DecodeEvent(source) => Some(source),
+            Self::ArchiveQuery(source) => Some(source),
+            Self::RequestTooLarge { .. }
+            | Self::EventTooLarge { .. }
+            | Self::Unauthorized
+            | Self::UnknownShard { .. }
+            | Self::Remote { .. } => None,
+        }
+    }
+}
+
+fn spawn_relay_forwarder(
+    handle: AuthorityShardOpsHandle,
+    event_tx: mpsc::UnboundedSender<OpsRelayEvent>,
+    mut cancel_rx: watch::Receiver<bool>,
+) {
+    let shard_id = handle.shard().shard_id.clone();
+    let mut subscription = handle.subscribe_documents();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                changed = cancel_rx.changed() => {
+                    if changed.is_err() || *cancel_rx.borrow() {
+                        break;
+                    }
+                }
+                received = subscription.recv() => {
+                    match received {
+                        Ok(document) => {
+                            if event_tx.send(OpsRelayEvent::ShardDocument {
+                                shard_id: shard_id.clone(),
+                                document,
+                                retained_document_count: handle.retained_document_count(),
+                                persisted_document_count: handle.persisted_document_count(),
+                                archive_path: handle.archive_path(),
+                            }).is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            if event_tx.send(OpsRelayEvent::Lagged {
+                                shard_id: shard_id.clone(),
+                                skipped: skipped as u64,
+                            }).is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
+        }
+    });
+}
+
 #[derive(Debug)]
 enum ReadCappedError {
+    Io(std::io::Error),
+    TooLarge,
+}
+
+#[derive(Debug)]
+enum ReadLineError {
     Io(std::io::Error),
     TooLarge,
 }
@@ -1409,6 +1929,32 @@ where
     }
 
     Ok(bytes)
+}
+
+async fn read_capped_line<R>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> Result<Option<String>, ReadLineError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = String::new();
+    let read = reader
+        .read_line(&mut line)
+        .await
+        .map_err(ReadLineError::Io)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if line.len() > max_bytes {
+        return Err(ReadLineError::TooLarge);
+    }
+
+    while matches!(line.as_bytes().last(), Some(b'\n' | b'\r')) {
+        line.pop();
+    }
+
+    Ok(Some(line))
 }
 
 fn authority_lifecycle_state_from_server_state(
@@ -2015,6 +2561,10 @@ impl PreparedShardSupervisor {
         self.archive_handle().service(config)
     }
 
+    pub fn ops_relay(&self, config: OpsRelayConfig) -> ShardSupervisorOpsRelayService {
+        self.ops_handle().relay(config)
+    }
+
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
         let local_set = tokio::task::LocalSet::new();
 
@@ -2141,8 +2691,9 @@ mod tests {
         AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
         DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
         OpsArchiveServiceClient, OpsArchiveServiceConfig, OpsArchiveServiceRequest,
-        OpsArchiveServiceResponse, OpsPersistenceConfig, PreparedAuthorityShard,
-        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
+        OpsArchiveServiceResponse, OpsPersistenceConfig, OpsRelayClient, OpsRelayConfig,
+        OpsRelayError, OpsRelayEvent, PreparedAuthorityShard, ShardSupervisorConfig,
+        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorOpsHandle,
         ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
@@ -2522,6 +3073,125 @@ mod tests {
             .await
             .expect("archive service task should join")
             .expect("archive service should exit cleanly after one request");
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[tokio::test]
+    async fn supervisor_ops_relay_requires_auth_and_streams_live_documents() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-relay-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(6.0, 6.0)
+                    .with_label("ops-relay-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("archive-backed local runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let relay = ShardSupervisorOpsHandle {
+            shards: vec![runtime.ops_handle()],
+        }
+        .relay(OpsRelayConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("relay-secret".to_string()),
+        });
+        let listener = relay
+            .bind_listener()
+            .await
+            .expect("ops relay should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops relay listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(relay.serve_listener(listener));
+
+        let mut rejected_subscription = OpsRelayClient {
+            address: address.clone(),
+            auth_token: Some("wrong-secret".to_string()),
+            max_event_bytes: 256 * 1024,
+        }
+        .subscribe_supervisor(8)
+        .await
+        .expect("relay client should connect before auth is evaluated");
+        match rejected_subscription.next_event().await {
+            Err(OpsRelayError::Remote { message }) => {
+                assert!(message.contains("rejected"));
+            }
+            other => panic!("expected auth rejection event, got {other:?}"),
+        }
+        drop(rejected_subscription);
+
+        let mut subscription = OpsRelayClient {
+            address,
+            auth_token: Some("relay-secret".to_string()),
+            max_event_bytes: 256 * 1024,
+        }
+        .subscribe_supervisor(8)
+        .await
+        .expect("authorized relay client should connect");
+        match subscription
+            .next_event()
+            .await
+            .expect("relay client should decode initial event")
+            .expect("relay should emit an initial snapshot")
+        {
+            OpsRelayEvent::SupervisorSnapshot(snapshot) => {
+                assert_eq!(snapshot.shard_count, 1);
+                assert_eq!(snapshot.archived_shard_count, 1);
+                assert!(snapshot.total_persisted_document_count >= 1);
+            }
+            other => panic!("expected supervisor snapshot event, got {other:?}"),
+        }
+
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        match subscription
+            .next_event()
+            .await
+            .expect("relay client should decode live shard document")
+            .expect("relay should stream a live shard document")
+        {
+            OpsRelayEvent::ShardDocument {
+                shard_id,
+                document,
+                retained_document_count,
+                persisted_document_count,
+                archive_path,
+            } => {
+                assert_eq!(shard_id, "alpha-1");
+                assert!(retained_document_count >= 1);
+                assert!(persisted_document_count >= 1);
+                assert!(archive_path.is_some());
+                assert_eq!(
+                    decode_toon_value(&document).expect("relay document should decode as TOON")
+                        ["document_type"],
+                    "versioned_tick_telemetry"
+                );
+            }
+            other => panic!("expected streamed shard document event, got {other:?}"),
+        }
+
+        drop(subscription);
+        service_task.abort();
+        let _ = service_task.await;
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
