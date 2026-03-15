@@ -1927,8 +1927,8 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
 - [x] Added `GeneratedSdkRuntime` in `crates/pod-stdb/src/client.rs`, so generated mode can now use the actual generated `DbConnection`, typed `remote_topology_document` table callbacks, and real subscription lifecycle instead of only the synthetic command-queue seam.
 - [x] Added `install_generated_sdk_runtime(...)` to both `StdbClient` and `pod-net::SpacetimeDBClient`, plus closed-port regression tests proving generated mode now attempts the real SDK-backed connection path and reports connection failures through the public error surface.
 
-**Last updated**: Iteration 217
-**Current focus**: Iteration 218 add a browser/editor-friendly HTTP or WebSocket facade above the new authenticated shard/supervisor ops relay so external clients do not have to embed the raw TCP transport contract
+**Last updated**: Iteration 218
+**Current focus**: Iteration 219 add replay/cursor semantics above the new shard/supervisor HTTP+SSE ops facade so browser/editor consumers can resume retained history without replaying the entire stream
 - [x] Added `TopologyFeedMeasurementsOptions`, `TopologyFeedGeneratedRuntimeMode`, and `LiveGeneratedSdkTopologyFeedConfig` in `crates/pod-net/src/client_stdb.rs`, so the topology feed benchmark can now choose between the deterministic command-driven generated path and a live SDK-backed generated path.
 - [x] Added a live generated SDK publisher path in `crates/pod-net/src/client_stdb.rs`, so `build_topology_feed_measurements_with_options(...)` can connect with `install_generated_sdk_runtime()`, publish `publish_remote_topology_document`, and wait for real `remote_topology_document` callbacks when pointed at a running module.
 - [x] Extended `crates/pod-net/examples/topology_feed_benchmark_suite.rs` with `--generated-sdk-host`, `--generated-sdk-auth-token`, and `--generated-sdk-timeout-ms`, plus deterministic tests proving the new example flags parse and closed-port live SDK failures surface cleanly.
@@ -2247,6 +2247,19 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `git diff --check`
 
 **Next focus**: Add a browser/editor-friendly HTTP or WebSocket facade above the new authenticated relay so external clients can consume shard ops streams without embedding the raw TCP contract directly.
+
+### Iteration 218
+- [x] Added a browser/editor-friendly HTTP facade in `crates/pod-host/src/lib.rs` through `OpsHttpServiceConfig`, `OpsHttpError`, and `ShardSupervisorOpsHttpService`, exposing retained shard/supervisor archive snapshots as bounded JSON `GET` endpoints and live shard ops as authenticated SSE streams.
+- [x] Extended the live ops surfaces with `ShardSupervisorOpsHandle::http_service(...)` and `PreparedShardSupervisor::ops_http_service(...)`, and refreshed `apps/pod-server/src/lib.rs` re-exports so app binaries and tooling can build against one shared HTTP/SSE seam instead of raw TCP relay wiring.
+- [x] Added deterministic `pod-host` coverage for HTTP auth rejection, archive snapshot JSON, and retained-plus-live SSE streaming, then revalidated the touched Rust surfaces.
+- [x] Validation:
+  - `cargo test -p pod-host supervisor_ops_http_service_serves_archive_json_and_sse_streams -- --nocapture`
+  - `cargo test -p pod-host -- --nocapture`
+  - `cargo test -p pod-server --bin pod-server -- --nocapture`
+  - `cargo check --workspace`
+  - `git diff --check`
+
+**Next focus**: Add replay/cursor semantics or resumable stream state above the new HTTP/SSE facade so browser/editor consumers can attach late without replaying the full retained shard history on every reconnect.
 
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.

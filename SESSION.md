@@ -334,6 +334,12 @@
 - [x] Extended the live ops surfaces with `ShardSupervisorOpsHandle::relay(...)` and `PreparedShardSupervisor::ops_relay(...)`, and refreshed the `apps/pod-server/src/lib.rs` compatibility exports, so app binaries and tooling can build against one shared authenticated relay seam.
 - [x] Added deterministic Tokio coverage for both auth rejection and live document streaming over the new relay.
 
+## Iteration 218 Progress
+
+- [x] Added `OpsHttpServiceConfig`, `OpsHttpError`, and `ShardSupervisorOpsHttpService` in `crates/pod-host/src/lib.rs`, so shard/supervisor retained ops snapshots can now be queried over bounded HTTP JSON endpoints and followed over authenticated SSE without embedding the raw relay protocol.
+- [x] Extended the live ops surfaces with `ShardSupervisorOpsHandle::http_service(...)` and `PreparedShardSupervisor::ops_http_service(...)`, and refreshed the `apps/pod-server/src/lib.rs` compatibility exports, so app binaries and tooling can compose one shared browser/editor-facing HTTP seam.
+- [x] Added deterministic Tokio coverage for HTTP auth rejection, archive snapshot JSON, and retained-plus-live SSE delivery over the new facade.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

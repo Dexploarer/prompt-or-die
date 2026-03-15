@@ -97,7 +97,7 @@ treated as composition roots rather than extension APIs.
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
 | `crates/pod-core/src/authority.rs` | Current transport-neutral authority world contract | Safe place to compose `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` without depending on transport-layer types. |
 | `crates/pod-net/src/authority.rs` | Current direct-connect transport adapter contract | Safe place to compose `DirectConnectTransportConfig`, `TransportPolicy`, `parse_bind_target(...)`, and `server_config(tick_rate)` without re-owning world/bootstrap state. |
-| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `OpsPersistenceConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, `ShardSupervisorConfig`, the shared shard/supervisor ops snapshot handles, the typed archive-query handles, the process-external archive query service, and the authenticated live relay so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
+| `crates/pod-host/src/lib.rs` | Current neutral authority host lifecycle contract | Safe place to compose `AuthorityHostConfig`, `OpsPersistenceConfig`, `AuthorityTransportMode`, `AuthorityHostRuntime`, `AuthorityShardConfig`, `ShardSupervisorConfig`, the shared shard/supervisor ops snapshot handles, the typed archive-query handles, the process-external archive query service, the authenticated live relay, and the browser/editor-friendly HTTP+SSE ops facade so apps can select single-host or multi-shard authority topologies without stitching `pod-core` and `pod-net` together manually. |
 | `apps/pod-server/src/main.rs` | Thin internal entry point | Keep it focused on process startup, shutdown wiring, and calling the exported authority lifecycle surface. |
 | Crate `lib.rs` re-exports (`pod-scene`, `pod-assets`, `pod-core`) | Current contract surface | Prefer integrating against these exported types/functions instead of reaching into app boot files. |
 
@@ -132,9 +132,11 @@ integrators back into app composition roots:
   `ShardSupervisorOpsRelayService` / `OpsRelayClient`
   live-stream surface above those handles, so external consumers no longer
   need an app-specific file bridge or in-process shard handle just to query and
-  follow retained history. What is still missing is a browser/editor-friendly
-  HTTP or WebSocket facade above that raw TCP relay for clients that should not
-  embed the transport details directly.
+  follow retained history. It now also exposes `ShardSupervisorOpsHttpService`
+  above the same retained-plus-live shard surfaces, so browser/editor clients
+  can consume JSON snapshots and SSE streams without embedding the raw relay
+  transport. What is still missing is resumable replay/cursor state above those
+  HTTP/SSE streams for late-joining or reconnecting consumers.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

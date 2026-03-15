@@ -990,6 +990,14 @@ impl ShardSupervisorOpsHandle {
             config,
         }
     }
+
+    pub fn http_service(&self, config: OpsHttpServiceConfig) -> ShardSupervisorOpsHttpService {
+        ShardSupervisorOpsHttpService {
+            live: self.clone(),
+            archive: self.archive_handle(),
+            config,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1388,6 +1396,915 @@ impl std::error::Error for OpsArchiveServiceError {
             Self::ArchiveQuery(source) => Some(source),
             Self::ResponseTooLarge { .. } | Self::UnknownShard { .. } | Self::Remote { .. } => None,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsHttpServiceConfig {
+    pub bind_address: String,
+    pub max_request_bytes: usize,
+    pub max_response_bytes: usize,
+    pub max_event_bytes: usize,
+    pub auth_token: Option<String>,
+}
+
+impl Default for OpsHttpServiceConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: "127.0.0.1:7612".to_string(),
+            max_request_bytes: 64 * 1024,
+            max_response_bytes: 512 * 1024,
+            max_event_bytes: 512 * 1024,
+            auth_token: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardSupervisorOpsHttpService {
+    live: ShardSupervisorOpsHandle,
+    archive: ShardSupervisorOpsArchiveHandle,
+    config: OpsHttpServiceConfig,
+}
+
+impl ShardSupervisorOpsHttpService {
+    pub async fn serve(self) -> Result<(), OpsHttpError> {
+        let listener = self.bind_listener().await?;
+        self.serve_listener(listener).await
+    }
+
+    pub async fn serve_once(self) -> Result<(), OpsHttpError> {
+        let listener = self.bind_listener().await?;
+        self.serve_once_listener(listener).await
+    }
+
+    async fn bind_listener(&self) -> Result<TcpListener, OpsHttpError> {
+        TcpListener::bind(&self.config.bind_address)
+            .await
+            .map_err(|source| OpsHttpError::Bind {
+                address: self.config.bind_address.clone(),
+                source,
+            })
+    }
+
+    async fn serve_listener(self, listener: TcpListener) -> Result<(), OpsHttpError> {
+        loop {
+            let (socket, _) = listener.accept().await.map_err(OpsHttpError::Accept)?;
+            self.handle_socket(socket).await?;
+        }
+    }
+
+    async fn serve_once_listener(self, listener: TcpListener) -> Result<(), OpsHttpError> {
+        let (socket, _) = listener.accept().await.map_err(OpsHttpError::Accept)?;
+        self.handle_socket(socket).await
+    }
+
+    async fn handle_socket(&self, socket: TcpStream) -> Result<(), OpsHttpError> {
+        let (read_half, mut write_half) = socket.into_split();
+        let mut reader = BufReader::new(read_half);
+        let request = match read_http_request(&mut reader, self.config.max_request_bytes).await {
+            Ok(Some(request)) => request,
+            Ok(None) => return Ok(()),
+            Err(err) if err.can_respond() => {
+                self.write_error_response(&mut write_half, &err).await?;
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
+        let route = match parse_http_route(&request.target) {
+            Ok(route) => route,
+            Err(err) => {
+                self.write_error_response(&mut write_half, &err).await?;
+                return Ok(());
+            }
+        };
+        let provided_token = request.bearer_token();
+
+        match route {
+            OpsHttpRoute::ArchiveSupervisor {
+                recent_limit_per_shard,
+            } => match self
+                .handle_archive_supervisor(&mut write_half, recent_limit_per_shard, provided_token)
+                .await
+            {
+                Ok(()) => Ok(()),
+                Err(err) if err.can_respond() => {
+                    self.write_error_response(&mut write_half, &err).await?;
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
+            OpsHttpRoute::ArchiveShard {
+                shard_id,
+                recent_limit,
+            } => match self
+                .handle_archive_shard(&mut write_half, shard_id, recent_limit, provided_token)
+                .await
+            {
+                Ok(()) => Ok(()),
+                Err(err) if err.can_respond() => {
+                    self.write_error_response(&mut write_half, &err).await?;
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
+            OpsHttpRoute::StreamSupervisor {
+                recent_limit_per_shard,
+            } => {
+                self.handle_stream_supervisor(
+                    &mut reader,
+                    &mut write_half,
+                    recent_limit_per_shard,
+                    provided_token,
+                )
+                .await
+            }
+            OpsHttpRoute::StreamShard {
+                shard_id,
+                recent_limit,
+            } => {
+                self.handle_stream_shard(
+                    &mut reader,
+                    &mut write_half,
+                    shard_id,
+                    recent_limit,
+                    provided_token,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn handle_archive_supervisor<W>(
+        &self,
+        writer: &mut W,
+        recent_limit_per_shard: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.authorize(provided_token)?;
+        let snapshot = self
+            .archive
+            .snapshot(recent_limit_per_shard)
+            .map_err(OpsHttpError::ArchiveQuery)?;
+        self.write_json_response(writer, "200 OK", &snapshot).await
+    }
+
+    async fn handle_archive_shard<W>(
+        &self,
+        writer: &mut W,
+        shard_id: String,
+        recent_limit: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.authorize(provided_token)?;
+        let snapshot = self
+            .archive
+            .shard(&shard_id)
+            .ok_or_else(|| OpsHttpError::UnknownShard {
+                shard_id: shard_id.clone(),
+            })?
+            .snapshot(recent_limit)
+            .map_err(OpsHttpError::ArchiveQuery)?;
+        self.write_json_response(writer, "200 OK", &snapshot).await
+    }
+
+    async fn handle_stream_supervisor<R, W>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        recent_limit_per_shard: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        R: AsyncBufRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let snapshot = self.build_stream_subscription(
+            OpsHttpRoute::StreamSupervisor {
+                recent_limit_per_shard,
+            },
+            provided_token,
+        )?;
+        self.stream_subscription(reader, writer, snapshot).await
+    }
+
+    async fn handle_stream_shard<R, W>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        shard_id: String,
+        recent_limit: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        R: AsyncBufRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let snapshot = self.build_stream_subscription(
+            OpsHttpRoute::StreamShard {
+                shard_id,
+                recent_limit,
+            },
+            provided_token,
+        )?;
+        self.stream_subscription(reader, writer, snapshot).await
+    }
+
+    async fn stream_subscription<R, W>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        subscription: (OpsRelayEvent, Vec<AuthorityShardOpsHandle>),
+    ) -> Result<(), OpsHttpError>
+    where
+        R: AsyncBufRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let (initial_event, live_handles) = subscription;
+        self.write_sse_headers(writer).await?;
+        if let Err(err) = self.write_sse_event(writer, initial_event).await {
+            if err.is_disconnect() {
+                return Ok(());
+            }
+            let _ = self.write_sse_error(writer, &err).await;
+            return Ok(());
+        }
+
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        for handle in live_handles {
+            spawn_relay_forwarder(handle, event_tx.clone(), cancel_rx.clone());
+        }
+        drop(event_tx);
+
+        loop {
+            tokio::select! {
+                maybe_event = event_rx.recv() => {
+                    let Some(event) = maybe_event else {
+                        break;
+                    };
+                    if let Err(err) = self.write_sse_event(writer, event).await {
+                        if !err.is_disconnect() {
+                            let _ = self.write_sse_error(writer, &err).await;
+                        }
+                        break;
+                    }
+                }
+                client_read = read_capped_line(reader, self.config.max_request_bytes) => {
+                    match client_read {
+                        Ok(Some(_)) => {}
+                        Ok(None) => break,
+                        Err(ReadLineError::Io(source)) => return Err(OpsHttpError::ReadRequest(source)),
+                        Err(ReadLineError::TooLarge) => {
+                            let err = OpsHttpError::RequestTooLarge {
+                                max_request_bytes: self.config.max_request_bytes,
+                            };
+                            let _ = self.write_sse_error(writer, &err).await;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = cancel_tx.send(true);
+        match writer.shutdown().await {
+            Ok(()) => Ok(()),
+            Err(source)
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                Ok(())
+            }
+            Err(source) => Err(OpsHttpError::WriteResponse(source)),
+        }
+    }
+
+    fn build_stream_subscription(
+        &self,
+        route: OpsHttpRoute,
+        provided_token: Option<&str>,
+    ) -> Result<(OpsRelayEvent, Vec<AuthorityShardOpsHandle>), OpsHttpError> {
+        self.authorize(provided_token)?;
+        match route {
+            OpsHttpRoute::StreamShard {
+                shard_id,
+                recent_limit,
+            } => {
+                let archive_handle =
+                    self.archive
+                        .shard(&shard_id)
+                        .ok_or_else(|| OpsHttpError::UnknownShard {
+                            shard_id: shard_id.clone(),
+                        })?;
+                let live_handle =
+                    self.live
+                        .shard(&shard_id)
+                        .ok_or_else(|| OpsHttpError::UnknownShard {
+                            shard_id: shard_id.clone(),
+                        })?;
+                let snapshot = archive_handle
+                    .snapshot(recent_limit)
+                    .map_err(OpsHttpError::ArchiveQuery)?;
+                Ok((
+                    OpsRelayEvent::ShardSnapshot(snapshot),
+                    vec![live_handle.clone()],
+                ))
+            }
+            OpsHttpRoute::StreamSupervisor {
+                recent_limit_per_shard,
+            } => {
+                let snapshot = self
+                    .archive
+                    .snapshot(recent_limit_per_shard)
+                    .map_err(OpsHttpError::ArchiveQuery)?;
+                Ok((
+                    OpsRelayEvent::SupervisorSnapshot(snapshot),
+                    self.live.shards().to_vec(),
+                ))
+            }
+            OpsHttpRoute::ArchiveSupervisor { .. } | OpsHttpRoute::ArchiveShard { .. } => {
+                Err(OpsHttpError::UnknownRoute {
+                    path: "archive route cannot stream".to_string(),
+                })
+            }
+        }
+    }
+
+    fn authorize(&self, provided_token: Option<&str>) -> Result<(), OpsHttpError> {
+        match (&self.config.auth_token, provided_token) {
+            (Some(expected), Some(provided)) if expected == provided => Ok(()),
+            (Some(_), _) => Err(OpsHttpError::Unauthorized),
+            (None, _) => Ok(()),
+        }
+    }
+
+    async fn write_json_response<W, T>(
+        &self,
+        writer: &mut W,
+        status: &str,
+        value: &T,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+        T: Serialize,
+    {
+        let body = serde_json::to_vec(value).map_err(OpsHttpError::EncodeResponse)?;
+        if body.len() > self.config.max_response_bytes {
+            return Err(OpsHttpError::ResponseTooLarge {
+                max_response_bytes: self.config.max_response_bytes,
+            });
+        }
+
+        self.write_http_response(
+            writer,
+            status,
+            "application/json; charset=utf-8",
+            Some(&body),
+            &[("Cache-Control", "no-store")],
+        )
+        .await
+    }
+
+    async fn write_error_response<W>(
+        &self,
+        writer: &mut W,
+        error: &OpsHttpError,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": error.to_string(),
+        }))
+        .map_err(OpsHttpError::EncodeResponse)?;
+        if body.len() > self.config.max_response_bytes {
+            return Err(OpsHttpError::ResponseTooLarge {
+                max_response_bytes: self.config.max_response_bytes,
+            });
+        }
+
+        self.write_http_response(
+            writer,
+            error.status_line(),
+            "application/json; charset=utf-8",
+            Some(&body),
+            &[("Cache-Control", "no-store")],
+        )
+        .await
+    }
+
+    async fn write_http_response<W>(
+        &self,
+        writer: &mut W,
+        status: &str,
+        content_type: &str,
+        body: Option<&[u8]>,
+        extra_headers: &[(&str, &str)],
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let body = body.unwrap_or_default();
+        let mut head = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        );
+        for (name, value) in extra_headers {
+            head.push_str(name);
+            head.push_str(": ");
+            head.push_str(value);
+            head.push_str("\r\n");
+        }
+        head.push_str("\r\n");
+
+        writer
+            .write_all(head.as_bytes())
+            .await
+            .map_err(OpsHttpError::WriteResponse)?;
+        if !body.is_empty() {
+            writer
+                .write_all(body)
+                .await
+                .map_err(OpsHttpError::WriteResponse)?;
+        }
+        writer.flush().await.map_err(OpsHttpError::WriteResponse)?;
+        writer
+            .shutdown()
+            .await
+            .map_err(OpsHttpError::WriteResponse)?;
+        Ok(())
+    }
+
+    async fn write_sse_headers<W>(&self, writer: &mut W) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        writer
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n",
+            )
+            .await
+            .map_err(OpsHttpError::WriteResponse)?;
+        writer.flush().await.map_err(OpsHttpError::WriteResponse)?;
+        Ok(())
+    }
+
+    async fn write_sse_event<W>(
+        &self,
+        writer: &mut W,
+        event: OpsRelayEvent,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let (event_name, data) = encode_sse_event_payload(event)?;
+        let frame = format!("event: {event_name}\ndata: {data}\n\n");
+        if frame.len() > self.config.max_event_bytes {
+            return Err(OpsHttpError::EventTooLarge {
+                max_event_bytes: self.config.max_event_bytes,
+            });
+        }
+
+        writer
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(OpsHttpError::WriteResponse)?;
+        writer.flush().await.map_err(OpsHttpError::WriteResponse)?;
+        Ok(())
+    }
+
+    async fn write_sse_error<W>(
+        &self,
+        writer: &mut W,
+        error: &OpsHttpError,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let frame = format!(
+            "event: error\ndata: {}\n\n",
+            serde_json::to_string(&serde_json::json!({
+                "error": error.to_string(),
+            }))
+            .map_err(OpsHttpError::EncodeEvent)?
+        );
+        if frame.len() > self.config.max_event_bytes {
+            return Err(OpsHttpError::EventTooLarge {
+                max_event_bytes: self.config.max_event_bytes,
+            });
+        }
+
+        writer
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(OpsHttpError::WriteResponse)?;
+        writer.flush().await.map_err(OpsHttpError::WriteResponse)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum OpsHttpError {
+    Bind {
+        address: String,
+        source: std::io::Error,
+    },
+    Accept(std::io::Error),
+    ReadRequest(std::io::Error),
+    WriteResponse(std::io::Error),
+    EncodeResponse(serde_json::Error),
+    EncodeEvent(serde_json::Error),
+    RequestTooLarge {
+        max_request_bytes: usize,
+    },
+    ResponseTooLarge {
+        max_response_bytes: usize,
+    },
+    EventTooLarge {
+        max_event_bytes: usize,
+    },
+    InvalidRequestLine {
+        line: String,
+    },
+    InvalidHeader {
+        line: String,
+    },
+    UnsupportedMethod {
+        method: String,
+    },
+    InvalidQueryParameter {
+        name: String,
+        value: String,
+    },
+    UnknownRoute {
+        path: String,
+    },
+    Unauthorized,
+    UnknownShard {
+        shard_id: String,
+    },
+    ArchiveQuery(AuthorityOpsArchiveError),
+}
+
+impl OpsHttpError {
+    fn can_respond(&self) -> bool {
+        !matches!(
+            self,
+            Self::Bind { .. } | Self::Accept(_) | Self::ReadRequest(_) | Self::WriteResponse(_)
+        )
+    }
+
+    fn is_disconnect(&self) -> bool {
+        matches!(
+            self,
+            Self::WriteResponse(source)
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::UnexpectedEof
+                )
+        )
+    }
+
+    fn status_line(&self) -> &'static str {
+        match self {
+            Self::Unauthorized => "401 Unauthorized",
+            Self::UnknownRoute { .. } | Self::UnknownShard { .. } => "404 Not Found",
+            Self::RequestTooLarge { .. } => "413 Payload Too Large",
+            Self::InvalidRequestLine { .. }
+            | Self::InvalidHeader { .. }
+            | Self::UnsupportedMethod { .. }
+            | Self::InvalidQueryParameter { .. } => "400 Bad Request",
+            Self::Bind { .. }
+            | Self::Accept(_)
+            | Self::ReadRequest(_)
+            | Self::WriteResponse(_)
+            | Self::EncodeResponse(_)
+            | Self::EncodeEvent(_)
+            | Self::ResponseTooLarge { .. }
+            | Self::EventTooLarge { .. }
+            | Self::ArchiveQuery(_) => "500 Internal Server Error",
+        }
+    }
+}
+
+impl std::fmt::Display for OpsHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bind { address, source } => {
+                write!(f, "failed to bind ops HTTP service on {address}: {source}")
+            }
+            Self::Accept(source) => write!(f, "failed to accept ops HTTP client: {source}"),
+            Self::ReadRequest(source) => write!(f, "failed to read ops HTTP request: {source}"),
+            Self::WriteResponse(source) => {
+                write!(f, "failed to write ops HTTP response: {source}")
+            }
+            Self::EncodeResponse(source) => {
+                write!(f, "failed to encode ops HTTP response: {source}")
+            }
+            Self::EncodeEvent(source) => write!(f, "failed to encode ops SSE event: {source}"),
+            Self::RequestTooLarge { max_request_bytes } => {
+                write!(f, "ops HTTP request exceeded {max_request_bytes} bytes")
+            }
+            Self::ResponseTooLarge { max_response_bytes } => {
+                write!(f, "ops HTTP response exceeded {max_response_bytes} bytes")
+            }
+            Self::EventTooLarge { max_event_bytes } => {
+                write!(f, "ops SSE event exceeded {max_event_bytes} bytes")
+            }
+            Self::InvalidRequestLine { line } => {
+                write!(f, "invalid HTTP request line: {line}")
+            }
+            Self::InvalidHeader { line } => write!(f, "invalid HTTP header: {line}"),
+            Self::UnsupportedMethod { method } => {
+                write!(f, "unsupported HTTP method '{method}'")
+            }
+            Self::InvalidQueryParameter { name, value } => {
+                write!(f, "invalid query parameter '{name}={value}'")
+            }
+            Self::UnknownRoute { path } => write!(f, "unknown ops HTTP route '{path}'"),
+            Self::Unauthorized => write!(f, "ops HTTP auth token was rejected"),
+            Self::UnknownShard { shard_id } => write!(f, "unknown shard '{shard_id}'"),
+            Self::ArchiveQuery(source) => write!(f, "{source}"),
+        }
+    }
+}
+
+impl std::error::Error for OpsHttpError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Bind { source, .. }
+            | Self::Accept(source)
+            | Self::ReadRequest(source)
+            | Self::WriteResponse(source) => Some(source),
+            Self::EncodeResponse(source) | Self::EncodeEvent(source) => Some(source),
+            Self::ArchiveQuery(source) => Some(source),
+            Self::RequestTooLarge { .. }
+            | Self::ResponseTooLarge { .. }
+            | Self::EventTooLarge { .. }
+            | Self::InvalidRequestLine { .. }
+            | Self::InvalidHeader { .. }
+            | Self::UnsupportedMethod { .. }
+            | Self::InvalidQueryParameter { .. }
+            | Self::UnknownRoute { .. }
+            | Self::Unauthorized
+            | Self::UnknownShard { .. } => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum OpsHttpRoute {
+    ArchiveSupervisor {
+        recent_limit_per_shard: usize,
+    },
+    ArchiveShard {
+        shard_id: String,
+        recent_limit: usize,
+    },
+    StreamSupervisor {
+        recent_limit_per_shard: usize,
+    },
+    StreamShard {
+        shard_id: String,
+        recent_limit: usize,
+    },
+}
+
+#[derive(Debug)]
+struct ParsedHttpRequest {
+    target: String,
+    headers: HashMap<String, String>,
+}
+
+impl ParsedHttpRequest {
+    fn bearer_token(&self) -> Option<&str> {
+        let authorization = self.headers.get("authorization")?;
+        let (scheme, token) = authorization.split_once(' ')?;
+        if scheme.eq_ignore_ascii_case("bearer") {
+            Some(token.trim())
+        } else {
+            None
+        }
+    }
+}
+
+async fn read_http_request<R>(
+    reader: &mut R,
+    max_request_bytes: usize,
+) -> Result<Option<ParsedHttpRequest>, OpsHttpError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let request_line = match read_capped_line(reader, max_request_bytes).await {
+        Ok(Some(line)) => line,
+        Ok(None) => return Ok(None),
+        Err(ReadLineError::Io(source)) => return Err(OpsHttpError::ReadRequest(source)),
+        Err(ReadLineError::TooLarge) => {
+            return Err(OpsHttpError::RequestTooLarge { max_request_bytes });
+        }
+    };
+    let mut consumed_bytes = request_line.len();
+    let mut parts = request_line.split_whitespace();
+    let method = parts
+        .next()
+        .ok_or_else(|| OpsHttpError::InvalidRequestLine {
+            line: request_line.clone(),
+        })?;
+    let target = parts
+        .next()
+        .ok_or_else(|| OpsHttpError::InvalidRequestLine {
+            line: request_line.clone(),
+        })?;
+    let version = parts
+        .next()
+        .ok_or_else(|| OpsHttpError::InvalidRequestLine {
+            line: request_line.clone(),
+        })?;
+    if parts.next().is_some() || !version.starts_with("HTTP/1.") {
+        return Err(OpsHttpError::InvalidRequestLine { line: request_line });
+    }
+    if !method.eq_ignore_ascii_case("GET") {
+        return Err(OpsHttpError::UnsupportedMethod {
+            method: method.to_string(),
+        });
+    }
+
+    let mut headers = HashMap::new();
+    loop {
+        let line = match read_capped_line(reader, max_request_bytes).await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(ReadLineError::Io(source)) => return Err(OpsHttpError::ReadRequest(source)),
+            Err(ReadLineError::TooLarge) => {
+                return Err(OpsHttpError::RequestTooLarge { max_request_bytes });
+            }
+        };
+        consumed_bytes += line.len();
+        if consumed_bytes > max_request_bytes {
+            return Err(OpsHttpError::RequestTooLarge { max_request_bytes });
+        }
+        if line.is_empty() {
+            break;
+        }
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| OpsHttpError::InvalidHeader { line: line.clone() })?;
+        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
+
+    Ok(Some(ParsedHttpRequest {
+        target: target.to_string(),
+        headers,
+    }))
+}
+
+fn parse_http_route(target: &str) -> Result<OpsHttpRoute, OpsHttpError> {
+    let (path, query) = match target.split_once('?') {
+        Some((path, query)) => (path, query),
+        None => (target, ""),
+    };
+    let params = parse_http_query(query);
+
+    match path {
+        "/ops/archive/supervisor" => Ok(OpsHttpRoute::ArchiveSupervisor {
+            recent_limit_per_shard: parse_http_query_usize(
+                &params,
+                "recent_limit_per_shard",
+                OPS_DOCUMENT_HISTORY_LIMIT,
+            )?,
+        }),
+        "/ops/stream/supervisor" => Ok(OpsHttpRoute::StreamSupervisor {
+            recent_limit_per_shard: parse_http_query_usize(
+                &params,
+                "recent_limit_per_shard",
+                OPS_DOCUMENT_HISTORY_LIMIT,
+            )?,
+        }),
+        _ if path.starts_with("/ops/archive/shard/") => {
+            let shard_id = path.trim_start_matches("/ops/archive/shard/");
+            if shard_id.is_empty() || shard_id.contains('/') {
+                return Err(OpsHttpError::UnknownRoute {
+                    path: path.to_string(),
+                });
+            }
+            Ok(OpsHttpRoute::ArchiveShard {
+                shard_id: shard_id.to_string(),
+                recent_limit: parse_http_query_usize(
+                    &params,
+                    "recent_limit",
+                    OPS_DOCUMENT_HISTORY_LIMIT,
+                )?,
+            })
+        }
+        _ if path.starts_with("/ops/stream/shard/") => {
+            let shard_id = path.trim_start_matches("/ops/stream/shard/");
+            if shard_id.is_empty() || shard_id.contains('/') {
+                return Err(OpsHttpError::UnknownRoute {
+                    path: path.to_string(),
+                });
+            }
+            Ok(OpsHttpRoute::StreamShard {
+                shard_id: shard_id.to_string(),
+                recent_limit: parse_http_query_usize(
+                    &params,
+                    "recent_limit",
+                    OPS_DOCUMENT_HISTORY_LIMIT,
+                )?,
+            })
+        }
+        _ => Err(OpsHttpError::UnknownRoute {
+            path: path.to_string(),
+        }),
+    }
+}
+
+fn parse_http_query(query: &str) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+    for entry in query.split('&').filter(|entry| !entry.is_empty()) {
+        let (name, value) = match entry.split_once('=') {
+            Some((name, value)) => (name, value),
+            None => (entry, ""),
+        };
+        params.insert(name.to_string(), value.to_string());
+    }
+    params
+}
+
+fn parse_http_query_usize(
+    params: &HashMap<String, String>,
+    name: &str,
+    default: usize,
+) -> Result<usize, OpsHttpError> {
+    match params.get(name) {
+        Some(value) if !value.is_empty() => {
+            value
+                .parse::<usize>()
+                .map_err(|_| OpsHttpError::InvalidQueryParameter {
+                    name: name.to_string(),
+                    value: value.clone(),
+                })
+        }
+        Some(_) | None => Ok(default),
+    }
+}
+
+fn encode_sse_event_payload(event: OpsRelayEvent) -> Result<(&'static str, String), OpsHttpError> {
+    match event {
+        OpsRelayEvent::SupervisorSnapshot(snapshot) => Ok((
+            "supervisor_snapshot",
+            serde_json::to_string(&snapshot).map_err(OpsHttpError::EncodeEvent)?,
+        )),
+        OpsRelayEvent::ShardSnapshot(snapshot) => Ok((
+            "shard_snapshot",
+            serde_json::to_string(&snapshot).map_err(OpsHttpError::EncodeEvent)?,
+        )),
+        OpsRelayEvent::ShardDocument {
+            shard_id,
+            document,
+            retained_document_count,
+            persisted_document_count,
+            archive_path,
+        } => Ok((
+            "shard_document",
+            serde_json::to_string(&serde_json::json!({
+                "shard_id": shard_id,
+                "document": document,
+                "retained_document_count": retained_document_count,
+                "persisted_document_count": persisted_document_count,
+                "archive_path": archive_path,
+            }))
+            .map_err(OpsHttpError::EncodeEvent)?,
+        )),
+        OpsRelayEvent::Lagged { shard_id, skipped } => Ok((
+            "lagged",
+            serde_json::to_string(&serde_json::json!({
+                "shard_id": shard_id,
+                "skipped": skipped,
+            }))
+            .map_err(OpsHttpError::EncodeEvent)?,
+        )),
+        OpsRelayEvent::Error { message } => Ok((
+            "error",
+            serde_json::to_string(&serde_json::json!({
+                "error": message,
+            }))
+            .map_err(OpsHttpError::EncodeEvent)?,
+        )),
     }
 }
 
@@ -2565,6 +3482,10 @@ impl PreparedShardSupervisor {
         self.ops_handle().relay(config)
     }
 
+    pub fn ops_http_service(&self, config: OpsHttpServiceConfig) -> ShardSupervisorOpsHttpService {
+        self.ops_handle().http_service(config)
+    }
+
     pub async fn run_direct_connect_until_failure(self) -> Result<(), ShardSupervisorError> {
         let local_set = tokio::task::LocalSet::new();
 
@@ -2691,10 +3612,11 @@ mod tests {
         AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
         DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
         OpsArchiveServiceClient, OpsArchiveServiceConfig, OpsArchiveServiceRequest,
-        OpsArchiveServiceResponse, OpsPersistenceConfig, OpsRelayClient, OpsRelayConfig,
-        OpsRelayError, OpsRelayEvent, PreparedAuthorityShard, ShardSupervisorConfig,
-        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorOpsHandle,
-        ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
+        OpsArchiveServiceResponse, OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient,
+        OpsRelayConfig, OpsRelayError, OpsRelayEvent, PreparedAuthorityShard,
+        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
+        ShardSupervisorOpsArchiveSnapshot, ShardSupervisorOpsHandle, ShardSupervisorSummary,
+        OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -2705,8 +3627,12 @@ mod tests {
         DirectConnectTransportConfig, OpsDocumentStream, ServerLifecycleCommand,
         ServerLifecycleState, TransportPolicy,
     };
+    use serde::Deserialize;
+    use std::collections::HashMap;
     use std::fs;
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpStream;
     use tokio::sync::{mpsc, watch};
 
     #[test]
@@ -3195,6 +4121,125 @@ mod tests {
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
+    #[tokio::test]
+    async fn supervisor_ops_http_service_serves_archive_json_and_sse_streams() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-http-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(7.0, 7.0)
+                    .with_label("ops-http-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("archive-backed local runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("http-secret".to_string()),
+        });
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("ops HTTP service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops HTTP listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_listener(listener));
+
+        let unauthorized_request = format!(
+            "GET /ops/archive/supervisor?recent_limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer wrong-secret\r\n\r\n"
+        );
+        let mut unauthorized_reader = send_http_request(&address, &unauthorized_request).await;
+        let (status, headers) = read_http_response_head(&mut unauthorized_reader).await;
+        assert!(status.contains("401 Unauthorized"));
+        let body = read_http_response_body(&mut unauthorized_reader, &headers).await;
+        let error = serde_json::from_slice::<serde_json::Value>(&body)
+            .expect("unauthorized response should decode as JSON");
+        assert!(error["error"]
+            .as_str()
+            .expect("unauthorized response should include an error message")
+            .contains("rejected"));
+
+        let archive_request = format!(
+            "GET /ops/archive/supervisor?recent_limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut archive_reader = send_http_request(&address, &archive_request).await;
+        let (status, headers) = read_http_response_head(&mut archive_reader).await;
+        assert!(status.contains("200 OK"));
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("application/json; charset=utf-8")
+        );
+        let body = read_http_response_body(&mut archive_reader, &headers).await;
+        let snapshot = serde_json::from_slice::<ShardSupervisorOpsArchiveSnapshot>(&body)
+            .expect("archive response should decode as a supervisor snapshot");
+        assert_eq!(snapshot.shard_count, 1);
+        assert_eq!(snapshot.archived_shard_count, 1);
+        assert!(snapshot.total_persisted_document_count >= 1);
+
+        let stream_request = format!(
+            "GET /ops/stream/supervisor?recent_limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut stream_reader = send_http_request(&address, &stream_request).await;
+        let (status, headers) = read_http_response_head(&mut stream_reader).await;
+        assert!(status.contains("200 OK"));
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("text/event-stream")
+        );
+        let (event_name, event_data) = read_sse_event(&mut stream_reader).await;
+        assert_eq!(event_name, "supervisor_snapshot");
+        let initial_snapshot =
+            serde_json::from_str::<ShardSupervisorOpsArchiveSnapshot>(&event_data)
+                .expect("initial SSE payload should decode as a supervisor snapshot");
+        assert_eq!(initial_snapshot.shard_count, 1);
+        assert_eq!(initial_snapshot.archived_shard_count, 1);
+
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let (event_name, event_data) = read_sse_event(&mut stream_reader).await;
+        assert_eq!(event_name, "shard_document");
+        let shard_document = serde_json::from_str::<HttpShardDocumentEvent>(&event_data)
+            .expect("live SSE payload should decode as a shard document event");
+        assert_eq!(shard_document.shard_id, "alpha-1");
+        assert!(shard_document.retained_document_count >= 1);
+        assert!(shard_document.persisted_document_count >= 1);
+        assert!(shard_document.archive_path.is_some());
+        assert_eq!(
+            decode_toon_value(&shard_document.document)
+                .expect("SSE document should decode as TOON")["document_type"],
+            "versioned_tick_telemetry"
+        );
+
+        drop(stream_reader);
+        service_task.abort();
+        let _ = service_task.await;
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
     #[test]
     fn local_ops_stream_emits_tick_and_incident_documents() {
         let mut stream = LocalAuthorityOpsStream::new("overworld-a");
@@ -3616,5 +4661,86 @@ mod tests {
         } else {
             std::env::remove_var(key);
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct HttpShardDocumentEvent {
+        shard_id: String,
+        document: String,
+        retained_document_count: usize,
+        persisted_document_count: usize,
+        archive_path: Option<std::path::PathBuf>,
+    }
+
+    async fn send_http_request(address: &str, request: &str) -> BufReader<TcpStream> {
+        let mut stream = TcpStream::connect(address)
+            .await
+            .expect("HTTP test client should connect");
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("HTTP test client should write the request");
+        BufReader::new(stream)
+    }
+
+    async fn read_http_response_head(
+        reader: &mut BufReader<TcpStream>,
+    ) -> (String, HashMap<String, String>) {
+        let status = super::read_capped_line(reader, 16 * 1024)
+            .await
+            .expect("HTTP response status line should read")
+            .expect("HTTP response should include a status line");
+        let mut headers = HashMap::new();
+        loop {
+            let line = super::read_capped_line(reader, 16 * 1024)
+                .await
+                .expect("HTTP response header line should read")
+                .expect("HTTP response should terminate headers with a blank line");
+            if line.is_empty() {
+                break;
+            }
+            let (name, value) = line
+                .split_once(':')
+                .expect("HTTP response header should contain a ':' separator");
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+        }
+        (status, headers)
+    }
+
+    async fn read_http_response_body(
+        reader: &mut BufReader<TcpStream>,
+        headers: &HashMap<String, String>,
+    ) -> Vec<u8> {
+        let content_length = headers
+            .get("content-length")
+            .expect("HTTP response should include a content-length header")
+            .parse::<usize>()
+            .expect("content-length header should parse as usize");
+        let mut body = vec![0_u8; content_length];
+        reader
+            .read_exact(&mut body)
+            .await
+            .expect("HTTP response body should read exactly");
+        body
+    }
+
+    async fn read_sse_event(reader: &mut BufReader<TcpStream>) -> (String, String) {
+        let mut event_name = String::new();
+        let mut data_lines = Vec::new();
+        loop {
+            let line = super::read_capped_line(reader, 16 * 1024)
+                .await
+                .expect("SSE event line should read")
+                .expect("SSE stream should remain open");
+            if line.is_empty() {
+                break;
+            }
+            if let Some(value) = line.strip_prefix("event: ") {
+                event_name = value.to_string();
+            } else if let Some(value) = line.strip_prefix("data: ") {
+                data_lines.push(value.to_string());
+            }
+        }
+        (event_name, data_lines.join("\n"))
     }
 }

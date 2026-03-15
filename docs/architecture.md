@@ -209,7 +209,8 @@ integration targets available today:
   above the persisted archive files, a process-external
   `ShardSupervisorOpsArchiveService` / `OpsArchiveServiceClient` query surface,
   an authenticated `ShardSupervisorOpsRelayService` / `OpsRelayClient` live
-  relay, and optional per-shard JSONL persistence via `POD_OPS_ARCHIVE_DIR`,
+  relay, a browser/editor-friendly `ShardSupervisorOpsHttpService` HTTP+SSE
+  facade, and optional per-shard JSONL persistence via `POD_OPS_ARCHIVE_DIR`,
   so app binaries and external ops consumers can select single-host or
   multi-shard authority hosting through one crate-level seam.
 - `apps/pod-web` consumes those contracts, but its top-level bootstrap file
@@ -223,7 +224,7 @@ The remaining blockers are also concrete now:
 
 - `apps/pod-web/src/main.ts` still owns browser mode selection plus runtime feature bootstrapping.
 - `crates/pod-editor/src/lib.rs` still owns a closed panel registry and hardcoded panel dispatch.
-- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, retains recent shard/supervisor ops history both in-memory and in optional per-shard JSONL archives, provides typed shard/supervisor archive-query handles above those files, and now exposes both a process-external archive query service and an authenticated live relay for retained-plus-live ops consumers, but it still does not provide a browser/editor-friendly HTTP or WebSocket facade above that raw TCP contract.
+- `crates/pod-host/src/lib.rs` now composes and supervises multiple authority hosts cleanly, exposes aggregate live transport plus gameplay-incident control-plane snapshots, supports coordinated drain/shutdown commands, retains recent shard/supervisor ops history both in-memory and in optional per-shard JSONL archives, provides typed shard/supervisor archive-query handles above those files, and now exposes a process-external archive query service plus both raw relay and HTTP/SSE retained-plus-live ops facades. The next missing piece is resumable replay/cursor semantics above those streams so browser/editor consumers can resume without replaying the full retained history.
 
 Those are the places where a future plugin/app lifecycle system still needs new
 hooks, not the exported crate seams listed above.
