@@ -340,6 +340,12 @@
 - [x] Extended the live ops surfaces with `ShardSupervisorOpsHandle::http_service(...)` and `PreparedShardSupervisor::ops_http_service(...)`, and refreshed the `apps/pod-server/src/lib.rs` compatibility exports, so app binaries and tooling can compose one shared browser/editor-facing HTTP seam.
 - [x] Added deterministic Tokio coverage for HTTP auth rejection, archive snapshot JSON, and retained-plus-live SSE delivery over the new facade.
 
+## Iteration 219 Progress
+
+- [x] Added monotonic per-shard ops document sequencing and archive-backed replay loading in `crates/pod-net/src/server.rs`, so retained shard history can now resume from cursor state.
+- [x] Added shard/supervisor replay cursor and snapshot surfaces in `crates/pod-host/src/lib.rs`, covering in-process replay, archive-backed replay, and sequence-aware live relay forwarding.
+- [x] Extended `ShardSupervisorOpsHttpService` with replay JSON routes and cursor-aware SSE startup, refreshed `apps/pod-server/src/lib.rs` re-exports, and proved the resume path with deterministic Tokio coverage.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

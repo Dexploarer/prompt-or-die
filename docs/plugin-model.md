@@ -135,8 +135,10 @@ integrators back into app composition roots:
   follow retained history. It now also exposes `ShardSupervisorOpsHttpService`
   above the same retained-plus-live shard surfaces, so browser/editor clients
   can consume JSON snapshots and SSE streams without embedding the raw relay
-  transport. What is still missing is resumable replay/cursor state above those
-  HTTP/SSE streams for late-joining or reconnecting consumers.
+  transport. It now also exposes replay/cursor state above those HTTP/SSE
+  streams for late-joining or reconnecting consumers. What is still missing is
+  a durable bookmark-token or filtered replay layer above those cursors so
+  browser/editor clients do not have to rebuild per-shard cursor maps manually.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

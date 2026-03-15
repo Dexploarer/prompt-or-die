@@ -17,8 +17,8 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 pub use pod_net::{parse_bind_target, DirectConnectTransportConfig, TransportPolicy};
 use pod_net::{
-    OpsDocumentArchiveSnapshot, OpsDocumentStream, ServerLifecycleCommand, ServerLifecyclePhase,
-    ServerLifecycleState,
+    OpsDocumentArchiveReplaySnapshot, OpsDocumentArchiveSnapshot, OpsDocumentRecord,
+    OpsDocumentStream, ServerLifecycleCommand, ServerLifecyclePhase, ServerLifecycleState,
 };
 
 const OPS_DOCUMENT_CHANNEL_CAPACITY: usize = 256;
@@ -453,12 +453,16 @@ impl AuthorityShardOpsHandle {
         &self.shard
     }
 
-    pub fn subscribe_documents(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe_documents(&self) -> broadcast::Receiver<OpsDocumentRecord> {
         self.stream.subscribe()
     }
 
     pub fn recent_documents(&self) -> Vec<String> {
         self.stream.recent_documents()
+    }
+
+    pub fn recent_document_records(&self) -> Vec<OpsDocumentRecord> {
+        self.stream.recent_document_records()
     }
 
     pub fn retained_document_count(&self) -> usize {
@@ -471,6 +475,10 @@ impl AuthorityShardOpsHandle {
 
     pub fn archive_path(&self) -> Option<PathBuf> {
         self.stream.archive_path()
+    }
+
+    pub fn latest_sequence(&self) -> u64 {
+        self.stream.latest_sequence()
     }
 
     pub fn snapshot(&self) -> AuthorityShardOpsSnapshot {
@@ -490,6 +498,64 @@ impl AuthorityShardOpsHandle {
             archive_path: self.archive_path(),
         }
     }
+
+    pub fn replay_snapshot(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> AuthorityShardOpsReplaySnapshot {
+        if self.archive_path().is_some() {
+            return self
+                .archive_handle()
+                .replay_snapshot(after_sequence, limit)
+                .unwrap_or_else(|_| self.replay_snapshot_from_retained(after_sequence, limit));
+        }
+
+        self.replay_snapshot_from_retained(after_sequence, limit)
+    }
+
+    fn replay_snapshot_from_retained(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> AuthorityShardOpsReplaySnapshot {
+        let records = self.recent_document_records();
+        let first_retained_sequence = records.first().map(|record| record.sequence).unwrap_or(0);
+        let last_available_sequence = self.latest_sequence();
+        let gap_detected = last_available_sequence > 0
+            && first_retained_sequence > after_sequence.saturating_add(1);
+        let effective_after_sequence = if gap_detected {
+            first_retained_sequence.saturating_sub(1)
+        } else {
+            after_sequence
+        };
+        let documents = records
+            .into_iter()
+            .filter(|record| record.sequence > effective_after_sequence)
+            .take(limit)
+            .map(AuthorityShardOpsReplayDocument::from)
+            .collect::<Vec<_>>();
+        let next_sequence = documents
+            .last()
+            .map(|document| document.sequence)
+            .unwrap_or(after_sequence.min(last_available_sequence));
+
+        AuthorityShardOpsReplaySnapshot {
+            shard_id: self.shard.shard_id.clone(),
+            shard: Some(self.shard.clone()),
+            archive_path: None,
+            persisted_document_count: 0,
+            requested_after_sequence: after_sequence,
+            gap_detected,
+            has_more: next_sequence < last_available_sequence,
+            last_available_sequence,
+            next_cursor: AuthorityShardOpsReplayCursor {
+                shard_id: self.shard.shard_id.clone(),
+                last_sequence: next_sequence,
+            },
+            documents,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -499,6 +565,41 @@ pub struct AuthorityShardOpsSnapshot {
     pub persisted_document_count: usize,
     pub archive_path: Option<PathBuf>,
     pub recent_documents: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityShardOpsReplayCursor {
+    pub shard_id: String,
+    pub last_sequence: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityShardOpsReplayDocument {
+    pub sequence: u64,
+    pub document: String,
+}
+
+impl From<OpsDocumentRecord> for AuthorityShardOpsReplayDocument {
+    fn from(value: OpsDocumentRecord) -> Self {
+        Self {
+            sequence: value.sequence,
+            document: value.document,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityShardOpsReplaySnapshot {
+    pub shard_id: String,
+    pub shard: Option<AuthorityShardSummary>,
+    pub archive_path: Option<PathBuf>,
+    pub persisted_document_count: usize,
+    pub requested_after_sequence: u64,
+    pub gap_detected: bool,
+    pub has_more: bool,
+    pub last_available_sequence: u64,
+    pub next_cursor: AuthorityShardOpsReplayCursor,
+    pub documents: Vec<AuthorityShardOpsReplayDocument>,
 }
 
 #[derive(Clone, Debug)]
@@ -550,6 +651,63 @@ impl AuthorityShardOpsArchiveHandle {
             archive_path: Some(snapshot.archive_path),
             persisted_document_count: snapshot.persisted_document_count,
             recent_documents: snapshot.recent_documents,
+        })
+    }
+
+    pub fn replay_snapshot(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> Result<AuthorityShardOpsReplaySnapshot, AuthorityOpsArchiveError> {
+        let Some(archive_path) = self.archive_path.clone() else {
+            return Ok(AuthorityShardOpsReplaySnapshot {
+                shard_id: self.shard_id.clone(),
+                shard: self.shard.clone(),
+                archive_path: None,
+                persisted_document_count: 0,
+                requested_after_sequence: after_sequence,
+                gap_detected: after_sequence > 0,
+                has_more: false,
+                last_available_sequence: 0,
+                next_cursor: AuthorityShardOpsReplayCursor {
+                    shard_id: self.shard_id.clone(),
+                    last_sequence: 0,
+                },
+                documents: Vec::new(),
+            });
+        };
+
+        let snapshot =
+            OpsDocumentArchiveReplaySnapshot::load_after(&archive_path, after_sequence, limit)
+                .map_err(|source| AuthorityOpsArchiveError::ReadArchive {
+                    shard_id: self.shard_id.clone(),
+                    path: archive_path.clone(),
+                    source,
+                })?;
+        let next_sequence = snapshot
+            .documents
+            .last()
+            .map(|document| document.sequence)
+            .unwrap_or(after_sequence.min(snapshot.last_available_sequence));
+
+        Ok(AuthorityShardOpsReplaySnapshot {
+            shard_id: self.shard_id.clone(),
+            shard: self.shard.clone(),
+            archive_path: Some(snapshot.archive_path),
+            persisted_document_count: snapshot.persisted_document_count,
+            requested_after_sequence: after_sequence,
+            gap_detected: false,
+            has_more: snapshot.has_more,
+            last_available_sequence: snapshot.last_available_sequence,
+            next_cursor: AuthorityShardOpsReplayCursor {
+                shard_id: self.shard_id.clone(),
+                last_sequence: next_sequence,
+            },
+            documents: snapshot
+                .documents
+                .into_iter()
+                .map(AuthorityShardOpsReplayDocument::from)
+                .collect(),
         })
     }
 }
@@ -998,6 +1156,43 @@ impl ShardSupervisorOpsHandle {
             config,
         }
     }
+
+    pub fn replay_snapshot(
+        &self,
+        cursor: &ShardSupervisorOpsReplayCursor,
+        limit_per_shard: usize,
+    ) -> ShardSupervisorOpsReplaySnapshot {
+        let shards = self
+            .shards
+            .iter()
+            .map(|handle| {
+                handle.replay_snapshot(
+                    cursor.last_sequence_for(&handle.shard.shard_id),
+                    limit_per_shard,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        ShardSupervisorOpsReplaySnapshot {
+            shard_count: shards.len(),
+            total_persisted_document_count: shards
+                .iter()
+                .map(|snapshot| snapshot.persisted_document_count)
+                .sum(),
+            gap_detected_shard_count: shards
+                .iter()
+                .filter(|snapshot| snapshot.gap_detected)
+                .count(),
+            has_more_shard_count: shards.iter().filter(|snapshot| snapshot.has_more).count(),
+            next_cursor: ShardSupervisorOpsReplayCursor {
+                shards: shards
+                    .iter()
+                    .map(|snapshot| snapshot.next_cursor.clone())
+                    .collect(),
+            },
+            shards,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1006,6 +1201,31 @@ pub struct ShardSupervisorOpsSnapshot {
     pub total_retained_document_count: usize,
     pub total_persisted_document_count: usize,
     pub shards: Vec<AuthorityShardOpsSnapshot>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardSupervisorOpsReplayCursor {
+    pub shards: Vec<AuthorityShardOpsReplayCursor>,
+}
+
+impl ShardSupervisorOpsReplayCursor {
+    fn last_sequence_for(&self, shard_id: &str) -> u64 {
+        self.shards
+            .iter()
+            .find(|cursor| cursor.shard_id == shard_id)
+            .map(|cursor| cursor.last_sequence)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardSupervisorOpsReplaySnapshot {
+    pub shard_count: usize,
+    pub total_persisted_document_count: usize,
+    pub gap_detected_shard_count: usize,
+    pub has_more_shard_count: usize,
+    pub next_cursor: ShardSupervisorOpsReplayCursor,
+    pub shards: Vec<AuthorityShardOpsReplaySnapshot>,
 }
 
 #[derive(Clone, Debug)]
@@ -1044,6 +1264,40 @@ impl ShardSupervisorOpsArchiveHandle {
                 .iter()
                 .map(|snapshot| snapshot.persisted_document_count)
                 .sum(),
+            shards,
+        })
+    }
+
+    pub fn replay_snapshot(
+        &self,
+        cursor: &ShardSupervisorOpsReplayCursor,
+        limit_per_shard: usize,
+    ) -> Result<ShardSupervisorOpsReplaySnapshot, AuthorityOpsArchiveError> {
+        let shards = self
+            .shards
+            .iter()
+            .map(|handle| {
+                handle.replay_snapshot(cursor.last_sequence_for(handle.shard_id()), limit_per_shard)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ShardSupervisorOpsReplaySnapshot {
+            shard_count: shards.len(),
+            total_persisted_document_count: shards
+                .iter()
+                .map(|snapshot| snapshot.persisted_document_count)
+                .sum(),
+            gap_detected_shard_count: shards
+                .iter()
+                .filter(|snapshot| snapshot.gap_detected)
+                .count(),
+            has_more_shard_count: shards.iter().filter(|snapshot| snapshot.has_more).count(),
+            next_cursor: ShardSupervisorOpsReplayCursor {
+                shards: shards
+                    .iter()
+                    .map(|snapshot| snapshot.next_cursor.clone())
+                    .collect(),
+            },
             shards,
         })
     }
@@ -1508,13 +1762,50 @@ impl ShardSupervisorOpsHttpService {
                 }
                 Err(err) => Err(err),
             },
+            OpsHttpRoute::ReplaySupervisor {
+                cursor,
+                limit_per_shard,
+            } => match self
+                .handle_replay_supervisor(&mut write_half, cursor, limit_per_shard, provided_token)
+                .await
+            {
+                Ok(()) => Ok(()),
+                Err(err) if err.can_respond() => {
+                    self.write_error_response(&mut write_half, &err).await?;
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
+            OpsHttpRoute::ReplayShard {
+                shard_id,
+                after_sequence,
+                limit,
+            } => match self
+                .handle_replay_shard(
+                    &mut write_half,
+                    shard_id,
+                    after_sequence,
+                    limit,
+                    provided_token,
+                )
+                .await
+            {
+                Ok(()) => Ok(()),
+                Err(err) if err.can_respond() => {
+                    self.write_error_response(&mut write_half, &err).await?;
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
             OpsHttpRoute::StreamSupervisor {
                 recent_limit_per_shard,
+                cursor,
             } => {
                 self.handle_stream_supervisor(
                     &mut reader,
                     &mut write_half,
                     recent_limit_per_shard,
+                    cursor,
                     provided_token,
                 )
                 .await
@@ -1522,12 +1813,14 @@ impl ShardSupervisorOpsHttpService {
             OpsHttpRoute::StreamShard {
                 shard_id,
                 recent_limit,
+                after_sequence,
             } => {
                 self.handle_stream_shard(
                     &mut reader,
                     &mut write_half,
                     shard_id,
                     recent_limit,
+                    after_sequence,
                     provided_token,
                 )
                 .await
@@ -1574,11 +1867,49 @@ impl ShardSupervisorOpsHttpService {
         self.write_json_response(writer, "200 OK", &snapshot).await
     }
 
+    async fn handle_replay_supervisor<W>(
+        &self,
+        writer: &mut W,
+        cursor: ShardSupervisorOpsReplayCursor,
+        limit_per_shard: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.authorize(provided_token)?;
+        let snapshot = self.live.replay_snapshot(&cursor, limit_per_shard);
+        self.write_json_response(writer, "200 OK", &snapshot).await
+    }
+
+    async fn handle_replay_shard<W>(
+        &self,
+        writer: &mut W,
+        shard_id: String,
+        after_sequence: u64,
+        limit: usize,
+        provided_token: Option<&str>,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.authorize(provided_token)?;
+        let snapshot = self
+            .live
+            .shard(&shard_id)
+            .ok_or_else(|| OpsHttpError::UnknownShard {
+                shard_id: shard_id.clone(),
+            })?
+            .replay_snapshot(after_sequence, limit);
+        self.write_json_response(writer, "200 OK", &snapshot).await
+    }
+
     async fn handle_stream_supervisor<R, W>(
         &self,
         reader: &mut R,
         writer: &mut W,
         recent_limit_per_shard: usize,
+        cursor: Option<ShardSupervisorOpsReplayCursor>,
         provided_token: Option<&str>,
     ) -> Result<(), OpsHttpError>
     where
@@ -1588,6 +1919,7 @@ impl ShardSupervisorOpsHttpService {
         let snapshot = self.build_stream_subscription(
             OpsHttpRoute::StreamSupervisor {
                 recent_limit_per_shard,
+                cursor,
             },
             provided_token,
         )?;
@@ -1600,6 +1932,7 @@ impl ShardSupervisorOpsHttpService {
         writer: &mut W,
         shard_id: String,
         recent_limit: usize,
+        after_sequence: Option<u64>,
         provided_token: Option<&str>,
     ) -> Result<(), OpsHttpError>
     where
@@ -1610,6 +1943,7 @@ impl ShardSupervisorOpsHttpService {
             OpsHttpRoute::StreamShard {
                 shard_id,
                 recent_limit,
+                after_sequence,
             },
             provided_token,
         )?;
@@ -1620,15 +1954,18 @@ impl ShardSupervisorOpsHttpService {
         &self,
         reader: &mut R,
         writer: &mut W,
-        subscription: (OpsRelayEvent, Vec<AuthorityShardOpsHandle>),
+        subscription: OpsHttpStreamSubscription,
     ) -> Result<(), OpsHttpError>
     where
         R: AsyncBufRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let (initial_event, live_handles) = subscription;
+        let OpsHttpStreamSubscription {
+            initial_event,
+            live_handles,
+        } = subscription;
         self.write_sse_headers(writer).await?;
-        if let Err(err) = self.write_sse_event(writer, initial_event).await {
+        if let Err(err) = self.write_sse_initial_event(writer, initial_event).await {
             if err.is_disconnect() {
                 return Ok(());
             }
@@ -1695,50 +2032,68 @@ impl ShardSupervisorOpsHttpService {
         &self,
         route: OpsHttpRoute,
         provided_token: Option<&str>,
-    ) -> Result<(OpsRelayEvent, Vec<AuthorityShardOpsHandle>), OpsHttpError> {
+    ) -> Result<OpsHttpStreamSubscription, OpsHttpError> {
         self.authorize(provided_token)?;
         match route {
             OpsHttpRoute::StreamShard {
                 shard_id,
                 recent_limit,
+                after_sequence,
             } => {
-                let archive_handle =
-                    self.archive
-                        .shard(&shard_id)
-                        .ok_or_else(|| OpsHttpError::UnknownShard {
-                            shard_id: shard_id.clone(),
-                        })?;
                 let live_handle =
                     self.live
                         .shard(&shard_id)
                         .ok_or_else(|| OpsHttpError::UnknownShard {
                             shard_id: shard_id.clone(),
                         })?;
-                let snapshot = archive_handle
-                    .snapshot(recent_limit)
-                    .map_err(OpsHttpError::ArchiveQuery)?;
-                Ok((
-                    OpsRelayEvent::ShardSnapshot(snapshot),
-                    vec![live_handle.clone()],
-                ))
+                let initial_event = match after_sequence {
+                    Some(after_sequence) => OpsHttpInitialEvent::ShardReplay(
+                        live_handle.replay_snapshot(after_sequence, recent_limit),
+                    ),
+                    None => {
+                        let archive_handle = self.archive.shard(&shard_id).ok_or_else(|| {
+                            OpsHttpError::UnknownShard {
+                                shard_id: shard_id.clone(),
+                            }
+                        })?;
+                        let snapshot = archive_handle
+                            .snapshot(recent_limit)
+                            .map_err(OpsHttpError::ArchiveQuery)?;
+                        OpsHttpInitialEvent::Relay(OpsRelayEvent::ShardSnapshot(snapshot))
+                    }
+                };
+                Ok(OpsHttpStreamSubscription {
+                    initial_event,
+                    live_handles: vec![live_handle.clone()],
+                })
             }
             OpsHttpRoute::StreamSupervisor {
                 recent_limit_per_shard,
+                cursor,
             } => {
-                let snapshot = self
-                    .archive
-                    .snapshot(recent_limit_per_shard)
-                    .map_err(OpsHttpError::ArchiveQuery)?;
-                Ok((
-                    OpsRelayEvent::SupervisorSnapshot(snapshot),
-                    self.live.shards().to_vec(),
-                ))
-            }
-            OpsHttpRoute::ArchiveSupervisor { .. } | OpsHttpRoute::ArchiveShard { .. } => {
-                Err(OpsHttpError::UnknownRoute {
-                    path: "archive route cannot stream".to_string(),
+                let initial_event = match cursor {
+                    Some(cursor) => OpsHttpInitialEvent::SupervisorReplay(
+                        self.live.replay_snapshot(&cursor, recent_limit_per_shard),
+                    ),
+                    None => {
+                        let snapshot = self
+                            .archive
+                            .snapshot(recent_limit_per_shard)
+                            .map_err(OpsHttpError::ArchiveQuery)?;
+                        OpsHttpInitialEvent::Relay(OpsRelayEvent::SupervisorSnapshot(snapshot))
+                    }
+                };
+                Ok(OpsHttpStreamSubscription {
+                    initial_event,
+                    live_handles: self.live.shards().to_vec(),
                 })
             }
+            OpsHttpRoute::ArchiveSupervisor { .. }
+            | OpsHttpRoute::ArchiveShard { .. }
+            | OpsHttpRoute::ReplaySupervisor { .. }
+            | OpsHttpRoute::ReplayShard { .. } => Err(OpsHttpError::UnknownRoute {
+                path: "non-stream route cannot open an SSE subscription".to_string(),
+            }),
         }
     }
 
@@ -1870,6 +2225,30 @@ impl ShardSupervisorOpsHttpService {
         W: AsyncWrite + Unpin,
     {
         let (event_name, data) = encode_sse_event_payload(event)?;
+        self.write_sse_named_event(writer, event_name, &data).await
+    }
+
+    async fn write_sse_initial_event<W>(
+        &self,
+        writer: &mut W,
+        event: OpsHttpInitialEvent,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let (event_name, data) = encode_sse_initial_event_payload(event)?;
+        self.write_sse_named_event(writer, event_name, &data).await
+    }
+
+    async fn write_sse_named_event<W>(
+        &self,
+        writer: &mut W,
+        event_name: &str,
+        data: &str,
+    ) -> Result<(), OpsHttpError>
+    where
+        W: AsyncWrite + Unpin,
+    {
         let frame = format!("event: {event_name}\ndata: {data}\n\n");
         if frame.len() > self.config.max_event_bytes {
             return Err(OpsHttpError::EventTooLarge {
@@ -1893,25 +2272,11 @@ impl ShardSupervisorOpsHttpService {
     where
         W: AsyncWrite + Unpin,
     {
-        let frame = format!(
-            "event: error\ndata: {}\n\n",
-            serde_json::to_string(&serde_json::json!({
-                "error": error.to_string(),
-            }))
-            .map_err(OpsHttpError::EncodeEvent)?
-        );
-        if frame.len() > self.config.max_event_bytes {
-            return Err(OpsHttpError::EventTooLarge {
-                max_event_bytes: self.config.max_event_bytes,
-            });
-        }
-
-        writer
-            .write_all(frame.as_bytes())
-            .await
-            .map_err(OpsHttpError::WriteResponse)?;
-        writer.flush().await.map_err(OpsHttpError::WriteResponse)?;
-        Ok(())
+        let data = serde_json::to_string(&serde_json::json!({
+            "error": error.to_string(),
+        }))
+        .map_err(OpsHttpError::EncodeEvent)?;
+        self.write_sse_named_event(writer, "error", &data).await
     }
 }
 
@@ -2076,13 +2441,37 @@ enum OpsHttpRoute {
         shard_id: String,
         recent_limit: usize,
     },
+    ReplaySupervisor {
+        cursor: ShardSupervisorOpsReplayCursor,
+        limit_per_shard: usize,
+    },
+    ReplayShard {
+        shard_id: String,
+        after_sequence: u64,
+        limit: usize,
+    },
     StreamSupervisor {
         recent_limit_per_shard: usize,
+        cursor: Option<ShardSupervisorOpsReplayCursor>,
     },
     StreamShard {
         shard_id: String,
         recent_limit: usize,
+        after_sequence: Option<u64>,
     },
+}
+
+#[derive(Clone, Debug)]
+enum OpsHttpInitialEvent {
+    Relay(OpsRelayEvent),
+    SupervisorReplay(ShardSupervisorOpsReplaySnapshot),
+    ShardReplay(AuthorityShardOpsReplaySnapshot),
+}
+
+#[derive(Clone, Debug)]
+struct OpsHttpStreamSubscription {
+    initial_event: OpsHttpInitialEvent,
+    live_handles: Vec<AuthorityShardOpsHandle>,
 }
 
 #[derive(Debug)]
@@ -2188,12 +2577,26 @@ fn parse_http_route(target: &str) -> Result<OpsHttpRoute, OpsHttpError> {
                 OPS_DOCUMENT_HISTORY_LIMIT,
             )?,
         }),
+        "/ops/replay/supervisor" => Ok(OpsHttpRoute::ReplaySupervisor {
+            cursor: parse_http_replay_cursor(
+                params.get("cursor").map(String::as_str).unwrap_or_default(),
+            )?,
+            limit_per_shard: parse_http_query_usize(
+                &params,
+                "limit_per_shard",
+                OPS_DOCUMENT_HISTORY_LIMIT,
+            )?,
+        }),
         "/ops/stream/supervisor" => Ok(OpsHttpRoute::StreamSupervisor {
             recent_limit_per_shard: parse_http_query_usize(
                 &params,
                 "recent_limit_per_shard",
                 OPS_DOCUMENT_HISTORY_LIMIT,
             )?,
+            cursor: params
+                .get("cursor")
+                .map(|value| parse_http_replay_cursor(value))
+                .transpose()?,
         }),
         _ if path.starts_with("/ops/archive/shard/") => {
             let shard_id = path.trim_start_matches("/ops/archive/shard/");
@@ -2211,6 +2614,19 @@ fn parse_http_route(target: &str) -> Result<OpsHttpRoute, OpsHttpError> {
                 )?,
             })
         }
+        _ if path.starts_with("/ops/replay/shard/") => {
+            let shard_id = path.trim_start_matches("/ops/replay/shard/");
+            if shard_id.is_empty() || shard_id.contains('/') {
+                return Err(OpsHttpError::UnknownRoute {
+                    path: path.to_string(),
+                });
+            }
+            Ok(OpsHttpRoute::ReplayShard {
+                shard_id: shard_id.to_string(),
+                after_sequence: parse_http_query_u64(&params, "after_sequence", 0)?,
+                limit: parse_http_query_usize(&params, "limit", OPS_DOCUMENT_HISTORY_LIMIT)?,
+            })
+        }
         _ if path.starts_with("/ops/stream/shard/") => {
             let shard_id = path.trim_start_matches("/ops/stream/shard/");
             if shard_id.is_empty() || shard_id.contains('/') {
@@ -2225,6 +2641,10 @@ fn parse_http_route(target: &str) -> Result<OpsHttpRoute, OpsHttpError> {
                     "recent_limit",
                     OPS_DOCUMENT_HISTORY_LIMIT,
                 )?,
+                after_sequence: params
+                    .get("after_sequence")
+                    .map(|_| parse_http_query_u64(&params, "after_sequence", 0))
+                    .transpose()?,
             })
         }
         _ => Err(OpsHttpError::UnknownRoute {
@@ -2263,6 +2683,73 @@ fn parse_http_query_usize(
     }
 }
 
+fn parse_http_query_u64(
+    params: &HashMap<String, String>,
+    name: &str,
+    default: u64,
+) -> Result<u64, OpsHttpError> {
+    match params.get(name) {
+        Some(value) if !value.is_empty() => {
+            value
+                .parse::<u64>()
+                .map_err(|_| OpsHttpError::InvalidQueryParameter {
+                    name: name.to_string(),
+                    value: value.clone(),
+                })
+        }
+        Some(_) | None => Ok(default),
+    }
+}
+
+fn parse_http_replay_cursor(value: &str) -> Result<ShardSupervisorOpsReplayCursor, OpsHttpError> {
+    if value.trim().is_empty() {
+        return Ok(ShardSupervisorOpsReplayCursor::default());
+    }
+
+    let shards = value
+        .split(',')
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| {
+            let (shard_id, sequence) =
+                entry
+                    .split_once(':')
+                    .ok_or_else(|| OpsHttpError::InvalidQueryParameter {
+                        name: "cursor".to_string(),
+                        value: value.to_string(),
+                    })?;
+            let last_sequence =
+                sequence
+                    .parse::<u64>()
+                    .map_err(|_| OpsHttpError::InvalidQueryParameter {
+                        name: "cursor".to_string(),
+                        value: value.to_string(),
+                    })?;
+            Ok(AuthorityShardOpsReplayCursor {
+                shard_id: shard_id.to_string(),
+                last_sequence,
+            })
+        })
+        .collect::<Result<Vec<_>, OpsHttpError>>()?;
+
+    Ok(ShardSupervisorOpsReplayCursor { shards })
+}
+
+fn encode_sse_initial_event_payload(
+    event: OpsHttpInitialEvent,
+) -> Result<(&'static str, String), OpsHttpError> {
+    match event {
+        OpsHttpInitialEvent::Relay(event) => encode_sse_event_payload(event),
+        OpsHttpInitialEvent::SupervisorReplay(snapshot) => Ok((
+            "supervisor_replay",
+            serde_json::to_string(&snapshot).map_err(OpsHttpError::EncodeEvent)?,
+        )),
+        OpsHttpInitialEvent::ShardReplay(snapshot) => Ok((
+            "shard_replay",
+            serde_json::to_string(&snapshot).map_err(OpsHttpError::EncodeEvent)?,
+        )),
+    }
+}
+
 fn encode_sse_event_payload(event: OpsRelayEvent) -> Result<(&'static str, String), OpsHttpError> {
     match event {
         OpsRelayEvent::SupervisorSnapshot(snapshot) => Ok((
@@ -2275,6 +2762,7 @@ fn encode_sse_event_payload(event: OpsRelayEvent) -> Result<(&'static str, Strin
         )),
         OpsRelayEvent::ShardDocument {
             shard_id,
+            sequence,
             document,
             retained_document_count,
             persisted_document_count,
@@ -2283,6 +2771,7 @@ fn encode_sse_event_payload(event: OpsRelayEvent) -> Result<(&'static str, Strin
             "shard_document",
             serde_json::to_string(&serde_json::json!({
                 "shard_id": shard_id,
+                "sequence": sequence,
                 "document": document,
                 "retained_document_count": retained_document_count,
                 "persisted_document_count": persisted_document_count,
@@ -2442,6 +2931,7 @@ pub enum OpsRelayEvent {
     SupervisorSnapshot(ShardSupervisorOpsArchiveSnapshot),
     ShardDocument {
         shard_id: String,
+        sequence: u64,
         document: String,
         retained_document_count: usize,
         persisted_document_count: usize,
@@ -2788,7 +3278,8 @@ fn spawn_relay_forwarder(
                         Ok(document) => {
                             if event_tx.send(OpsRelayEvent::ShardDocument {
                                 shard_id: shard_id.clone(),
-                                document,
+                                sequence: document.sequence,
+                                document: document.document,
                                 retained_document_count: handle.retained_document_count(),
                                 persisted_document_count: handle.persisted_document_count(),
                                 archive_path: handle.archive_path(),
@@ -3609,14 +4100,14 @@ mod tests {
     use super::{
         AuthorityHostConfig, AuthorityHostRuntime, AuthorityShardConfig,
         AuthorityShardControlPlaneHandle, AuthorityShardLifecycleCommandKind,
-        AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityTransportMode,
-        DirectConnectAuthorityRuntime, LocalAuthorityOpsStream, LocalAuthorityRuntime,
-        OpsArchiveServiceClient, OpsArchiveServiceConfig, OpsArchiveServiceRequest,
-        OpsArchiveServiceResponse, OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient,
-        OpsRelayConfig, OpsRelayError, OpsRelayEvent, PreparedAuthorityShard,
-        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
-        ShardSupervisorOpsArchiveSnapshot, ShardSupervisorOpsHandle, ShardSupervisorSummary,
-        OPS_DOCUMENT_CHANNEL_CAPACITY,
+        AuthorityShardLifecyclePhase, AuthorityShardOpsHandle, AuthorityShardOpsReplaySnapshot,
+        AuthorityTransportMode, DirectConnectAuthorityRuntime, LocalAuthorityOpsStream,
+        LocalAuthorityRuntime, OpsArchiveServiceClient, OpsArchiveServiceConfig,
+        OpsArchiveServiceRequest, OpsArchiveServiceResponse, OpsHttpServiceConfig,
+        OpsPersistenceConfig, OpsRelayClient, OpsRelayConfig, OpsRelayError, OpsRelayEvent,
+        PreparedAuthorityShard, ShardSupervisorConfig, ShardSupervisorControlPlaneHandle,
+        ShardSupervisorError, ShardSupervisorOpsArchiveSnapshot, ShardSupervisorOpsHandle,
+        ShardSupervisorOpsReplaySnapshot, ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -3713,7 +4204,8 @@ mod tests {
         let first_document = documents
             .try_recv()
             .expect("local runtime should publish a TOON ops document");
-        let value = decode_toon_value(&first_document).expect("ops document should decode as TOON");
+        let value = decode_toon_value(&first_document.document)
+            .expect("ops document should decode as TOON");
         assert_eq!(value["document_type"], "versioned_tick_telemetry");
         assert!(runtime.ops_handle().retained_document_count() >= 1);
         assert_eq!(runtime.ops_handle().persisted_document_count(), 0);
@@ -4097,12 +4589,14 @@ mod tests {
         {
             OpsRelayEvent::ShardDocument {
                 shard_id,
+                sequence,
                 document,
                 retained_document_count,
                 persisted_document_count,
                 archive_path,
             } => {
                 assert_eq!(shard_id, "alpha-1");
+                assert!(sequence >= 1);
                 assert!(retained_document_count >= 1);
                 assert!(persisted_document_count >= 1);
                 assert!(archive_path.is_some());
@@ -4231,6 +4725,137 @@ mod tests {
         assert_eq!(
             decode_toon_value(&shard_document.document)
                 .expect("SSE document should decode as TOON")["document_type"],
+            "versioned_tick_telemetry"
+        );
+        assert!(shard_document.sequence >= 1);
+
+        drop(stream_reader);
+        service_task.abort();
+        let _ = service_task.await;
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[tokio::test]
+    async fn supervisor_ops_http_service_replays_from_cursor_over_http_and_sse() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-http-replay-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(8.0, 8.0)
+                    .with_label("ops-http-replay-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("archive-backed local runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("http-secret".to_string()),
+        });
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("ops HTTP service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops HTTP listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_listener(listener));
+
+        let supervisor_replay_request = format!(
+            "GET /ops/replay/supervisor?cursor=alpha-1:1&limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut supervisor_replay_reader =
+            send_http_request(&address, &supervisor_replay_request).await;
+        let (status, headers) = read_http_response_head(&mut supervisor_replay_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut supervisor_replay_reader, &headers).await;
+        let supervisor_replay = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("supervisor replay response should decode");
+        assert_eq!(supervisor_replay.shard_count, 1);
+        assert_eq!(supervisor_replay.gap_detected_shard_count, 0);
+        assert_eq!(supervisor_replay.has_more_shard_count, 0);
+        assert_eq!(supervisor_replay.shards[0].requested_after_sequence, 1);
+        assert_eq!(supervisor_replay.shards[0].documents.len(), 1);
+        assert_eq!(supervisor_replay.shards[0].documents[0].sequence, 2);
+        assert_eq!(
+            decode_toon_value(&supervisor_replay.shards[0].documents[0].document)
+                .expect("supervisor replay document should decode as TOON")["document_type"],
+            "versioned_tick_telemetry"
+        );
+        assert_eq!(
+            supervisor_replay.next_cursor.shards[0].last_sequence,
+            supervisor_replay.shards[0].next_cursor.last_sequence
+        );
+
+        let shard_replay_request = format!(
+            "GET /ops/replay/shard/alpha-1?after_sequence=1&limit=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut shard_replay_reader = send_http_request(&address, &shard_replay_request).await;
+        let (status, headers) = read_http_response_head(&mut shard_replay_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut shard_replay_reader, &headers).await;
+        let shard_replay = serde_json::from_slice::<AuthorityShardOpsReplaySnapshot>(&body)
+            .expect("shard replay response should decode");
+        assert_eq!(shard_replay.shard_id, "alpha-1");
+        assert_eq!(shard_replay.requested_after_sequence, 1);
+        assert!(!shard_replay.gap_detected);
+        assert!(!shard_replay.has_more);
+        assert_eq!(shard_replay.documents.len(), 1);
+        assert_eq!(shard_replay.documents[0].sequence, 2);
+
+        let stream_request = format!(
+            "GET /ops/stream/shard/alpha-1?after_sequence=1&recent_limit=8 HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut stream_reader = send_http_request(&address, &stream_request).await;
+        let (status, headers) = read_http_response_head(&mut stream_reader).await;
+        assert!(status.contains("200 OK"));
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("text/event-stream")
+        );
+        let (event_name, event_data) = read_sse_event(&mut stream_reader).await;
+        assert_eq!(event_name, "shard_replay");
+        let initial_replay = serde_json::from_str::<AuthorityShardOpsReplaySnapshot>(&event_data)
+            .expect("initial replay SSE payload should decode");
+        assert_eq!(initial_replay.shard_id, "alpha-1");
+        assert_eq!(initial_replay.documents.len(), 1);
+        assert_eq!(initial_replay.documents[0].sequence, 2);
+
+        runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let (event_name, event_data) = read_sse_event(&mut stream_reader).await;
+        assert_eq!(event_name, "shard_document");
+        let shard_document = serde_json::from_str::<HttpShardDocumentEvent>(&event_data)
+            .expect("live replay SSE payload should decode as a shard document event");
+        assert_eq!(shard_document.shard_id, "alpha-1");
+        assert_eq!(shard_document.sequence, 3);
+        assert!(shard_document.persisted_document_count >= 3);
+        assert_eq!(
+            decode_toon_value(&shard_document.document)
+                .expect("live replay SSE document should decode as TOON")["document_type"],
             "versioned_tick_telemetry"
         );
 
@@ -4666,6 +5291,7 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct HttpShardDocumentEvent {
         shard_id: String,
+        sequence: u64,
         document: String,
         retained_document_count: usize,
         persisted_document_count: usize,

@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use quinn::Endpoint;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -183,11 +183,23 @@ pub enum ServerLifecycleCommand {
     Shutdown { reason: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsDocumentRecord {
+    pub sequence: u64,
+    pub document: String,
+}
+
+#[derive(Debug)]
+struct OpsDocumentStreamState {
+    history: VecDeque<OpsDocumentRecord>,
+    next_sequence: u64,
+}
+
 #[derive(Clone, Debug)]
 pub struct OpsDocumentStream {
     history_limit: usize,
-    history: Arc<Mutex<VecDeque<String>>>,
-    tx: broadcast::Sender<String>,
+    state: Arc<Mutex<OpsDocumentStreamState>>,
+    tx: broadcast::Sender<OpsDocumentRecord>,
     archive: Option<OpsDocumentArchive>,
 }
 
@@ -196,7 +208,10 @@ impl OpsDocumentStream {
         let live_capacity = live_capacity.max(1);
         Self {
             history_limit,
-            history: Arc::new(Mutex::new(VecDeque::with_capacity(history_limit.max(1)))),
+            state: Arc::new(Mutex::new(OpsDocumentStreamState {
+                history: VecDeque::with_capacity(history_limit.max(1)),
+                next_sequence: 1,
+            })),
             tx: broadcast::channel(live_capacity).0,
             archive: None,
         }
@@ -212,26 +227,39 @@ impl OpsDocumentStream {
         let (archive, recent_documents) =
             OpsDocumentArchive::open(&archive_path, history_limit.max(1))?;
         let history = recent_documents.into_iter().collect::<VecDeque<_>>();
+        let next_sequence = archive.persisted_document_count() as u64 + 1;
 
         Ok(Self {
             history_limit,
-            history: Arc::new(Mutex::new(history)),
+            state: Arc::new(Mutex::new(OpsDocumentStreamState {
+                history,
+                next_sequence,
+            })),
             tx: broadcast::channel(live_capacity).0,
             archive: Some(archive),
         })
     }
 
     pub fn publish(&self, document: String) {
-        {
-            let mut history = self.history.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            history.push_back(document.clone());
-            while history.len() > self.history_limit {
-                history.pop_front();
+        let record = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let record = OpsDocumentRecord {
+                sequence: state.next_sequence,
+                document,
+            };
+            state.next_sequence += 1;
+            state.history.push_back(record.clone());
+            while state.history.len() > self.history_limit {
+                state.history.pop_front();
             }
-        }
+            record
+        };
 
         if let Some(archive) = &self.archive {
-            if let Err(err) = archive.append(&document) {
+            if let Err(err) = archive.append(&record) {
                 warn!(
                     "failed to append ops document to persistent archive {}: {err}",
                     archive.path().display()
@@ -239,26 +267,39 @@ impl OpsDocumentStream {
             }
         }
 
-        let _ = self.tx.send(document);
+        let _ = self.tx.send(record);
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe(&self) -> broadcast::Receiver<OpsDocumentRecord> {
         self.tx.subscribe()
     }
 
     pub fn recent_documents(&self) -> Vec<String> {
-        self.history
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .history
+            .iter()
+            .cloned()
+            .map(|record| record.document)
+            .collect()
+    }
+
+    pub fn recent_document_records(&self) -> Vec<OpsDocumentRecord> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .history
             .iter()
             .cloned()
             .collect()
     }
 
     pub fn retained_document_count(&self) -> usize {
-        self.history
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .history
             .len()
     }
 
@@ -269,8 +310,18 @@ impl OpsDocumentStream {
             .unwrap_or(0)
     }
 
+    pub fn latest_sequence(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .next_sequence
+            .saturating_sub(1)
+    }
+
     pub fn archive_path(&self) -> Option<PathBuf> {
-        self.archive.as_ref().map(|archive| archive.path().to_path_buf())
+        self.archive
+            .as_ref()
+            .map(|archive| archive.path().to_path_buf())
     }
 
     pub fn receiver_count(&self) -> usize {
@@ -286,17 +337,55 @@ pub struct OpsDocumentArchiveSnapshot {
 }
 
 impl OpsDocumentArchiveSnapshot {
-    pub fn load(
-        archive_path: impl Into<PathBuf>,
-        recent_limit: usize,
-    ) -> std::io::Result<Self> {
+    pub fn load(archive_path: impl Into<PathBuf>, recent_limit: usize) -> std::io::Result<Self> {
         let archive_path = archive_path.into();
         let (persisted_document_count, recent_documents) =
-            read_ops_document_archive_snapshot(&archive_path, recent_limit)?;
+            read_ops_document_archive_records(&archive_path, recent_limit)?;
         Ok(Self {
             archive_path,
             persisted_document_count,
-            recent_documents,
+            recent_documents: recent_documents
+                .into_iter()
+                .map(|record| record.document)
+                .collect(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsDocumentArchiveReplaySnapshot {
+    pub archive_path: PathBuf,
+    pub persisted_document_count: usize,
+    pub last_available_sequence: u64,
+    pub has_more: bool,
+    pub documents: Vec<OpsDocumentRecord>,
+}
+
+impl OpsDocumentArchiveReplaySnapshot {
+    pub fn load_after(
+        archive_path: impl Into<PathBuf>,
+        after_sequence: u64,
+        limit: usize,
+    ) -> std::io::Result<Self> {
+        let archive_path = archive_path.into();
+        let (persisted_document_count, all_documents) =
+            read_ops_document_archive_records(&archive_path, usize::MAX)?;
+        let documents = all_documents
+            .into_iter()
+            .filter(|record| record.sequence > after_sequence)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let last_returned_sequence = documents
+            .last()
+            .map(|record| record.sequence)
+            .unwrap_or(after_sequence.min(persisted_document_count as u64));
+
+        Ok(Self {
+            archive_path,
+            persisted_document_count,
+            last_available_sequence: persisted_document_count as u64,
+            has_more: last_returned_sequence < persisted_document_count as u64,
+            documents,
         })
     }
 }
@@ -313,19 +402,21 @@ struct OpsDocumentArchiveState {
     persisted_document_count: usize,
 }
 
-#[derive(Serialize, serde::Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct PersistedOpsDocumentRecord {
+    #[serde(default)]
+    sequence: Option<u64>,
     document: String,
 }
 
 impl OpsDocumentArchive {
-    fn open(path: &Path, history_limit: usize) -> std::io::Result<(Self, Vec<String>)> {
+    fn open(path: &Path, history_limit: usize) -> std::io::Result<(Self, Vec<OpsDocumentRecord>)> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
         let (persisted_document_count, recent_documents) =
-            read_ops_document_archive_snapshot(path, history_limit)?;
+            read_ops_document_archive_records(path, history_limit)?;
 
         let writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
         Ok((
@@ -340,9 +431,10 @@ impl OpsDocumentArchive {
         ))
     }
 
-    fn append(&self, document: &str) -> std::io::Result<()> {
+    fn append(&self, record: &OpsDocumentRecord) -> std::io::Result<()> {
         let record = PersistedOpsDocumentRecord {
-            document: document.to_string(),
+            sequence: Some(record.sequence),
+            document: record.document.clone(),
         };
         let encoded = serde_json::to_string(&record).map_err(|err| {
             std::io::Error::new(
@@ -351,7 +443,10 @@ impl OpsDocumentArchive {
             )
         })?;
 
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.writer.write_all(encoded.as_bytes())?;
         state.writer.write_all(b"\n")?;
         state.writer.flush()?;
@@ -371,11 +466,11 @@ impl OpsDocumentArchive {
     }
 }
 
-fn read_ops_document_archive_snapshot(
+fn read_ops_document_archive_records(
     path: &Path,
     recent_limit: usize,
-) -> std::io::Result<(usize, Vec<String>)> {
-    let mut recent_documents = VecDeque::with_capacity(recent_limit.max(1));
+) -> std::io::Result<(usize, Vec<OpsDocumentRecord>)> {
+    let mut recent_documents = VecDeque::new();
     let mut persisted_document_count = 0;
 
     if !path.exists() {
@@ -399,15 +494,22 @@ fn read_ops_document_archive_snapshot(
             )
         })?;
         persisted_document_count += 1;
+        let persisted_record = OpsDocumentRecord {
+            sequence: record.sequence.unwrap_or(persisted_document_count as u64),
+            document: record.document,
+        };
         if recent_limit > 0 {
-            recent_documents.push_back(record.document);
+            recent_documents.push_back(persisted_record);
             while recent_documents.len() > recent_limit {
                 recent_documents.pop_front();
             }
         }
     }
 
-    Ok((persisted_document_count, recent_documents.into_iter().collect()))
+    Ok((
+        persisted_document_count,
+        recent_documents.into_iter().collect(),
+    ))
 }
 
 // ============================================================
@@ -3173,10 +3275,12 @@ mod tests {
         let document = ops_rx
             .try_recv()
             .expect("host ops subscribers should receive a TOON document");
-        let value = decode_toon_value(&document).expect("ops document should decode");
+        let value = decode_toon_value(&document.document).expect("ops document should decode");
         assert_eq!(value["document_type"], "versioned_tick_telemetry");
         assert_eq!(value["payload"]["payload"]["tick"], 0);
         assert_eq!(ops_stream.retained_document_count(), 2);
+        assert!(document.sequence >= 1);
+        assert_eq!(ops_stream.latest_sequence(), 2);
         assert!(ops_stream
             .recent_documents()
             .iter()
@@ -3187,10 +3291,8 @@ mod tests {
 
     #[test]
     fn ops_document_stream_persistent_archive_reloads_recent_history() {
-        let archive_root = std::env::temp_dir().join(format!(
-            "pod-net-ops-archive-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let archive_root =
+            std::env::temp_dir().join(format!("pod-net-ops-archive-{}", uuid::Uuid::new_v4()));
         let archive_path = archive_root.join("alpha-1-ops.jsonl");
 
         let stream = OpsDocumentStream::with_persistent_archive(2, 16, &archive_path)
@@ -3210,6 +3312,32 @@ mod tests {
             reloaded_stream.recent_documents(),
             vec!["doc-2".to_string(), "doc-3".to_string()]
         );
+        assert_eq!(reloaded_stream.latest_sequence(), 3);
+
+        fs::remove_dir_all(&archive_root).expect("archive root should be removable");
+    }
+
+    #[test]
+    fn ops_document_archive_replay_snapshot_loads_records_after_cursor() {
+        let archive_root =
+            std::env::temp_dir().join(format!("pod-net-ops-replay-{}", uuid::Uuid::new_v4()));
+        let archive_path = archive_root.join("alpha-1-ops.jsonl");
+
+        let stream = OpsDocumentStream::with_persistent_archive(4, 16, &archive_path)
+            .expect("persistent stream should initialize");
+        stream.publish("doc-1".to_string());
+        stream.publish("doc-2".to_string());
+        stream.publish("doc-3".to_string());
+        drop(stream);
+
+        let replay = OpsDocumentArchiveReplaySnapshot::load_after(&archive_path, 1, 1)
+            .expect("archive replay snapshot should load records after a cursor");
+        assert_eq!(replay.persisted_document_count, 3);
+        assert_eq!(replay.last_available_sequence, 3);
+        assert!(replay.has_more);
+        assert_eq!(replay.documents.len(), 1);
+        assert_eq!(replay.documents[0].sequence, 2);
+        assert_eq!(replay.documents[0].document, "doc-2");
 
         fs::remove_dir_all(&archive_root).expect("archive root should be removable");
     }
