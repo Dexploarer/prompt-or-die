@@ -146,34 +146,34 @@
 
 ## Phase 6: Client Runtime Consumers
 **Type**: Runtime Consumer
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-render`, `apps/pod-web`, `apps/pod-desktop`
 
 **Tasks**:
-- [ ] Re-validate render extraction and representation contracts in `pod-render`
-- [ ] Re-validate the browser runtime as a consumer of shared render, transport, and asset contracts
-- [ ] Re-validate browser asset verification, smoke, and route-measurement gates
-- [ ] Re-validate desktop/native runtime composition as a consumer instead of a special-case path
+- [x] Re-validate render extraction and representation contracts in `pod-render`
+- [x] Re-validate the browser runtime as a consumer of shared render, transport, and asset contracts
+- [x] Re-validate browser asset verification, smoke, and route-measurement gates
+- [x] Re-validate desktop/native runtime composition as a consumer instead of a special-case path
 
 **Verification Criteria**:
-- [ ] `cargo check -p pod-render -p pod-desktop`
-- [ ] `cd apps/pod-web && bun test`
-- [ ] `cd apps/pod-web && bun run build`
-- [ ] `cd apps/pod-web && bun run verify:assets`
-- [ ] `cd apps/pod-web && bun run measure:render-routes:check`
-- [ ] `cd apps/pod-web && bun run test:smoke`
+- [x] `cargo check -p pod-render -p pod-desktop`
+- [x] `cd apps/pod-web && bun test`
+- [x] `cd apps/pod-web && bun run build`
+- [x] `cd apps/pod-web && bun run verify:assets`
+- [x] `cd apps/pod-web && bun run measure:render-routes:check`
+- [x] `cd apps/pod-web && bun run test:smoke`
 
 **Exit Criteria**:
-- [ ] Browser and native clients are clearly downstream of shared runtime contracts
-- [ ] Performance/asset/debug expectations are enforced by repeatable gates
-- [ ] Client surfaces no longer distort the order of the core platform roadmap
+- [x] Browser and native clients are clearly downstream of shared runtime contracts
+- [x] Performance/asset/debug expectations are enforced by repeatable gates
+- [x] Client surfaces no longer distort the order of the core platform roadmap
 
 ---
 
 ## Phase 7: Editor and Authoring Tooling
 **Type**: Tooling
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 3-5 focused hours
 **Primary surfaces**: `crates/pod-editor`, `crates/pod-scene`, `crates/pod-assets`
 
