@@ -7,6 +7,13 @@ The goal is not generic engine vanity metrics. The goal is to measure whether
 POD is becoming the best platform for deterministic, authoritative,
 AI-agent-native worlds.
 
+> Audience: contributors and operators running the repo's proof surfaces,
+> weekly snapshots, and retained-history workflow.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Reference Bootstrap](./reference-bootstrap.md) ·
+> [Benchmark Snapshot History](./benchmark-snapshots/README.md)
+
 ## Metrics that matter
 
 | Metric | Why it matters | Source | Status |

@@ -4,6 +4,13 @@ This document defines how Prompt or Die should support developer-controlled
 teams, neural swarms, and linked worlds without depending on the browser client
 as the primary proving ground.
 
+> Audience: contributors working on linked worlds, teams, tournaments, and
+> remote-topology surfaces.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Architecture Overview](./architecture.md) ·
+> [Agent Integration Contract](./agent-integration-contract.md)
+
 ## Core idea
 
 Prompt or Die should treat a world as an authoritative reality, not as the only

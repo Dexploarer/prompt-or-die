@@ -11,6 +11,13 @@ competitive field is layered:
 This file is the standing matrix. Update it monthly. Treat each monthly pass as
 product intelligence, not marketing copy.
 
+> Audience: product and strategy contributors reviewing where POD wins or loses
+> against the real market.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Moat Gates](./moat-gates.md) ·
+> [Benchmark Suite](./benchmark-suite.md)
+
 ## Category we are trying to win
 
 Prompt or Die is not trying to be "another general-purpose engine." The target

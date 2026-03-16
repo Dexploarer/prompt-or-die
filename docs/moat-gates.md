@@ -8,6 +8,13 @@ before it ships:
 If the answer is "dilute," the default decision is no unless the work is a
 prerequisite for a stronger moat later.
 
+> Audience: reviewers deciding whether roadmap and PR work strengthens the
+> platform moat.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Competitive Matrix](./competitive-matrix.md) ·
+> [Benchmark Suite](./benchmark-suite.md)
+
 ## The moat we are protecting
 
 Prompt or Die wins if it becomes the easiest way to build and operate

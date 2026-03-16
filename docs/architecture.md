@@ -2,6 +2,13 @@
 
 This document describes the current Prompt or Die platform architecture as it exists in the workspace today. It is intentionally grounded in the current crate layout and runtime behavior rather than the full long-term roadmap.
 
+> Audience: contributors and integrators who need the current crate, runtime,
+> and authority seam map.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Plugin Model](./plugin-model.md) ·
+> [Agent Integration Contract](./agent-integration-contract.md)
+
 ## Design goals
 
 - One runtime for humans and AI agents

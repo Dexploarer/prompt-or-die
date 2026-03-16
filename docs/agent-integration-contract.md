@@ -2,6 +2,13 @@
 
 This document defines how an agent integrates with Prompt or Die. It is the main runtime contract for human control, scripted NPCs, LLM agents, neural policies, hybrid controllers, and system automation.
 
+> Audience: anyone implementing human, scripted, LLM, hybrid, neural, or
+> remote agents on the shared runtime path.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Agent Runtime Audit](./agent-runtime-audit.md) ·
+> [Multi-World Agent Topology](./multi-world-agent-topology.md)
+
 ## Core invariant
 
 Every agent type goes through the same authoritative pipeline:
@@ -240,11 +247,15 @@ without custom per-test runtimes or auto-acked connect/subscription hooks.
 `StdbClient` and `pod-net::SpacetimeDBClient` now expose
 `install_generated_binding_runtime(...)` for the deterministic command-driven
 path and `install_generated_sdk_runtime(...)` for the live generated SDK path,
-so external generated hosts no longer need manual adapter injection. The
-remaining gap is no longer the topology contract itself. It is surfacing the
-top regressions and changed metrics directly in the retained shard-target
-history report, so orchestration history review does not stop at links and
-summary counts. The topology
+so external generated hosts no longer need manual adapter injection. That
+history-review gap is closed too: `scripts/run_shard_target_snapshot.ts`,
+`scripts/compare_moat_snapshots.ts`, and
+[`docs/benchmark-snapshots/README.md`](/Users/home/Desktop/prompt-or-die/docs/benchmark-snapshots/README.md)
+now retain week-over-week topology, tournament-control-plane, and
+tournament-orchestration drift instead of leaving orchestration review at raw
+links and summary counts. The remaining work is broader scenario coverage and
+operator UX around the existing contract, not another topology-contract reset.
+The topology
 parity contract is shared now too: `pod-core` owns
 `assign_roster_to_world_teams(...)`, `build_world_admission_summary(...)`,
 `build_world_control_plane_summary(...)`, `build_remote_topology_bundle(...)`,

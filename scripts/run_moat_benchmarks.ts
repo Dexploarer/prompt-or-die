@@ -503,7 +503,7 @@ function buildCreatorReport(repoRoot: string, options: Options): CreatorTimeRepo
     benchmarkSeconds: bootstrap.startupTimeMs / 1000,
     notes: [
       `Measured from the canonical bootstrap at ${bootstrap.url}.`,
-      "Override with --creator-command if a different official starter flow replaces the local sandbox bootstrap.",
+      "Override with --creator-command if a different official starter flow replaces the reference bootstrap.",
     ],
   };
 }

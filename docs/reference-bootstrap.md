@@ -2,6 +2,12 @@
 
 This is the official first-world bootstrap for Prompt or Die.
 
+> Audience: anyone trying to get to the first canonical POD world quickly.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Asset Pipeline](./asset-pipeline.md) ·
+> [Bootstrap Showcase Research](./bootstrap-showcase-research.md)
+
 It is intentionally opinionated:
 
 - web-first
@@ -19,6 +25,9 @@ The answer should not be a doc safari. It should be one repeatable command.
 
 ## Command
 
+The script defaults to `--hold`, `--host 127.0.0.1`, `--port 4178`, and
+`--timeout-ms 60000`.
+
 Hold the dev server open:
 
 ```bash
@@ -33,15 +42,26 @@ cd /Users/home/Desktop/prompt-or-die
 bun ./scripts/bootstrap_reference_world.ts --measure
 ```
 
+Show available options:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+bun ./scripts/bootstrap_reference_world.ts --help
+```
+
 ## What it boots
 
-The bootstrap launches the flagship `pod-web` bootstrap showcase on:
+The bootstrap runs `bun run dev -- --host ... --port ...` in
+`apps/pod-web`, waits for the showcase route to answer successfully, and then
+targets:
 
 ```text
 http://127.0.0.1:4178/?world=bootstrap-showcase&backend=webgl2
 ```
 
-That route is the canonical "first world" because it already gives creators:
+That route resolves to the local `bootstrap-showcase` preset
+(`Resonant Shore`). It is the canonical "first world" because it already gives
+creators:
 
 - a controllable human
 - autonomous agents
@@ -49,11 +69,21 @@ That route is the canonical "first world" because it already gives creators:
 - a camera-directed first impression
 - the real browser runtime contract
 
+In `--hold` mode the dev server stays up until Ctrl+C. In `--measure` mode the
+script prints JSON with the measured `startupTimeMs`, the resolved `url`, the
+working directory, and source-of-truth notes, then exits cleanly.
+
 ## Benchmark use
 
 `scripts/run_moat_benchmarks.ts` uses this bootstrap by default for the
-creator-time metric unless another official starter flow is passed with
-`--creator-command`.
+creator-time metric by invoking:
+
+```bash
+bun ./scripts/bootstrap_reference_world.ts --measure --host 127.0.0.1 --port 4178
+```
+
+Override that default with `--creator-command` only if the official starter
+flow changes.
 
 ## Next evolution
 

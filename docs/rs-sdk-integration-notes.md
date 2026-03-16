@@ -8,6 +8,13 @@ Current direction:
 - the preferred path is an internal POD headless team/world runner
 - this document remains useful only as an external comparison point
 
+> Audience: contributors using `rs-sdk` only as an external comparison or
+> proving ground.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Multi-World Agent Topology](./multi-world-agent-topology.md) ·
+> [Agent Runtime Audit](./agent-runtime-audit.md)
+
 ## Why this matters
 
 We do not need more `pod-web` UI work to move the agent stack forward.

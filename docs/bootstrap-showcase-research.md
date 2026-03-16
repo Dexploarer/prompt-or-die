@@ -10,6 +10,13 @@ The target is not a generic "better scene". The target is a production-worthy bo
 - the benchmarked creator bootstrap path
 - the visual reference for future starter worlds
 
+> Audience: contributors shaping the first-world browser experience and the
+> creator bootstrap route.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Reference Bootstrap](./reference-bootstrap.md) ·
+> [Benchmark Suite](./benchmark-suite.md)
+
 ## Scope
 
 This research is focused on the actual POD stack:

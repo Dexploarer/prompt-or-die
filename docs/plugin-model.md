@@ -1,13 +1,30 @@
 # Plugin Model
 
-Prompt or Die does not yet ship a formal Bevy-style `App` / `Plugin` lifecycle. That work is still tracked in the Phase 8 and Phase 9 roadmap. This document defines the plugin model that exists today so integrators can extend the platform without inventing incompatible patterns.
+Prompt or Die now ships a small `pod_core::App` / `Plugin` /
+`SchedulePhase` kernel, but it does not yet expose the full repo-wide,
+versioned Bevy-style plugin/app lifecycle tracked in the Phase 8 and Phase 9
+roadmap. This document defines the plugin model that exists today so
+integrators can extend the platform without inventing incompatible patterns.
+
+> Audience: integrators extending POD through crate seams instead of app-root
+> patches.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Architecture Overview](./architecture.md) ·
+> [Asset Pipeline](./asset-pipeline.md)
 
 ## Current status
 
-Today, "plugin" means extending the platform through stable subsystem seams, not through a single runtime registration API.
+Today, "plugin" means two related but different things:
+
+- low-level in-process lifecycle composition through `pod_core::{App, Plugin,
+  SchedulePhase, AppContext}`
+- cross-crate platform extension through stable subsystem seams, not through one
+  repo-wide registration API
 
 The practical extension surfaces are:
 
+- In-process systems/resources registered through the `pod-core` app kernel
 - New crates inside the workspace
 - New components and systems in `pod-core`
 - New scene/prefab bindings in `pod-scene`
@@ -24,6 +41,7 @@ contract today. If a seam is not in this table, assume it is still internal.
 
 | Seam | Public surface to depend on | What you own | Validation path today |
 | --- | --- | --- | --- |
+| In-process app lifecycle kernel | `pod_core::{App, Plugin, SchedulePhase, AppContext, ResourceStore, TypeRegistry}` | Deterministic startup/update/render/broadcast registration, plugin-local resources, and contract metadata within one runtime process | `cargo test -p pod-core app_runs_startup_once_and_keeps_schedule_order_deterministic -- --nocapture` |
 | Authoring to runtime translation | `pod_scene::NativeComponentBinding`, `pod_scene::Prefab`, `pod_scene::PrefabRegistry`, `pod_scene::Scene`, `pod_scene::SceneManager` | New authored component schemas, prefab composition, scene instantiation rules | `cargo test -p pod-scene test_scene_instantiation_tracks_component_provenance_across_prefab_and_scene_layers -- --nocapture` |
 | Asset import to shipped runtime bundle | `pod_assets::import_asset`, `pod_assets::build_runtime_bundle_manifest`, `pod_assets::materialize_runtime_bundle_manifest` | New source imports, bundle specs, staged-to-runtime materialization rules | `cargo test -p pod-assets build_runtime_bundle_manifest_maps_staged_imports_to_runtime_paths -- --nocapture` |
 | Direct-connect debug transport | `pod_core::ShardTransportSummary`, `pod_net::protocol::{ClientMessage, ServerMessage}`, `pod_net::OpsDocumentStream` | New typed debug documents, transport counters, recovery/resume behavior, retained shard ops history, durable JSONL archive persistence | `cargo test -p pod-net broadcast_updates -- --nocapture` |
@@ -37,9 +55,9 @@ SDK the repo currently ships.
 
 | Tier | Surface | Guidance |
 | --- | --- | --- |
-| Current platform contract | `Agent` trait, action/observation flow, `pod-scene` bindings, `RenderState`, transport message types | Safe place to integrate against now |
+| Current platform contract | `pod_core::{App, Plugin, SchedulePhase}`, `Agent` trait, action/observation flow, `pod-scene` bindings, `RenderState`, transport message types | Safe place to integrate against now |
 | Draft contract | Public docs in this directory, scene streaming model, prefab provenance and override reporting | Good integration targets, but still moving |
-| Internal / not yet stabilized | Formal plugin lifecycle, schedule graph, app startup hooks, versioned extension SDK | Do not build hard dependencies on these yet |
+| Internal / not yet stabilized | Repo-wide plugin discovery, browser/editor registration hooks, cross-runtime startup/shutdown ordering, versioned extension SDK | Do not build hard dependencies on these yet |
 
 ## How to extend the platform today
 
@@ -93,6 +111,7 @@ treated as composition roots rather than extension APIs.
 
 | Surface | Status | Guidance |
 | --- | --- | --- |
+| `crates/pod-core/src/app.rs` | Stable low-level lifecycle kernel | Safe for in-process `Plugin` registration, typed resources, and phase-local systems inside one runtime, but not a full cross-crate discovery or packaging model. |
 | `apps/pod-web/src/main.ts` | Internal composition root | Do not add feature-specific hooks here if the behavior belongs in `pod-scene`, `pod-assets`, `pod-net`, or shared browser contracts. |
 | `apps/pod-web/src/runtime-config.ts` and `runtime-flags.ts` | Stable app-local bootstrap inputs | Safe for route/runtime selection and deterministic test toggles, but not a general plugin lifecycle. |
 | `crates/pod-core/src/authority.rs` | Current transport-neutral authority world contract | Safe place to compose `AuthorityWorldConfig`, `WorldBootstrapPlan`, and `build_authoritative_world(...)` without depending on transport-layer types. |
@@ -106,8 +125,8 @@ touch app bootstrap when you are composing existing subsystems together.
 
 ## Missing lifecycle hooks that still block integrators
 
-The current seams are usable, but several hooks are still missing and force
-integrators back into app composition roots:
+The low-level app kernel is usable today, but several higher-level hooks are
+still missing and force integrators back into app composition roots:
 
 - Multi-shard authority control-plane hook:
   `crates/pod-host/src/lib.rs` now exposes
@@ -150,8 +169,8 @@ integrators back into app composition roots:
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
-  one file. There is no formal registration phase for runtime features before
-  or after renderer startup.
+  one file. The `pod-core` schedule kernel does not yet drive browser runtime
+  feature registration before or after renderer startup.
 - Editor panel registry hook:
   `crates/pod-editor/src/lib.rs` still uses a closed `EditorPanel` enum plus
   hardcoded `render_*panel` dispatch, so new panels require editing the editor
@@ -210,10 +229,10 @@ The feature crate should then integrate with:
 
 The roadmap items for plugin parity still matter. The future formal model is expected to add:
 
-- Startup and shutdown hooks
-- Ordered plugin registration
-- Schedule phase hooks
-- Resource and system registration
+- Startup and shutdown hooks that span app entrypoints, not just one in-process `App`
+- Ordered plugin registration across app binaries and runtime features
+- Cross-runtime schedule/graph composition above the current `SchedulePhase` kernel
+- Versioned resource/system registration conventions across crate boundaries
 - Versioned extension API boundaries
 
 Those items are already tracked in:

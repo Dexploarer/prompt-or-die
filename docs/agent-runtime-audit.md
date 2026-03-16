@@ -2,6 +2,13 @@
 
 This document is the grounded map of how agents currently work in Prompt or Die, based on the live code in `pod-core` and `pod-agents`.
 
+> Audience: contributors verifying what the runtime actually does today rather
+> than what the roadmap says it should do.
+>
+> Related docs: [Documentation Hub](./README.md) ·
+> [Agent Integration Contract](./agent-integration-contract.md) ·
+> [Benchmark Suite](./benchmark-suite.md)
+
 ## Source of truth
 
 - Shared runtime trait: `/Users/home/Desktop/prompt-or-die/crates/pod-core/src/agent.rs`
@@ -103,7 +110,8 @@ Maturity: high
 Weak spots:
 
 - still depends on prompt/parser quality for action correctness
-- needs stronger benchmark/evaluation surfaces, not more architecture
+- needs broader scenario coverage in the parity harness and shard-target
+  benchmark flow, not another local architecture rewrite
 
 ## HybridAgent
 
@@ -149,12 +157,16 @@ What is already real:
 - replay artifacts can already be filtered into neural training samples
 - reward summaries and terminal flags are now derived from authoritative tick telemetry
 - ONNX inference can load models from file or bytes
+- the curated controller parity harness already compares scripted, LLM,
+  hybrid, and neural controllers on one shared report surface
 
 What is still missing:
 
 - persistent model registry/checkpoint lifecycle beyond per-model metadata validation
-- a trainer/export/evaluation workflow grounded in authoritative replay artifacts
-- parity and benchmark harnesses for neural agents the way transport/render already have them
+- a trainer/export workflow grounded in authoritative replay artifacts and
+  replay-derived reward summaries
+- broader scenario and remote-runtime evaluation coverage beyond the curated
+  controller parity harness
 
 ## Neural feature contract today
 
@@ -182,7 +194,9 @@ The current discrete action space is exactly 10 entries:
 - `Drop { slot: 0 }`
 - `Rotate { angle: PI / 4 }`
 
-This is enough for a scaffold. It is not yet a durable model interface.
+This is now a real versioned interface with metadata validation. It is still
+intentionally narrow, and it is not yet the full long-horizon policy surface a
+production neural runtime would eventually want.
 
 ## ONNX runtime position
 
@@ -214,27 +228,35 @@ Strongest parts of the agent system:
 - observation building
 - action validation
 - telemetry and replay export
+- authoritative reward attribution and replay-derived training samples
+- curated controller parity reporting across scripted, LLM, hybrid, and neural controllers
 - LLM and hybrid controller infrastructure
 
 Weakest parts of the agent system:
 
-- reward attribution and training data contract
-- evaluation harnesses for neural vs scripted vs LLM vs hybrid
 - persistent model lifecycle and checkpoint tooling
+- trainer/export workflow above authoritative replay data
+- scenario breadth for controller evaluation outside the curated parity harness
 
 ## Recommended execution order
 
-1. Freeze the neural interface.
-   Define versioned feature-schema and action-schema contracts and use them everywhere.
+1. Keep the neural interface stable unless benchmarks force a schema change.
+   The versioned feature/action contract already exists and should be treated
+   as an explicit compatibility boundary.
 
-2. Make reward and outcome attribution authoritative.
-   Training rows should come from tick/replay truth, not caller-local guesswork.
+2. Build trainer/export tooling on top of the authoritative replay surface.
+   Training rows already come from tick/replay truth; the missing piece is the
+   workflow that turns them into repeatable model inputs and checkpoints.
 
-3. Add evaluation harnesses.
-   Neural work without replay/scenario benchmarks will drift into unprovable tuning.
+3. Expand evaluation coverage.
+   The curated controller parity harness is real, but it should grow into
+   broader scenario suites and remote-runtime checks before model complexity
+   increases.
 
-4. Only then expand model sophistication.
-   Better architectures are not the first bottleneck. Better contracts are.
+4. Only then expand model sophistication and action breadth.
+   Better architectures are not the first bottleneck. Better training loops
+   and stronger comparative evidence are.
 
-5. After that, define remote neural/LLM topology on top of SpacetimeDB.
-   Transport should carry the same observation/action truth, not a second gameplay model.
+5. Keep remote neural/LLM paths on the same observation/action contract.
+   Transport and multi-world topology should continue to reuse the existing
+   authoritative agent contract instead of inventing a second gameplay model.
