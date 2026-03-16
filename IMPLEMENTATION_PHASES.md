@@ -121,32 +121,32 @@
 
 ## Phase 5: Scene, Asset, and Content Pipeline
 **Type**: Authoring Foundation
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-scene`, `crates/pod-assets`, supporting scripts/docs
 
 **Tasks**:
-- [ ] Re-validate native scene/prefab bindings, override/provenance tracking, streaming, and save/load seams
-- [ ] Re-validate staged import, runtime bundle materialization, and importer boundaries in `pod-assets`
-- [ ] Re-validate creator-facing bundle/manifest contracts independently of any single consuming app
-- [ ] Re-confirm that asset optimization, bundle validation, and import failure handling are explicit platform behavior
+- [x] Re-validate native scene/prefab bindings, override/provenance tracking, streaming, and save/load seams
+- [x] Re-validate staged import, runtime bundle materialization, and importer boundaries in `pod-assets`
+- [x] Re-validate creator-facing bundle/manifest contracts independently of any single consuming app
+- [x] Re-confirm that asset optimization, bundle validation, and import failure handling are explicit platform behavior
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-scene -- --nocapture`
-- [ ] `cargo test -p pod-assets -- --nocapture`
-- [ ] `cargo check -p pod-scene -p pod-assets`
-- [ ] `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`
+- [x] `cargo test -p pod-scene -- --nocapture`
+- [x] `cargo test -p pod-assets -- --nocapture`
+- [x] `cargo check -p pod-scene -p pod-assets`
+- [x] `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`
 
 **Exit Criteria**:
-- [ ] Authoring data has a stable path into runtime-native contracts
-- [ ] Asset staging and runtime materialization are shared platform workflows instead of app-local conventions
-- [ ] Scene and asset boundaries are good enough to support both editor and client phases
+- [x] Authoring data has a stable path into runtime-native contracts
+- [x] Asset staging and runtime materialization are shared platform workflows instead of app-local conventions
+- [x] Scene and asset boundaries are good enough to support both editor and client phases
 
 ---
 
 ## Phase 6: Client Runtime Consumers
 **Type**: Runtime Consumer
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-render`, `apps/pod-web`, `apps/pod-desktop`
 
