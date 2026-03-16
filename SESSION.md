@@ -358,6 +358,12 @@
 - [x] Extended the supervisor HTTP replay and SSE surfaces with `shards=...`, validated requested shard ids against the live supervisor handle set, and filtered both retained replay output and live SSE subscriptions down to the selected shard subset.
 - [x] Added deterministic `pod-host` coverage for legacy bookmark decoding, filtered supervisor replay over HTTP, and filtered supervisor SSE subscription wiring, moving the next MMO blocker up to authz-aware replay policy instead of manual shard selection.
 
+## Iteration 222 Progress
+
+- [x] Added static HTTP shard-scope authorization in `crates/pod-host/src/lib.rs` through `OpsHttpAuthorizedToken`, while keeping the existing full-access `auth_token` path intact for admin or trusted consumers.
+- [x] Applied that authorization across supervisor replay/SSE and shard-specific archive/replay/stream routes, defaulting supervisor requests to the token’s allowed shard set and rejecting disallowed shard requests with explicit `403 Forbidden` responses.
+- [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and added deterministic `pod-host` coverage for scoped-token defaults plus forbidden shard rejection, moving the next MMO blocker up to a shared authz policy source instead of static per-service token maps.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

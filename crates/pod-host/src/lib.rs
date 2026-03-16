@@ -1857,12 +1857,19 @@ impl std::error::Error for OpsArchiveServiceError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpsHttpAuthorizedToken {
+    pub token: String,
+    pub allowed_shard_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpsHttpServiceConfig {
     pub bind_address: String,
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
     pub max_event_bytes: usize,
     pub auth_token: Option<String>,
+    pub authorized_tokens: Vec<OpsHttpAuthorizedToken>,
 }
 
 impl Default for OpsHttpServiceConfig {
@@ -1873,7 +1880,85 @@ impl Default for OpsHttpServiceConfig {
             max_response_bytes: 512 * 1024,
             max_event_bytes: 512 * 1024,
             auth_token: None,
+            authorized_tokens: Vec::new(),
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OpsHttpAuthorization {
+    allowed_shard_ids: Option<BTreeSet<String>>,
+}
+
+impl OpsHttpAuthorization {
+    fn full_access() -> Self {
+        Self {
+            allowed_shard_ids: None,
+        }
+    }
+
+    fn scoped(allowed_shard_ids: &[String]) -> Self {
+        Self {
+            allowed_shard_ids: Some(allowed_shard_ids.iter().cloned().collect()),
+        }
+    }
+
+    fn ensure_shard_access(&self, shard_id: &str) -> Result<(), OpsHttpError> {
+        if self
+            .allowed_shard_ids
+            .as_ref()
+            .is_some_and(|allowed_shard_ids| !allowed_shard_ids.contains(shard_id))
+        {
+            return Err(OpsHttpError::ForbiddenShard {
+                shard_id: shard_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn authorized_supervisor_shard_ids(
+        &self,
+        handles: &[AuthorityShardOpsHandle],
+    ) -> Result<Option<BTreeSet<String>>, OpsHttpError> {
+        let Some(allowed_shard_ids) = &self.allowed_shard_ids else {
+            return Ok(None);
+        };
+
+        let authorized_shard_ids = handles
+            .iter()
+            .map(|handle| handle.shard().shard_id.clone())
+            .filter(|shard_id| allowed_shard_ids.contains(shard_id))
+            .collect::<BTreeSet<_>>();
+        if authorized_shard_ids.is_empty() {
+            return Err(OpsHttpError::ForbiddenSupervisorAccess);
+        }
+
+        Ok(Some(authorized_shard_ids))
+    }
+
+    fn scope_supervisor_cursor(
+        &self,
+        mut cursor: ShardSupervisorOpsReplayCursor,
+        handles: &[AuthorityShardOpsHandle],
+    ) -> Result<ShardSupervisorOpsReplayCursor, OpsHttpError> {
+        let Some(authorized_shard_ids) = self.authorized_supervisor_shard_ids(handles)? else {
+            return Ok(cursor);
+        };
+
+        if cursor.selected_shard_ids.is_empty() {
+            cursor.selected_shard_ids = authorized_shard_ids.into_iter().collect();
+            return Ok(cursor);
+        }
+
+        for shard_id in &cursor.selected_shard_ids {
+            if !authorized_shard_ids.contains(shard_id) {
+                return Err(OpsHttpError::ForbiddenShard {
+                    shard_id: shard_id.clone(),
+                });
+            }
+        }
+
+        Ok(cursor)
     }
 }
 
@@ -2040,11 +2125,16 @@ impl ShardSupervisorOpsHttpService {
     where
         W: AsyncWrite + Unpin,
     {
-        self.authorize(provided_token)?;
-        let snapshot = self
+        let authorization = self.authorize(provided_token)?;
+        let mut snapshot = self
             .archive
             .snapshot(recent_limit_per_shard)
             .map_err(OpsHttpError::ArchiveQuery)?;
+        if let Some(authorized_shard_ids) =
+            authorization.authorized_supervisor_shard_ids(self.live.shards())?
+        {
+            snapshot = filter_supervisor_archive_snapshot(snapshot, &authorized_shard_ids);
+        }
         self.write_json_response(writer, "200 OK", &snapshot).await
     }
 
@@ -2058,7 +2148,8 @@ impl ShardSupervisorOpsHttpService {
     where
         W: AsyncWrite + Unpin,
     {
-        self.authorize(provided_token)?;
+        self.authorize(provided_token)?
+            .ensure_shard_access(&shard_id)?;
         let snapshot = self
             .archive
             .shard(&shard_id)
@@ -2080,7 +2171,8 @@ impl ShardSupervisorOpsHttpService {
     where
         W: AsyncWrite + Unpin,
     {
-        self.authorize(provided_token)?;
+        let authorization = self.authorize(provided_token)?;
+        let cursor = authorization.scope_supervisor_cursor(cursor, self.live.shards())?;
         self.validate_selected_supervisor_shards(&cursor)?;
         let snapshot = self.live.replay_snapshot(&cursor, limit_per_shard);
         self.write_json_response(writer, "200 OK", &snapshot).await
@@ -2097,7 +2189,8 @@ impl ShardSupervisorOpsHttpService {
     where
         W: AsyncWrite + Unpin,
     {
-        self.authorize(provided_token)?;
+        self.authorize(provided_token)?
+            .ensure_shard_access(&shard_id)?;
         let snapshot = self
             .live
             .shard(&shard_id)
@@ -2241,13 +2334,14 @@ impl ShardSupervisorOpsHttpService {
         route: OpsHttpRoute,
         provided_token: Option<&str>,
     ) -> Result<OpsHttpStreamSubscription, OpsHttpError> {
-        self.authorize(provided_token)?;
+        let authorization = self.authorize(provided_token)?;
         match route {
             OpsHttpRoute::StreamShard {
                 shard_id,
                 recent_limit,
                 after_sequence,
             } => {
+                authorization.ensure_shard_access(&shard_id)?;
                 let live_handle =
                     self.live
                         .shard(&shard_id)
@@ -2289,9 +2383,27 @@ impl ShardSupervisorOpsHttpService {
                 recent_limit_per_shard,
                 cursor,
             } => {
-                if let Some(cursor) = cursor.as_ref() {
-                    self.validate_selected_supervisor_shards(cursor)?;
-                }
+                let authorized_supervisor_shard_ids =
+                    authorization.authorized_supervisor_shard_ids(self.live.shards())?;
+                let live_handles = match &authorized_supervisor_shard_ids {
+                    Some(authorized_shard_ids) => self
+                        .live
+                        .shards()
+                        .iter()
+                        .filter(|handle| authorized_shard_ids.contains(&handle.shard().shard_id))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    None => self.live.shards().to_vec(),
+                };
+                let cursor = match cursor {
+                    Some(cursor) => {
+                        let cursor =
+                            authorization.scope_supervisor_cursor(cursor, self.live.shards())?;
+                        self.validate_selected_supervisor_shards(&cursor)?;
+                        Some(cursor)
+                    }
+                    None => None,
+                };
                 let (initial_event, bookmark_state) = match cursor {
                     Some(cursor) => {
                         let snapshot = self.live.replay_snapshot(&cursor, recent_limit_per_shard);
@@ -2303,15 +2415,28 @@ impl ShardSupervisorOpsHttpService {
                         )
                     }
                     None => {
-                        let snapshot = self
+                        let mut snapshot = self
                             .archive
                             .snapshot(recent_limit_per_shard)
                             .map_err(OpsHttpError::ArchiveQuery)?;
+                        let bookmark_state = match &authorized_supervisor_shard_ids {
+                            Some(authorized_shard_ids) => {
+                                snapshot = filter_supervisor_archive_snapshot(
+                                    snapshot,
+                                    authorized_shard_ids,
+                                );
+                                let mut cursor = build_supervisor_replay_cursor(&live_handles);
+                                cursor.selected_shard_ids =
+                                    authorized_shard_ids.iter().cloned().collect();
+                                OpsHttpBookmarkState::Supervisor(cursor)
+                            }
+                            None => OpsHttpBookmarkState::Supervisor(
+                                build_supervisor_replay_cursor(self.live.shards()),
+                            ),
+                        };
                         (
                             OpsHttpInitialEvent::Relay(OpsRelayEvent::SupervisorSnapshot(snapshot)),
-                            OpsHttpBookmarkState::Supervisor(build_supervisor_replay_cursor(
-                                self.live.shards(),
-                            )),
+                            bookmark_state,
                         )
                     }
                 };
@@ -2319,14 +2444,12 @@ impl ShardSupervisorOpsHttpService {
                     OpsHttpBookmarkState::Supervisor(cursor)
                         if !cursor.selected_shard_ids.is_empty() =>
                     {
-                        self.live
-                            .shards()
-                            .iter()
+                        live_handles
+                            .into_iter()
                             .filter(|handle| cursor.includes_shard(&handle.shard().shard_id))
-                            .cloned()
                             .collect()
                     }
-                    _ => self.live.shards().to_vec(),
+                    _ => live_handles,
                 };
                 Ok(OpsHttpStreamSubscription {
                     initial_event,
@@ -2343,11 +2466,43 @@ impl ShardSupervisorOpsHttpService {
         }
     }
 
-    fn authorize(&self, provided_token: Option<&str>) -> Result<(), OpsHttpError> {
-        match (&self.config.auth_token, provided_token) {
-            (Some(expected), Some(provided)) if expected == provided => Ok(()),
-            (Some(_), _) => Err(OpsHttpError::Unauthorized),
-            (None, _) => Ok(()),
+    fn authorize(
+        &self,
+        provided_token: Option<&str>,
+    ) -> Result<OpsHttpAuthorization, OpsHttpError> {
+        match provided_token {
+            Some(provided)
+                if self
+                    .config
+                    .auth_token
+                    .as_deref()
+                    .is_some_and(|expected| expected == provided) =>
+            {
+                Ok(OpsHttpAuthorization::full_access())
+            }
+            Some(provided) => {
+                if let Some(authorized_token) = self
+                    .config
+                    .authorized_tokens
+                    .iter()
+                    .find(|authorized_token| authorized_token.token == provided)
+                {
+                    return Ok(OpsHttpAuthorization::scoped(
+                        &authorized_token.allowed_shard_ids,
+                    ));
+                }
+                if self.config.auth_token.is_none() && self.config.authorized_tokens.is_empty() {
+                    Ok(OpsHttpAuthorization::full_access())
+                } else {
+                    Err(OpsHttpError::Unauthorized)
+                }
+            }
+            None if self.config.auth_token.is_none()
+                && self.config.authorized_tokens.is_empty() =>
+            {
+                Ok(OpsHttpAuthorization::full_access())
+            }
+            None => Err(OpsHttpError::Unauthorized),
         }
     }
 
@@ -2616,6 +2771,10 @@ pub enum OpsHttpError {
         path: String,
     },
     Unauthorized,
+    ForbiddenSupervisorAccess,
+    ForbiddenShard {
+        shard_id: String,
+    },
     UnknownShard {
         shard_id: String,
     },
@@ -2647,6 +2806,7 @@ impl OpsHttpError {
     fn status_line(&self) -> &'static str {
         match self {
             Self::Unauthorized => "401 Unauthorized",
+            Self::ForbiddenSupervisorAccess | Self::ForbiddenShard { .. } => "403 Forbidden",
             Self::UnknownRoute { .. } | Self::UnknownShard { .. } => "404 Not Found",
             Self::RequestTooLarge { .. } => "413 Payload Too Large",
             Self::InvalidRequestLine { .. }
@@ -2706,6 +2866,15 @@ impl std::fmt::Display for OpsHttpError {
             }
             Self::UnknownRoute { path } => write!(f, "unknown ops HTTP route '{path}'"),
             Self::Unauthorized => write!(f, "ops HTTP auth token was rejected"),
+            Self::ForbiddenSupervisorAccess => {
+                write!(
+                    f,
+                    "ops HTTP token is not authorized for any supervisor shards"
+                )
+            }
+            Self::ForbiddenShard { shard_id } => {
+                write!(f, "ops HTTP token is not authorized for shard '{shard_id}'")
+            }
             Self::UnknownShard { shard_id } => write!(f, "unknown shard '{shard_id}'"),
             Self::ArchiveQuery(source) => write!(f, "{source}"),
         }
@@ -2731,6 +2900,8 @@ impl std::error::Error for OpsHttpError {
             | Self::ConflictingQueryParameters { .. }
             | Self::UnknownRoute { .. }
             | Self::Unauthorized
+            | Self::ForbiddenSupervisorAccess
+            | Self::ForbiddenShard { .. }
             | Self::UnknownShard { .. } => None,
         }
     }
@@ -3244,6 +3415,29 @@ fn build_supervisor_replay_cursor(
                 last_sequence: handle.latest_sequence(),
             })
             .collect(),
+    }
+}
+
+fn filter_supervisor_archive_snapshot(
+    snapshot: ShardSupervisorOpsArchiveSnapshot,
+    allowed_shard_ids: &BTreeSet<String>,
+) -> ShardSupervisorOpsArchiveSnapshot {
+    let shards = snapshot
+        .shards
+        .into_iter()
+        .filter(|snapshot| allowed_shard_ids.contains(&snapshot.shard_id))
+        .collect::<Vec<_>>();
+    ShardSupervisorOpsArchiveSnapshot {
+        shard_count: shards.len(),
+        archived_shard_count: shards
+            .iter()
+            .filter(|snapshot| snapshot.archive_path.is_some())
+            .count(),
+        total_persisted_document_count: shards
+            .iter()
+            .map(|snapshot| snapshot.persisted_document_count)
+            .sum(),
+        shards,
     }
 }
 
@@ -4555,11 +4749,11 @@ mod tests {
         AuthorityShardOpsReplaySnapshot, AuthorityTransportMode, DirectConnectAuthorityRuntime,
         LocalAuthorityOpsStream, LocalAuthorityRuntime, OpsArchiveServiceClient,
         OpsArchiveServiceConfig, OpsArchiveServiceRequest, OpsArchiveServiceResponse,
-        OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient, OpsRelayConfig, OpsRelayError,
-        OpsRelayEvent, PreparedAuthorityShard, ShardSupervisorConfig,
-        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorOpsArchiveSnapshot,
-        ShardSupervisorOpsHandle, ShardSupervisorOpsReplaySnapshot, ShardSupervisorSummary,
-        OPS_DOCUMENT_CHANNEL_CAPACITY,
+        OpsHttpAuthorizedToken, OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient,
+        OpsRelayConfig, OpsRelayError, OpsRelayEvent, PreparedAuthorityShard,
+        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
+        ShardSupervisorOpsArchiveSnapshot, ShardSupervisorOpsHandle,
+        ShardSupervisorOpsReplaySnapshot, ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -5104,6 +5298,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
+            authorized_tokens: Vec::new(),
         });
         let listener = service
             .bind_listener()
@@ -5226,6 +5421,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
+            authorized_tokens: Vec::new(),
         });
         let listener = service
             .bind_listener()
@@ -5403,6 +5599,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
+            authorized_tokens: Vec::new(),
         });
         let listener = service
             .bind_listener()
@@ -5475,6 +5672,203 @@ mod tests {
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
+    #[tokio::test]
+    async fn supervisor_ops_http_service_applies_scoped_tokens_and_rejects_forbidden_shards() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-http-authz-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut alpha_runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(10.0, 10.0)
+                    .with_label("authz-alpha-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("alpha runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        let mut beta_runtime = match host
+            .prepare_runtime_with_shard_id("beta-2", |world, _map_name| {
+                world
+                    .spawn_at(14.0, 14.0)
+                    .with_label("authz-beta-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("beta runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        alpha_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        beta_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![alpha_runtime.ops_handle(), beta_runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("admin-secret".to_string()),
+            authorized_tokens: vec![OpsHttpAuthorizedToken {
+                token: "alpha-only".to_string(),
+                allowed_shard_ids: vec!["alpha-1".to_string()],
+            }],
+        });
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("ops HTTP service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops HTTP listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_listener(listener));
+
+        let replay_request = format!(
+            "GET /ops/replay/supervisor?limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer alpha-only\r\n\r\n"
+        );
+        let mut replay_reader = send_http_request(&address, &replay_request).await;
+        let (status, headers) = read_http_response_head(&mut replay_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut replay_reader, &headers).await;
+        let replay = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("scoped supervisor replay should decode");
+        assert_eq!(replay.shard_count, 1);
+        assert_eq!(replay.selected_shard_ids, vec!["alpha-1".to_string()]);
+        assert_eq!(replay.shards.len(), 1);
+        assert_eq!(replay.shards[0].shard_id, "alpha-1");
+        let replay_cursor = decode_supervisor_replay_bookmark(&replay.next_bookmark)
+            .expect("scoped replay bookmark should decode");
+        assert_eq!(
+            replay_cursor.selected_shard_ids,
+            vec!["alpha-1".to_string()]
+        );
+
+        let forbidden_supervisor_request = format!(
+            "GET /ops/replay/supervisor?shards=beta-2&limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer alpha-only\r\n\r\n"
+        );
+        let mut forbidden_supervisor_reader =
+            send_http_request(&address, &forbidden_supervisor_request).await;
+        let (status, headers) = read_http_response_head(&mut forbidden_supervisor_reader).await;
+        assert!(status.contains("403 Forbidden"));
+        let body = read_http_response_body(&mut forbidden_supervisor_reader, &headers).await;
+        assert!(
+            String::from_utf8_lossy(&body).contains("not authorized for shard 'beta-2'"),
+            "unexpected forbidden supervisor body: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        let forbidden_shard_request = format!(
+            "GET /ops/archive/shard/beta-2?recent_limit=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer alpha-only\r\n\r\n"
+        );
+        let mut forbidden_shard_reader =
+            send_http_request(&address, &forbidden_shard_request).await;
+        let (status, headers) = read_http_response_head(&mut forbidden_shard_reader).await;
+        assert!(status.contains("403 Forbidden"));
+        let body = read_http_response_body(&mut forbidden_shard_reader, &headers).await;
+        assert!(
+            String::from_utf8_lossy(&body).contains("not authorized for shard 'beta-2'"),
+            "unexpected forbidden shard body: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        let admin_request = format!(
+            "GET /ops/archive/shard/beta-2?recent_limit=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer admin-secret\r\n\r\n"
+        );
+        let mut admin_reader = send_http_request(&address, &admin_request).await;
+        let (status, headers) = read_http_response_head(&mut admin_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut admin_reader, &headers).await;
+        let admin_snapshot =
+            serde_json::from_slice::<super::AuthorityShardOpsArchiveSnapshot>(&body)
+                .expect("admin shard archive response should decode");
+        assert_eq!(admin_snapshot.shard_id, "beta-2");
+
+        service_task.abort();
+        let _ = service_task.await;
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[test]
+    fn supervisor_stream_subscription_applies_scoped_token_defaults() {
+        let config = sample_config(AuthorityTransportMode::Local);
+        let alpha_runtime = LocalAuthorityRuntime::new_with_shard_id(
+            &config,
+            config.build_world(|world, _map_name| {
+                world
+                    .spawn_at(4.0, 4.0)
+                    .with_label("stream-authz-alpha", pod_core::Team::None)
+                    .build();
+            }),
+            "alpha-1",
+        );
+        let beta_runtime = LocalAuthorityRuntime::new_with_shard_id(
+            &config,
+            config.build_world(|world, _map_name| {
+                world
+                    .spawn_at(6.0, 6.0)
+                    .with_label("stream-authz-beta", pod_core::Team::None)
+                    .build();
+            }),
+            "beta-2",
+        );
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![alpha_runtime.ops_handle(), beta_runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("admin-secret".to_string()),
+            authorized_tokens: vec![OpsHttpAuthorizedToken {
+                token: "alpha-only".to_string(),
+                allowed_shard_ids: vec!["alpha-1".to_string()],
+            }],
+        });
+        let subscription = service
+            .build_stream_subscription(
+                super::OpsHttpRoute::StreamSupervisor {
+                    recent_limit_per_shard: 8,
+                    cursor: None,
+                },
+                Some("alpha-only"),
+            )
+            .expect("scoped supervisor stream subscription should build");
+        match subscription.initial_event {
+            super::OpsHttpInitialEvent::Relay(OpsRelayEvent::SupervisorSnapshot(snapshot)) => {
+                assert_eq!(snapshot.shard_count, 1);
+                assert_eq!(snapshot.shards.len(), 1);
+                assert_eq!(snapshot.shards[0].shard_id, "alpha-1");
+            }
+            other => panic!("unexpected scoped supervisor stream initial event: {other:?}"),
+        }
+        assert_eq!(subscription.live_handles.len(), 1);
+        assert_eq!(subscription.live_handles[0].shard().shard_id, "alpha-1");
+        match subscription.bookmark_state {
+            super::OpsHttpBookmarkState::Supervisor(cursor) => {
+                assert_eq!(cursor.selected_shard_ids, vec!["alpha-1".to_string()]);
+                assert_eq!(cursor.shards.len(), 1);
+                assert_eq!(cursor.shards[0].shard_id, "alpha-1");
+            }
+            other => panic!("unexpected bookmark state: {other:?}"),
+        }
+    }
+
     #[test]
     fn supervisor_stream_subscription_filters_selected_live_handles() {
         let config = sample_config(AuthorityTransportMode::Local);
@@ -5510,6 +5904,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: None,
+            authorized_tokens: Vec::new(),
         });
         let subscription = service
             .build_stream_subscription(
