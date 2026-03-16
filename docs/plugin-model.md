@@ -141,11 +141,12 @@ integrators back into app composition roots:
   It now also exposes supervisor shard-selection replay state above those
   bookmarks through `selected_shard_ids` and `shards=...`, so browser/editor
   clients can resume only a requested shard subset without rebuilding raw
-  cursor maps. It now also exposes static shard-scoped HTTP authorization
-  through `OpsHttpAuthorizedToken`, covering both supervisor replay/SSE and
-  shard-specific archive/replay/stream routes. What is still missing is a
-  shared authz policy source above those static token maps so browser/editor
-  clients do not depend on hardcoded per-service shard allowlists.
+  cursor maps. It now also exposes shard-scoped HTTP authorization through
+  `OpsHttpAuthorizationPolicySource`, so supervisor replay/SSE and
+  shard-specific archive/replay/stream routes can load scope from a shared
+  inline or file-backed policy document. What is still missing is signed or
+  process-external authz policy distribution above those local files so
+  browser/editor clients do not depend on local JSON policy rollout.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

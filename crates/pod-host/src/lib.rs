@@ -1856,10 +1856,73 @@ impl std::error::Error for OpsArchiveServiceError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpsHttpAuthorizedToken {
     pub token: String,
+    #[serde(default)]
     pub allowed_shard_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsHttpAuthorizationPolicy {
+    #[serde(default)]
+    pub authorized_tokens: Vec<OpsHttpAuthorizedToken>,
+}
+
+impl OpsHttpAuthorizationPolicy {
+    fn find_token(&self, provided_token: &str) -> Option<&OpsHttpAuthorizedToken> {
+        self.authorized_tokens
+            .iter()
+            .find(|authorized_token| authorized_token.token == provided_token)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OpsHttpAuthorizationPolicySource {
+    Inline(OpsHttpAuthorizationPolicy),
+    File(PathBuf),
+}
+
+impl Default for OpsHttpAuthorizationPolicySource {
+    fn default() -> Self {
+        Self::Inline(OpsHttpAuthorizationPolicy::default())
+    }
+}
+
+impl OpsHttpAuthorizationPolicySource {
+    fn is_inline_open_access(&self) -> bool {
+        matches!(
+            self,
+            Self::Inline(policy) if policy.authorized_tokens.is_empty()
+        )
+    }
+
+    fn requires_token(&self) -> bool {
+        match self {
+            Self::Inline(policy) => !policy.authorized_tokens.is_empty(),
+            Self::File(_) => true,
+        }
+    }
+
+    fn load(&self) -> Result<OpsHttpAuthorizationPolicy, OpsHttpError> {
+        match self {
+            Self::Inline(policy) => Ok(policy.clone()),
+            Self::File(path) => {
+                let bytes = std::fs::read(path).map_err(|source| {
+                    OpsHttpError::ReadAuthorizationPolicy {
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
+                serde_json::from_slice(&bytes).map_err(|source| {
+                    OpsHttpError::DecodeAuthorizationPolicy {
+                        path: path.clone(),
+                        source,
+                    }
+                })
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1869,7 +1932,7 @@ pub struct OpsHttpServiceConfig {
     pub max_response_bytes: usize,
     pub max_event_bytes: usize,
     pub auth_token: Option<String>,
-    pub authorized_tokens: Vec<OpsHttpAuthorizedToken>,
+    pub authorization_policy: OpsHttpAuthorizationPolicySource,
 }
 
 impl Default for OpsHttpServiceConfig {
@@ -1880,7 +1943,7 @@ impl Default for OpsHttpServiceConfig {
             max_response_bytes: 512 * 1024,
             max_event_bytes: 512 * 1024,
             auth_token: None,
-            authorized_tokens: Vec::new(),
+            authorization_policy: OpsHttpAuthorizationPolicySource::default(),
         }
     }
 }
@@ -2481,24 +2544,23 @@ impl ShardSupervisorOpsHttpService {
                 Ok(OpsHttpAuthorization::full_access())
             }
             Some(provided) => {
-                if let Some(authorized_token) = self
-                    .config
-                    .authorized_tokens
-                    .iter()
-                    .find(|authorized_token| authorized_token.token == provided)
-                {
+                let policy = self.config.authorization_policy.load()?;
+                if let Some(authorized_token) = policy.find_token(provided) {
                     return Ok(OpsHttpAuthorization::scoped(
                         &authorized_token.allowed_shard_ids,
                     ));
                 }
-                if self.config.auth_token.is_none() && self.config.authorized_tokens.is_empty() {
+                if self.config.auth_token.is_none()
+                    && self.config.authorization_policy.is_inline_open_access()
+                    && policy.authorized_tokens.is_empty()
+                {
                     Ok(OpsHttpAuthorization::full_access())
                 } else {
                     Err(OpsHttpError::Unauthorized)
                 }
             }
             None if self.config.auth_token.is_none()
-                && self.config.authorized_tokens.is_empty() =>
+                && !self.config.authorization_policy.requires_token() =>
             {
                 Ok(OpsHttpAuthorization::full_access())
             }
@@ -2771,6 +2833,14 @@ pub enum OpsHttpError {
         path: String,
     },
     Unauthorized,
+    ReadAuthorizationPolicy {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    DecodeAuthorizationPolicy {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
     ForbiddenSupervisorAccess,
     ForbiddenShard {
         shard_id: String,
@@ -2818,6 +2888,8 @@ impl OpsHttpError {
             | Self::Accept(_)
             | Self::ReadRequest(_)
             | Self::WriteResponse(_)
+            | Self::ReadAuthorizationPolicy { .. }
+            | Self::DecodeAuthorizationPolicy { .. }
             | Self::EncodeResponse(_)
             | Self::EncodeEvent(_)
             | Self::ResponseTooLarge { .. }
@@ -2866,6 +2938,16 @@ impl std::fmt::Display for OpsHttpError {
             }
             Self::UnknownRoute { path } => write!(f, "unknown ops HTTP route '{path}'"),
             Self::Unauthorized => write!(f, "ops HTTP auth token was rejected"),
+            Self::ReadAuthorizationPolicy { path, source } => write!(
+                f,
+                "failed to read ops HTTP authorization policy at {}: {source}",
+                path.display()
+            ),
+            Self::DecodeAuthorizationPolicy { path, source } => write!(
+                f,
+                "failed to decode ops HTTP authorization policy at {}: {source}",
+                path.display()
+            ),
             Self::ForbiddenSupervisorAccess => {
                 write!(
                     f,
@@ -2887,8 +2969,11 @@ impl std::error::Error for OpsHttpError {
             Self::Bind { source, .. }
             | Self::Accept(source)
             | Self::ReadRequest(source)
-            | Self::WriteResponse(source) => Some(source),
-            Self::EncodeResponse(source) | Self::EncodeEvent(source) => Some(source),
+            | Self::WriteResponse(source)
+            | Self::ReadAuthorizationPolicy { source, .. } => Some(source),
+            Self::EncodeResponse(source)
+            | Self::EncodeEvent(source)
+            | Self::DecodeAuthorizationPolicy { source, .. } => Some(source),
             Self::ArchiveQuery(source) => Some(source),
             Self::RequestTooLarge { .. }
             | Self::ResponseTooLarge { .. }
@@ -4749,11 +4834,12 @@ mod tests {
         AuthorityShardOpsReplaySnapshot, AuthorityTransportMode, DirectConnectAuthorityRuntime,
         LocalAuthorityOpsStream, LocalAuthorityRuntime, OpsArchiveServiceClient,
         OpsArchiveServiceConfig, OpsArchiveServiceRequest, OpsArchiveServiceResponse,
-        OpsHttpAuthorizedToken, OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient,
-        OpsRelayConfig, OpsRelayError, OpsRelayEvent, PreparedAuthorityShard,
-        ShardSupervisorConfig, ShardSupervisorControlPlaneHandle, ShardSupervisorError,
-        ShardSupervisorOpsArchiveSnapshot, ShardSupervisorOpsHandle,
-        ShardSupervisorOpsReplaySnapshot, ShardSupervisorSummary, OPS_DOCUMENT_CHANNEL_CAPACITY,
+        OpsHttpAuthorizationPolicy, OpsHttpAuthorizationPolicySource, OpsHttpAuthorizedToken,
+        OpsHttpServiceConfig, OpsPersistenceConfig, OpsRelayClient, OpsRelayConfig, OpsRelayError,
+        OpsRelayEvent, PreparedAuthorityShard, ShardSupervisorConfig,
+        ShardSupervisorControlPlaneHandle, ShardSupervisorError, ShardSupervisorOpsArchiveSnapshot,
+        ShardSupervisorOpsHandle, ShardSupervisorOpsReplaySnapshot, ShardSupervisorSummary,
+        OPS_DOCUMENT_CHANNEL_CAPACITY,
     };
     use pod_core::tick::TickResult;
     use pod_core::{
@@ -5298,7 +5384,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
-            authorized_tokens: Vec::new(),
+            authorization_policy: OpsHttpAuthorizationPolicySource::default(),
         });
         let listener = service
             .bind_listener()
@@ -5421,7 +5507,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
-            authorized_tokens: Vec::new(),
+            authorization_policy: OpsHttpAuthorizationPolicySource::default(),
         });
         let listener = service
             .bind_listener()
@@ -5599,7 +5685,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("http-secret".to_string()),
-            authorized_tokens: Vec::new(),
+            authorization_policy: OpsHttpAuthorizationPolicySource::default(),
         });
         let listener = service
             .bind_listener()
@@ -5722,10 +5808,14 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("admin-secret".to_string()),
-            authorized_tokens: vec![OpsHttpAuthorizedToken {
-                token: "alpha-only".to_string(),
-                allowed_shard_ids: vec!["alpha-1".to_string()],
-            }],
+            authorization_policy: OpsHttpAuthorizationPolicySource::Inline(
+                OpsHttpAuthorizationPolicy {
+                    authorized_tokens: vec![OpsHttpAuthorizedToken {
+                        token: "alpha-only".to_string(),
+                        allowed_shard_ids: vec!["alpha-1".to_string()],
+                    }],
+                },
+            ),
         });
         let listener = service
             .bind_listener()
@@ -5802,6 +5892,133 @@ mod tests {
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
+    #[tokio::test]
+    async fn supervisor_ops_http_service_reloads_authorization_policy_source_from_file() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-http-authz-policy-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let policy_path = archive_root_dir.join("ops-http-policy.json");
+        fs::create_dir_all(&archive_root_dir)
+            .expect("temp authz policy directory should be creatable");
+        write_http_authorization_policy(
+            &policy_path,
+            vec![OpsHttpAuthorizedToken {
+                token: "scoped-user".to_string(),
+                allowed_shard_ids: vec!["alpha-1".to_string()],
+            }],
+        );
+
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut alpha_runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(10.0, 10.0)
+                    .with_label("policy-alpha-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("alpha runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        let mut beta_runtime = match host
+            .prepare_runtime_with_shard_id("beta-2", |world, _map_name| {
+                world
+                    .spawn_at(14.0, 14.0)
+                    .with_label("policy-beta-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("beta runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        alpha_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        beta_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![alpha_runtime.ops_handle(), beta_runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("admin-secret".to_string()),
+            authorization_policy: OpsHttpAuthorizationPolicySource::File(policy_path.clone()),
+        });
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("ops HTTP service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops HTTP listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_listener(listener));
+
+        let alpha_request = format!(
+            "GET /ops/replay/supervisor?limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer scoped-user\r\n\r\n"
+        );
+        let mut alpha_reader = send_http_request(&address, &alpha_request).await;
+        let (status, headers) = read_http_response_head(&mut alpha_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut alpha_reader, &headers).await;
+        let alpha_replay = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("scoped replay response should decode");
+        assert_eq!(alpha_replay.selected_shard_ids, vec!["alpha-1".to_string()]);
+        assert_eq!(alpha_replay.shard_count, 1);
+        assert_eq!(alpha_replay.shards.len(), 1);
+        assert_eq!(alpha_replay.shards[0].shard_id, "alpha-1");
+
+        write_http_authorization_policy(
+            &policy_path,
+            vec![OpsHttpAuthorizedToken {
+                token: "scoped-user".to_string(),
+                allowed_shard_ids: vec!["beta-2".to_string()],
+            }],
+        );
+
+        let beta_request = format!(
+            "GET /ops/replay/supervisor?limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer scoped-user\r\n\r\n"
+        );
+        let mut beta_reader = send_http_request(&address, &beta_request).await;
+        let (status, headers) = read_http_response_head(&mut beta_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut beta_reader, &headers).await;
+        let beta_replay = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("reloaded scoped replay response should decode");
+        assert_eq!(beta_replay.selected_shard_ids, vec!["beta-2".to_string()]);
+        assert_eq!(beta_replay.shard_count, 1);
+        assert_eq!(beta_replay.shards.len(), 1);
+        assert_eq!(beta_replay.shards[0].shard_id, "beta-2");
+
+        let forbidden_request = format!(
+            "GET /ops/archive/shard/alpha-1?recent_limit=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer scoped-user\r\n\r\n"
+        );
+        let mut forbidden_reader = send_http_request(&address, &forbidden_request).await;
+        let (status, headers) = read_http_response_head(&mut forbidden_reader).await;
+        assert!(status.contains("403 Forbidden"));
+        let body = read_http_response_body(&mut forbidden_reader, &headers).await;
+        assert!(
+            String::from_utf8_lossy(&body).contains("not authorized for shard 'alpha-1'"),
+            "unexpected forbidden shard body after policy reload: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        service_task.abort();
+        let _ = service_task.await;
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
     #[test]
     fn supervisor_stream_subscription_applies_scoped_token_defaults() {
         let config = sample_config(AuthorityTransportMode::Local);
@@ -5835,10 +6052,14 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: Some("admin-secret".to_string()),
-            authorized_tokens: vec![OpsHttpAuthorizedToken {
-                token: "alpha-only".to_string(),
-                allowed_shard_ids: vec!["alpha-1".to_string()],
-            }],
+            authorization_policy: OpsHttpAuthorizationPolicySource::Inline(
+                OpsHttpAuthorizationPolicy {
+                    authorized_tokens: vec![OpsHttpAuthorizedToken {
+                        token: "alpha-only".to_string(),
+                        allowed_shard_ids: vec!["alpha-1".to_string()],
+                    }],
+                },
+            ),
         });
         let subscription = service
             .build_stream_subscription(
@@ -5904,7 +6125,7 @@ mod tests {
             max_response_bytes: 256 * 1024,
             max_event_bytes: 256 * 1024,
             auth_token: None,
-            authorized_tokens: Vec::new(),
+            authorization_policy: OpsHttpAuthorizationPolicySource::default(),
         });
         let subscription = service
             .build_stream_subscription(
@@ -6421,6 +6642,15 @@ mod tests {
         } else {
             std::env::remove_var(key);
         }
+    }
+
+    fn write_http_authorization_policy(
+        path: &std::path::Path,
+        authorized_tokens: Vec<OpsHttpAuthorizedToken>,
+    ) {
+        let bytes = serde_json::to_vec(&OpsHttpAuthorizationPolicy { authorized_tokens })
+            .expect("ops HTTP authorization policy should encode");
+        fs::write(path, bytes).expect("ops HTTP authorization policy should write");
     }
 
     #[derive(Debug, Deserialize)]

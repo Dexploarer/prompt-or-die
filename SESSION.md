@@ -364,6 +364,12 @@
 - [x] Applied that authorization across supervisor replay/SSE and shard-specific archive/replay/stream routes, defaulting supervisor requests to the token’s allowed shard set and rejecting disallowed shard requests with explicit `403 Forbidden` responses.
 - [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and added deterministic `pod-host` coverage for scoped-token defaults plus forbidden shard rejection, moving the next MMO blocker up to a shared authz policy source instead of static per-service token maps.
 
+## Iteration 223 Progress
+
+- [x] Replaced the static per-service shard token map in `crates/pod-host/src/lib.rs` with `OpsHttpAuthorizationPolicy` plus `OpsHttpAuthorizationPolicySource`, so HTTP shard authorization can now come from a shared inline policy or a file-backed JSON policy document.
+- [x] Tightened the authorization fallback so only the existing inline-empty configuration preserves open access; file-backed policies now require a real token match instead of implicitly granting full access when the external policy is empty.
+- [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and added deterministic `pod-host` coverage proving a live HTTP service reloads updated shard scope from the shared policy file without being rebuilt, moving the next MMO blocker up to signed or process-external authz policy distribution.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.
