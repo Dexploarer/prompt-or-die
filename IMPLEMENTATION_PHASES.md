@@ -68,34 +68,34 @@
 
 ## Phase 3: Authority Runtime, Networking, and Persistence
 **Type**: Runtime Integration
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `crates/pod-host`, `crates/pod-net`, `crates/pod-stdb`, `apps/pod-server`
 
 **Tasks**:
-- [ ] Re-validate transport-neutral authority host composition for both local and direct-connect execution
-- [ ] Re-validate client/server snapshot, recovery, and reconnect behavior in `pod-net`
-- [ ] Re-validate SpacetimeDB client/module boundaries and the remote-agent observation/action envelope
-- [ ] Re-validate retained ops history, archive-query, relay, and HTTP/SSE ops surfaces in `pod-host`
-- [ ] Re-validate the dedicated-server entry point as a thin composition root over exported runtime seams
+- [x] Re-validate transport-neutral authority host composition for both local and direct-connect execution
+- [x] Re-validate client/server snapshot, recovery, and reconnect behavior in `pod-net`
+- [x] Re-validate SpacetimeDB client/module boundaries and the remote-agent observation/action envelope
+- [x] Re-validate retained ops history, archive-query, relay, and HTTP/SSE ops surfaces in `pod-host`
+- [x] Re-validate the dedicated-server entry point as a thin composition root over exported runtime seams
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-host -- --nocapture`
-- [ ] `cargo test -p pod-net broadcast_updates -- --nocapture`
-- [ ] `cargo test -p pod-stdb --no-default-features --features client`
-- [ ] `cargo test -p pod-server --bin pod-server -- --nocapture`
-- [ ] `cargo check -p pod-host -p pod-net -p pod-stdb -p pod-server`
+- [x] `cargo test -p pod-host -- --nocapture`
+- [x] `cargo test -p pod-net broadcast_updates -- --nocapture`
+- [x] `cargo test -p pod-stdb --no-default-features --features client`
+- [x] `cargo test -p pod-server --bin pod-server -- --nocapture`
+- [x] `cargo check -p pod-host -p pod-net -p pod-stdb -p pod-server`
 
 **Exit Criteria**:
-- [ ] Single-host, multi-shard, direct-connect, and SpacetimeDB-backed execution paths are all proven from the same authority contracts
-- [ ] External ops/inspection surfaces are real platform seams, not app-local utilities
-- [ ] Server startup does not re-own runtime concerns already expressed in the crates
+- [x] Single-host, multi-shard, direct-connect, and SpacetimeDB-backed execution paths are all proven from the same authority contracts
+- [x] External ops/inspection surfaces are real platform seams, not app-local utilities
+- [x] Server startup does not re-own runtime concerns already expressed in the crates
 
 ---
 
 ## Phase 4: Multi-World and Remote Topology
 **Type**: Runtime Integration
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-core`, `apps/pod-headless`, `crates/pod-net`, `crates/pod-stdb`
 
