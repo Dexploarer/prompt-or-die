@@ -2,6 +2,9 @@
 
 Priority-sorted task list. One task per iteration. Mark [x] when complete.
 
+This file is the historical implementation log. The active from-scratch
+execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
+
 ---
 
 ## Iteration 28: Deterministic Core + Network + Persistence Completion
@@ -2323,6 +2326,62 @@ Priority-sorted task list. One task per iteration. Mark [x] when complete.
   - `cargo test -p pod-host -- --nocapture`
   - `cargo test -p pod-server --bin pod-server -- --nocapture`
   - `cargo check --workspace`
+  - `git diff --check`
+
+### Iteration 225
+- [x] Revalidated the public agent docs against the current `pod-core`,
+  `pod-agents`, and shard-target benchmark surfaces instead of leaving older
+  “reward attribution still missing” and “history reporting still missing”
+  claims in place.
+- [x] Updated `docs/agent-runtime-audit.md` so it now reflects the real
+  authoritative reward-summary path, replay-derived training samples, curated
+  controller parity harness, and the actual remaining neural-runtime gaps.
+- [x] Updated `docs/agent-integration-contract.md` so the retained
+  shard-target/topology history workflow is described as implemented, not still
+  hypothetical, and added `docs/agent-runtime-audit.md` plus
+  `docs/multi-world-agent-topology.md` to the root README docs index.
+- [x] Validation:
+  - `rg -n "reward attribution|training data contract|evaluation harnesses|remaining gap is no longer the topology contract itself" docs/agent-runtime-audit.md docs/agent-integration-contract.md README.md`
+  - `git diff --check`
+
+### Iteration 226
+- [x] Reworked the repo documentation information architecture around a real
+  docs hub instead of treating the root `README.md` as the only stable entry
+  point.
+- [x] Added `docs/README.md` as the canonical documentation index, grouped the
+  docs by runtime, agent, workflow, product, and historical use case, and
+  documented the update rules for contributors.
+- [x] Added `docs/asset-pipeline.md` so staged imports, runtime bundle specs,
+  browser asset verification, and runtime selection rules now live in a focused
+  deep doc instead of an oversized root README section.
+- [x] Rewrote `README.md` to be shorter and task-oriented, linking out to the
+  docs hub, benchmark history, reference bootstrap, and asset pipeline instead
+  of duplicating deep workflow detail inline.
+- [x] Added consistent audience/related-docs navigation blocks to the core docs
+  set (`architecture`, `plugin-model`, `agent-*`, `benchmark-suite`,
+  `reference-bootstrap`, `multi-world-agent-topology`, `competitive-matrix`,
+  `moat-gates`, `bootstrap-showcase-research`, and `rs-sdk-integration-notes`)
+  so the docs read like one system instead of disconnected pages.
+- [x] Validation:
+  - `rg -n "Documentation Hub|Asset Pipeline|Benchmark Snapshot History|Related docs:" README.md docs/*.md`
+  - `git diff --check`
+
+### Iteration 227
+- [x] Revalidated `docs/plugin-model.md` against the current
+  `pod-core::{App, Plugin, SchedulePhase}` kernel so the public plugin docs now
+  distinguish the existing in-process lifecycle surface from the still-missing
+  repo-wide plugin/app lifecycle hooks.
+- [x] Revalidated `docs/reference-bootstrap.md` against
+  `scripts/bootstrap_reference_world.ts`, `apps/pod-web/src/runtime-config.ts`,
+  and the moat benchmark default creator flow so the bootstrap doc now reflects
+  the real flags, resolved preset, and measure-mode behavior.
+- [x] Corrected the default creator benchmark note in
+  `scripts/run_moat_benchmarks.ts` so emitted moat guidance now matches the
+  documented reference bootstrap instead of the older local-sandbox wording.
+- [x] Validation:
+  - `cargo test -p pod-core app_runs_startup_once_and_keeps_schedule_order_deterministic -- --nocapture`
+  - `bun ./scripts/bootstrap_reference_world.ts --help`
+  - `bun ./scripts/run_moat_benchmarks.ts --help`
   - `git diff --check`
 
 **Next focus**: Replace local file-backed shard policy documents with signed claims or a process-external authz provider so browser/editor consumers do not depend on local JSON policy distribution.

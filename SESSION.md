@@ -4,6 +4,7 @@
 **Current Stage**: Complete
 **Last Checkpoint**: `1f8af6fa`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
+**Planning Note**: `IMPLEMENTATION_PHASES.md` is now the active unchecked re-verification plan; `IMPLEMENTATION_PLAN.md` remains the historical completion log.
 
 ---
 
@@ -369,6 +370,50 @@
 - [x] Replaced the static per-service shard token map in `crates/pod-host/src/lib.rs` with `OpsHttpAuthorizationPolicy` plus `OpsHttpAuthorizationPolicySource`, so HTTP shard authorization can now come from a shared inline policy or a file-backed JSON policy document.
 - [x] Tightened the authorization fallback so only the existing inline-empty configuration preserves open access; file-backed policies now require a real token match instead of implicitly granting full access when the external policy is empty.
 - [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and added deterministic `pod-host` coverage proving a live HTTP service reloads updated shard scope from the shared policy file without being rebuilt, moving the next MMO blocker up to signed or process-external authz policy distribution.
+
+## Iteration 225 Progress
+
+- [x] Revalidated `docs/agent-runtime-audit.md` against the current
+  `pod-core`/`pod-agents` runtime surfaces, so the public audit now reflects the
+  implemented reward-summary path, replay-derived training samples, and curated
+  controller parity harness instead of describing those pieces as still missing.
+- [x] Updated `docs/agent-integration-contract.md` so the retained
+  shard-target/topology history workflow is described as already implemented via
+  `run_shard_target_snapshot.ts`, `compare_moat_snapshots.ts`, and
+  `docs/benchmark-snapshots/README.md`, not as an unresolved reporting gap.
+- [x] Added `docs/agent-runtime-audit.md` and
+  `docs/multi-world-agent-topology.md` to the root `README.md` docs index so
+  the current public contract/audit set is easier to discover from the repo
+  entry point.
+
+## Iteration 226 Progress
+
+- [x] Added `docs/README.md` as the canonical docs hub, grouping the repo docs
+  by runtime, workflow, benchmark, product, and historical use case instead of
+  leaving discovery to the root `README.md` alone.
+- [x] Added `docs/asset-pipeline.md` so staged imports, runtime bundle specs,
+  browser asset verification, and runtime selection policy now live in one
+  focused deep doc instead of being buried inside the root README.
+- [x] Rewrote `README.md` into a shorter task-oriented entry point that points
+  readers at the right deep docs for benchmarking, asset workflows, and
+  retained benchmark history.
+- [x] Added consistent audience/related-docs navigation blocks across the core
+  docs set so the major pages now point at one another explicitly instead of
+  acting like disconnected standalone notes.
+
+## Iteration 227 Progress
+
+- [x] Revalidated `docs/plugin-model.md` against the current
+  `pod-core::{App, Plugin, SchedulePhase}` lifecycle kernel, so the public
+  plugin doc now distinguishes the existing in-process app surface from the
+  still-missing repo-wide plugin/app lifecycle hooks.
+- [x] Revalidated `docs/reference-bootstrap.md` against
+  `scripts/bootstrap_reference_world.ts` and `apps/pod-web/src/runtime-config.ts`,
+  so the reference bootstrap doc now captures the real defaults, showcase
+  route, resolved preset, and measure-mode JSON behavior.
+- [x] Corrected the default creator note in
+  `scripts/run_moat_benchmarks.ts` so the moat benchmark guidance now matches
+  the documented reference bootstrap instead of the older local-sandbox wording.
 
 ## Audit Backlog (2026-03-13)
 
