@@ -42,33 +42,33 @@
 
 ## Phase 2: Agent Execution Stack
 **Type**: Agent Runtime
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-agents`, `crates/pod-scripting`, `docs/agent-integration-contract.md`, `docs/agent-runtime-audit.md`
 
 **Tasks**:
-- [ ] Re-validate the shared `Agent` contract and runtime-profile expectations across scripted, LLM, neural, and hybrid controllers
-- [ ] Re-validate neural schema, model metadata, and inference fallback behavior
-- [ ] Re-validate tool-call, action-parse, and observation-budget behavior for asynchronous agent controllers
-- [ ] Re-validate the scripting sandbox as part of the same gameplay contract, not as a parallel privilege path
-- [ ] Re-confirm the local parity/evaluation harnesses that measure controller behavior outside full app boots
+- [x] Re-validate the shared `Agent` contract and runtime-profile expectations across scripted, LLM, neural, and hybrid controllers
+- [x] Re-validate neural schema, model metadata, and inference fallback behavior
+- [x] Re-validate tool-call, action-parse, and observation-budget behavior for asynchronous agent controllers
+- [x] Re-validate the scripting sandbox as part of the same gameplay contract, not as a parallel privilege path
+- [x] Re-confirm the local parity/evaluation harnesses that measure controller behavior outside full app boots
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-agents -- --nocapture`
-- [ ] `cargo test -p pod-scripting -- --nocapture`
-- [ ] `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks`
-- [ ] `cargo check -p pod-agents -p pod-scripting`
+- [x] `cargo test -p pod-agents -- --nocapture`
+- [x] `cargo test -p pod-scripting -- --nocapture`
+- [x] `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks`
+- [x] `cargo check -p pod-agents -p pod-scripting`
 
 **Exit Criteria**:
-- [ ] Every supported controller type still enters the runtime through one shared contract
-- [ ] Neural compatibility is explicit and testable instead of inferred from implementation details
-- [ ] Agent-quality measurement exists before remote topology and client consumers are revisited
+- [x] Every supported controller type still enters the runtime through one shared contract
+- [x] Neural compatibility is explicit and testable instead of inferred from implementation details
+- [x] Agent-quality measurement exists before remote topology and client consumers are revisited
 
 ---
 
 ## Phase 3: Authority Runtime, Networking, and Persistence
 **Type**: Runtime Integration
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `crates/pod-host`, `crates/pod-net`, `crates/pod-stdb`, `apps/pod-server`
 
