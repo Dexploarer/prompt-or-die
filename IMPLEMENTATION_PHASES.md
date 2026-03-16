@@ -95,33 +95,33 @@
 
 ## Phase 4: Multi-World and Remote Topology
 **Type**: Runtime Integration
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-core`, `apps/pod-headless`, `crates/pod-net`, `crates/pod-stdb`
 
 **Tasks**:
-- [ ] Re-validate teams, worlds, tournaments, and cross-world link contracts in `pod-core`
-- [ ] Re-validate the headless scenario runner, dataset export, and topology export as first-class proving grounds
-- [ ] Re-validate remote-topology ingestion and parity measurement across both local and generated/live SpacetimeDB paths
-- [ ] Re-confirm that remote autonomous agents honor the same gameplay constraints as local controllers
+- [x] Re-validate teams, worlds, tournaments, and cross-world link contracts in `pod-core`
+- [x] Re-validate the headless scenario runner, dataset export, and topology export as first-class proving grounds
+- [x] Re-validate remote-topology ingestion and parity measurement across both local and generated/live SpacetimeDB paths
+- [x] Re-confirm that remote autonomous agents honor the same gameplay constraints as local controllers
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-core contract -- --nocapture`
-- [ ] `cargo test -p pod-headless -- --nocapture`
-- [ ] `cargo run -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`
-- [ ] `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
-- [ ] `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`
+- [x] `cargo test -p pod-core contract -- --nocapture`
+- [x] `cargo test -p pod-headless -- --nocapture`
+- [x] `cargo run -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`
+- [x] `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+- [x] `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`
 
 **Exit Criteria**:
-- [ ] Multi-world orchestration is proven as a core runtime capability rather than a headless-only experiment
-- [ ] Remote topology artifacts are portable, replayable, and parity-checked
-- [ ] The platform’s MMO-specific differentiators are validated before client/tooling polish resumes
+- [x] Multi-world orchestration is proven as a core runtime capability rather than a headless-only experiment
+- [x] Remote topology artifacts are portable, replayable, and parity-checked
+- [x] The platform’s MMO-specific differentiators are validated before client/tooling polish resumes
 
 ---
 
 ## Phase 5: Scene, Asset, and Content Pipeline
 **Type**: Authoring Foundation
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-scene`, `crates/pod-assets`, supporting scripts/docs
 
