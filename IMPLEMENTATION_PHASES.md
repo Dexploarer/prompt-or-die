@@ -197,26 +197,26 @@
 
 ## Phase 8: Lifecycle, SDK, and Shipping Stabilization
 **Type**: Platform Hardening
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `docs/architecture.md`, `docs/plugin-model.md`, CI/scripts, app roots, exported crate APIs
 
 **Tasks**:
-- [ ] Reconcile the active crate seams with a formal plugin/app lifecycle plan
-- [ ] Re-validate benchmark/report gates and decide which ones are platform requirements versus local tooling
-- [ ] Re-validate the public contract/export surface that future integrations should depend on
-- [ ] Decide what shipping profiles, authz policy sources, and SDK boundaries are truly production requirements versus local/dev scaffolding
+- [x] Reconcile the active crate seams with a formal plugin/app lifecycle plan
+- [x] Re-validate benchmark/report gates and decide which ones are platform requirements versus local tooling
+- [x] Re-validate the public contract/export surface that future integrations should depend on
+- [x] Decide what shipping profiles, authz policy sources, and SDK boundaries are truly production requirements versus local/dev scaffolding
 
 **Verification Criteria**:
-- [ ] `cargo check --workspace`
-- [ ] `cargo test --workspace`
-- [ ] `git diff --check`
-- [ ] Planning docs agree on the same active route and the same archival/history split
+- [x] `cargo check --workspace`
+- [x] `cargo test --workspace`
+- [x] `git diff --check`
+- [x] Planning docs agree on the same active route and the same archival/history split
 
 **Exit Criteria**:
-- [ ] POD has one active execution checklist and one preserved historical log
-- [ ] Missing plugin/app lifecycle hooks are prioritized explicitly instead of being buried inside iteration history
-- [ ] The repo can move from re-verification into focused new platform work without roadmap ambiguity
+- [x] POD has one active execution checklist and one preserved historical log
+- [x] Missing plugin/app lifecycle hooks are prioritized explicitly instead of being buried inside iteration history
+- [x] The repo can move from re-verification into focused new platform work without roadmap ambiguity
 
 ---
 

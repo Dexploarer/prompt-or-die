@@ -1,8 +1,8 @@
 # Session State
 
-**Current Phase**: Phase 8 - Lifecycle, SDK, and Shipping Stabilization
-**Current Stage**: Verification
-**Last Checkpoint**: `29aa1a41`
+**Current Phase**: Active Re-verification Complete
+**Current Stage**: Complete
+**Last Checkpoint**: `f9c7cfe9`
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
 **Planning Note**: `IMPLEMENTATION_PHASES.md` is now the active unchecked re-verification plan; `IMPLEMENTATION_PLAN.md` remains the historical completion log.
 
@@ -17,9 +17,9 @@
 - [x] Phase 5: Scene, Asset, and Content Pipeline revalidated on 2026-03-16 with `cargo test -p pod-scene -- --nocapture`, `cargo test -p pod-assets -- --nocapture`, `cargo check -p pod-scene -p pod-assets`, and `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`.
 - [x] Phase 6: Client Runtime Consumers revalidated on 2026-03-16 with `cargo check -p pod-render -p pod-desktop`, `cd apps/pod-web && bun test`, `cd apps/pod-web && bun run build`, `cd apps/pod-web && bun run verify:assets`, `cd apps/pod-web && bun run measure:render-routes:check`, and `cd apps/pod-web && bun run test:smoke`.
 - [x] Phase 7: Editor and Authoring Tooling revalidated on 2026-03-16 with `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, and `cargo check -p pod-editor -p pod-scene -p pod-assets`.
-- [ ] Phase 8: Lifecycle, SDK, and Shipping Stabilization is now active.
+- [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization revalidated on 2026-03-16 with `cargo check --workspace`, `cargo test --workspace`, and `git diff --check`.
 
-**Next Action**: Run `cargo check --workspace`, `cargo test --workspace`, and `git diff --check`.
+**Next Action**: Start the next focused implementation slice from the revalidated baseline; the strongest immediate follow-up is tightening the browser render-route gate so the degraded main-thread measurements observed in `apps/pod-web/artifacts/render-route-measurements.json` fail as explicitly as the rest of the client/runtime checks.
 
 ---
 

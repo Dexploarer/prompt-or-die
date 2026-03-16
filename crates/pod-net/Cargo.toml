@@ -39,3 +39,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "network_performance"
 harness = false
+
+[[example]]
+name = "topology_feed_benchmark_suite"
+required-features = ["spacetimedb"]
