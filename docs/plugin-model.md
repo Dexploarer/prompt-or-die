@@ -138,9 +138,12 @@ integrators back into app composition roots:
   transport. It now also exposes replay/cursor state above those HTTP/SSE
   streams for late-joining or reconnecting consumers, plus durable bookmark
   tokens so those consumers can reconnect without rebuilding raw cursor maps.
-  What is still missing is a filtered replay or shard-selection layer above
-  those bookmarks so browser/editor clients can stay scoped to the shard
-  subsets they are authorized to inspect.
+  It now also exposes supervisor shard-selection replay state above those
+  bookmarks through `selected_shard_ids` and `shards=...`, so browser/editor
+  clients can resume only a requested shard subset without rebuilding raw
+  cursor maps. What is still missing is authz-aware replay policy above that
+  selection layer so browser/editor clients can request only the shard subsets
+  they are allowed to inspect.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in

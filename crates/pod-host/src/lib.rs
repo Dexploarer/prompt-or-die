@@ -1173,6 +1173,7 @@ impl ShardSupervisorOpsHandle {
         let shards = self
             .shards
             .iter()
+            .filter(|handle| cursor.includes_shard(&handle.shard.shard_id))
             .map(|handle| {
                 handle.replay_snapshot(
                     cursor.last_sequence_for(&handle.shard.shard_id),
@@ -1181,6 +1182,7 @@ impl ShardSupervisorOpsHandle {
             })
             .collect::<Vec<_>>();
         let next_cursor = ShardSupervisorOpsReplayCursor {
+            selected_shard_ids: cursor.selected_shard_ids.clone(),
             shards: shards
                 .iter()
                 .map(|snapshot| snapshot.next_cursor.clone())
@@ -1189,6 +1191,7 @@ impl ShardSupervisorOpsHandle {
 
         ShardSupervisorOpsReplaySnapshot {
             shard_count: shards.len(),
+            selected_shard_ids: cursor.selected_shard_ids.clone(),
             total_persisted_document_count: shards
                 .iter()
                 .map(|snapshot| snapshot.persisted_document_count)
@@ -1215,6 +1218,8 @@ pub struct ShardSupervisorOpsSnapshot {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardSupervisorOpsReplayCursor {
+    #[serde(default)]
+    pub selected_shard_ids: Vec<String>,
     pub shards: Vec<AuthorityShardOpsReplayCursor>,
 }
 
@@ -1226,11 +1231,20 @@ impl ShardSupervisorOpsReplayCursor {
             .map(|cursor| cursor.last_sequence)
             .unwrap_or(0)
     }
+
+    fn includes_shard(&self, shard_id: &str) -> bool {
+        self.selected_shard_ids.is_empty()
+            || self
+                .selected_shard_ids
+                .iter()
+                .any(|selected_shard_id| selected_shard_id == shard_id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardSupervisorOpsReplaySnapshot {
     pub shard_count: usize,
+    pub selected_shard_ids: Vec<String>,
     pub total_persisted_document_count: usize,
     pub gap_detected_shard_count: usize,
     pub has_more_shard_count: usize,
@@ -1460,11 +1474,13 @@ impl ShardSupervisorOpsArchiveHandle {
         let shards = self
             .shards
             .iter()
+            .filter(|handle| cursor.includes_shard(handle.shard_id()))
             .map(|handle| {
                 handle.replay_snapshot(cursor.last_sequence_for(handle.shard_id()), limit_per_shard)
             })
             .collect::<Result<Vec<_>, _>>()?;
         let next_cursor = ShardSupervisorOpsReplayCursor {
+            selected_shard_ids: cursor.selected_shard_ids.clone(),
             shards: shards
                 .iter()
                 .map(|snapshot| snapshot.next_cursor.clone())
@@ -1473,6 +1489,7 @@ impl ShardSupervisorOpsArchiveHandle {
 
         Ok(ShardSupervisorOpsReplaySnapshot {
             shard_count: shards.len(),
+            selected_shard_ids: cursor.selected_shard_ids.clone(),
             total_persisted_document_count: shards
                 .iter()
                 .map(|snapshot| snapshot.persisted_document_count)
@@ -2064,6 +2081,7 @@ impl ShardSupervisorOpsHttpService {
         W: AsyncWrite + Unpin,
     {
         self.authorize(provided_token)?;
+        self.validate_selected_supervisor_shards(&cursor)?;
         let snapshot = self.live.replay_snapshot(&cursor, limit_per_shard);
         self.write_json_response(writer, "200 OK", &snapshot).await
     }
@@ -2271,6 +2289,9 @@ impl ShardSupervisorOpsHttpService {
                 recent_limit_per_shard,
                 cursor,
             } => {
+                if let Some(cursor) = cursor.as_ref() {
+                    self.validate_selected_supervisor_shards(cursor)?;
+                }
                 let (initial_event, bookmark_state) = match cursor {
                     Some(cursor) => {
                         let snapshot = self.live.replay_snapshot(&cursor, recent_limit_per_shard);
@@ -2294,9 +2315,22 @@ impl ShardSupervisorOpsHttpService {
                         )
                     }
                 };
+                let live_handles = match &bookmark_state {
+                    OpsHttpBookmarkState::Supervisor(cursor)
+                        if !cursor.selected_shard_ids.is_empty() =>
+                    {
+                        self.live
+                            .shards()
+                            .iter()
+                            .filter(|handle| cursor.includes_shard(&handle.shard().shard_id))
+                            .cloned()
+                            .collect()
+                    }
+                    _ => self.live.shards().to_vec(),
+                };
                 Ok(OpsHttpStreamSubscription {
                     initial_event,
-                    live_handles: self.live.shards().to_vec(),
+                    live_handles,
                     bookmark_state,
                 })
             }
@@ -2315,6 +2349,20 @@ impl ShardSupervisorOpsHttpService {
             (Some(_), _) => Err(OpsHttpError::Unauthorized),
             (None, _) => Ok(()),
         }
+    }
+
+    fn validate_selected_supervisor_shards(
+        &self,
+        cursor: &ShardSupervisorOpsReplayCursor,
+    ) -> Result<(), OpsHttpError> {
+        for shard_id in &cursor.selected_shard_ids {
+            if self.live.shard(shard_id).is_none() {
+                return Err(OpsHttpError::UnknownShard {
+                    shard_id: shard_id.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     async fn write_json_response<W, T>(
@@ -3015,7 +3063,36 @@ fn parse_http_replay_cursor(value: &str) -> Result<ShardSupervisorOpsReplayCurso
         })
         .collect::<Result<Vec<_>, OpsHttpError>>()?;
 
-    Ok(ShardSupervisorOpsReplayCursor { shards })
+    Ok(ShardSupervisorOpsReplayCursor {
+        selected_shard_ids: Vec::new(),
+        shards,
+    })
+}
+
+fn parse_http_shard_selection(
+    params: &HashMap<String, String>,
+) -> Result<Option<Vec<String>>, OpsHttpError> {
+    let Some(value) = non_empty_http_query_value(params, "shards") else {
+        return Ok(None);
+    };
+
+    let mut shard_ids = BTreeSet::new();
+    for shard_id in value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        shard_ids.insert(shard_id.to_string());
+    }
+
+    if shard_ids.is_empty() {
+        return Err(OpsHttpError::InvalidQueryParameter {
+            name: "shards".to_string(),
+            value: value.to_string(),
+        });
+    }
+
+    Ok(Some(shard_ids.into_iter().collect()))
 }
 
 fn parse_http_supervisor_replay_query(
@@ -3029,16 +3106,24 @@ fn parse_http_supervisor_replay_query(
         });
     }
 
-    if let Some(bookmark) = bookmark {
-        return decode_supervisor_replay_bookmark(bookmark)
+    let mut replay_cursor = if let Some(bookmark) = bookmark {
+        decode_supervisor_replay_bookmark(bookmark)
             .map(Some)
             .map_err(|_| OpsHttpError::InvalidQueryParameter {
                 name: "bookmark".to_string(),
                 value: bookmark.to_string(),
-            });
+            })?
+    } else {
+        cursor.map(parse_http_replay_cursor).transpose()?
+    };
+
+    if let Some(selected_shard_ids) = parse_http_shard_selection(params)? {
+        let mut cursor = replay_cursor.unwrap_or_default();
+        cursor.selected_shard_ids = selected_shard_ids;
+        replay_cursor = Some(cursor);
     }
 
-    cursor.map(parse_http_replay_cursor).transpose()
+    Ok(replay_cursor)
 }
 
 fn parse_http_shard_replay_query(
@@ -3151,6 +3236,7 @@ fn build_supervisor_replay_cursor(
     handles: &[AuthorityShardOpsHandle],
 ) -> ShardSupervisorOpsReplayCursor {
     ShardSupervisorOpsReplayCursor {
+        selected_shard_ids: Vec::new(),
         shards: handles
             .iter()
             .map(|handle| AuthorityShardOpsReplayCursor {
@@ -5266,6 +5352,198 @@ mod tests {
         fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
     }
 
+    #[tokio::test]
+    async fn supervisor_ops_http_service_filters_selected_shards_and_preserves_bookmarks() {
+        let archive_root_dir = std::env::temp_dir().join(format!(
+            "pod-host-ops-http-filtered-replay-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let mut host = sample_config(AuthorityTransportMode::Local);
+        host.ops_persistence = Some(OpsPersistenceConfig {
+            archive_root_dir: archive_root_dir.clone(),
+        });
+
+        let mut alpha_runtime = match host
+            .prepare_runtime_with_shard_id("alpha-1", |world, _map_name| {
+                world
+                    .spawn_at(8.0, 8.0)
+                    .with_label("filtered-alpha-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("alpha runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        let mut beta_runtime = match host
+            .prepare_runtime_with_shard_id("beta-2", |world, _map_name| {
+                world
+                    .spawn_at(12.0, 12.0)
+                    .with_label("filtered-beta-marker", pod_core::Team::None)
+                    .build();
+            })
+            .expect("beta runtime should build")
+        {
+            AuthorityHostRuntime::Local(runtime) => runtime,
+            AuthorityHostRuntime::DirectConnect(_) => panic!("expected local host runtime"),
+        };
+        alpha_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        alpha_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+        beta_runtime.step(Duration::from_secs_f32(1.0 / host.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![alpha_runtime.ops_handle(), beta_runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: Some("http-secret".to_string()),
+        });
+        let listener = service
+            .bind_listener()
+            .await
+            .expect("ops HTTP service should bind an ephemeral listener");
+        let address = listener
+            .local_addr()
+            .expect("ops HTTP listener should expose a local address")
+            .to_string();
+        let service_task = tokio::spawn(service.serve_listener(listener));
+
+        let unknown_request = format!(
+            "GET /ops/replay/supervisor?shards=missing-9&limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut unknown_reader = send_http_request(&address, &unknown_request).await;
+        let (status, headers) = read_http_response_head(&mut unknown_reader).await;
+        assert!(status.contains("404 Not Found"));
+        let body = read_http_response_body(&mut unknown_reader, &headers).await;
+        assert!(
+            String::from_utf8_lossy(&body).contains("unknown shard 'missing-9'"),
+            "unexpected error body: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        let replay_request = format!(
+            "GET /ops/replay/supervisor?shards=alpha-1&limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n"
+        );
+        let mut replay_reader = send_http_request(&address, &replay_request).await;
+        let (status, headers) = read_http_response_head(&mut replay_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut replay_reader, &headers).await;
+        let replay = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("filtered supervisor replay should decode");
+        assert_eq!(replay.shard_count, 1);
+        assert_eq!(replay.selected_shard_ids, vec!["alpha-1".to_string()]);
+        assert_eq!(replay.shards.len(), 1);
+        assert_eq!(replay.shards[0].shard_id, "alpha-1");
+        assert_eq!(replay.shards[0].requested_after_sequence, 0);
+        assert!(!replay.shards[0].documents.is_empty());
+        assert!(replay
+            .shards
+            .iter()
+            .all(|snapshot| snapshot.shard_id == "alpha-1"));
+        let replay_cursor = decode_supervisor_replay_bookmark(&replay.next_bookmark)
+            .expect("filtered replay bookmark should decode");
+        assert_eq!(
+            replay_cursor.selected_shard_ids,
+            vec!["alpha-1".to_string()]
+        );
+        assert_eq!(replay_cursor.shards.len(), 1);
+        assert_eq!(replay_cursor.shards[0].shard_id, "alpha-1");
+
+        let resumed_request = format!(
+            "GET /ops/replay/supervisor?bookmark={}&limit_per_shard=8 HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer http-secret\r\n\r\n",
+            replay.next_bookmark
+        );
+        let mut resumed_reader = send_http_request(&address, &resumed_request).await;
+        let (status, headers) = read_http_response_head(&mut resumed_reader).await;
+        assert!(status.contains("200 OK"));
+        let body = read_http_response_body(&mut resumed_reader, &headers).await;
+        let resumed = serde_json::from_slice::<ShardSupervisorOpsReplaySnapshot>(&body)
+            .expect("resumed filtered replay should decode");
+        assert_eq!(resumed.shard_count, 1);
+        assert_eq!(resumed.selected_shard_ids, vec!["alpha-1".to_string()]);
+        assert_eq!(resumed.shards[0].shard_id, "alpha-1");
+        assert!(resumed.shards[0].documents.is_empty());
+
+        service_task.abort();
+        let _ = service_task.await;
+        fs::remove_dir_all(&archive_root_dir).expect("temp archive root should be removable");
+    }
+
+    #[test]
+    fn supervisor_stream_subscription_filters_selected_live_handles() {
+        let config = sample_config(AuthorityTransportMode::Local);
+        let mut alpha_runtime = LocalAuthorityRuntime::new_with_shard_id(
+            &config,
+            config.build_world(|world, _map_name| {
+                world
+                    .spawn_at(4.0, 4.0)
+                    .with_label("stream-filter-alpha", pod_core::Team::None)
+                    .build();
+            }),
+            "alpha-1",
+        );
+        let mut beta_runtime = LocalAuthorityRuntime::new_with_shard_id(
+            &config,
+            config.build_world(|world, _map_name| {
+                world
+                    .spawn_at(6.0, 6.0)
+                    .with_label("stream-filter-beta", pod_core::Team::None)
+                    .build();
+            }),
+            "beta-2",
+        );
+        alpha_runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
+        beta_runtime.step(Duration::from_secs_f32(1.0 / config.tick_rate as f32));
+
+        let service = ShardSupervisorOpsHandle {
+            shards: vec![alpha_runtime.ops_handle(), beta_runtime.ops_handle()],
+        }
+        .http_service(OpsHttpServiceConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_request_bytes: 16 * 1024,
+            max_response_bytes: 256 * 1024,
+            max_event_bytes: 256 * 1024,
+            auth_token: None,
+        });
+        let subscription = service
+            .build_stream_subscription(
+                super::OpsHttpRoute::StreamSupervisor {
+                    recent_limit_per_shard: 8,
+                    cursor: Some(super::ShardSupervisorOpsReplayCursor {
+                        selected_shard_ids: vec!["alpha-1".to_string()],
+                        shards: Vec::new(),
+                    }),
+                },
+                None,
+            )
+            .expect("filtered supervisor stream subscription should build");
+        match subscription.initial_event {
+            super::OpsHttpInitialEvent::SupervisorReplay(snapshot) => {
+                assert_eq!(snapshot.shard_count, 1);
+                assert_eq!(snapshot.selected_shard_ids, vec!["alpha-1".to_string()]);
+                assert_eq!(snapshot.shards.len(), 1);
+                assert_eq!(snapshot.shards[0].shard_id, "alpha-1");
+            }
+            other => panic!("unexpected supervisor stream initial event: {other:?}"),
+        }
+        assert_eq!(subscription.live_handles.len(), 1);
+        assert_eq!(subscription.live_handles[0].shard().shard_id, "alpha-1");
+        match subscription.bookmark_state {
+            super::OpsHttpBookmarkState::Supervisor(cursor) => {
+                assert_eq!(cursor.selected_shard_ids, vec!["alpha-1".to_string()]);
+                assert_eq!(cursor.shards.len(), 1);
+                assert_eq!(cursor.shards[0].shard_id, "alpha-1");
+            }
+            other => panic!("unexpected bookmark state: {other:?}"),
+        }
+    }
+
     #[test]
     fn replay_bookmarks_round_trip_for_shard_and_supervisor_cursors() {
         let shard_cursor = super::AuthorityShardOpsReplayCursor {
@@ -5280,6 +5558,7 @@ mod tests {
         );
 
         let supervisor_cursor = super::ShardSupervisorOpsReplayCursor {
+            selected_shard_ids: vec!["alpha-1".to_string()],
             shards: vec![
                 super::AuthorityShardOpsReplayCursor {
                     shard_id: "alpha-1".to_string(),
@@ -5296,6 +5575,33 @@ mod tests {
             decode_supervisor_replay_bookmark(&supervisor_bookmark)
                 .expect("supervisor replay bookmark should round-trip"),
             supervisor_cursor
+        );
+
+        let legacy_bookmark = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "scope": "supervisor",
+            "cursor": {
+                "shards": [
+                    {
+                        "shard_id": "alpha-1",
+                        "last_sequence": 9
+                    }
+                ]
+            }
+        }))
+        .expect("legacy supervisor bookmark payload should encode")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+        let legacy_cursor = decode_supervisor_replay_bookmark(&legacy_bookmark)
+            .expect("legacy supervisor replay bookmark should decode");
+        assert!(legacy_cursor.selected_shard_ids.is_empty());
+        assert_eq!(
+            legacy_cursor.shards,
+            vec![super::AuthorityShardOpsReplayCursor {
+                shard_id: "alpha-1".to_string(),
+                last_sequence: 9,
+            }]
         );
     }
 

@@ -352,6 +352,12 @@
 - [x] Extended replay snapshots with `next_bookmark`, taught the HTTP replay routes to accept `bookmark=...`, and updated HTTP SSE `shard_document` payloads to carry the latest bookmark as live events advance.
 - [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and proved bookmark round-trips plus bookmark-based replay resume with deterministic Tokio coverage.
 
+## Iteration 221 Progress
+
+- [x] Added supervisor shard-selection replay state in `crates/pod-host/src/lib.rs`, so `ShardSupervisorOpsReplayCursor` and `ShardSupervisorOpsReplaySnapshot` now carry `selected_shard_ids` and preserve that scope through durable bookmark tokens.
+- [x] Extended the supervisor HTTP replay and SSE surfaces with `shards=...`, validated requested shard ids against the live supervisor handle set, and filtered both retained replay output and live SSE subscriptions down to the selected shard subset.
+- [x] Added deterministic `pod-host` coverage for legacy bookmark decoding, filtered supervisor replay over HTTP, and filtered supervisor SSE subscription wiring, moving the next MMO blocker up to authz-aware replay policy instead of manual shard selection.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.
