@@ -173,31 +173,31 @@
 
 ## Phase 7: Editor and Authoring Tooling
 **Type**: Tooling
-**Status**: In Progress
+**Status**: Complete
 **Estimated**: 3-5 focused hours
 **Primary surfaces**: `crates/pod-editor`, `crates/pod-scene`, `crates/pod-assets`
 
 **Tasks**:
-- [ ] Re-validate the editor shell, hierarchy, inspector, console, asset browser, and telemetry/dashboard panes against current runtime contracts
-- [ ] Re-confirm where the editor still depends on closed enums or hardcoded panel dispatch
-- [ ] Re-validate editor-facing scene, asset, and ops inspection workflows as consumers of shared crate seams
-- [ ] Isolate the exact extension hooks that must exist before editor pluginization is credible
+- [x] Re-validate the editor shell, hierarchy, inspector, console, asset browser, and telemetry/dashboard panes against current runtime contracts
+- [x] Re-confirm where the editor still depends on closed enums or hardcoded panel dispatch
+- [x] Re-validate editor-facing scene, asset, and ops inspection workflows as consumers of shared crate seams
+- [x] Isolate the exact extension hooks that must exist before editor pluginization is credible
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-editor -- --nocapture`
-- [ ] `cargo check -p pod-editor`
-- [ ] `cargo check -p pod-editor -p pod-scene -p pod-assets`
+- [x] `cargo test -p pod-editor -- --nocapture`
+- [x] `cargo check -p pod-editor`
+- [x] `cargo check -p pod-editor -p pod-scene -p pod-assets`
 
 **Exit Criteria**:
-- [ ] The editor is grounded on real platform seams instead of private app glue
-- [ ] The next editor/plugin refactors are identified as explicit lifecycle gaps
-- [ ] Tooling no longer hides architectural debt behind “it works locally”
+- [x] The editor is grounded on real platform seams instead of private app glue
+- [x] The next editor/plugin refactors are identified as explicit lifecycle gaps
+- [x] Tooling no longer hides architectural debt behind “it works locally”
 
 ---
 
 ## Phase 8: Lifecycle, SDK, and Shipping Stabilization
 **Type**: Platform Hardening
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `docs/architecture.md`, `docs/plugin-model.md`, CI/scripts, app roots, exported crate APIs
 
