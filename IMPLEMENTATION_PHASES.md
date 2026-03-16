@@ -17,32 +17,32 @@
 
 ## Phase 1: Deterministic Gameplay Kernel
 **Type**: Runtime Foundation
-**Status**: Planned
+**Status**: Complete
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-core`, `crates/pod-physics`, `crates/pod-spatial`
 
 **Tasks**:
-- [ ] Re-validate the canonical `Observe -> Decide -> Validate -> Execute -> Broadcast` pipeline in `pod-core`
-- [ ] Re-validate authoritative world bootstrap, replay, telemetry, and acceptance harness surfaces
-- [ ] Re-validate deterministic physics and spatial-query integration against the core world model
-- [ ] Re-confirm that world/app/plugin primitives in `pod-core::app` are coherent enough to serve as the eventual lifecycle foundation
+- [x] Re-validate the canonical `Observe -> Decide -> Validate -> Execute -> Broadcast` pipeline in `pod-core`
+- [x] Re-validate authoritative world bootstrap, replay, telemetry, and acceptance harness surfaces
+- [x] Re-validate deterministic physics and spatial-query integration against the core world model
+- [x] Re-confirm that world/app/plugin primitives in `pod-core::app` are coherent enough to serve as the eventual lifecycle foundation
 
 **Verification Criteria**:
-- [ ] `cargo test -p pod-core -- --nocapture`
-- [ ] `cargo test -p pod-physics -- --nocapture`
-- [ ] `cargo test -p pod-spatial -- --nocapture`
-- [ ] `cargo check -p pod-core -p pod-physics -p pod-spatial`
+- [x] `cargo test -p pod-core -- --nocapture`
+- [x] `cargo test -p pod-physics -- --nocapture`
+- [x] `cargo test -p pod-spatial -- --nocapture`
+- [x] `cargo check -p pod-core -p pod-physics -p pod-spatial`
 
 **Exit Criteria**:
-- [ ] The deterministic kernel is proven without depending on browser, editor, or network surfaces
-- [ ] Replay, telemetry, and acceptance signals are trustworthy enough to validate higher layers
-- [ ] Core runtime contracts are stable enough to drive every later phase
+- [x] The deterministic kernel is proven without depending on browser, editor, or network surfaces
+- [x] Replay, telemetry, and acceptance signals are trustworthy enough to validate higher layers
+- [x] Core runtime contracts are stable enough to drive every later phase
 
 ---
 
 ## Phase 2: Agent Execution Stack
 **Type**: Agent Runtime
-**Status**: Planned
+**Status**: In Progress
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-agents`, `crates/pod-scripting`, `docs/agent-integration-contract.md`, `docs/agent-runtime-audit.md`
 
