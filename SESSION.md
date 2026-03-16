@@ -346,6 +346,12 @@
 - [x] Added shard/supervisor replay cursor and snapshot surfaces in `crates/pod-host/src/lib.rs`, covering in-process replay, archive-backed replay, and sequence-aware live relay forwarding.
 - [x] Extended `ShardSupervisorOpsHttpService` with replay JSON routes and cursor-aware SSE startup, refreshed `apps/pod-server/src/lib.rs` re-exports, and proved the resume path with deterministic Tokio coverage.
 
+## Iteration 220 Progress
+
+- [x] Added durable replay bookmark helpers in `crates/pod-host/src/lib.rs`, so shard and supervisor replay state can now be persisted as opaque resume tokens instead of raw cursor maps.
+- [x] Extended replay snapshots with `next_bookmark`, taught the HTTP replay routes to accept `bookmark=...`, and updated HTTP SSE `shard_document` payloads to carry the latest bookmark as live events advance.
+- [x] Refreshed `apps/pod-server/src/lib.rs` compatibility exports and proved bookmark round-trips plus bookmark-based replay resume with deterministic Tokio coverage.
+
 ## Audit Backlog (2026-03-13)
 
 - [x] Browser infra: repaired the render-route perf regression so `bun run measure:render-routes:check` and `bun run test:smoke` now pass again on the shipped asset set.

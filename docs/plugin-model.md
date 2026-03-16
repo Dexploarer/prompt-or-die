@@ -136,9 +136,11 @@ integrators back into app composition roots:
   above the same retained-plus-live shard surfaces, so browser/editor clients
   can consume JSON snapshots and SSE streams without embedding the raw relay
   transport. It now also exposes replay/cursor state above those HTTP/SSE
-  streams for late-joining or reconnecting consumers. What is still missing is
-  a durable bookmark-token or filtered replay layer above those cursors so
-  browser/editor clients do not have to rebuild per-shard cursor maps manually.
+  streams for late-joining or reconnecting consumers, plus durable bookmark
+  tokens so those consumers can reconnect without rebuilding raw cursor maps.
+  What is still missing is a filtered replay or shard-selection layer above
+  those bookmarks so browser/editor clients can stay scoped to the shard
+  subsets they are authorized to inspect.
 - Browser mode/bootstrap hook:
   `apps/pod-web/src/main.ts` still owns renderer creation, local-world vs
   direct-connect mode choice, DOM wiring, and telemetry/debug bootstrapping in
