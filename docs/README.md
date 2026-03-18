@@ -9,14 +9,18 @@ the index instead of jumping into files at random.
 If you are new to the repo, read these in order:
 
 1. [Root README](../README.md)
-2. [Reference Bootstrap](./reference-bootstrap.md)
-3. [Architecture Overview](./architecture.md)
-4. [Benchmark Suite](./benchmark-suite.md)
+2. [CLI Surface](./cli-surface.md)
+3. [Reference Bootstrap](./reference-bootstrap.md)
+4. [Architecture Overview](./architecture.md)
+5. [Benchmark Suite](./benchmark-suite.md)
 
 ## Documentation map
 
 ### Runtime and architecture
 
+- [CLI Surface](./cli-surface.md)
+  The canonical command catalog for developers, users, agents, and
+  agent-assisted development workflows.
 - [Architecture Overview](./architecture.md)
   What the platform looks like today: crate boundaries, authority model, and
   extension seams.
@@ -72,8 +76,9 @@ If you are new to the repo, read these in order:
 ### I want to run the product
 
 1. [Root README](../README.md)
-2. [Reference Bootstrap](./reference-bootstrap.md)
-3. [`apps/pod-web/README.md`](../apps/pod-web/README.md)
+2. [CLI Surface](./cli-surface.md)
+3. [Reference Bootstrap](./reference-bootstrap.md)
+4. [`apps/pod-web/README.md`](../apps/pod-web/README.md)
 
 ### I want to understand the runtime
 
@@ -95,10 +100,18 @@ If you are new to the repo, read these in order:
 3. [Moat Gates](./moat-gates.md)
 4. [Competitive Matrix](./competitive-matrix.md)
 
+### I want to automate against the platform
+
+1. [CLI Surface](./cli-surface.md)
+2. [Benchmark Suite](./benchmark-suite.md)
+3. [Agent Integration Contract](./agent-integration-contract.md)
+
 ## Documentation rules for contributors
 
 - If a command changes, update the owning deep doc and the relevant entry point
   (`README.md` or this hub) in the same change.
+- If a supported top-level CLI surface changes, update `scripts/cli_surface.ts`
+  and rerun `bun ./scripts/verify_cli_surface.ts --write` in the same change.
 - If a public contract changes, update the contract doc and the grounded audit
   doc together.
 - If a document is generated, keep the generator as the source of truth and say

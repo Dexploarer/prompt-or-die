@@ -118,6 +118,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Verify CLI surface catalog
+        run: bun ./scripts/verify_cli_surface.ts --check
+
       - name: Install pod-web dependencies
         working-directory: apps/pod-web
         run: bun install --frozen-lockfile

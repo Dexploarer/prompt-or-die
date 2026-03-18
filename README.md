@@ -13,6 +13,7 @@ surfaces while the platform hardens.
 ## Start here
 
 - [Documentation Hub](docs/README.md)
+- [CLI Surface](docs/cli-surface.md)
 - [Reference Bootstrap](docs/reference-bootstrap.md)
 - [Architecture Overview](docs/architecture.md)
 - [Benchmark Suite](docs/benchmark-suite.md)
@@ -107,6 +108,7 @@ docs/
 ## Documentation
 
 - [Documentation Hub](docs/README.md)
+- [CLI Surface](docs/cli-surface.md)
 - [Architecture Overview](docs/architecture.md)
 - [Plugin Model](docs/plugin-model.md)
 - [Agent Integration Contract](docs/agent-integration-contract.md)
