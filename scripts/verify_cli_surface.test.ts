@@ -28,6 +28,8 @@ describe("verify cli surface", () => {
     const markdown = renderCliSurfaceMarkdown(catalog, repoRoot);
 
     expect(markdown).toContain("# CLI Surface");
+    expect(markdown).toContain("## Canonical root CLI");
+    expect(markdown).toContain("bun ./scripts/pod.ts list");
     expect(markdown).toContain("## Audience matrix");
     expect(markdown).toContain("## Dedicated server environment contract");
     expect(markdown).toContain("verify-cli-surface");

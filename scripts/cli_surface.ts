@@ -79,6 +79,28 @@ export type CliSurfaceValidation = {
 
 export const CLI_DOC_PATH = "docs/cli-surface.md";
 export const CLI_SOURCE_OF_TRUTH_PATH = "scripts/cli_surface.ts";
+export const CLI_AUDIENCES: CliAudience[] = [
+  "developer",
+  "user",
+  "agent",
+  "agent-developer",
+];
+export const CLI_AREAS: CliArea[] = [
+  "workspace",
+  "runtime",
+  "web",
+  "assets",
+  "benchmark",
+  "history",
+  "catalog",
+];
+export const CLI_KINDS: CliKind[] = [
+  "workspace-command",
+  "cargo-bin",
+  "cargo-example",
+  "bun-package-script",
+  "bun-script",
+];
 export const CLI_SCOPE =
   "The CLI catalog covers supported top-level workspace commands, cargo binaries, cargo examples, root Bun scripts, and packaged app scripts. It intentionally excludes one-off targeted test invocations and third-party prerequisite tools such as cargo, bun, bunx, Playwright, or SpacetimeDB commands that are not owned by this repository.";
 
@@ -608,6 +630,24 @@ export const CLI_SURFACE: CliSurfaceEntry[] = [
     coverage: ["bun-script:scripts/index_benchmark_snapshots.ts"],
   },
   {
+    id: "pod",
+    name: "Root POD CLI",
+    audiences: ["developer", "user", "agent", "agent-developer"],
+    area: "catalog",
+    kind: "bun-script",
+    command: "bun ./scripts/pod.ts list",
+    cwd: ".",
+    entrypoint: "scripts/pod.ts",
+    summary:
+      "Canonical root CLI for discovering, inspecting, and executing supported Prompt or Die command surfaces.",
+    machineReadable: true,
+    outputArtifacts: [],
+    docs: ["docs/cli-surface.md"],
+    env: [],
+    notes: ["Use `list`, `show`, `env`, `command`, and `run` subcommands."],
+    coverage: ["bun-script:scripts/pod.ts"],
+  },
+  {
     id: "verify-cli-surface",
     name: "Verify CLI Surface",
     audiences: ["developer", "agent", "agent-developer"],
@@ -905,6 +945,68 @@ export function buildCliSurfaceCatalog(repoRoot: string): CliSurfaceCatalog {
   };
 }
 
+export type CliSurfaceFilters = {
+  audience?: CliAudience;
+  area?: CliArea;
+  kind?: CliKind;
+  machineReadableOnly?: boolean;
+  text?: string;
+};
+
+export function findCliSurfaceEntry(
+  catalog: CliSurfaceCatalog,
+  id: string,
+): CliSurfaceEntry | null {
+  return catalog.commands.find((entry) => entry.id === id) ?? null;
+}
+
+export function filterCliSurfaceEntries(
+  catalog: CliSurfaceCatalog,
+  filters: CliSurfaceFilters,
+): CliSurfaceEntry[] {
+  const query = filters.text?.trim().toLowerCase() ?? "";
+  return catalog.commands.filter((entry) => {
+    if (filters.audience && !entry.audiences.includes(filters.audience)) {
+      return false;
+    }
+    if (filters.area && entry.area !== filters.area) {
+      return false;
+    }
+    if (filters.kind && entry.kind !== filters.kind) {
+      return false;
+    }
+    if (filters.machineReadableOnly && !entry.machineReadable) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+
+    return [
+      entry.id,
+      entry.name,
+      entry.summary,
+      entry.command,
+      entry.area,
+      entry.kind,
+      ...entry.audiences,
+      ...entry.docs,
+      ...entry.env,
+      ...entry.notes,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+}
+
+export function resolveCliSurfaceCommand(entry: CliSurfaceEntry): string {
+  if (entry.cwd === ".") {
+    return entry.command;
+  }
+  return `cd ${entry.cwd} && ${entry.command}`;
+}
+
 function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
@@ -947,6 +1049,18 @@ export function renderCliSurfaceMarkdown(
     `- Source of truth: \`${catalog.sourceOfTruth}\``,
     `- Verification command: \`bun ./scripts/verify_cli_surface.ts --check\``,
     `- Agent export: \`bun ./scripts/verify_cli_surface.ts --json\``,
+    "",
+    "## Canonical root CLI",
+    "",
+    "Use the root `pod` CLI when you want one deterministic entrypoint instead of remembering scattered cargo and Bun commands.",
+    "",
+    "```bash",
+    "bun ./scripts/pod.ts list",
+    "bun ./scripts/pod.ts list --audience agent --json",
+    "bun ./scripts/pod.ts show pod-server",
+    "bun ./scripts/pod.ts env pod-server",
+    "bun ./scripts/pod.ts run bootstrap-reference-world",
+    "```",
     "",
     "## Audience matrix",
     "",

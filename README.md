@@ -20,6 +20,13 @@ surfaces while the platform hardens.
 
 ## Quick start
 
+Discover the supported platform command surface from one entrypoint:
+
+```bash
+bun ./scripts/pod.ts list
+bun ./scripts/pod.ts show pod-server
+```
+
 ### Build and run the main surfaces
 
 ```bash

@@ -11,6 +11,18 @@ This is the canonical Prompt or Die CLI catalog for developers, users, agents, a
 - Verification command: `bun ./scripts/verify_cli_surface.ts --check`
 - Agent export: `bun ./scripts/verify_cli_surface.ts --json`
 
+## Canonical root CLI
+
+Use the root `pod` CLI when you want one deterministic entrypoint instead of remembering scattered cargo and Bun commands.
+
+```bash
+bun ./scripts/pod.ts list
+bun ./scripts/pod.ts list --audience agent --json
+bun ./scripts/pod.ts show pod-server
+bun ./scripts/pod.ts env pod-server
+bun ./scripts/pod.ts run bootstrap-reference-world
+```
+
 ## Audience matrix
 
 | ID | Developer | User | Agent | Agent-developer | Command |
@@ -43,6 +55,7 @@ This is the canonical Prompt or Die CLI catalog for developers, users, agents, a
 | compare-moat-snapshots | yes |  | yes | yes | `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W10-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions` |
 | publish-moat-snapshots | yes |  | yes | yes | `bun ./scripts/publish_moat_snapshots.ts --input artifacts/moat-benchmarks-shard-local.json --label YYYY-Www --output docs/benchmark-snapshots/YYYY-Www-shard-target.json` |
 | index-benchmark-snapshots | yes |  | yes | yes | `bun ./scripts/index_benchmark_snapshots.ts` |
+| pod | yes | yes | yes | yes | `bun ./scripts/pod.ts list` |
 | verify-cli-surface | yes |  | yes | yes | `bun ./scripts/verify_cli_surface.ts --check` |
 
 ## Command catalog
@@ -77,6 +90,7 @@ This is the canonical Prompt or Die CLI catalog for developers, users, agents, a
 | compare-moat-snapshots | history | bun-script | yes | `.` | [scripts/compare_moat_snapshots.ts](../scripts/compare_moat_snapshots.ts) | `artifacts/benchmark-snapshot-comparison.json` | Diff two retained shard-target snapshots and surface regressions or improvements as structured JSON. | [docs/benchmark-suite.md](benchmark-suite.md) |
 | publish-moat-snapshots | history | bun-script | yes | `.` | [scripts/publish_moat_snapshots.ts](../scripts/publish_moat_snapshots.ts) | `docs/benchmark-snapshots/YYYY-Www-shard-target.json` | Normalize a live moat benchmark report into the retained benchmark snapshot format. | [docs/benchmark-suite.md](benchmark-suite.md) |
 | index-benchmark-snapshots | history | bun-script | yes | `.` | [scripts/index_benchmark_snapshots.ts](../scripts/index_benchmark_snapshots.ts) | `docs/benchmark-snapshots/index.json`, `docs/benchmark-snapshots/README.md` | Regenerate the retained benchmark snapshot JSON index and Markdown history view. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/benchmark-snapshots/README.md](benchmark-snapshots/README.md) |
+| pod | catalog | bun-script | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Canonical root CLI for discovering, inspecting, and executing supported Prompt or Die command surfaces. | [docs/cli-surface.md](cli-surface.md) |
 | verify-cli-surface | catalog | bun-script | yes | `.` | [scripts/verify_cli_surface.ts](../scripts/verify_cli_surface.ts) | `docs/cli-surface.md` | Validate that the CLI catalog covers every supported top-level command surface and that the generated docs are in sync. | [docs/cli-surface.md](cli-surface.md) |
 
 ## Dedicated server environment contract

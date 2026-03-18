@@ -119,7 +119,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Verify CLI surface catalog
-        run: bun ./scripts/verify_cli_surface.ts --check
+        run: |
+          bun test scripts/pod.test.ts scripts/verify_cli_surface.test.ts
+          bun ./scripts/verify_cli_surface.ts --check
 
       - name: Install pod-web dependencies
         working-directory: apps/pod-web
