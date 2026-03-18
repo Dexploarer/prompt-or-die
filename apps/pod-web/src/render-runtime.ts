@@ -163,8 +163,7 @@ export async function createPodRenderRuntime(
     ...options,
     backendPreference,
     qualityPreset: options.qualityPreset ?? defaultWorkerQualityPreset,
-    enableShadows:
-      options.enableShadows ?? (preference === "worker" ? false : undefined)
+    enableShadows: options.enableShadows ?? (preference === "worker" ? false : undefined)
   };
 
   if (shouldUseRenderWorker(preference, capabilities) && workerFactory) {
@@ -176,7 +175,7 @@ export async function createPodRenderRuntime(
     );
   }
 
-  if (fallbackReason) {
+  if (fallbackReason && preference === "worker") {
     console.warn(
       `Falling back to main-thread rendering; render worker prerequisite missing: ${fallbackReason}`
     );

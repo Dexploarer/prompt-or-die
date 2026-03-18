@@ -162,6 +162,7 @@ export interface ManifestBackedPodThreeAssetRegistryOptions {
   textureLoader: PodThreeTextureLoader;
   compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
   preferCompressedMeshVariants?: boolean;
+  preferCompressedTextureVariants?: boolean;
   preferNonBlockingFallbacks?: boolean;
 }
 
@@ -175,6 +176,7 @@ export interface RuntimePodThreeAssetRegistryOptions {
   textureLoader?: PodThreeTextureLoader;
   compressedTextureLoader?: PodThreeCompressedTextureLoader | null;
   preferCompressedMeshVariants?: boolean;
+  preferCompressedTextureVariants?: boolean;
   preferNonBlockingFallbacks?: boolean;
   lazyManifestLoad?: boolean;
 }
@@ -681,6 +683,22 @@ export async function createManifestBackedAssetRegistry(
   return await loadManifestBackedAssetRegistry(options, fallbackRegistry);
 }
 
+export function resolvePreferCompressedRuntimeVariants(
+  preferCompressedMeshVariants?: boolean
+): boolean {
+  // Workers should keep using compressed runtime assets instead of falling back to
+  // heavier source variants just because `document` is unavailable.
+  return preferCompressedMeshVariants ?? true;
+}
+
+export function resolvePreferCompressedRuntimeTextures(
+  preferCompressedTextureVariants?: boolean
+): boolean {
+  // The current shipped sprite set is tiny, so KTX2 startup/transcode cost is a
+  // net loss for interactive browser routes unless a caller opts in explicitly.
+  return preferCompressedTextureVariants ?? false;
+}
+
 async function loadManifestBackedAssetRegistry(
   options: RuntimePodThreeAssetRegistryOptions,
   fallbackRegistry: PodThreeAssetRegistry
@@ -698,12 +716,15 @@ async function loadManifestBackedAssetRegistry(
     }
 
     const preferCompressedRuntimeVariants =
-      options.preferCompressedMeshVariants ?? typeof document === "object";
+      resolvePreferCompressedRuntimeVariants(options.preferCompressedMeshVariants);
+    const preferCompressedRuntimeTextures =
+      resolvePreferCompressedRuntimeTextures(options.preferCompressedTextureVariants);
     const manifest = parsePodThreeAssetManifest(await response.json());
     const runtimeLoaders = await createRuntimeAssetLoaders({
       renderer: options.renderer,
       basisTranscoderPath: options.basisTranscoderPath ?? "/assets/basis/",
-      enableCompressedRuntimeVariants: preferCompressedRuntimeVariants
+      enableCompressedMeshVariants: preferCompressedRuntimeVariants,
+      enableCompressedTextureVariants: preferCompressedRuntimeTextures
     });
 
     return new ManifestBackedPodThreeAssetRegistry({
@@ -713,8 +734,9 @@ async function loadManifestBackedAssetRegistry(
       textureLoader: options.textureLoader ?? runtimeLoaders.textureLoader,
       compressedTextureLoader:
         options.compressedTextureLoader ??
-        (preferCompressedRuntimeVariants ? runtimeLoaders.compressedTextureLoader : null),
+        (preferCompressedRuntimeTextures ? runtimeLoaders.compressedTextureLoader : null),
       preferCompressedMeshVariants: preferCompressedRuntimeVariants,
+      preferCompressedTextureVariants: preferCompressedRuntimeTextures,
       preferNonBlockingFallbacks: options.preferNonBlockingFallbacks ?? false
     });
   } catch (error) {
@@ -1305,7 +1327,8 @@ function scoreAssetDescriptor(
 async function createRuntimeAssetLoaders(options: {
   renderer: unknown;
   basisTranscoderPath: string;
-  enableCompressedRuntimeVariants: boolean;
+  enableCompressedMeshVariants: boolean;
+  enableCompressedTextureVariants: boolean;
 }): Promise<{
   geometryLoader: PodThreeGeometryLoader;
   textureLoader: PodThreeTextureLoader;
@@ -1313,10 +1336,10 @@ async function createRuntimeAssetLoaders(options: {
 }> {
   const [{ GLTFLoader }, ktx2Module, meshoptModule] = await Promise.all([
     import("three/examples/jsm/loaders/GLTFLoader.js"),
-    options.enableCompressedRuntimeVariants
+    options.enableCompressedTextureVariants
       ? import("three/examples/jsm/loaders/KTX2Loader.js")
       : Promise.resolve(null),
-    options.enableCompressedRuntimeVariants
+    options.enableCompressedMeshVariants
       ? import("three/examples/jsm/libs/meshopt_decoder.module.js")
       : Promise.resolve(null)
   ]);

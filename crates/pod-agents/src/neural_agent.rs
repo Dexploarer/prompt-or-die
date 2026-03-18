@@ -42,19 +42,19 @@ impl NeuralRuntimeSchema {
         metadata: &NeuralModelMetadata,
     ) -> Result<(), NeuralSchemaError> {
         if metadata.runtime_schema.interface_version != self.interface_version {
-            return Err(NeuralSchemaError::InterfaceVersionMismatch {
+            return Err(NeuralSchemaError::InterfaceVersion {
                 expected: self.interface_version,
                 got: metadata.runtime_schema.interface_version,
             });
         }
         if metadata.runtime_schema.feature_count != self.feature_count {
-            return Err(NeuralSchemaError::FeatureCountMismatch {
+            return Err(NeuralSchemaError::FeatureCount {
                 expected: self.feature_count,
                 got: metadata.runtime_schema.feature_count,
             });
         }
         if metadata.runtime_schema.action_count != self.action_count {
-            return Err(NeuralSchemaError::ActionCountMismatch {
+            return Err(NeuralSchemaError::ActionCount {
                 expected: self.action_count,
                 got: metadata.runtime_schema.action_count,
             });
@@ -80,27 +80,27 @@ impl NeuralModelMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NeuralSchemaError {
-    InterfaceVersionMismatch { expected: u32, got: u32 },
-    FeatureCountMismatch { expected: usize, got: usize },
-    ActionCountMismatch { expected: usize, got: usize },
+    InterfaceVersion { expected: u32, got: u32 },
+    FeatureCount { expected: usize, got: usize },
+    ActionCount { expected: usize, got: usize },
 }
 
 impl fmt::Display for NeuralSchemaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NeuralSchemaError::InterfaceVersionMismatch { expected, got } => {
+            NeuralSchemaError::InterfaceVersion { expected, got } => {
                 write!(
                     f,
                     "neural interface version mismatch: expected {expected}, got {got}"
                 )
             }
-            NeuralSchemaError::FeatureCountMismatch { expected, got } => {
+            NeuralSchemaError::FeatureCount { expected, got } => {
                 write!(
                     f,
                     "neural feature count mismatch: expected {expected}, got {got}"
                 )
             }
-            NeuralSchemaError::ActionCountMismatch { expected, got } => {
+            NeuralSchemaError::ActionCount { expected, got } => {
                 write!(
                     f,
                     "neural action count mismatch: expected {expected}, got {got}"
@@ -802,23 +802,76 @@ mod tests {
     #[test]
     fn neural_runtime_schema_rejects_mismatched_metadata() {
         let schema = NeuralRuntimeSchema::current();
+        let actual = schema.feature_count + 1;
         let metadata = NeuralModelMetadata {
             model_name: "bad-model".to_string(),
             runtime_schema: NeuralRuntimeSchema {
                 interface_version: schema.interface_version,
-                feature_count: schema.feature_count + 1,
+                feature_count: actual,
                 action_count: schema.action_count,
             },
         };
 
         let error = schema.validate_model_metadata(&metadata).unwrap_err();
-        assert!(matches!(
-            error,
-            NeuralSchemaError::FeatureCountMismatch {
-                expected: NEURAL_FEATURE_COUNT,
-                got: 33
+        match error {
+            NeuralSchemaError::FeatureCount { expected, got } => {
+                assert_eq!(expected, schema.feature_count);
+                assert_eq!(got, actual);
             }
-        ));
+            _ => panic!("Expected feature-count schema mismatch"),
+        }
+    }
+
+    #[test]
+    fn neural_runtime_schema_rejects_interface_version_mismatch() {
+        let schema = NeuralRuntimeSchema::current();
+        let actual = schema.interface_version + 1;
+        let metadata = NeuralModelMetadata {
+            model_name: "bad-model".to_string(),
+            runtime_schema: NeuralRuntimeSchema {
+                interface_version: actual,
+                feature_count: schema.feature_count,
+                action_count: schema.action_count,
+            },
+        };
+
+        let error = schema.validate_model_metadata(&metadata).unwrap_err();
+        match error {
+            NeuralSchemaError::InterfaceVersion { expected, got } => {
+                assert_eq!(expected, schema.interface_version);
+                assert_eq!(got, actual);
+                assert_eq!(
+                    format!("{error}"),
+                    format!(
+                        "neural interface version mismatch: expected {expected}, got {actual}"
+                    )
+                );
+            }
+            _ => panic!("Expected interface-version schema mismatch"),
+        }
+    }
+
+    #[test]
+    fn neural_runtime_schema_rejects_action_count_mismatch() {
+        let schema = NeuralRuntimeSchema::current();
+        let actual = schema.action_count + 1;
+        let metadata = NeuralModelMetadata {
+            model_name: "bad-model".to_string(),
+            runtime_schema: NeuralRuntimeSchema {
+                interface_version: schema.interface_version,
+                feature_count: schema.feature_count,
+                action_count: actual,
+            },
+        };
+
+        let error = schema.validate_model_metadata(&metadata).unwrap_err();
+        match error {
+            NeuralSchemaError::ActionCount { expected, got } => {
+                assert_eq!(expected, schema.action_count);
+                assert_eq!(got, actual);
+            }
+            _ => panic!("Expected action-count schema mismatch"),
+        }
     }
 
     #[test]

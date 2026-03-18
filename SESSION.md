@@ -1,25 +1,25 @@
 # Session State
 
-**Current Phase**: Active Re-verification Complete
-**Current Stage**: Complete
-**Last Checkpoint**: `f9c7cfe9`
+**Current Phase**: Phase 8: Lifecycle, SDK, and Shipping Stabilization
+**Current Stage**: Full Re-Verification Pass Completed
+**Last Checkpoint**: 2026-03-18 (Re-verification pass complete)
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
-**Planning Note**: `IMPLEMENTATION_PHASES.md` is now the active unchecked re-verification plan; `IMPLEMENTATION_PLAN.md` remains the historical completion log.
+**Planning Note**: `IMPLEMENTATION_PHASES.md` is reset to an active unchecked checklist for this pass. `IMPLEMENTATION_PLAN.md` remains the historical log.
 
 ---
 
 ## Active Re-verification Track 🔄
 
-- [x] Phase 1: Deterministic Gameplay Kernel revalidated on 2026-03-16 with `cargo test -p pod-core -- --nocapture`, `cargo test -p pod-physics -- --nocapture`, `cargo test -p pod-spatial -- --nocapture`, and `cargo check -p pod-core -p pod-physics -p pod-spatial`.
-- [x] Phase 2: Agent Execution Stack revalidated on 2026-03-16 with `cargo test -p pod-agents -- --nocapture`, `cargo test -p pod-scripting -- --nocapture`, `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks`, and `cargo check -p pod-agents -p pod-scripting`.
-- [x] Phase 3: Authority Runtime, Networking, and Persistence revalidated on 2026-03-16 with `cargo test -p pod-host -- --nocapture`, `cargo test -p pod-net broadcast_updates -- --nocapture`, `cargo test -p pod-stdb --no-default-features --features client`, `cargo test -p pod-server --bin pod-server -- --nocapture`, and `cargo check -p pod-host -p pod-net -p pod-stdb -p pod-server`.
-- [x] Phase 4: Multi-World and Remote Topology revalidated on 2026-03-16 with `cargo test -p pod-core contract -- --nocapture`, `cargo test -p pod-headless -- --nocapture`, `cargo run -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`, `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`, and `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`.
-- [x] Phase 5: Scene, Asset, and Content Pipeline revalidated on 2026-03-16 with `cargo test -p pod-scene -- --nocapture`, `cargo test -p pod-assets -- --nocapture`, `cargo check -p pod-scene -p pod-assets`, and `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`.
-- [x] Phase 6: Client Runtime Consumers revalidated on 2026-03-16 with `cargo check -p pod-render -p pod-desktop`, `cd apps/pod-web && bun test`, `cd apps/pod-web && bun run build`, `cd apps/pod-web && bun run verify:assets`, `cd apps/pod-web && bun run measure:render-routes:check`, and `cd apps/pod-web && bun run test:smoke`.
-- [x] Phase 7: Editor and Authoring Tooling revalidated on 2026-03-16 with `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, and `cargo check -p pod-editor -p pod-scene -p pod-assets`.
-- [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization revalidated on 2026-03-16 with `cargo check --workspace`, `cargo test --workspace`, and `git diff --check`.
+- [x] Phase 1: Deterministic Gameplay Kernel (completed in this pass). Commands: `cargo test -p pod-core -- --nocapture`, `cargo test -p pod-physics -- --nocapture`, `cargo test -p pod-spatial -- --nocapture`, `cargo check -p pod-core -p pod-physics -p pod-spatial`.
+- [x] Phase 2: Agent Execution Stack (completed in this pass). Commands: `cargo test -p pod-agents -- --nocapture`, `cargo test -p pod-scripting -- --nocapture`, `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks`, `cargo check -p pod-agents -p pod-scripting`.
+- [x] Phase 3: Authority Runtime, Networking, and Persistence (completed in this pass). Commands: `cargo test -p pod-host -- --nocapture`, `cargo test -p pod-net broadcast_updates -- --nocapture`, `cargo test -p pod-stdb --no-default-features --features client`, `cargo test -p pod-server --bin pod-server -- --nocapture`, `cargo check -p pod-host -p pod-net -p pod-stdb -p pod-server`.
+- [x] Phase 4: Multi-World and Remote Topology (completed in this pass). Commands: `cargo test -p pod-core contract -- --nocapture`, `cargo test -p pod-headless -- --nocapture`, `cargo run -p pod-headless -- --profile ci-smoke --topology-output /tmp/pod-headless-topology.json`, `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`, `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`.
+- [x] Phase 5: Scene, Asset, and Content Pipeline (completed in this pass). Commands: `cargo test -p pod-scene -- --nocapture`, `cargo test -p pod-assets -- --nocapture`, `cargo check -p pod-scene -p pod-assets`, `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`.
+- [x] Phase 6: Client Runtime Consumers (completed in this pass). Commands: `cargo check -p pod-render -p pod-desktop`, `cd apps/pod-web && bun test`, `cd apps/pod-web && bun run build`, `cd apps/pod-web && bun run verify:assets`, `cd apps/pod-web && bun run measure:render-routes:check`, `cd apps/pod-web && bun run test:smoke`.
+- [x] Phase 7: Editor and Authoring Tooling (completed in this pass). Commands: `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, `cargo check -p pod-editor -p pod-scene -p pod-assets`.
+- [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization (completed in this pass). Commands: `cargo check --workspace`, `cargo test --workspace`, `git diff --check`.
 
-**Next Action**: Start the next focused implementation slice from the revalidated baseline; the strongest immediate follow-up is tightening the browser render-route gate so the degraded main-thread measurements observed in `apps/pod-web/artifacts/render-route-measurements.json` fail as explicitly as the rest of the client/runtime checks.
+**Next Action**: Transition to focused feature work. If you want a strict delivery-ready checkpoint, run a commit now after confirming current git working set.
 
 ---
 

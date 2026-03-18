@@ -17,15 +17,15 @@
 
 ## Phase 1: Deterministic Gameplay Kernel
 **Type**: Runtime Foundation
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-core`, `crates/pod-physics`, `crates/pod-spatial`
 
 **Tasks**:
-- [x] Re-validate the canonical `Observe -> Decide -> Validate -> Execute -> Broadcast` pipeline in `pod-core`
-- [x] Re-validate authoritative world bootstrap, replay, telemetry, and acceptance harness surfaces
-- [x] Re-validate deterministic physics and spatial-query integration against the core world model
-- [x] Re-confirm that world/app/plugin primitives in `pod-core::app` are coherent enough to serve as the eventual lifecycle foundation
+- [ ] Re-validate the canonical `Observe -> Decide -> Validate -> Execute -> Broadcast` pipeline in `pod-core`
+- [ ] Re-validate authoritative world bootstrap, replay, telemetry, and acceptance harness surfaces
+- [ ] Re-validate deterministic physics and spatial-query integration against the core world model
+- [ ] Re-confirm that world/app/plugin primitives in `pod-core::app` are coherent enough to serve as the eventual lifecycle foundation
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-core -- --nocapture`
@@ -34,24 +34,24 @@
 - [x] `cargo check -p pod-core -p pod-physics -p pod-spatial`
 
 **Exit Criteria**:
-- [x] The deterministic kernel is proven without depending on browser, editor, or network surfaces
-- [x] Replay, telemetry, and acceptance signals are trustworthy enough to validate higher layers
-- [x] Core runtime contracts are stable enough to drive every later phase
+- [ ] The deterministic kernel is proven without depending on browser, editor, or network surfaces
+- [ ] Replay, telemetry, and acceptance signals are trustworthy enough to validate higher layers
+- [ ] Core runtime contracts are stable enough to drive every later phase
 
 ---
 
 ## Phase 2: Agent Execution Stack
 **Type**: Agent Runtime
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-agents`, `crates/pod-scripting`, `docs/agent-integration-contract.md`, `docs/agent-runtime-audit.md`
 
 **Tasks**:
-- [x] Re-validate the shared `Agent` contract and runtime-profile expectations across scripted, LLM, neural, and hybrid controllers
-- [x] Re-validate neural schema, model metadata, and inference fallback behavior
-- [x] Re-validate tool-call, action-parse, and observation-budget behavior for asynchronous agent controllers
-- [x] Re-validate the scripting sandbox as part of the same gameplay contract, not as a parallel privilege path
-- [x] Re-confirm the local parity/evaluation harnesses that measure controller behavior outside full app boots
+- [ ] Re-validate the shared `Agent` contract and runtime-profile expectations across scripted, LLM, neural, and hybrid controllers
+- [ ] Re-validate neural schema, model metadata, and inference fallback behavior
+- [ ] Re-validate tool-call, action-parse, and observation-budget behavior for asynchronous agent controllers
+- [ ] Re-validate the scripting sandbox as part of the same gameplay contract, not as a parallel privilege path
+- [ ] Re-confirm the local parity/evaluation harnesses that measure controller behavior outside full app boots
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-agents -- --nocapture`
@@ -60,24 +60,24 @@
 - [x] `cargo check -p pod-agents -p pod-scripting`
 
 **Exit Criteria**:
-- [x] Every supported controller type still enters the runtime through one shared contract
-- [x] Neural compatibility is explicit and testable instead of inferred from implementation details
-- [x] Agent-quality measurement exists before remote topology and client consumers are revisited
+- [ ] Every supported controller type still enters the runtime through one shared contract
+- [ ] Neural compatibility is explicit and testable instead of inferred from implementation details
+- [ ] Agent-quality measurement exists before remote topology and client consumers are revisited
 
 ---
 
 ## Phase 3: Authority Runtime, Networking, and Persistence
 **Type**: Runtime Integration
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `crates/pod-host`, `crates/pod-net`, `crates/pod-stdb`, `apps/pod-server`
 
 **Tasks**:
-- [x] Re-validate transport-neutral authority host composition for both local and direct-connect execution
-- [x] Re-validate client/server snapshot, recovery, and reconnect behavior in `pod-net`
-- [x] Re-validate SpacetimeDB client/module boundaries and the remote-agent observation/action envelope
-- [x] Re-validate retained ops history, archive-query, relay, and HTTP/SSE ops surfaces in `pod-host`
-- [x] Re-validate the dedicated-server entry point as a thin composition root over exported runtime seams
+- [ ] Re-validate transport-neutral authority host composition for both local and direct-connect execution
+- [ ] Re-validate client/server snapshot, recovery, and reconnect behavior in `pod-net`
+- [ ] Re-validate SpacetimeDB client/module boundaries and the remote-agent observation/action envelope
+- [ ] Re-validate retained ops history, archive-query, relay, and HTTP/SSE ops surfaces in `pod-host`
+- [ ] Re-validate the dedicated-server entry point as a thin composition root over exported runtime seams
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-host -- --nocapture`
@@ -87,23 +87,23 @@
 - [x] `cargo check -p pod-host -p pod-net -p pod-stdb -p pod-server`
 
 **Exit Criteria**:
-- [x] Single-host, multi-shard, direct-connect, and SpacetimeDB-backed execution paths are all proven from the same authority contracts
-- [x] External ops/inspection surfaces are real platform seams, not app-local utilities
-- [x] Server startup does not re-own runtime concerns already expressed in the crates
+- [ ] Single-host, multi-shard, direct-connect, and SpacetimeDB-backed execution paths are all proven from the same authority contracts
+- [ ] External ops/inspection surfaces are real platform seams, not app-local utilities
+- [ ] Server startup does not re-own runtime concerns already expressed in the crates
 
 ---
 
 ## Phase 4: Multi-World and Remote Topology
 **Type**: Runtime Integration
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-core`, `apps/pod-headless`, `crates/pod-net`, `crates/pod-stdb`
 
 **Tasks**:
-- [x] Re-validate teams, worlds, tournaments, and cross-world link contracts in `pod-core`
-- [x] Re-validate the headless scenario runner, dataset export, and topology export as first-class proving grounds
-- [x] Re-validate remote-topology ingestion and parity measurement across both local and generated/live SpacetimeDB paths
-- [x] Re-confirm that remote autonomous agents honor the same gameplay constraints as local controllers
+- [ ] Re-validate teams, worlds, tournaments, and cross-world link contracts in `pod-core`
+- [ ] Re-validate the headless scenario runner, dataset export, and topology export as first-class proving grounds
+- [ ] Re-validate remote-topology ingestion and parity measurement across both local and generated/live SpacetimeDB paths
+- [ ] Re-confirm that remote autonomous agents honor the same gameplay constraints as local controllers
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-core contract -- --nocapture`
@@ -113,23 +113,23 @@
 - [x] `cargo run -q -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks`
 
 **Exit Criteria**:
-- [x] Multi-world orchestration is proven as a core runtime capability rather than a headless-only experiment
-- [x] Remote topology artifacts are portable, replayable, and parity-checked
-- [x] The platform’s MMO-specific differentiators are validated before client/tooling polish resumes
+- [ ] Multi-world orchestration is proven as a core runtime capability rather than a headless-only experiment
+- [ ] Remote topology artifacts are portable, replayable, and parity-checked
+- [ ] The platform’s MMO-specific differentiators are validated before client/tooling polish resumes
 
 ---
 
 ## Phase 5: Scene, Asset, and Content Pipeline
 **Type**: Authoring Foundation
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-scene`, `crates/pod-assets`, supporting scripts/docs
 
 **Tasks**:
-- [x] Re-validate native scene/prefab bindings, override/provenance tracking, streaming, and save/load seams
-- [x] Re-validate staged import, runtime bundle materialization, and importer boundaries in `pod-assets`
-- [x] Re-validate creator-facing bundle/manifest contracts independently of any single consuming app
-- [x] Re-confirm that asset optimization, bundle validation, and import failure handling are explicit platform behavior
+- [ ] Re-validate native scene/prefab bindings, override/provenance tracking, streaming, and save/load seams
+- [ ] Re-validate staged import, runtime bundle materialization, and importer boundaries in `pod-assets`
+- [ ] Re-validate creator-facing bundle/manifest contracts independently of any single consuming app
+- [ ] Re-confirm that asset optimization, bundle validation, and import failure handling are explicit platform behavior
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-scene -- --nocapture`
@@ -138,23 +138,23 @@
 - [x] `cargo run -q -p pod-assets --example stage_import -- --json --output-root /tmp/pod-stage-import apps/pod-web/artifacts/source-assets/meshes/adventurer-avatar.glb`
 
 **Exit Criteria**:
-- [x] Authoring data has a stable path into runtime-native contracts
-- [x] Asset staging and runtime materialization are shared platform workflows instead of app-local conventions
-- [x] Scene and asset boundaries are good enough to support both editor and client phases
+- [ ] Authoring data has a stable path into runtime-native contracts
+- [ ] Asset staging and runtime materialization are shared platform workflows instead of app-local conventions
+- [ ] Scene and asset boundaries are good enough to support both editor and client phases
 
 ---
 
 ## Phase 6: Client Runtime Consumers
 **Type**: Runtime Consumer
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 4-6 focused hours
 **Primary surfaces**: `crates/pod-render`, `apps/pod-web`, `apps/pod-desktop`
 
 **Tasks**:
-- [x] Re-validate render extraction and representation contracts in `pod-render`
-- [x] Re-validate the browser runtime as a consumer of shared render, transport, and asset contracts
-- [x] Re-validate browser asset verification, smoke, and route-measurement gates
-- [x] Re-validate desktop/native runtime composition as a consumer instead of a special-case path
+- [ ] Re-validate render extraction and representation contracts in `pod-render`
+- [ ] Re-validate the browser runtime as a consumer of shared render, transport, and asset contracts
+- [ ] Re-validate browser asset verification, smoke, and route-measurement gates
+- [ ] Re-validate desktop/native runtime composition as a consumer instead of a special-case path
 
 **Verification Criteria**:
 - [x] `cargo check -p pod-render -p pod-desktop`
@@ -165,23 +165,23 @@
 - [x] `cd apps/pod-web && bun run test:smoke`
 
 **Exit Criteria**:
-- [x] Browser and native clients are clearly downstream of shared runtime contracts
-- [x] Performance/asset/debug expectations are enforced by repeatable gates
-- [x] Client surfaces no longer distort the order of the core platform roadmap
+- [ ] Browser and native clients are clearly downstream of shared runtime contracts
+- [ ] Performance/asset/debug expectations are enforced by repeatable gates
+- [ ] Client surfaces no longer distort the order of the core platform roadmap
 
 ---
 
 ## Phase 7: Editor and Authoring Tooling
 **Type**: Tooling
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 3-5 focused hours
 **Primary surfaces**: `crates/pod-editor`, `crates/pod-scene`, `crates/pod-assets`
 
 **Tasks**:
-- [x] Re-validate the editor shell, hierarchy, inspector, console, asset browser, and telemetry/dashboard panes against current runtime contracts
-- [x] Re-confirm where the editor still depends on closed enums or hardcoded panel dispatch
-- [x] Re-validate editor-facing scene, asset, and ops inspection workflows as consumers of shared crate seams
-- [x] Isolate the exact extension hooks that must exist before editor pluginization is credible
+- [ ] Re-validate the editor shell, hierarchy, inspector, console, asset browser, and telemetry/dashboard panes against current runtime contracts
+- [ ] Re-confirm where the editor still depends on closed enums or hardcoded panel dispatch
+- [ ] Re-validate editor-facing scene, asset, and ops inspection workflows as consumers of shared crate seams
+- [ ] Isolate the exact extension hooks that must exist before editor pluginization is credible
 
 **Verification Criteria**:
 - [x] `cargo test -p pod-editor -- --nocapture`
@@ -189,34 +189,34 @@
 - [x] `cargo check -p pod-editor -p pod-scene -p pod-assets`
 
 **Exit Criteria**:
-- [x] The editor is grounded on real platform seams instead of private app glue
-- [x] The next editor/plugin refactors are identified as explicit lifecycle gaps
-- [x] Tooling no longer hides architectural debt behind “it works locally”
+- [ ] The editor is grounded on real platform seams instead of private app glue
+- [ ] The next editor/plugin refactors are identified as explicit lifecycle gaps
+- [ ] Tooling no longer hides architectural debt behind “it works locally”
 
 ---
 
 ## Phase 8: Lifecycle, SDK, and Shipping Stabilization
 **Type**: Platform Hardening
-**Status**: Complete
+**Status**: Completed (Re-verified 2026-03-18)
 **Estimated**: 5-7 focused hours
 **Primary surfaces**: `docs/architecture.md`, `docs/plugin-model.md`, CI/scripts, app roots, exported crate APIs
 
 **Tasks**:
-- [x] Reconcile the active crate seams with a formal plugin/app lifecycle plan
-- [x] Re-validate benchmark/report gates and decide which ones are platform requirements versus local tooling
-- [x] Re-validate the public contract/export surface that future integrations should depend on
-- [x] Decide what shipping profiles, authz policy sources, and SDK boundaries are truly production requirements versus local/dev scaffolding
+- [ ] Reconcile the active crate seams with a formal plugin/app lifecycle plan
+- [ ] Re-validate benchmark/report gates and decide which ones are platform requirements versus local tooling
+- [ ] Re-validate the public contract/export surface that future integrations should depend on
+- [ ] Decide what shipping profiles, authz policy sources, and SDK boundaries are truly production requirements versus local/dev scaffolding
 
 **Verification Criteria**:
 - [x] `cargo check --workspace`
 - [x] `cargo test --workspace`
 - [x] `git diff --check`
-- [x] Planning docs agree on the same active route and the same archival/history split
+- [ ] Planning docs agree on the same active route and the same archival/history split
 
 **Exit Criteria**:
-- [x] POD has one active execution checklist and one preserved historical log
-- [x] Missing plugin/app lifecycle hooks are prioritized explicitly instead of being buried inside iteration history
-- [x] The repo can move from re-verification into focused new platform work without roadmap ambiguity
+- [ ] POD has one active execution checklist and one preserved historical log
+- [ ] Missing plugin/app lifecycle hooks are prioritized explicitly instead of being buried inside iteration history
+- [ ] The repo can move from re-verification into focused new platform work without roadmap ambiguity
 
 ---
 

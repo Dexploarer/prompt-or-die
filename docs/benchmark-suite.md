@@ -139,11 +139,11 @@ It records pass/fail and duration for:
 
 `bun run test:smoke` now covers two separate browser responsibilities:
 
-- generic `local-sandbox` gameplay-input smoke on both main-thread and worker routes
+- generic `local-sandbox` gameplay-input smoke on the default auto-selected route plus the explicit worker route
 - fixed-time `bootstrap-showcase` screenshot regression capture for the directed first-world intro
 
 The `local-sandbox` smoke now also asserts that `window.podRender.getStats().runtimePerf`
-is populated on both render routes, which gives the current Phase 5 baseline for:
+is populated on both shipped play routes, which gives the current Phase 5 baseline for:
 
 - time-to-first-rendered-frame (`warmupMs`)
 - stable-vs-slow frame counts against the shared frame budget
@@ -178,13 +178,16 @@ and coarse frame-step variance.
 
 Outside Playwright smoke, `apps/pod-web/scripts/measure-render-routes.ts`
 provides an artifact-grade browser sample of the same main-vs-worker
-`local-sandbox` route pair. It writes
+`local-sandbox` route pair. The default no-param route remains on the shipped
+main-thread path, so the sampler uses explicit `renderThread=main` and
+`renderThread=worker` URLs to compare the playable route against the worker
+experiment directly. It writes
 `apps/pod-web/artifacts/render-route-measurements.json` and captures:
 
 - per-route `runtimePerf` and `mainThreadPerf` payloads
 - per-route geometry/sprite load timing stats from `window.podRender.getStats()`
 - recorded gate booleans for stability and average/slowest geometry/sprite load ceilings
-- enforced gate pass/fail results for completed-asset-load floors plus worker-route chatter ceilings
+- enforced gate pass/fail results for stable-frame floors, completed-asset-load floors, and worker-route chatter ceilings
 - main-vs-worker frame-submission reduction percentage
 - stable-frame and slow-frame deltas between the two routes
 

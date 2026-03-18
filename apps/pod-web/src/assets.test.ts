@@ -3,6 +3,8 @@ import { BoxGeometry, Group, Mesh, MeshStandardMaterial, NoColorSpace, SphereGeo
 
 import {
   createProceduralSpriteTexture,
+  resolvePreferCompressedRuntimeTextures,
+  resolvePreferCompressedRuntimeVariants,
   createMeshMaterial,
   DefaultPodThreeAssetRegistry,
   extractRenderableGeometry,
@@ -239,6 +241,18 @@ describe("parsePodThreeAssetManifest", () => {
 });
 
 describe("runtime asset path selection", () => {
+  test("defaults compressed runtime variants on unless explicitly disabled", () => {
+    expect(resolvePreferCompressedRuntimeVariants()).toBe(true);
+    expect(resolvePreferCompressedRuntimeVariants(true)).toBe(true);
+    expect(resolvePreferCompressedRuntimeVariants(false)).toBe(false);
+  });
+
+  test("keeps compressed runtime textures opt-in by default", () => {
+    expect(resolvePreferCompressedRuntimeTextures()).toBe(false);
+    expect(resolvePreferCompressedRuntimeTextures(true)).toBe(true);
+    expect(resolvePreferCompressedRuntimeTextures(false)).toBe(false);
+  });
+
   test("uses explicit lod paths when runtime selection is explicit", () => {
     const manifest = parsePodThreeAssetManifest({
       version: 1,
@@ -487,6 +501,45 @@ describe("ManifestBackedPodThreeAssetRegistry", () => {
     const geometry = await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
     expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.glb"]);
     expect(geometry.type).toBe("SphereGeometry");
+  });
+
+  test("loads meshopt geometry variants when compressed runtime meshes are preferred", async () => {
+    const loadedPaths: string[] = [];
+    const registry = new ManifestBackedPodThreeAssetRegistry({
+      manifest: parsePodThreeAssetManifest({
+        version: 1,
+        meshes: {
+          "rift-beast": {
+            path: "/assets/meshes/rift-beast.gltf",
+            meshoptLods: {
+              0: "/assets/meshes/rift-beast.meshopt.glb"
+            },
+            aliases: ["monster"],
+            runtime: {
+              preferredEncoding: "meshopt"
+            }
+          }
+        },
+        sprites: {}
+      }),
+      fallbackRegistry: new DefaultPodThreeAssetRegistry(),
+      geometryLoader: {
+        async load(path: string) {
+          loadedPaths.push(path);
+          return new SphereGeometry(1.2, 6, 4);
+        }
+      },
+      textureLoader: {
+        async load() {
+          return new Texture();
+        }
+      },
+      preferCompressedMeshVariants: true
+    });
+
+    await registry.resolveGeometry(meshBatch({ mesh: "monster" }), 0);
+
+    expect(loadedPaths).toEqual(["/assets/meshes/rift-beast.meshopt.glb"]);
   });
 
   test("falls back to procedural geometry for unknown mesh ids", async () => {

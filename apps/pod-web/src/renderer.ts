@@ -88,7 +88,7 @@ interface SmoothedInstanceTransform {
 interface ResolvedMeshBatchResources {
   planned: PlannedMeshBatch;
   geometry: THREE.BufferGeometry;
-  material: THREE.Material;
+  material: THREE.Material | null;
 }
 
 interface ResolvedSpriteBatchResources {
@@ -893,6 +893,23 @@ export interface PodThreeWorldRendererOptions {
 
 type PaintSurface = OffscreenCanvas | HTMLCanvasElement;
 
+export function resolveRuntimeAssetRegistryBootstrapOptions(
+  canvas: HTMLCanvasElement | OffscreenCanvas
+): {
+  preferCompressedMeshVariants: boolean;
+  preferCompressedTextureVariants: boolean;
+  preferNonBlockingFallbacks: boolean;
+  lazyManifestLoad: boolean;
+} {
+  const htmlCanvas = isHtmlCanvasElement(canvas);
+  return {
+    preferCompressedMeshVariants: htmlCanvas,
+    preferCompressedTextureVariants: false,
+    preferNonBlockingFallbacks: htmlCanvas,
+    lazyManifestLoad: htmlCanvas
+  };
+}
+
 interface AmbientChunkDressingPlan {
   meshBatches: PlannedMeshBatch[];
   prewarmRequests: Array<{ batch: PlannedMeshBatch["batch"]; lodLevel: 0 | 1 | 2 }>;
@@ -905,13 +922,13 @@ export class PodThreeWorldRenderer {
     options: PodThreeWorldRendererOptions = {}
   ): Promise<PodThreeWorldRenderer> {
     const { renderer, backend } = await createRenderer(canvas, options);
+    const assetRegistryOptions = resolveRuntimeAssetRegistryBootstrapOptions(canvas);
     const assetRegistry =
       options.assetRegistry ??
       (await createManifestBackedAssetRegistry({
         renderer,
         fallbackRegistry: new DefaultPodThreeAssetRegistry(),
-        preferNonBlockingFallbacks: true,
-        lazyManifestLoad: true
+        ...assetRegistryOptions
       }));
     return new PodThreeWorldRenderer(canvas, renderer, backend, {
       ...options,
@@ -1594,11 +1611,12 @@ export class PodThreeWorldRenderer {
     for (const { planned, geometry, material } of resolvedBatches) {
       activeKeys.add(planned.key);
       const existing = this.meshEntries.get(planned.key);
+      const resolvedMaterial = material ?? this.getOrCreateMeshMaterial(planned);
       const entry = ensureInstancedEntry(
         this.scene,
         existing,
         geometry,
-        material,
+        resolvedMaterial,
         planned.instances.length,
         planned.key
       );
@@ -1712,9 +1730,7 @@ export class PodThreeWorldRenderer {
     for (const { planned, geometry } of resolvedBatches) {
       activeKeys.add(planned.key);
       const existing = this.ambientMeshEntries.get(planned.key);
-      const material =
-        existing?.material ??
-        createMeshMaterial(planned.batch, planned.lodLevel, this.quality);
+      const material = existing?.material ?? this.getOrCreateMeshMaterial(planned);
       const entry = ensureInstancedEntry(
         this.scene,
         existing,
@@ -2587,12 +2603,13 @@ export async function resolveVisibleMeshBatchResources(
     visibleBatches.map(async (planned) => ({
       planned,
       geometry: await assetRegistry.resolveGeometry(planned.batch, planned.lodLevel),
-      material:
-        (await assetRegistry.resolveMeshMaterial?.(
-          planned.batch,
-          planned.lodLevel,
-          quality
-        )) ?? createMeshMaterial(planned.batch, planned.lodLevel, quality)
+      material: assetRegistry.resolveMeshMaterial
+        ? await assetRegistry.resolveMeshMaterial(
+            planned.batch,
+            planned.lodLevel,
+            quality
+          )
+        : null
     }))
   );
 }

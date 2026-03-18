@@ -15,6 +15,9 @@ import {
 } from "../src/render-runtime-gates";
 
 const ROUTE_WAIT_TIMEOUT_MS = 90_000;
+const PRE_RESET_WARMUP_BURSTS_MS = [250, 250, 250, 250] as const;
+const TEARDOWN_TIMEOUT_MS = 5_000;
+const DEBUG_MEASURE_RENDER_ROUTES = process.env.DEBUG_MEASURE_RENDER_ROUTES === "1";
 
 type RouteTarget = {
   label: "main" | "worker";
@@ -154,13 +157,19 @@ const DEFAULT_OUTPUT = "artifacts/render-route-measurements.json";
 const DEFAULT_ROUTE_TARGETS: RouteTarget[] = [
   {
     label: "main",
-    url: "/?world=local-sandbox&backend=webgl2",
+    url: "/?world=local-sandbox&renderThread=main&backend=webgl2",
   },
   {
     label: "worker",
     url: "/?world=local-sandbox&renderThread=worker&backend=webgl2",
   },
 ];
+
+function debugLog(message: string): void {
+  if (DEBUG_MEASURE_RENDER_ROUTES) {
+    console.error(`[measure-render-routes] ${message}`);
+  }
+}
 
 function parseArgs(argv: string[]): Options {
   const options: Options = {
@@ -335,6 +344,11 @@ export function collectRenderRouteMeasurementFailures(
   const failures: string[] = [];
 
   for (const route of report.routes) {
+    if (!route.gates.stableFramePercentFloorPassed) {
+      failures.push(
+        `${route.label} route stable frame percent ${route.runtimePerf.stableFramePercent} fell below ${route.gates.stableFramePercentFloor}`,
+      );
+    }
     if (!route.gates.completedAssetLoadsFloorPassed) {
       failures.push(
         `${route.label} route completed only ${route.loadsCompleted} asset loads; expected at least ${route.gates.completedAssetLoadsFloor}`,
@@ -402,6 +416,7 @@ async function startServerIfNeeded(
       env: process.env,
     },
   );
+  serverProcess.unref();
   await waitForServer(baseUrl, 30_000);
   return serverProcess;
 }
@@ -452,6 +467,28 @@ async function advanceInBursts(
   }
 }
 
+async function waitWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T | undefined> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<undefined>((resolve) => {
+    timeoutId = setTimeout(() => {
+      console.warn(`${label} timed out after ${timeoutMs}ms; continuing shutdown`);
+      resolve(undefined);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 async function collectRouteMeasurement(
   browser: import("@playwright/test").Browser,
   baseUrl: string,
@@ -466,18 +503,29 @@ async function collectRouteMeasurement(
   const url = `${baseUrl}${routeTarget.url}`;
 
   try {
+    debugLog(`navigating ${routeTarget.label} route`);
     await page.goto(url);
+    debugLog(`${routeTarget.label} gameplay ready wait`);
     await waitForGameplayReady(page);
+    debugLog(`${routeTarget.label} asset wait`);
     await waitForRuntimeAssets(page);
+    debugLog(`${routeTarget.label} pre-reset warmup`);
+    await page.evaluate(() => (window as WindowWithPodRender).podRender.requestGameplayFocus());
+    await advanceInBursts(page, PRE_RESET_WARMUP_BURSTS_MS);
+    debugLog(`${routeTarget.label} perf reset`);
     await page.evaluate(() => (window as WindowWithPodRender).podRender.resetPerfMetrics());
     await page.evaluate(() => (window as WindowWithPodRender).podRender.requestGameplayFocus());
     await page.keyboard.down("w");
+    debugLog(`${routeTarget.label} measured movement`);
     await advanceInBursts(page, [100, 100, 100, 100, 100, 100, 100]);
     await page.keyboard.up("w");
+    debugLog(`${routeTarget.label} cooldown movement`);
     await advanceInBursts(page, [100, 100, 100, 100]);
+    debugLog(`${routeTarget.label} collecting stats`);
     const stats = await page.evaluate(() => (window as WindowWithPodRender).podRender.getStats());
     return buildRenderRouteMeasurement(routeTarget.label, url, stats);
   } finally {
+    debugLog(`${routeTarget.label} page close`);
     await page.close();
   }
 }
@@ -486,9 +534,11 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const appRoot = resolve(import.meta.dir, "..");
   const outputPath = resolve(appRoot, options.output);
+  debugLog(`starting with baseUrl=${options.baseUrl}`);
   const serverProcess = await startServerIfNeeded(appRoot, options.baseUrl);
 
   try {
+    debugLog("launching browser");
     const browser = await chromium.launch({
       headless: true,
       args: ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-webgpu"],
@@ -498,19 +548,28 @@ async function main() {
       for (const routeTarget of DEFAULT_ROUTE_TARGETS) {
         routes.push(await collectRouteMeasurement(browser, options.baseUrl, routeTarget));
       }
+      debugLog("building report");
       const report = buildRenderRouteMeasurementReport(options.baseUrl, routes);
+      debugLog(`writing report to ${outputPath}`);
       await Bun.write(outputPath, JSON.stringify(report, null, 2));
       if (options.failOnGates) {
+        debugLog("asserting gates");
         assertRenderRouteMeasurementReportGates(report);
       }
+      debugLog("printing report");
       console.log(JSON.stringify(report, null, 2));
     } finally {
-      await browser.close();
+      debugLog("closing browser");
+      await waitWithTimeout(browser.close(), TEARDOWN_TIMEOUT_MS, "browser.close");
+      debugLog("browser close wait completed");
     }
   } finally {
     if (serverProcess) {
+      debugLog("stopping vite server");
       serverProcess.kill();
-      await serverProcess.exited;
+      serverProcess.unref();
+      await waitWithTimeout(serverProcess.exited, TEARDOWN_TIMEOUT_MS, "vite shutdown");
+      debugLog("vite shutdown wait completed");
     }
   }
 }
@@ -519,5 +578,7 @@ if (import.meta.main) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
+  }).then(() => {
+    process.exit(0);
   });
 }

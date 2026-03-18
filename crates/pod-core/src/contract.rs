@@ -981,7 +981,7 @@ pub struct TournamentTeamStandingSummary {
 
 /// Tournament-scoped control-plane rollup derived from shared admissions,
 /// per-world control planes, reward ledgers, and applied world state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TournamentControlPlaneSummary {
     pub tournament_id: String,
     pub standings: Vec<TournamentTeamStandingSummary>,
@@ -990,15 +990,6 @@ pub struct TournamentControlPlaneSummary {
 impl TournamentControlPlaneSummary {
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("tournament_control_plane_summary", self)
-    }
-}
-
-impl Default for TournamentControlPlaneSummary {
-    fn default() -> Self {
-        Self {
-            tournament_id: String::new(),
-            standings: Vec::new(),
-        }
     }
 }
 

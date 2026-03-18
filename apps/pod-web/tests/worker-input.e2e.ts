@@ -103,29 +103,36 @@ async function waitForRuntimeAssets(page: Page) {
 
 async function advanceInBursts(page: Page, durationsMs: number[]) {
   for (const durationMs of durationsMs) {
-    const framesBefore = await page.evaluate(
-      () => window.podRender.getStats().runtimePerf.framesRendered,
-    );
     await page.evaluate((stepMs) => window.advanceTime(stepMs), durationMs);
-    await page.waitForFunction(
-      (expectedFrames) => window.podRender.getStats().runtimePerf.framesRendered > expectedFrames,
-      framesBefore,
-    );
   }
 }
 
 async function moveForward(
   page: Page,
   expectedRenderThread: "main" | "worker",
-  expectedRequestedRenderThread: "auto" | "worker"
+  expectedRequestedRenderThread: "auto" | "main" | "worker"
 ) {
   await expect(page.evaluate(() => window.podRender.requestGameplayFocus())).resolves.toBeTruthy();
   const before = await page.evaluate(() => window.podRender.getGameplayState());
+  const framesBeforeMovement = await page.evaluate(
+    () => window.podRender.getStats().runtimePerf.framesRendered,
+  );
   await page.keyboard.down("w");
   await advanceInBursts(page, [100, 100, 100, 100, 100, 100, 100]);
+  await page.waitForFunction(
+    (expectedFrames) => window.podRender.getStats().runtimePerf.framesRendered > expectedFrames,
+    framesBeforeMovement,
+  );
   const during = await page.evaluate(() => window.podRender.getGameplayState());
   await page.keyboard.up("w");
+  const framesBeforeCooldown = await page.evaluate(
+    () => window.podRender.getStats().runtimePerf.framesRendered,
+  );
   await advanceInBursts(page, [100, 100, 100, 100]);
+  await page.waitForFunction(
+    (expectedFrames) => window.podRender.getStats().runtimePerf.framesRendered > expectedFrames,
+    framesBeforeCooldown,
+  );
   const after = await page.evaluate(() => window.podRender.getGameplayState());
   const stats = await page.evaluate(() => window.podRender.getStats());
 
@@ -182,7 +189,7 @@ async function moveForward(
   );
 }
 
-test("main-thread local sandbox route accepts gameplay focus and movement input", async ({ page }) => {
+test("default local sandbox route accepts gameplay focus and movement input", async ({ page }) => {
   await page.goto("/?world=local-sandbox&backend=webgl2");
   await waitForGameplayReady(page);
   await waitForRuntimeAssets(page);

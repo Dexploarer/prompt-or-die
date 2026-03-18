@@ -12,6 +12,7 @@ import {
   shouldUseRenderWorker
 } from "./render-runtime";
 import {
+  PodThreeWorldRenderer,
   createPodThreeMainThreadPerfTracker,
   POD_THREE_FRAME_STABILITY_BUDGET_MS,
   createPodThreeRuntimePerfTracker,
@@ -155,7 +156,7 @@ describe("render worker runtime", () => {
     expect(resolveRendererBackendPreference("?backend=software")).toBe("auto");
   });
 
-  test("only enables the render worker when explicitly requested and supported", () => {
+  test("keeps main-thread rendering as the default unless the worker is explicitly requested", () => {
     const supported = {
       hasWorkerConstructor: true,
       hasOffscreenCanvas: true,
@@ -166,12 +167,23 @@ describe("render worker runtime", () => {
     expect(shouldUseRenderWorker("main", supported)).toBe(false);
     expect(shouldUseRenderWorker("worker", supported)).toBe(true);
     expect(
-      shouldUseRenderWorker("worker", {
+      shouldUseRenderWorker("auto", {
         ...supported,
         hasCanvasTransferControl: false
       })
     ).toBe(false);
+    expect(resolveRenderWorkerFallbackReason("auto", supported)).toBeNull();
     expect(resolveRenderWorkerFallbackReason("worker", supported)).toBeNull();
+    expect(
+      resolveRenderWorkerFallbackReason(
+        "worker",
+        {
+          ...supported,
+          hasOffscreenCanvas: false
+        },
+        true
+      )
+    ).toBe("missing-offscreen-canvas");
     expect(
       resolveRenderWorkerFallbackReason(
         "worker",
@@ -195,6 +207,74 @@ describe("render worker runtime", () => {
     expect(resolveRenderWorkerFallbackReason("worker", supported, false)).toBe(
       "missing-worker-constructor"
     );
+  });
+
+  test("auto mode keeps the main-thread runtime even when worker primitives exist", async () => {
+    const originalWorker = globalThis.Worker;
+    const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+    const originalCreate = PodThreeWorldRenderer.create;
+    const fakeWorker = new FakeRenderWorker();
+    const fakeRenderer = {
+      backend: "webgl2",
+      quality: { preset: "balanced" },
+      applyFrame() {
+        return Promise.resolve();
+      },
+      applyLegacyFrame() {
+        return Promise.resolve();
+      },
+      notifyWorldEvents() {},
+      setTelemetryTrail() {},
+      clearTelemetryTrail() {},
+      resetPerfMetrics() {},
+      getStats() {
+        return {
+          ...BASE_RENDERER_STATS,
+          renderThread: "main",
+          requestedRenderThread: "auto",
+          qualityPreset: "balanced"
+        };
+      },
+      dispose() {}
+    } as unknown as PodThreeWorldRenderer;
+
+    try {
+      globalThis.Worker = (function Worker() {}) as unknown as typeof Worker;
+      globalThis.OffscreenCanvas = (function OffscreenCanvas() {}) as unknown as typeof OffscreenCanvas;
+      PodThreeWorldRenderer.create = (() => Promise.resolve(fakeRenderer)) as typeof PodThreeWorldRenderer.create;
+
+      const runtime = await createPodRenderRuntime(
+        {
+          clientWidth: 1280,
+          clientHeight: 720,
+          width: 1280,
+          height: 720,
+          transferControlToOffscreen() {
+            return { tag: "offscreen" } as unknown as OffscreenCanvas;
+          }
+        } as unknown as HTMLCanvasElement,
+        {},
+        "?backend=webgl2",
+        () => fakeWorker as unknown as Worker
+      );
+
+      expect(runtime.renderThread).toBe("main");
+      expect(runtime.getStats().requestedRenderThread).toBe("auto");
+
+      runtime.dispose();
+    } finally {
+      if (originalWorker === undefined) {
+        delete (globalThis as Record<string, unknown>).Worker;
+      } else {
+        globalThis.Worker = originalWorker;
+      }
+      PodThreeWorldRenderer.create = originalCreate;
+      if (originalOffscreenCanvas === undefined) {
+        delete (globalThis as Record<string, unknown>).OffscreenCanvas;
+      } else {
+        globalThis.OffscreenCanvas = originalOffscreenCanvas;
+      }
+    }
   });
 
   test("detects transfer support from the canvas surface", () => {

@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { BoxGeometry } from "three";
+import { BoxGeometry, Scene } from "three";
 
 import type { PodThreeAssetRegistry } from "./assets";
-import { buildAmbientChunkDressingPlan, resolveVisibleMeshBatchResources } from "./renderer";
+import {
+  PodThreeWorldRenderer,
+  buildAmbientChunkDressingPlan,
+  resolveRuntimeAssetRegistryBootstrapOptions,
+  resolveVisibleMeshBatchResources
+} from "./renderer";
 import type { PlannedMeshBatch } from "./frame-plan";
 import {
   describeEnvironmentPreset,
@@ -391,5 +396,107 @@ describe("pod-web renderer landscape helpers", () => {
 
     expect(resolved).toHaveLength(2);
     expect(resolved.map((entry) => entry.planned.key)).toEqual(["mesh:a", "mesh:b"]);
+  });
+
+  test("keeps worker asset bootstrap on source meshes and eager manifest loading", () => {
+    expect(
+      resolveRuntimeAssetRegistryBootstrapOptions({
+        width: 1280,
+        height: 720
+      } as OffscreenCanvas)
+    ).toEqual({
+      preferCompressedMeshVariants: false,
+      preferCompressedTextureVariants: false,
+      preferNonBlockingFallbacks: false,
+      lazyManifestLoad: false
+    });
+
+    expect(
+      resolveRuntimeAssetRegistryBootstrapOptions({
+        clientWidth: 1280,
+        clientHeight: 720,
+        width: 1280,
+        height: 720
+      } as HTMLCanvasElement)
+    ).toEqual({
+      preferCompressedMeshVariants: true,
+      preferCompressedTextureVariants: false,
+      preferNonBlockingFallbacks: true,
+      lazyManifestLoad: true
+    });
+  });
+
+  test("reuses cached fallback mesh materials across repeated syncs", async () => {
+    const geometry = new BoxGeometry(1, 1, 1);
+    const batch: PlannedMeshBatch = {
+      key: "mesh:hero",
+      batch: {
+        mesh: "adventurer-avatar",
+        material: "default",
+        layer: 0,
+        phase: "opaque",
+        sortDepth: 0,
+        renderOrder: 1,
+        transparent: false,
+        doubleSided: false,
+        castShadows: true,
+        receiveShadows: true,
+        tint: [1, 1, 1, 1],
+        roughness: 0.82,
+        metallic: 0.08,
+        emissive: [0, 0, 0],
+        depthWrite: true,
+        depthTest: true,
+        instances: []
+      },
+      lodLevel: 0,
+      visibleCount: 1,
+      instances: [
+        {
+          position: [0, 0, 0],
+          rotation: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+          sourceEntity: 7
+        }
+      ],
+      matrices: []
+    };
+    const renderer = Object.create(PodThreeWorldRenderer.prototype) as {
+      scene: Scene;
+      quality: { environmentIntensity: number };
+      assetRegistry: PodThreeAssetRegistry;
+      meshEntries: Map<string, { mesh: unknown; material: unknown }>;
+      meshMaterialCache: Map<string, unknown>;
+      entityPulseUntilMs: Map<number, number>;
+      smoothedInstanceTransforms: Map<string, unknown>;
+      sceneTimeMs: () => number;
+      syncMeshBatches: (batches: PlannedMeshBatch[]) => Promise<void>;
+    };
+    renderer.scene = new Scene();
+    renderer.quality = { environmentIntensity: 1 };
+    renderer.assetRegistry = {
+      resolveGeometry() {
+        return geometry;
+      },
+      resolveSpriteTexture() {
+        throw new Error("not used in mesh sync");
+      }
+    };
+    renderer.meshEntries = new Map();
+    renderer.meshMaterialCache = new Map();
+    renderer.entityPulseUntilMs = new Map();
+    renderer.smoothedInstanceTransforms = new Map();
+    renderer.sceneTimeMs = () => 0;
+
+    await renderer.syncMeshBatches([batch]);
+    const firstEntry = renderer.meshEntries.get(batch.key);
+
+    await renderer.syncMeshBatches([batch]);
+    const secondEntry = renderer.meshEntries.get(batch.key);
+
+    expect(firstEntry).toBeDefined();
+    expect(secondEntry).toBe(firstEntry);
+    expect(secondEntry?.material).toBe(firstEntry?.material);
+    expect(renderer.meshMaterialCache.size).toBe(1);
   });
 });

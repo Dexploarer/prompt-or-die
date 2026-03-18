@@ -239,4 +239,30 @@ describe("measure render routes", () => {
       "worker route completed only 5 asset loads; expected at least 10",
     );
   });
+
+  test("fails explicitly when the main route falls below the stable-frame floor", () => {
+    const report = buildRenderRouteMeasurementReport("http://127.0.0.1:4178", [
+      buildRenderRouteMeasurement(
+        "main",
+        "http://127.0.0.1:4178/?world=local-sandbox&backend=webgl2",
+        createStats({
+          geometryLoadsCompleted: 8,
+          spriteLoadsCompleted: 4,
+          runtimePerf: {
+            stableFrames: 44,
+            slowFrames: 56,
+            stableFramePercent: 44,
+          },
+        }),
+      ),
+    ]);
+
+    expect(report.routes[0]?.gates.stableFramePercentFloorPassed).toBeFalse();
+    expect(collectRenderRouteMeasurementFailures(report)).toEqual([
+      "main route stable frame percent 44 fell below 45",
+    ]);
+    expect(() => assertRenderRouteMeasurementReportGates(report)).toThrow(
+      "main route stable frame percent 44 fell below 45",
+    );
+  });
 });
