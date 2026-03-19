@@ -40,12 +40,21 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("RustSdkFacade");
     expect(markdown).toContain("RustSdkFacadeConfig");
     expect(markdown).toContain("RustSdkFacadeError");
+    expect(markdown).toContain(
+      "pod_sdk::{RustSdkClient, RustSdkClientConfig, RustSdkRuntimeMode, run_rust_sdk_benchmark_suite, run_rust_sdk_live_smoke}",
+    );
     expect(markdown).toContain("RustSdkAdapterLiveSmokeConfig");
     expect(markdown).toContain("run_rust_sdk_adapter_live_smoke()");
     expect(markdown).toContain("RustSdkRolloutRecorder");
     expect(markdown).toContain("run_rust_sdk_adapter_benchmark_suite()");
     expect(markdown).toContain(
       "cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks",
+    );
+    expect(markdown).toContain(
+      "cargo run -p pod-sdk --example rust_sdk_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks",
+    );
+    expect(markdown).toContain(
+      "cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks",
     );
     expect(markdown).toContain("bun ./scripts/verify_rust_sdk_boundary.ts --check");
   });

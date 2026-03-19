@@ -8,6 +8,7 @@ members = [
     "crates/pod-scripting",
     "crates/pod-render",
     "crates/pod-net",
+    "crates/pod-sdk",
     "crates/pod-host",
     "crates/pod-animation",
     "crates/pod-scene",

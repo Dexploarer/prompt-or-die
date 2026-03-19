@@ -36,7 +36,7 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
   },
   {
     path: "docs/platform-stabilization.md",
-    requiredSnippets: ["docs/rust-sdk-boundary.md"],
+    requiredSnippets: ["docs/rust-sdk-boundary.md", "crates/pod-sdk/src/lib.rs"],
   },
   {
     path: RUST_SDK_BOUNDARY_DOC_PATH,
@@ -64,12 +64,15 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "RustSdkFacade",
       "RustSdkFacadeConfig",
       "RustSdkFacadeError",
+      "pod_sdk::{RustSdkClient, RustSdkClientConfig, RustSdkRuntimeMode, run_rust_sdk_benchmark_suite, run_rust_sdk_live_smoke}",
       "RustSdkAdapterLiveSmokeConfig",
       "run_rust_sdk_adapter_live_smoke()",
       "RustSdkRolloutRecorder",
       "run_rust_sdk_adapter_benchmark_suite()",
       "cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks",
       "cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks",
+      "cargo run -p pod-sdk --example rust_sdk_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks",
+      "cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks",
       "## Adapter lanes",
       "rs_state_adapter",
       "rs_action_adapter",
@@ -91,11 +94,23 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
     ],
   },
   {
+    path: "Cargo.toml",
+    requiredSnippets: ['"crates/pod-sdk"'],
+  },
+  {
     path: "crates/pod-net/Cargo.toml",
     requiredSnippets: [
       'name = "rust_sdk_adapter_benchmark_suite"',
       'name = "rust_sdk_adapter_live_smoke"',
       'required-features = ["spacetimedb"]',
+    ],
+  },
+  {
+    path: "crates/pod-sdk/Cargo.toml",
+    requiredSnippets: [
+      'name = "pod-sdk"',
+      'name = "rust_sdk_benchmark_suite"',
+      'name = "rust_sdk_live_smoke"',
     ],
   },
   {
@@ -120,6 +135,19 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
       "pub fn apply_rust_sdk_handoff_artifact(",
+    ],
+  },
+  {
+    path: "crates/pod-sdk/src/lib.rs",
+    requiredSnippets: [
+      "pub use pod_net::RustSdkAdapterRuntimeMode as RustSdkRuntimeMode;",
+      "RustSdkFacade as RustSdkClient",
+      "RustSdkFacadeConfig as RustSdkClientConfig",
+      "RustSdkFacadeError as RustSdkClientError",
+      "pub type RustSdkLiveSmokeConfig = pod_net::RustSdkAdapterLiveSmokeConfig;",
+      "pub fn run_rust_sdk_benchmark_suite()",
+      "pub fn run_rust_sdk_live_smoke(",
+      "pub enum RustSdkError",
     ],
   },
   {
@@ -151,6 +179,20 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
       "pub fn apply_rust_sdk_handoff_artifact(",
+    ],
+  },
+  {
+    path: "crates/pod-sdk/examples/rust_sdk_live_smoke.rs",
+    requiredSnippets: [
+      "run_rust_sdk_live_smoke",
+      "Usage: cargo run -p pod-sdk --example rust_sdk_live_smoke -- [--host URL] [--db-name NAME] [--auth-token TOKEN] [--timeout-ms MS] [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]",
+    ],
+  },
+  {
+    path: "crates/pod-sdk/examples/rust_sdk_benchmark_suite.rs",
+    requiredSnippets: [
+      "run_rust_sdk_benchmark_suite",
+      "Usage: cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]",
     ],
   },
   {

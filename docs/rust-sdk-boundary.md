@@ -46,6 +46,7 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan, RustSdkActionExecutorError}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions plus one host-level execution seam (`bind_state_snapshot_action_entity()` and `execute_action_plan()`) before any live SDK method bindings exist. |
 | Thin session facade | `pod_net::{RustSdkAdapterSession, RustSdkAdapterSessionError}` | The future POD-owned rs-sdk facade can now start from one repo-owned session surface that binds snapshot state, submits translated actions, and records replay rows without app-local orchestration glue. |
 | Thin POD-owned rs-sdk facade | `pod_net::{RustSdkFacade, RustSdkFacadeConfig, RustSdkFacadeError}` | This is the smallest repo-owned wrapper a future packaged rs-sdk can depend on directly when it wants runtime-mode selection, handoff ingest, action execution, replay finalization, and the live smoke entrypoint without exposing app-local host/session glue. |
+| Packaged Rust SDK surface | `pod_sdk::{RustSdkClient, RustSdkClientConfig, RustSdkRuntimeMode, run_rust_sdk_benchmark_suite, run_rust_sdk_live_smoke}` | This is the first packaged workspace crate that re-exports the thin facade under package-friendly names and hosts the canonical smoke/benchmark entrypoints above `pod-net`. |
 | Live generated-SDK smoke surface | `pod_net::{RustSdkAdapterLiveSmokeConfig, run_rust_sdk_adapter_live_smoke}` | When a real SpacetimeDB module is running, this proves the repo-owned session facade can spawn, connect, submit, and record over `GeneratedSdk` mode instead of only deterministic emulation. |
 | Repo-owned rollout/benchmark seam | `pod_net::{RustSdkRolloutRecorder, RustSdkBenchmarkReport, run_rust_sdk_adapter_benchmark_suite}` | SDK-driven episodes and adapter parity checks can now stay on the same replay/training/report contracts, and the benchmark suite now exercises real queue/send submission instead of only translation. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
@@ -135,11 +136,18 @@ Rules:
   `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
   as the deterministic adapter seam smoke/benchmark surface before wiring live
   SDK calls
+- prefer `run_rust_sdk_benchmark_suite()` and
+  `cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks`
+  when the goal is to exercise the packaged Rust SDK surface instead of the
+  lower-level `pod-net` seam directly
 - prefer `run_rust_sdk_adapter_live_smoke()` and
   `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks`
   when a local published module is available and the goal is to prove
   `RustSdkAdapterSession` reaches live generated-SDK `spawn_entity`,
   `connect_agent`, and `submit_action` rows
+- prefer `run_rust_sdk_live_smoke()` and
+  `cargo run -p pod-sdk --example rust_sdk_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks`
+  when the packaged Rust SDK surface should own the live-smoke entrypoint
 - keep the benchmark execution-backed: it should submit through the same host
   bind/execute seam over emulated or generated-binding runtime modes rather
   than only checking plan translation
@@ -171,8 +179,10 @@ The supported handoff is:
    `RustSdkAdapterHost::execute_action_plan()`.
 7. Prefer `RustSdkAdapterSession` when the rs-sdk facade wants one repo-owned
    wrapper that composes steps 4-6 with rollout recording.
-8. Prefer `run_rust_sdk_adapter_live_smoke()` when a local module is
-   available and the goal is to prove that the session facade reaches real
+8. Prefer `RustSdkFacade` when the packaged SDK surface wants one config-bound
+   wrapper above that session seam.
+9. Prefer `run_rust_sdk_live_smoke()` when a local module is available and the
+   goal is to prove that the packaged SDK surface still reaches real
    generated-SDK `spawn_entity`, `connect_agent`, and `submit_action` rows.
 
 This keeps the future SDK aligned with the repo-owned generated runtime seam
@@ -200,8 +210,11 @@ The SDK boundary should only be treated as ready when these checks stay green:
 cargo test -p pod-core contract -- --nocapture
 cargo test -p pod-stdb --no-default-features --features client
 cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture
+cargo test -p pod-sdk -- --nocapture
 cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite
 cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks
+cargo check -p pod-sdk --example rust_sdk_benchmark_suite
+cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks
 cargo run -p pod-core --example rust_sdk_handoff_fixture -- --format toon >/tmp/pod-sdk-handoff.toon
 bun ./scripts/pod.ts export world --format json >/tmp/pod-sdk-world.json
 bun ./scripts/pod.ts export events --format toon >/tmp/pod-sdk-events.toon
@@ -214,6 +227,7 @@ Optional live generated-SDK smoke when a local module is available:
 
 ```bash
 cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks
+cargo run -p pod-sdk --example rust_sdk_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks
 ```
 
 If any of those surfaces drift, update the owning crate/doc pair together
@@ -238,6 +252,9 @@ As of the current Phase 8 hardening pass:
   packaged rs-sdk can start from one repo-owned config-bound surface instead
   of stitching `RustSdkAdapterHost`, `RustSdkAdapterSession`, and the live
   smoke helper together in app code
+- the first packaged workspace SDK surface now exists in `pod-sdk`, so the
+  canonical smoke and benchmark commands no longer need to import `pod-net`
+  directly just to reach the facade and helper seams
 - the live generated-SDK smoke harness now exists in `pod-net`, so a running
   module can prove `RustSdkAdapterSession` reaches real `spawn_entity`,
   `connect_agent`, and `submit_action` rows while the facade stays thin
@@ -254,9 +271,9 @@ As of the current Phase 8 hardening pass:
 
 What is still intentionally not promised:
 
-- a packaged third-party Rust SDK crate
+- a versioned third-party Rust SDK release outside this workspace
 - app-root lifecycle hooks as reusable SDK APIs
 - any SDK-specific action dialect inside `pod-core`
 
-That is the boundary to preserve while the POD-owned Rust SDK facade is wired
-up.
+That is the boundary to preserve while the packaged POD Rust SDK surface is
+iterated inside the workspace.

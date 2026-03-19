@@ -4192,6 +4192,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pod-sdk"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "pod-core",
+ "pod-net",
+ "serde_json",
+]
+
+[[package]]
 name = "pod-server"
 version = "0.1.0-alpha.2"
 dependencies = [

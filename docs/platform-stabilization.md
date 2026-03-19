@@ -92,7 +92,9 @@ Integration rule:
 - Treat app entry points (`apps/pod-web/src/main.ts`, `apps/pod-server/src/main.rs`) as composition roots, not reusable APIs.
 - Treat [Rust SDK Boundary](./rust-sdk-boundary.md) as the repo-owned contract
   for future Rust SDK hookup work.
-- Treat `docs/rs-sdk-integration-notes.md` as reference-only until POD ships a versioned external SDK boundary of its own.
+- Treat `docs/rs-sdk-integration-notes.md` as reference-only context; the
+  current packaged workspace SDK surface now lives in
+  `crates/pod-sdk/src/lib.rs`.
 
 ## Shipping, authz, and SDK boundaries
 

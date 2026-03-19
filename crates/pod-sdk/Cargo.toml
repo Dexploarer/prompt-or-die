@@ -1,0 +1,15 @@
+[package]
+name = "pod-sdk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pod-core = { path = "../pod-core" }
+pod-net = { path = "../pod-net", features = ["spacetimedb"] }
+serde_json.workspace = true
+
+[[example]]
+name = "rust_sdk_benchmark_suite"
+
+[[example]]
+name = "rust_sdk_live_smoke"

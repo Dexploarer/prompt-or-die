@@ -2486,3 +2486,18 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 242
+- Added `crates/pod-sdk` as the first packaged workspace Rust SDK surface, re-exporting the thin `pod-net` facade under package-facing names (`RustSdkClient`, `RustSdkClientConfig`, `RustSdkRuntimeMode`) and adding package-level `run_rust_sdk_benchmark_suite()` / `run_rust_sdk_live_smoke()` helpers so consumers no longer need to import `pod-net` directly to reach the canonical SDK entrypoints.
+- Added `crates/pod-sdk/examples/rust_sdk_benchmark_suite.rs` and `crates/pod-sdk/examples/rust_sdk_live_smoke.rs`, so the canonical smoke and benchmark command surfaces now live on the packaged SDK crate instead of only on lower-level `pod-net` examples.
+- Updated the Rust SDK boundary docs, platform-stabilization note, and boundary verifier to treat `pod-sdk` as part of the enforced contract, while keeping the lower-level `pod-net` seams visible as implementation detail.
+- [x] Validation:
+  - `cargo test -p pod-sdk -- --nocapture`
+  - `cargo test -p pod-sdk --example rust_sdk_live_smoke -- --nocapture`
+  - `cargo check -p pod-sdk --example rust_sdk_benchmark_suite`
+  - `cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `bun test scripts/verify_platform_docs.test.ts`
+  - `bun ./scripts/verify_platform_docs.ts --check`
+  - `git diff --check`
