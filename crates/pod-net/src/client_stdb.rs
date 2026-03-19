@@ -64,10 +64,9 @@ use pod_core::replay::{ReplayFile, ReplayHeader, ReplayRecorder, ReplayTrainingS
 use pod_core::AgentType as CoreAgentType;
 use pod_core::{
     build_rust_sdk_handoff_fixture, decode_toon_document, ActionLifecycleStage, ActionSource,
-    AgentRuntimeProfile, AgentTelemetryFrame, AppliedWorldStateSummary,
-    RemoteAgentFallbackReason, RemoteAgentRuntimeStatus, RemoteAgentTransportContract,
-    RemoteTopologyBundle, RustSdkHandoffArtifact, VersionedObservation,
-    VersionedTickTelemetry, WorldEvaluationSummary,
+    AgentRuntimeProfile, AgentTelemetryFrame, AppliedWorldStateSummary, RemoteAgentFallbackReason,
+    RemoteAgentRuntimeStatus, RemoteAgentTransportContract, RemoteTopologyBundle,
+    RustSdkHandoffArtifact, VersionedObservation, VersionedTickTelemetry, WorldEvaluationSummary,
 };
 
 use pod_stdb::client::{
@@ -474,7 +473,63 @@ impl RustSdkAdapterHost {
         &mut self,
         snapshot: &RustSdkStateSnapshot,
     ) -> Result<(), StdbClientError> {
+        upsert_rust_sdk_state_snapshot_entities(self.client.inner_mut(), snapshot);
         self.apply_handoff_artifact(snapshot.to_handoff_artifact())
+    }
+
+    /// Bind the controlled entity used for repo-owned Rust SDK action execution.
+    pub fn bind_action_entity(
+        &mut self,
+        entity_id: u64,
+        agent_type: CoreAgentType,
+    ) -> Result<(), StdbClientError> {
+        let stdb_agent_type = stdb_agent_type_from_core(agent_type);
+
+        if self.client.inner().entity(entity_id).is_none() {
+            self.client
+                .inner_mut()
+                .upsert_entity(CachedEntity::from_entity(
+                    entity_id,
+                    Some(stdb_agent_type.clone()),
+                    true,
+                ));
+        }
+
+        self.client.connect_remote_agent(entity_id, stdb_agent_type)
+    }
+
+    /// Bind the state snapshot's controlled entity for subsequent action execution.
+    pub fn bind_state_snapshot_action_entity(
+        &mut self,
+        snapshot: &RustSdkStateSnapshot,
+    ) -> Result<(), StdbClientError> {
+        self.bind_action_entity(
+            snapshot.self_state.entity_id.0,
+            snapshot.runtime_profile.agent_type,
+        )
+    }
+
+    /// Execute a repo-owned Rust SDK action plan through the existing action queue.
+    pub fn execute_action_plan(
+        &mut self,
+        plan: &RustSdkActionPlan,
+    ) -> Result<Action, RustSdkActionExecutorError> {
+        let controlled_entity = self.client.inner().controlled_entity().ok_or_else(|| {
+            RustSdkActionExecutorError::Client(
+                "cannot execute Rust SDK action plan without a bound remote agent entity".into(),
+            )
+        })?;
+
+        if self.client.inner().entity(controlled_entity).is_none() {
+            return Err(RustSdkActionExecutorError::Client(format!(
+                "controlled entity {controlled_entity} is missing from the cached state"
+            )));
+        }
+
+        let action = rust_sdk_action_from_plan(plan);
+        self.client.queue_action(action.clone());
+        self.client.send_actions(0)?;
+        Ok(action)
     }
 }
 
@@ -817,6 +872,27 @@ impl fmt::Display for RustSdkActionAdapterError {
 
 impl std::error::Error for RustSdkActionAdapterError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkActionExecutorError {
+    Client(String),
+}
+
+impl fmt::Display for RustSdkActionExecutorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Client(message) => write!(f, "failed to execute Rust SDK action plan: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RustSdkActionExecutorError {}
+
+impl From<StdbClientError> for RustSdkActionExecutorError {
+    fn from(error: StdbClientError) -> Self {
+        Self::Client(error.to_string())
+    }
+}
+
 /// Translate a shared POD action into a repo-owned Rust SDK action plan.
 pub fn build_rust_sdk_action_plan(
     action: &Action,
@@ -975,8 +1051,9 @@ impl RustSdkRolloutRecord {
             .iter()
             .map(build_rust_sdk_action_plan)
             .collect::<Result<Vec<_>, _>>()?;
-        let raw_response = serde_json::to_string(&action_plans)
-            .map_err(|error| RustSdkRolloutRecorderError::SerializeActionPlans(error.to_string()))?;
+        let raw_response = serde_json::to_string(&action_plans).map_err(|error| {
+            RustSdkRolloutRecorderError::SerializeActionPlans(error.to_string())
+        })?;
 
         Ok(Self {
             snapshot,
@@ -994,6 +1071,7 @@ impl RustSdkRolloutRecord {
 pub enum RustSdkRolloutRecorderError {
     DuplicateDecision { tick: u64, agent_id: AgentId },
     UnsupportedAction(RustSdkActionAdapterError),
+    ActionExecution(String),
     SerializeActionPlans(String),
 }
 
@@ -1007,6 +1085,9 @@ impl fmt::Display for RustSdkRolloutRecorderError {
                 )
             }
             Self::UnsupportedAction(error) => error.fmt(f),
+            Self::ActionExecution(message) => {
+                write!(f, "failed to execute Rust SDK benchmark action: {message}")
+            }
             Self::SerializeActionPlans(message) => {
                 write!(f, "failed to serialize Rust SDK action plans: {message}")
             }
@@ -1019,6 +1100,12 @@ impl std::error::Error for RustSdkRolloutRecorderError {}
 impl From<RustSdkActionAdapterError> for RustSdkRolloutRecorderError {
     fn from(error: RustSdkActionAdapterError) -> Self {
         Self::UnsupportedAction(error)
+    }
+}
+
+impl From<RustSdkActionExecutorError> for RustSdkRolloutRecorderError {
+    fn from(error: RustSdkActionExecutorError) -> Self {
+        Self::ActionExecution(error.to_string())
     }
 }
 
@@ -1039,7 +1126,10 @@ impl RustSdkRolloutRecorder {
         }
     }
 
-    pub fn record(&mut self, record: RustSdkRolloutRecord) -> Result<(), RustSdkRolloutRecorderError> {
+    pub fn record(
+        &mut self,
+        record: RustSdkRolloutRecord,
+    ) -> Result<(), RustSdkRolloutRecorderError> {
         let tick = record.snapshot.tick;
         let agent_id = record.snapshot.self_state.agent_id;
 
@@ -1105,6 +1195,7 @@ pub struct RustSdkBenchmarkCheck {
 pub struct RustSdkBenchmarkScenarioReport {
     pub scenario_id: String,
     pub description: String,
+    pub runtime_mode: RustSdkAdapterRuntimeMode,
     pub expected_action_key: String,
     pub observed_action_key: String,
     pub expected_execution_mode: RustSdkActionExecutionMode,
@@ -1112,6 +1203,8 @@ pub struct RustSdkBenchmarkScenarioReport {
     pub action_matches: bool,
     pub execution_mode_matches: bool,
     pub available_action_matches: bool,
+    pub reducer_submission_count: u64,
+    pub reducer_submission_matches: bool,
     pub tool_call_error_count: usize,
     pub training_sample_count: usize,
 }
@@ -1146,6 +1239,7 @@ const RUST_SDK_BENCHMARK_SCHEMA_VERSION: u32 = 1;
 struct RustSdkBenchmarkCase {
     scenario_id: &'static str,
     description: &'static str,
+    runtime_mode: RustSdkAdapterRuntimeMode,
     snapshot: RustSdkStateSnapshot,
     action: Action,
     tool_calls: Vec<pod_core::AgentToolCallTrace>,
@@ -1166,16 +1260,27 @@ pub fn run_rust_sdk_adapter_benchmark_suite(
     for case in &cases {
         max_tick = max_tick.max(case.snapshot.tick);
         let action_plan = build_rust_sdk_action_plan(&case.action)?;
+        let mut host = build_rust_sdk_benchmark_host(case)?;
+        let reducers_before = host.client().inner().reducers_called();
+        let executed_action = host.execute_action_plan(&action_plan)?;
+        let reducer_submission_count = host
+            .client()
+            .inner()
+            .reducers_called()
+            .saturating_sub(reducers_before);
         let record = RustSdkRolloutRecord::from_actions(
             case.snapshot.clone(),
-            format!("rust-sdk benchmark scenario:{}", case.scenario_id),
-            vec![case.action.clone()],
+            format!(
+                "rust-sdk benchmark scenario:{} runtime:{:?}",
+                case.scenario_id, case.runtime_mode
+            ),
+            vec![executed_action.clone()],
             case.tool_calls.clone(),
             case.latency_ms,
         )?;
         recorder.record(record)?;
 
-        let expected_variant = rust_sdk_action_variant_name(&case.action);
+        let expected_variant = rust_sdk_action_variant_name(&executed_action);
         let training_sample_count = case
             .snapshot
             .latest_tick_telemetry
@@ -1185,17 +1290,21 @@ pub fn run_rust_sdk_adapter_benchmark_suite(
         scenario_reports.push(RustSdkBenchmarkScenarioReport {
             scenario_id: case.scenario_id.to_string(),
             description: case.description.to_string(),
+            runtime_mode: case.runtime_mode,
             expected_action_key: case.expected_action_key.to_string(),
-            observed_action_key: rust_sdk_action_semantic_key(&case.action).to_string(),
+            observed_action_key: rust_sdk_action_semantic_key(&executed_action).to_string(),
             expected_execution_mode: case.expected_execution_mode,
             observed_execution_mode: action_plan.execution_mode,
-            action_matches: rust_sdk_action_semantic_key(&case.action) == case.expected_action_key,
+            action_matches: rust_sdk_action_semantic_key(&executed_action)
+                == case.expected_action_key,
             execution_mode_matches: action_plan.execution_mode == case.expected_execution_mode,
             available_action_matches: case
                 .snapshot
                 .available_actions
                 .iter()
                 .any(|available| available == expected_variant),
+            reducer_submission_count,
+            reducer_submission_matches: reducer_submission_count == 1,
             tool_call_error_count: case
                 .tool_calls
                 .iter()
@@ -1233,7 +1342,9 @@ pub fn run_rust_sdk_adapter_benchmark_suite(
         },
         RustSdkBenchmarkCheck {
             metric: "action_match_count".into(),
-            passed: scenario_reports.iter().all(|scenario| scenario.action_matches),
+            passed: scenario_reports
+                .iter()
+                .all(|scenario| scenario.action_matches),
             expected: cases.len().to_string(),
             observed: scenario_reports
                 .iter()
@@ -1262,6 +1373,18 @@ pub fn run_rust_sdk_adapter_benchmark_suite(
             observed: scenario_reports
                 .iter()
                 .filter(|scenario| scenario.available_action_matches)
+                .count()
+                .to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "reducer_submission_match_count".into(),
+            passed: scenario_reports
+                .iter()
+                .all(|scenario| scenario.reducer_submission_matches),
+            expected: cases.len().to_string(),
+            observed: scenario_reports
+                .iter()
+                .filter(|scenario| scenario.reducer_submission_matches)
                 .count()
                 .to_string(),
         },
@@ -1295,7 +1418,8 @@ fn curated_rust_sdk_benchmark_cases() -> Vec<RustSdkBenchmarkCase> {
     vec![
         RustSdkBenchmarkCase {
             scenario_id: "frontier_anchor_attack",
-            description: "Remote combat state should lower to an immediate attack plan.",
+            description: "Remote combat state should submit an immediate attack plan over the emulated runtime seam.",
+            runtime_mode: RustSdkAdapterRuntimeMode::Emulated,
             snapshot: attack_snapshot,
             action: Action::AttackTarget {
                 target: EntityId(9001),
@@ -1307,7 +1431,8 @@ fn curated_rust_sdk_benchmark_cases() -> Vec<RustSdkBenchmarkCase> {
         },
         RustSdkBenchmarkCase {
             scenario_id: "frontier_iron_gather",
-            description: "Resource-node state should lower to a completion-aware gather plan.",
+            description: "Resource-node state should submit a completion-aware gather plan over the generated-binding seam.",
+            runtime_mode: RustSdkAdapterRuntimeMode::GeneratedBinding,
             snapshot: gather_snapshot,
             action: Action::GatherResource {
                 target: EntityId(9101),
@@ -1326,6 +1451,55 @@ fn curated_rust_sdk_benchmark_cases() -> Vec<RustSdkBenchmarkCase> {
             expected_execution_mode: RustSdkActionExecutionMode::CompletionAware,
         },
     ]
+}
+
+fn build_rust_sdk_benchmark_host(
+    case: &RustSdkBenchmarkCase,
+) -> Result<RustSdkAdapterHost, RustSdkRolloutRecorderError> {
+    let mut host = RustSdkAdapterHost::new(
+        SpacetimeDBClientConfig {
+            db_name: format!("rust-sdk-benchmark-{}", case.scenario_id),
+            ..Default::default()
+        },
+        case.runtime_mode,
+    );
+
+    host.connect().map_err(RustSdkActionExecutorError::from)?;
+
+    match case.runtime_mode {
+        RustSdkAdapterRuntimeMode::Emulated => {
+            let _ = host.poll_updates();
+        }
+        RustSdkAdapterRuntimeMode::GeneratedBinding => {
+            let endpoint = host.generated_binding_endpoint().ok_or_else(|| {
+                RustSdkActionExecutorError::Client(
+                    "generated-binding benchmark host is missing its endpoint".into(),
+                )
+            })?;
+            let callbacks = endpoint.callbacks();
+            let _ = endpoint.drain_commands();
+            callbacks.connected(vec![7; 16], format!("tok-{}", case.scenario_id));
+            let _ = host.poll_updates();
+            let _ = endpoint.drain_commands();
+            callbacks.subscription_applied();
+            let _ = host.poll_updates();
+        }
+        RustSdkAdapterRuntimeMode::GeneratedSdk => {}
+    }
+
+    host.bind_state_snapshot_action_entity(&case.snapshot)
+        .map_err(RustSdkActionExecutorError::from)?;
+
+    if let Some(endpoint) = host.generated_binding_endpoint() {
+        let callbacks = endpoint.callbacks();
+        let _ = endpoint.drain_commands();
+        callbacks.subscription_applied();
+        let _ = host.poll_updates();
+    }
+
+    host.apply_state_snapshot(&case.snapshot)
+        .map_err(RustSdkActionExecutorError::from)?;
+    Ok(host)
 }
 
 fn build_rust_sdk_attack_snapshot() -> RustSdkStateSnapshot {
@@ -1392,15 +1566,13 @@ fn build_rust_sdk_attack_snapshot() -> RustSdkStateSnapshot {
         bank: None,
         transport_contract: fixture.transport_contract.clone(),
         remote_topology: fixture.remote_topology.clone(),
-        latest_tick_telemetry: Some(VersionedTickTelemetry::new(
-            build_rust_sdk_tick_telemetry(
-                &observation,
-                &Action::AttackTarget {
-                    target: EntityId(9001),
-                },
-                &[],
-            ),
-        )),
+        latest_tick_telemetry: Some(VersionedTickTelemetry::new(build_rust_sdk_tick_telemetry(
+            &observation,
+            &Action::AttackTarget {
+                target: EntityId(9001),
+            },
+            &[],
+        ))),
         replay: None,
     };
 
@@ -1539,23 +1711,21 @@ fn build_rust_sdk_gather_snapshot() -> RustSdkStateSnapshot {
         }),
         transport_contract: None,
         remote_topology: None,
-        latest_tick_telemetry: Some(VersionedTickTelemetry::new(
-            build_rust_sdk_tick_telemetry(
-                &observation,
-                &Action::GatherResource {
-                    target: EntityId(9101),
-                    skill: SkillKind::Mining,
-                },
-                &[pod_core::AgentToolCallTrace::success(
-                    1,
-                    "path_probe",
-                    "rs-sdk-benchmark",
-                    12,
-                    4,
-                    3,
-                )],
-            ),
-        )),
+        latest_tick_telemetry: Some(VersionedTickTelemetry::new(build_rust_sdk_tick_telemetry(
+            &observation,
+            &Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining,
+            },
+            &[pod_core::AgentToolCallTrace::success(
+                1,
+                "path_probe",
+                "rs-sdk-benchmark",
+                12,
+                4,
+                3,
+            )],
+        ))),
         replay: None,
     }
 }
@@ -2877,6 +3047,125 @@ fn core_agent_type_from_stdb(agent_type: &AgentType) -> CoreAgentType {
     }
 }
 
+fn stdb_agent_type_from_core(agent_type: CoreAgentType) -> AgentType {
+    match agent_type {
+        CoreAgentType::Human => AgentType::Human,
+        CoreAgentType::LlmAgent => AgentType::LlmAgent,
+        CoreAgentType::NeuralAgent => AgentType::NeuralAgent,
+        CoreAgentType::ScriptedNpc => AgentType::ScriptedNpc,
+        CoreAgentType::System => AgentType::System,
+    }
+}
+
+fn rust_sdk_action_from_plan(plan: &RustSdkActionPlan) -> Action {
+    match &plan.intent {
+        RustSdkActionIntent::MoveDirection { direction } => Action::Move {
+            direction: *direction,
+        },
+        RustSdkActionIntent::Stop => Action::Stop,
+        RustSdkActionIntent::Rotate { angle } => Action::Rotate { angle: *angle },
+        RustSdkActionIntent::LookAtPosition { target } => Action::LookAt { target: *target },
+        RustSdkActionIntent::AttackCurrentTarget => Action::Attack,
+        RustSdkActionIntent::AttackEntity { entity_id } => Action::AttackTarget {
+            target: EntityId(*entity_id),
+        },
+        RustSdkActionIntent::UseAbility { slot, target } => Action::UseAbility {
+            slot: *slot,
+            target: target.clone(),
+        },
+        RustSdkActionIntent::CaptureCreature {
+            entity_id,
+            tool_slot,
+        } => Action::CaptureCreature {
+            target: EntityId(*entity_id),
+            tool_slot: *tool_slot,
+        },
+        RustSdkActionIntent::SummonCompanion { slot } => Action::SummonCompanion { slot: *slot },
+        RustSdkActionIntent::CommandCompanion {
+            slot,
+            command,
+            target_entity_id,
+        } => Action::CommandCompanion {
+            slot: *slot,
+            command: *command,
+            target: target_entity_id.map(EntityId),
+        },
+        RustSdkActionIntent::InteractNearest => Action::Interact,
+        RustSdkActionIntent::InteractEntity { entity_id } => Action::InteractWith {
+            target: EntityId(*entity_id),
+        },
+        RustSdkActionIntent::PickupEntity { entity_id } => Action::Pickup {
+            target: EntityId(*entity_id),
+        },
+        RustSdkActionIntent::DropInventorySlot { slot } => Action::Drop { slot: *slot },
+        RustSdkActionIntent::UseInventorySlot { slot } => Action::UseItem { slot: *slot },
+        RustSdkActionIntent::GatherEntity { entity_id, skill } => Action::GatherResource {
+            target: EntityId(*entity_id),
+            skill: *skill,
+        },
+        RustSdkActionIntent::LootEntity { entity_id } => Action::Loot {
+            target: EntityId(*entity_id),
+        },
+        RustSdkActionIntent::Speak { message, volume } => Action::Speak {
+            message: message.clone(),
+            volume: *volume,
+        },
+        RustSdkActionIntent::Signal { signal_type, data } => Action::Signal {
+            signal_type: signal_type.clone(),
+            data: data.clone(),
+        },
+        RustSdkActionIntent::SetAutoRetaliate { enabled } => {
+            Action::SetAutoRetaliate { enabled: *enabled }
+        }
+        RustSdkActionIntent::Idle => Action::Idle,
+    }
+}
+
+fn upsert_rust_sdk_state_snapshot_entities(
+    client: &mut StdbClient,
+    snapshot: &RustSdkStateSnapshot,
+) {
+    let mut self_entity = CachedEntity::from_entity(
+        snapshot.self_state.entity_id.0,
+        Some(stdb_agent_type_from_core(
+            snapshot.runtime_profile.agent_type,
+        )),
+        true,
+    );
+    self_entity.pos_x = Some(snapshot.self_state.position.x);
+    self_entity.pos_y = Some(snapshot.self_state.position.y);
+    self_entity.rotation = Some(snapshot.self_state.rotation);
+    self_entity.vel_x = Some(snapshot.self_state.velocity.x);
+    self_entity.vel_y = Some(snapshot.self_state.velocity.y);
+    self_entity.health = snapshot.self_state.health;
+    self_entity.max_health = snapshot.self_state.max_health;
+    self_entity.team_id = team_id_from_core(snapshot.self_state.team);
+    self_entity.max_speed = Some(200.0);
+    client.upsert_entity(self_entity);
+
+    for entity in &snapshot.visible_entities {
+        let mut cached = CachedEntity::from_entity(entity.entity_id.0, None, true);
+        cached.pos_x = Some(entity.position.x);
+        cached.pos_y = Some(entity.position.y);
+        cached.rotation = Some(entity.rotation);
+        cached.vel_x = Some(entity.velocity.x);
+        cached.vel_y = Some(entity.velocity.y);
+        cached.name = Some(entity.entity_type.clone());
+        if let Some(fraction) = entity.health_fraction {
+            cached.max_health = Some(100.0);
+            cached.health = Some((fraction.clamp(0.0, 1.0)) * 100.0);
+        }
+        client.upsert_entity(cached);
+    }
+}
+
+fn team_id_from_core(team: Team) -> Option<u8> {
+    match team {
+        Team::None => None,
+        Team::Team(team_id) => Some(team_id),
+    }
+}
+
 /// Convert a pod-core [`Action`] into a SpacetimeDB [`SubmittedAction`].
 fn convert_action(entity_id: u64, action: &Action) -> SubmittedAction {
     match action {
@@ -3911,6 +4200,11 @@ mod tests {
                 .latest_observation_tick(snapshot.self_state.entity_id.0),
             Some(snapshot.tick)
         );
+        assert!(host
+            .client()
+            .inner()
+            .entity(snapshot.visible_entities[0].entity_id.0)
+            .is_some());
         let messages = host.poll_updates();
         assert!(messages.iter().any(|message| matches!(
             message,
@@ -3924,6 +4218,104 @@ mod tests {
             .find_map(|document| decode_toon_document::<ReplayFile>(&document, "replay_file").ok())
             .expect("replay debug document should be retained");
         assert_eq!(replay.header.name, "rust-sdk-fixture");
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_executes_action_plan_through_emulated_submission() {
+        let snapshot = build_rust_sdk_attack_snapshot();
+        let plan = build_rust_sdk_action_plan(&Action::AttackTarget {
+            target: EntityId(9001),
+        })
+        .expect("attack action should lower into a Rust SDK plan");
+        let mut host = RustSdkAdapterHost::new(
+            SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::Emulated,
+        );
+
+        host.connect().expect("emulated host should connect");
+        let _ = host.poll_updates();
+        host.bind_state_snapshot_action_entity(&snapshot)
+            .expect("snapshot entity should bind");
+        host.apply_state_snapshot(&snapshot)
+            .expect("snapshot should hydrate state and handoff");
+
+        let reducers_before = host.client().inner().reducers_called();
+        let executed = host
+            .execute_action_plan(&plan)
+            .expect("action plan should execute over the shared queue/send path");
+
+        assert!(matches!(
+            executed,
+            Action::AttackTarget {
+                target: EntityId(9001)
+            }
+        ));
+        assert_eq!(host.client().inner().reducers_called(), reducers_before + 1);
+        assert_eq!(
+            host.client().inner().controlled_entity(),
+            Some(snapshot.self_state.entity_id.0)
+        );
+        assert_eq!(host.client().remote_agent_status().pending_action_count, 0);
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_executes_action_plan_through_generated_binding_submission() {
+        let snapshot = build_rust_sdk_gather_snapshot();
+        let plan = build_rust_sdk_action_plan(&Action::GatherResource {
+            target: EntityId(9101),
+            skill: SkillKind::Mining,
+        })
+        .expect("gather action should lower into a Rust SDK plan");
+        let mut host = RustSdkAdapterHost::new(
+            SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::GeneratedBinding,
+        );
+        let endpoint = host
+            .generated_binding_endpoint()
+            .expect("generated-binding host should expose its endpoint");
+
+        host.connect()
+            .expect("generated-binding host should stage connection work");
+        let callbacks = endpoint.callbacks();
+        let _ = endpoint.drain_commands();
+        callbacks.connected(vec![9; 16], "tok-rust-sdk-action");
+        let _ = host.poll_updates();
+        let _ = endpoint.drain_commands();
+        callbacks.subscription_applied();
+        let _ = host.poll_updates();
+
+        host.bind_state_snapshot_action_entity(&snapshot)
+            .expect("snapshot entity should bind");
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }] if !queries.is_empty()
+        ));
+        callbacks.subscription_applied();
+        let _ = host.poll_updates();
+        host.apply_state_snapshot(&snapshot)
+            .expect("snapshot should hydrate state and handoff");
+
+        let reducers_before = host.client().inner().reducers_called();
+        let executed = host
+            .execute_action_plan(&plan)
+            .expect("action plan should execute over generated-binding transport");
+
+        assert!(matches!(
+            executed,
+            Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining
+            }
+        ));
+        assert_eq!(host.client().inner().reducers_called(), reducers_before + 1);
+        assert_eq!(host.client().remote_agent_status().pending_action_count, 0);
     }
 
     #[test]
@@ -4054,7 +4446,7 @@ mod tests {
     #[test]
     fn test_run_rust_sdk_adapter_benchmark_suite_reports_passing_checks() {
         let run = run_rust_sdk_adapter_benchmark_suite()
-            .expect("benchmark suite should run on curated fixtures");
+            .expect("benchmark suite should run on execution-backed fixtures");
 
         assert!(run.report.passed(), "benchmark checks should pass");
         assert_eq!(run.report.benchmark_id, "rust-sdk-adapter-seams");
@@ -4062,11 +4454,14 @@ mod tests {
         assert_eq!(run.report.replay_training_sample_count, 2);
         assert_eq!(run.training_samples.len(), 2);
         assert_eq!(run.replay.header.name, "rust-sdk-adapter-benchmark");
-        assert!(run
-            .report
-            .scenarios
-            .iter()
-            .all(|scenario| scenario.action_matches && scenario.execution_mode_matches));
+        assert!(run.report.scenarios.iter().all(|scenario| {
+            scenario.action_matches
+                && scenario.execution_mode_matches
+                && scenario.reducer_submission_matches
+        }));
+        assert!(run.report.scenarios.iter().any(|scenario| {
+            scenario.runtime_mode == RustSdkAdapterRuntimeMode::GeneratedBinding
+        }));
     }
 
     #[test]

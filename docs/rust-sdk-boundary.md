@@ -43,8 +43,8 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Generated SpacetimeDB runtime seam | `pod_stdb::StdbClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | This is the repo-owned bridge between deterministic command-runtime tests, the live generated bindings path, and the canonical observation/topology/telemetry handoff ingest used by a future Rust SDK adapter. |
 | Network-facing generated runtime seam | `pod_net::SpacetimeDBClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | Higher-level Rust SDK consumers should be able to choose the same generated binding or live SDK path through the public client wrapper while forwarding replay/debug documents over the existing public surfaces. |
 | Thin adapter host | `pod_net::{RustSdkAdapterHost, RustSdkAdapterRuntimeMode}` | Future rs-sdk integration should enter through this small host surface when it needs runtime-mode selection plus Rust/JSON/TOON handoff decoding without depending on app roots. |
-| Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions before any live SDK method bindings exist. |
-| Repo-owned rollout/benchmark seam | `pod_net::{RustSdkRolloutRecorder, RustSdkBenchmarkReport, run_rust_sdk_adapter_benchmark_suite}` | SDK-driven episodes and adapter parity checks can now stay on the same replay/training/report contracts instead of inventing adapter-local episode formats. |
+| Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan, RustSdkActionExecutorError}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions plus one host-level execution seam (`bind_state_snapshot_action_entity()` and `execute_action_plan()`) before any live SDK method bindings exist. |
+| Repo-owned rollout/benchmark seam | `pod_net::{RustSdkRolloutRecorder, RustSdkBenchmarkReport, run_rust_sdk_adapter_benchmark_suite}` | SDK-driven episodes and adapter parity checks can now stay on the same replay/training/report contracts, and the benchmark suite now exercises real queue/send submission instead of only translation. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
 
 ## Adapter lanes
@@ -81,6 +81,9 @@ Responsibility:
 - expose the reverse lowering through `pod_net::RustSdkActionPlan` plus
   `build_rust_sdk_action_plan()` so future SDK integrations can choose between
   immediate and completion-aware execution without mutating `pod_core::Action`
+- execute the lowered plan through `RustSdkAdapterHost::execute_action_plan()`
+  after binding the authoritative action entity with
+  `RustSdkAdapterHost::bind_state_snapshot_action_entity()`
 
 Rules:
 
@@ -89,6 +92,8 @@ Rules:
 - let authority reject stale or invalid actions instead of trying to bypass it
 - reject world-authority-only actions such as `Spawn` instead of pretending the
   SDK can bypass authority
+- keep execution on the existing `queue_action()` / `send_actions()` path
+  instead of inventing an rs-sdk-only submission transport
 
 ### `rs_rollout_recorder`
 
@@ -124,6 +129,9 @@ Rules:
   `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
   as the deterministic adapter seam smoke/benchmark surface before wiring live
   SDK calls
+- keep the benchmark execution-backed: it should submit through the same host
+  bind/execute seam over emulated or generated-binding runtime modes rather
+  than only checking plan translation
 
 ## Generated-runtime handoff
 
@@ -140,11 +148,16 @@ The supported handoff is:
    wrapper that owns runtime-mode selection and Rust/JSON/TOON handoff decode.
 4. Prefer `RustSdkStateSnapshot` plus `RustSdkAdapterHost::apply_state_snapshot()`
    when the integration is still translating raw SDK state into repo-owned
-   observations and handoff bundles.
+   observations and handoff bundles. That host method also hydrates the local
+   entity cache so subsequent action execution can use the same snapshot state.
 5. Apply the resulting SDK-facing bundle through
    `apply_rust_sdk_handoff_artifact()` so observations, topology, telemetry,
    and replay stay on the same repo-owned client ingress path instead of
    becoming adapter-local glue.
+6. Bind the controlled entity with
+   `RustSdkAdapterHost::bind_state_snapshot_action_entity()` (or
+   `bind_action_entity()`) before calling
+   `RustSdkAdapterHost::execute_action_plan()`.
 
 This keeps the future SDK aligned with the repo-owned generated runtime seam
 instead of re-owning connection or callback semantics in app code.
@@ -196,10 +209,14 @@ As of the current Phase 8 hardening pass:
 - the repo-owned `RustSdkStateSnapshot` and `RustSdkActionPlan` surfaces exist
   in `pod-net`, so future SDK hookups can translate external state/actions
   before any live binding code is written
+- the host-level bind/execute seam now exists in `pod-net`, so translated
+  action plans already submit through the shared queue/send path instead of a
+  benchmark-only translation lane
 - the repo-owned `RustSdkRolloutRecorder` and
   `run_rust_sdk_adapter_benchmark_suite()` surfaces exist in `pod-net`, so
   adapter-driven episodes already land on shared replay/training/report
-  contracts before live SDK calls are wired
+  contracts before live SDK calls are wired, and the benchmark suite now
+  covers both emulated and generated-binding submission-backed cases
 - large agent-facing export surfaces exist for world, events, and multiverse
 - replay/training artifacts already derive from authoritative telemetry
 

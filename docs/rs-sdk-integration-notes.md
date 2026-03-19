@@ -162,6 +162,10 @@ Current repo-owned seam:
   a repo-owned `RustSdkActionPlan`
 - the plan distinguishes immediate runtime calls from completion-aware helper
   calls without changing `pod_core::Action`
+- `RustSdkAdapterHost::bind_state_snapshot_action_entity(...)` and
+  `RustSdkAdapterHost::execute_action_plan(...)` now submit those lowered plans
+  through the existing `queue_action()` / `send_actions()` path instead of a
+  benchmark-only translation seam
 - world-authority-only actions such as `Spawn` are rejected explicitly
 
 ## `rs_rollout_recorder`
@@ -197,8 +201,11 @@ This should eventually compare:
 
 Current repo-owned seam:
 
-- `run_rust_sdk_adapter_benchmark_suite()` runs deterministic curated cases over
-  `RustSdkStateSnapshot`, `RustSdkActionPlan`, and `RustSdkRolloutRecorder`
+- `run_rust_sdk_adapter_benchmark_suite()` runs deterministic execution-backed
+  cases over `RustSdkStateSnapshot`, `RustSdkActionPlan`, and
+  `RustSdkRolloutRecorder`
+- the suite now covers both emulated and generated-binding runtime modes and
+  checks that each scenario actually produces one shared reducer submission
 - `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
   now gives one command that emits a benchmark JSON report plus optional replay
   and training TOON artifacts
@@ -219,7 +226,8 @@ Current repo-owned seam:
 4. Land the repo-owned state/action adapter seam through
    `RustSdkStateSnapshot`, `RustSdkActionPlan`, and
    `build_rust_sdk_action_plan(...)`.
-5. Wire rollout recording and benchmark execution on top of that adapter seam.
+5. Wire rollout recording and execution-backed benchmark submission on top of
+   that adapter seam.
 6. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources

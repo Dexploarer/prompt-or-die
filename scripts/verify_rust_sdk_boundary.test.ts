@@ -32,6 +32,9 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("RustSdkStateSnapshot");
     expect(markdown).toContain("RustSdkActionPlan");
     expect(markdown).toContain("build_rust_sdk_action_plan()");
+    expect(markdown).toContain("bind_state_snapshot_action_entity()");
+    expect(markdown).toContain("execute_action_plan()");
+    expect(markdown).toContain("RustSdkActionExecutorError");
     expect(markdown).toContain("RustSdkRolloutRecorder");
     expect(markdown).toContain("run_rust_sdk_adapter_benchmark_suite()");
     expect(markdown).toContain("bun ./scripts/verify_rust_sdk_boundary.ts --check");

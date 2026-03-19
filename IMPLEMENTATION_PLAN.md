@@ -2444,3 +2444,15 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 238
+- Added `RustSdkAdapterHost::bind_action_entity(...)`, `bind_state_snapshot_action_entity(...)`, and `execute_action_plan(...)` in `crates/pod-net/src/client_stdb.rs`, so repo-owned Rust SDK action plans now bind to a controlled entity and submit through the same `queue_action()` / `send_actions()` path as every other controller instead of stopping at translation.
+- Taught `RustSdkAdapterHost::apply_state_snapshot(...)` to hydrate the local entity cache from the repo-owned snapshot seam, so emulated and generated-binding execution-backed tests can reuse authoritative self/visible-entity state without inventing a second benchmark cache.
+- Converted `run_rust_sdk_adapter_benchmark_suite()` into an execution-backed benchmark over emulated and generated-binding runtime modes, re-exported the new executor error from `crates/pod-net/src/lib.rs`, and tightened the Rust SDK boundary docs plus verifier so bind/execute is now part of the enforced repo-owned contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite`
+  - `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks --output /tmp/pod-rust-sdk-benchmark.json --replay-output /tmp/pod-rust-sdk-benchmark.toon --training-output /tmp/pod-rust-sdk-training.toon`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`
