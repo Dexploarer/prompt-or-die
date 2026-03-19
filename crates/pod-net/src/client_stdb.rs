@@ -56,7 +56,7 @@ use pod_core::AgentType as CoreAgentType;
 use pod_core::{
     AgentRuntimeProfile, AppliedWorldStateSummary, RemoteAgentFallbackReason,
     RemoteAgentRuntimeStatus, RemoteAgentTransportContract, RemoteTopologyBundle,
-    WorldEvaluationSummary,
+    RustSdkHandoffArtifact, WorldEvaluationSummary,
 };
 
 use pod_stdb::client::{
@@ -1263,6 +1263,45 @@ impl SpacetimeDBClient {
         Ok(())
     }
 
+    /// Apply the repo-owned Rust SDK handoff bundle to the wrapped client.
+    ///
+    /// This installs any published transport contract and forwards replay
+    /// documents through the existing debug-document surface while delegating
+    /// observation/topology/telemetry ingestion to `pod-stdb`.
+    pub fn apply_rust_sdk_handoff_artifact(
+        &mut self,
+        artifact: RustSdkHandoffArtifact,
+    ) -> Result<(), StdbClientError> {
+        let observation_tick = artifact.observation.payload.tick;
+        let transport_contract = artifact.transport_contract.clone();
+        let replay_document = artifact.replay.as_ref().map(|replay| replay.to_toon_document());
+
+        self.inner.apply_rust_sdk_handoff_artifact(artifact)?;
+
+        if let Some(contract) = transport_contract {
+            self.remote_agent_contract = Some(contract);
+        }
+
+        let authoritative_tick = self
+            .remote_agent_status
+            .last_authoritative_tick
+            .unwrap_or(observation_tick)
+            .max(observation_tick);
+        self.remote_agent_status.last_authoritative_tick = Some(authoritative_tick);
+        self.remote_agent_status.last_observation_tick = Some(observation_tick);
+        self.remote_agent_status.stale_observation_ticks =
+            authoritative_tick.saturating_sub(observation_tick);
+        if self.remote_agent_status.stale_observation_ticks == 0 {
+            self.remote_agent_status.clear_fallback();
+        }
+
+        if let Some(document) = replay_document {
+            self.push_debug_document(document);
+        }
+
+        Ok(())
+    }
+
     /// Apply an authority-published remote-topology feed row from SpacetimeDB.
     pub fn receive_remote_topology_document_row(
         &mut self,
@@ -2172,10 +2211,11 @@ pub fn build_topology_feed_measurements_with_options(
 mod tests {
     use super::*;
     use pod_core::{
-        action::SpeakVolume as CoreSpeakVolume, decode_toon_document, AgentTickRollup,
-        AgentToolCallEvent, AgentToolCallTrace, FocusedEntityDebugSummary, RemoteTopologyBundle,
-        ReplayFile, ReplayHeader, ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry,
-        WorldQuestBinding, WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+        action::SpeakVolume as CoreSpeakVolume, build_rust_sdk_handoff_fixture, decode_toon_document,
+        AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace,
+        FocusedEntityDebugSummary, RemoteTopologyBundle, ReplayFile, ReplayHeader,
+        ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry, WorldQuestBinding,
+        WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
     };
     use pod_stdb::client::CachedWorldState;
 
@@ -4008,6 +4048,86 @@ mod tests {
         assert!(!client.remote_agent_status().fallback_active);
         assert_eq!(client.remote_agent_status().fallback_reason, None);
         assert_eq!(client.remote_agent_status().last_observation_tick, Some(4));
+    }
+
+    #[test]
+    fn test_apply_rust_sdk_handoff_artifact_updates_remote_contract_and_forwards_replay() {
+        let mut client = SpacetimeDBClient::new(SpacetimeDBClientConfig {
+            db_name: "world-frontier-1".into(),
+            connection_mode: StdbConnectionMode::Emulated,
+            ..Default::default()
+        });
+        let mut artifact = build_rust_sdk_handoff_fixture();
+        let observation = artifact.observation.payload.clone();
+        artifact.latest_tick_telemetry = Some(VersionedTickTelemetry::new(TickTelemetryFrame {
+            tick: observation.tick,
+            agents: vec![AgentTelemetryFrame::new(
+                observation.tick,
+                observation.self_state.agent_id,
+                Some(observation.self_state.entity_id),
+                artifact.profile(),
+                observation.visible_entities.len(),
+                observation.audible_events.len(),
+                observation.messages.len(),
+                observation.available_actions.len(),
+                observation.objectives.len(),
+                None,
+                None,
+            )],
+        }));
+
+        client
+            .apply_rust_sdk_handoff_artifact(artifact)
+            .expect("handoff artifact should apply");
+
+        assert_eq!(
+            client
+                .remote_agent_contract()
+                .map(|contract| contract.profile.agent_type),
+            Some(CoreAgentType::LlmAgent)
+        );
+        assert_eq!(
+            client.remote_agent_status().last_observation_tick,
+            Some(observation.tick)
+        );
+        assert_eq!(
+            client.remote_agent_status().last_authoritative_tick,
+            Some(observation.tick)
+        );
+        assert_eq!(client.remote_agent_status().stale_observation_ticks, 0);
+        assert_eq!(client.remote_world_id(), Some("world-frontier-1"));
+        assert_eq!(
+            client
+                .inner()
+                .latest_observation_tick(observation.self_state.entity_id.0),
+            Some(observation.tick)
+        );
+
+        let messages = client.poll_updates();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document }
+                if document.contains("remote_topology_bundle")
+        )));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document }
+                if document.contains("versioned_tick_telemetry")
+        )));
+        let documents = client.drain_debug_documents();
+        let replay = documents
+            .iter()
+            .find_map(|document| {
+                if document.contains("\"document_type\":\"replay_file\"")
+                    || document.contains("replay_file")
+                {
+                    decode_toon_document::<ReplayFile>(document, "replay_file").ok()
+                } else {
+                    None
+                }
+            })
+            .expect("replay document should be retained");
+        assert_eq!(replay.header.name, "rust-sdk-fixture");
     }
 
     #[test]

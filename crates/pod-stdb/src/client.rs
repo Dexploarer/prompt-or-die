@@ -80,8 +80,9 @@ use std::sync::{Arc, Mutex};
 
 use pod_core::{
     decode_toon_document, decode_toon_value, AgentTickRollup, AgentToolCallEvent,
-    AppliedWorldStateSummary, FocusedEntityDebugSummary, RemoteTopologyBundle, ToolCallStatus,
-    VersionedTickTelemetry, WorldEvaluationSummary, WorldQuestBinding, WorldRealityDefinition,
+    AppliedWorldStateSummary, FocusedEntityDebugSummary, RemoteTopologyBundle,
+    RustSdkHandoffArtifact, ToolCallStatus, VersionedTickTelemetry, WorldEvaluationSummary,
+    WorldQuestBinding, WorldRealityDefinition,
 };
 use spacetimedb_sdk::{
     DbContext as _, SubscriptionHandle as _, Table as _, TableWithPrimaryKey as _,
@@ -2079,6 +2080,44 @@ impl StdbClient {
         self.apply_remote_topology_resolved(topology, None);
     }
 
+    /// Apply the repo-owned Rust SDK handoff bundle through the existing
+    /// observation/topology/telemetry ingress paths.
+    ///
+    /// This deliberately does not claim a controlled entity or surface replay
+    /// documents. Higher-level wrappers own action binding and replay/debug
+    /// forwarding.
+    pub fn apply_rust_sdk_handoff_artifact(
+        &mut self,
+        artifact: RustSdkHandoffArtifact,
+    ) -> Result<(), StdbError> {
+        let RustSdkHandoffArtifact {
+            observation,
+            remote_topology,
+            latest_tick_telemetry,
+            ..
+        } = artifact;
+
+        let observation = observation.payload;
+        let tick = observation.tick;
+        let observer_entity_id = observation.self_state.entity_id.0;
+        let observation_json = serde_json::to_string(&observation).map_err(|error| {
+            StdbError::DocumentError(format!(
+                "failed to serialize RustSdkHandoffArtifact observation payload: {error}"
+            ))
+        })?;
+        self.receive_observation(tick, observer_entity_id, observation_json);
+
+        if let Some(topology) = remote_topology {
+            self.receive_debug_document(topology.to_toon_document())?;
+        }
+
+        if let Some(telemetry) = latest_tick_telemetry {
+            self.receive_debug_document(telemetry.to_toon_document())?;
+        }
+
+        Ok(())
+    }
+
     /// Store a received authority-published remote-topology row.
     ///
     /// Rows are monotonic by `(generated_at_unix_ms, row_id)`. Older rows are
@@ -3160,6 +3199,10 @@ impl std::fmt::Debug for StdbClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pod_core::{
+        build_rust_sdk_handoff_fixture, decode_toon_document, AgentTelemetryFrame,
+        TickTelemetryFrame, VersionedTickTelemetry,
+    };
 
     #[test]
     fn test_client_new() {
@@ -4764,6 +4807,87 @@ mod tests {
             StdbError::DocumentError(message)
                 if message.contains("unsupported debug document type `unsupported_debug_document`")
         ));
+    }
+
+    #[test]
+    fn test_apply_rust_sdk_handoff_artifact_routes_observation_topology_and_telemetry() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            db_name: "world-frontier-1".into(),
+            ..StdbClientConfig::default()
+        });
+        let mut artifact = build_rust_sdk_handoff_fixture();
+        let observation = artifact.observation.payload.clone();
+        artifact.latest_tick_telemetry = Some(VersionedTickTelemetry::new(TickTelemetryFrame {
+            tick: observation.tick,
+            agents: vec![AgentTelemetryFrame::new(
+                observation.tick,
+                observation.self_state.agent_id,
+                Some(observation.self_state.entity_id),
+                artifact.profile(),
+                observation.visible_entities.len(),
+                observation.audible_events.len(),
+                observation.messages.len(),
+                observation.available_actions.len(),
+                observation.objectives.len(),
+                None,
+                None,
+            )],
+        }));
+
+        client
+            .apply_rust_sdk_handoff_artifact(artifact)
+            .expect("handoff artifact should apply");
+
+        let stored = client
+            .latest_observation(observation.self_state.entity_id.0)
+            .expect("observation should be cached");
+        let decoded: pod_core::Observation =
+            serde_json::from_str(stored).expect("cached observation should decode");
+        assert_eq!(decoded.tick, observation.tick);
+        assert_eq!(decoded.self_state.entity_id, observation.self_state.entity_id);
+        assert_eq!(
+            decoded.objectives.first().map(|objective| objective.id.as_str()),
+            Some("secure-anchor")
+        );
+        assert_eq!(
+            client.latest_observation_tick(observation.self_state.entity_id.0),
+            Some(observation.tick)
+        );
+        assert_eq!(client.resolved_remote_world_id(), Some("world-frontier-1"));
+
+        let events = client.drain_events().collect::<Vec<_>>();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StdbEvent::ObservationReceived {
+                tick,
+                observer_entity_id,
+                ..
+            } if *tick == observation.tick
+                && *observer_entity_id == observation.self_state.entity_id.0
+        )));
+        let topology_document = events
+            .iter()
+            .find_map(|event| match event {
+                StdbEvent::RemoteTopologyDocumentReceived { document } => Some(document),
+                _ => None,
+            })
+            .expect("topology document should be forwarded");
+        let topology = decode_toon_document::<RemoteTopologyBundle>(
+            topology_document,
+            "remote_topology_bundle",
+        )
+        .expect("topology document should decode");
+        assert_eq!(topology.scenario_id, "rust-sdk-fixture");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StdbEvent::AgentTelemetryTickReceived {
+                tick,
+                agent_entity_id,
+                frame_json,
+            } if *tick == observation.tick
+                && *agent_entity_id == observation.self_state.entity_id.0
+                && frame_json.contains("versioned_tick_telemetry")
+        )));
     }
 
     #[test]

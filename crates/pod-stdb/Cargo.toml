@@ -32,7 +32,7 @@ module = [
 unstable = ["module"]
 # Enable the native Rust client wrapper (StdbClient, event types, cached state).
 # Excluded from WASM module compilation — use only in native targets (pod-net, pod-server).
-client = ["dep:spacetimedb-sdk"]
+client = ["dep:spacetimedb-sdk", "dep:serde_json"]
 
 [dependencies]
 pod-core = { path = "../pod-core" }

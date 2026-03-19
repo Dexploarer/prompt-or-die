@@ -50,6 +50,7 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "RemoteTopologyBundle",
       "install_generated_binding_runtime()",
       "install_generated_sdk_runtime()",
+      "apply_rust_sdk_handoff_artifact()",
       "## Adapter lanes",
       "rs_state_adapter",
       "rs_action_adapter",
@@ -91,6 +92,7 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
     requiredSnippets: [
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
+      "pub fn apply_rust_sdk_handoff_artifact(",
     ],
   },
   {
@@ -98,6 +100,7 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
     requiredSnippets: [
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
+      "pub fn apply_rust_sdk_handoff_artifact(",
     ],
   },
   {

@@ -2401,3 +2401,14 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
 - Added `docs/rust-sdk-boundary.md` as the repo-owned contract for the future POD Rust SDK facade, naming the stable crate seams, versioned runtime envelopes, generated-runtime handoff, adapter lanes, non-goals, and readiness gates.
 - Added `scripts/verify_rust_sdk_boundary.ts` plus `scripts/verify_rust_sdk_boundary.test.ts`, so README/docs/platform policy, `pod-core` versioned exports, generated-runtime install seams, and export targets now have a deterministic drift check.
 - Wired the new SDK readiness gate through `scripts/cli_surface.ts`, refreshed the docs index and platform-stabilization policy, and updated `SESSION.md` so Rust SDK hardening is part of the normal catalog/doc workflow instead of an informal note.
+
+### Iteration 234
+- Added `apply_rust_sdk_handoff_artifact(...)` to `crates/pod-stdb/src/client.rs`, so the repo-owned Rust SDK handoff bundle now reuses the existing observation cache plus TOON topology/telemetry ingress instead of requiring adapter-local glue.
+- Added the matching `apply_rust_sdk_handoff_artifact(...)` seam to `crates/pod-net/src/client_stdb.rs`, wiring transport-contract/status updates and replay TOON forwarding onto the existing public debug-document surface.
+- Added deterministic `pod-stdb` and `pod-net` coverage around `build_rust_sdk_handoff_fixture()`, then tightened `docs/rust-sdk-boundary.md` and `scripts/verify_rust_sdk_boundary.ts` so this ingest path is now part of the enforced Rust SDK boundary contract.
+- [x] Validation:
+  - `cargo test -p pod-stdb --no-default-features --features client test_apply_rust_sdk_handoff_artifact_routes_observation_topology_and_telemetry -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb test_apply_rust_sdk_handoff_artifact_updates_remote_contract_and_forwards_replay -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`
