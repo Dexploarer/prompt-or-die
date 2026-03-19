@@ -42,6 +42,7 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Replay and training artifacts | `pod_core::{ReplayFile, ReplayTrainingSample, RewardAttributionSummary}` | Rollouts and learning/export work must reuse authoritative replay truth rather than invent a second episode format. |
 | Generated SpacetimeDB runtime seam | `pod_stdb::StdbClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | This is the repo-owned bridge between deterministic command-runtime tests, the live generated bindings path, and the canonical observation/topology/telemetry handoff ingest used by a future Rust SDK adapter. |
 | Network-facing generated runtime seam | `pod_net::SpacetimeDBClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | Higher-level Rust SDK consumers should be able to choose the same generated binding or live SDK path through the public client wrapper while forwarding replay/debug documents over the existing public surfaces. |
+| Thin adapter host | `pod_net::{RustSdkAdapterHost, RustSdkAdapterRuntimeMode}` | Future rs-sdk integration should enter through this small host surface when it needs runtime-mode selection plus Rust/JSON/TOON handoff decoding without depending on app roots. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
 
 ## Adapter lanes
@@ -115,7 +116,9 @@ The supported handoff is:
    inspect outbound commands and inject callbacks deterministically.
 2. Use `install_generated_sdk_runtime()` when the adapter should ride the live
    generated SpacetimeDB bindings path.
-3. Apply the resulting SDK-facing bundle through
+3. Prefer `RustSdkAdapterHost` when the integration needs one small public
+   wrapper that owns runtime-mode selection and Rust/JSON/TOON handoff decode.
+4. Apply the resulting SDK-facing bundle through
    `apply_rust_sdk_handoff_artifact()` so observations, topology, telemetry,
    and replay stay on the same repo-owned client ingress path instead of
    becoming adapter-local glue.
@@ -163,6 +166,8 @@ As of the current Phase 8 hardening pass:
 - the versioned runtime envelopes exist in `pod-core`
 - the generated binding and live SDK runtime install seams exist in `pod-stdb`
   and `pod-net`
+- the thin `RustSdkAdapterHost` wrapper exists for runtime selection and
+  handoff-document decode above those client seams
 - large agent-facing export surfaces exist for world, events, and multiverse
 - replay/training artifacts already derive from authoritative telemetry
 

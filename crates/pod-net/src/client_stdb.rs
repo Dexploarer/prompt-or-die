@@ -54,9 +54,10 @@ use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
 use pod_core::AgentType as CoreAgentType;
 use pod_core::{
-    AgentRuntimeProfile, AppliedWorldStateSummary, RemoteAgentFallbackReason,
-    RemoteAgentRuntimeStatus, RemoteAgentTransportContract, RemoteTopologyBundle,
-    RustSdkHandoffArtifact, WorldEvaluationSummary,
+    build_rust_sdk_handoff_fixture, decode_toon_document, AgentRuntimeProfile,
+    AppliedWorldStateSummary, RemoteAgentFallbackReason, RemoteAgentRuntimeStatus,
+    RemoteAgentTransportContract, RemoteTopologyBundle, RustSdkHandoffArtifact,
+    WorldEvaluationSummary,
 };
 
 use pod_stdb::client::{
@@ -327,6 +328,136 @@ impl From<SpacetimeDBClientConfig> for StdbClientConfig {
             player_name: cfg.player_name,
             connection_mode: cfg.connection_mode,
         }
+    }
+}
+
+/// Select how a thin Rust SDK adapter host should wire the underlying client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RustSdkAdapterRuntimeMode {
+    /// Local deterministic fallback with no generated runtime.
+    #[default]
+    Emulated,
+    /// Generated command/callback seam for deterministic adapter tests.
+    GeneratedBinding,
+    /// Real generated SpacetimeDB SDK runtime.
+    GeneratedSdk,
+}
+
+/// Thin host wrapper for future Rust SDK adapters.
+///
+/// This owns runtime-mode selection and handoff-document decoding while keeping
+/// the real observation/topology/telemetry/replay ingest inside
+/// [`SpacetimeDBClient`].
+pub struct RustSdkAdapterHost {
+    runtime_mode: RustSdkAdapterRuntimeMode,
+    client: SpacetimeDBClient,
+    generated_binding_endpoint: Option<GeneratedBindingEndpoint>,
+}
+
+impl RustSdkAdapterHost {
+    /// Build a new adapter host with the requested runtime wiring.
+    pub fn new(
+        mut config: SpacetimeDBClientConfig,
+        runtime_mode: RustSdkAdapterRuntimeMode,
+    ) -> Self {
+        config.connection_mode = match runtime_mode {
+            RustSdkAdapterRuntimeMode::Emulated => StdbConnectionMode::Emulated,
+            RustSdkAdapterRuntimeMode::GeneratedBinding
+            | RustSdkAdapterRuntimeMode::GeneratedSdk => StdbConnectionMode::Generated,
+        };
+
+        let mut client = SpacetimeDBClient::new(config);
+        let generated_binding_endpoint = match runtime_mode {
+            RustSdkAdapterRuntimeMode::Emulated => None,
+            RustSdkAdapterRuntimeMode::GeneratedBinding => {
+                Some(client.install_generated_binding_runtime())
+            }
+            RustSdkAdapterRuntimeMode::GeneratedSdk => {
+                client.install_generated_sdk_runtime();
+                None
+            }
+        };
+
+        Self {
+            runtime_mode,
+            client,
+            generated_binding_endpoint,
+        }
+    }
+
+    /// Inspect the selected runtime mode.
+    pub fn runtime_mode(&self) -> RustSdkAdapterRuntimeMode {
+        self.runtime_mode
+    }
+
+    /// Access the wrapped SpacetimeDB client.
+    pub fn client(&self) -> &SpacetimeDBClient {
+        &self.client
+    }
+
+    /// Mutably access the wrapped SpacetimeDB client.
+    pub fn client_mut(&mut self) -> &mut SpacetimeDBClient {
+        &mut self.client
+    }
+
+    /// Clone the command/callback endpoint for generated-binding mode.
+    pub fn generated_binding_endpoint(&self) -> Option<GeneratedBindingEndpoint> {
+        self.generated_binding_endpoint.clone()
+    }
+
+    /// Connect the wrapped client using the configured runtime mode.
+    pub fn connect(&mut self) -> Result<(), StdbClientError> {
+        self.client.connect()
+    }
+
+    /// Drive the wrapped client event loop.
+    pub fn poll_updates(&mut self) -> Vec<ServerMessage> {
+        self.client.poll_updates()
+    }
+
+    /// Apply a repo-owned Rust SDK handoff bundle.
+    pub fn apply_handoff_artifact(
+        &mut self,
+        artifact: RustSdkHandoffArtifact,
+    ) -> Result<(), StdbClientError> {
+        self.client.apply_rust_sdk_handoff_artifact(artifact)
+    }
+
+    /// Apply the canonical deterministic handoff fixture.
+    pub fn apply_handoff_fixture(&mut self) -> Result<(), StdbClientError> {
+        self.apply_handoff_artifact(build_rust_sdk_handoff_fixture())
+    }
+
+    /// Decode and apply a handoff bundle from JSON.
+    pub fn apply_handoff_json_document(
+        &mut self,
+        document: impl AsRef<str>,
+    ) -> Result<(), StdbClientError> {
+        let artifact = serde_json::from_str::<RustSdkHandoffArtifact>(document.as_ref())
+            .map_err(|error| {
+                StdbClientError::Document(format!(
+                    "failed to decode rust_sdk_handoff_artifact JSON: {error}"
+                ))
+            })?;
+        self.apply_handoff_artifact(artifact)
+    }
+
+    /// Decode and apply a handoff bundle from TOON.
+    pub fn apply_handoff_toon_document(
+        &mut self,
+        document: impl AsRef<str>,
+    ) -> Result<(), StdbClientError> {
+        let artifact =
+            decode_toon_document::<RustSdkHandoffArtifact>(
+                document.as_ref(),
+                "rust_sdk_handoff_artifact",
+            )
+            .map_err(|error| {
+                StdbClientError::Document(format!(
+                    "failed to decode rust_sdk_handoff_artifact TOON: {error}"
+                ))
+            })?;
+        self.apply_handoff_artifact(artifact)
     }
 }
 
@@ -2234,6 +2365,148 @@ mod tests {
             .connect_remote_agent(1, AgentType::LlmAgent)
             .expect("remote llm agent connects");
         client
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_applies_handoff_artifact_json_and_toon() {
+        let fixture = build_rust_sdk_handoff_fixture();
+        let observation = fixture.observation.payload.clone();
+
+        for input in ["artifact", "json", "toon"] {
+            let mut host = RustSdkAdapterHost::new(
+                SpacetimeDBClientConfig {
+                    db_name: "world-frontier-1".into(),
+                    ..Default::default()
+                },
+                RustSdkAdapterRuntimeMode::Emulated,
+            );
+
+            match input {
+                "artifact" => host
+                    .apply_handoff_artifact(fixture.clone())
+                    .expect("artifact handoff should apply"),
+                "json" => host
+                    .apply_handoff_json_document(
+                        serde_json::to_string(&fixture)
+                            .expect("fixture should serialize to JSON"),
+                    )
+                    .expect("json handoff should apply"),
+                "toon" => host
+                    .apply_handoff_toon_document(fixture.to_toon_document())
+                    .expect("toon handoff should apply"),
+                _ => unreachable!("covered inputs only"),
+            }
+
+            assert_eq!(host.runtime_mode(), RustSdkAdapterRuntimeMode::Emulated);
+            assert_eq!(host.client().remote_world_id(), Some("world-frontier-1"));
+            assert_eq!(
+                host.client()
+                    .remote_agent_contract()
+                    .map(|contract| contract.profile.agent_type),
+                Some(CoreAgentType::LlmAgent)
+            );
+            assert_eq!(
+                host.client()
+                    .inner()
+                    .latest_observation_tick(observation.self_state.entity_id.0),
+                Some(observation.tick)
+            );
+
+            let messages = host.poll_updates();
+            assert!(messages.iter().any(|message| matches!(
+                message,
+                ServerMessage::DebugDocument { document }
+                    if document.contains("remote_topology_bundle")
+            )));
+            let documents = host.client_mut().drain_debug_documents();
+            let replay = documents
+                .iter()
+                .find_map(|document| decode_toon_document::<ReplayFile>(document, "replay_file").ok())
+                .expect("replay debug document should be retained");
+            assert_eq!(replay.header.name, "rust-sdk-fixture");
+        }
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_generated_binding_mode_exposes_runtime_flow() {
+        let mut host = RustSdkAdapterHost::new(
+            SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::GeneratedBinding,
+        );
+        let endpoint = host
+            .generated_binding_endpoint()
+            .expect("generated binding mode should expose an endpoint");
+
+        assert_eq!(
+            host.client().inner().config().connection_mode,
+            StdbConnectionMode::Generated
+        );
+
+        host.connect().expect("connect should stage generated runtime work");
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Connect { config }]
+                if config.db_name == "world-frontier-1"
+                    && matches!(config.connection_mode, StdbConnectionMode::Generated)
+        ));
+
+        let callbacks = endpoint.callbacks();
+        callbacks.connected(vec![3; 16], "tok-rs-sdk");
+        let _ = host.poll_updates();
+        let commands = endpoint.drain_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [GeneratedBindingCommand::Subscribe { queries }] if !queries.is_empty()
+        ));
+        callbacks.subscription_applied();
+        let messages = host.poll_updates();
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, ServerMessage::Welcome { .. })));
+
+        host.apply_handoff_fixture()
+            .expect("fixture should apply after generated binding connect flow");
+        let messages = host.poll_updates();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document }
+                if document.contains("remote_topology_bundle")
+        )));
+        let replay = host
+            .client_mut()
+            .drain_debug_documents()
+            .into_iter()
+            .find_map(|document| decode_toon_document::<ReplayFile>(&document, "replay_file").ok())
+            .expect("replay document should be retained");
+        assert_eq!(replay.header.name, "rust-sdk-fixture");
+        assert_eq!(host.client().remote_world_id(), Some("world-frontier-1"));
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_generated_sdk_mode_maps_connect_failures() {
+        let mut host = RustSdkAdapterHost::new(
+            SpacetimeDBClientConfig {
+                host: "http://127.0.0.1:1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::GeneratedSdk,
+        );
+
+        assert_eq!(host.runtime_mode(), RustSdkAdapterRuntimeMode::GeneratedSdk);
+        assert!(host.generated_binding_endpoint().is_none());
+        assert_eq!(
+            host.client().inner().config().connection_mode,
+            StdbConnectionMode::Generated
+        );
+
+        let err = host
+            .connect()
+            .expect_err("closed localhost port should fail generated SDK connect");
+        assert!(matches!(err, StdbClientError::Connection(_)));
     }
 
     #[test]

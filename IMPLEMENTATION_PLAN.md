@@ -2412,3 +2412,13 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 235
+- Added `RustSdkAdapterRuntimeMode` plus `RustSdkAdapterHost` in `crates/pod-net/src/client_stdb.rs`, so future rs-sdk integrations now have one small public host that selects `emulated`, `generated-binding`, or `generated-sdk` runtime mode without depending on app roots.
+- Taught that host to consume `RustSdkHandoffArtifact` as Rust values, JSON, or TOON, while delegating the real observation/topology/telemetry/replay ingest to the already-hardened `SpacetimeDBClient` path instead of adding a parallel adapter-local cache.
+- Re-exported the new host from `crates/pod-net/src/lib.rs`, updated the Rust SDK boundary docs plus the integration notes, and tightened the boundary verifier so the thin host is now part of the repo-owned rs-sdk contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`

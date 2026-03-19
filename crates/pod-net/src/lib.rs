@@ -98,10 +98,10 @@ pub use client_web::{ClientError, WebClient};
 #[cfg(feature = "spacetimedb")]
 pub use client_stdb::{
     build_topology_feed_measurements, build_topology_feed_measurements_with_options,
-    LiveGeneratedSdkTopologyFeedConfig, SpacetimeDBClient, SpacetimeDBClientConfig,
-    StdbClientError, TopologyFeedCheck, TopologyFeedGeneratedRuntimeMode,
-    TopologyFeedMeasurementsOptions, TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport,
-    TopologyFeedWorldReport,
+    LiveGeneratedSdkTopologyFeedConfig, RustSdkAdapterHost, RustSdkAdapterRuntimeMode,
+    SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError, TopologyFeedCheck,
+    TopologyFeedGeneratedRuntimeMode, TopologyFeedMeasurementsOptions,
+    TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport, TopologyFeedWorldReport,
 };
 
 /// Default web runtime client type.

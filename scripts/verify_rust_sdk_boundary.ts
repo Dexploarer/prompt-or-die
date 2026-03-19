@@ -51,6 +51,8 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "install_generated_binding_runtime()",
       "install_generated_sdk_runtime()",
       "apply_rust_sdk_handoff_artifact()",
+      "RustSdkAdapterHost",
+      "RustSdkAdapterRuntimeMode",
       "## Adapter lanes",
       "rs_state_adapter",
       "rs_action_adapter",
@@ -98,10 +100,18 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
   {
     path: "crates/pod-net/src/client_stdb.rs",
     requiredSnippets: [
+      "pub enum RustSdkAdapterRuntimeMode",
+      "pub struct RustSdkAdapterHost",
+      "pub fn apply_handoff_json_document(",
+      "pub fn apply_handoff_toon_document(",
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
       "pub fn apply_rust_sdk_handoff_artifact(",
     ],
+  },
+  {
+    path: "crates/pod-net/src/lib.rs",
+    requiredSnippets: ["RustSdkAdapterHost", "RustSdkAdapterRuntimeMode"],
   },
   {
     path: "scripts/pod_sdk.ts",

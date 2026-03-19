@@ -179,7 +179,9 @@ This should eventually compare:
 1. Finish POD reward/outcome attribution in `pod-core`.
 2. Finish replay-derived training/export contracts.
 3. Add an rs-sdk state/action mapping document or module.
-4. Build a small adapter runner outside the main client UI path.
+4. Start from `pod_net::RustSdkAdapterHost` as the small runner/host outside
+   the main client UI path, then layer rs-sdk-specific state/action mapping on
+   top of it.
 5. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources
