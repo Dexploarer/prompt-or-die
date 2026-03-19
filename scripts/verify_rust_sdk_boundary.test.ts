@@ -37,6 +37,9 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("RustSdkActionExecutorError");
     expect(markdown).toContain("RustSdkAdapterSession");
     expect(markdown).toContain("RustSdkAdapterSessionError");
+    expect(markdown).toContain("RustSdkFacade");
+    expect(markdown).toContain("RustSdkFacadeConfig");
+    expect(markdown).toContain("RustSdkFacadeError");
     expect(markdown).toContain("RustSdkAdapterLiveSmokeConfig");
     expect(markdown).toContain("run_rust_sdk_adapter_live_smoke()");
     expect(markdown).toContain("RustSdkRolloutRecorder");

@@ -2477,3 +2477,12 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 241
+- Added `RustSdkFacadeConfig`, `RustSdkFacade`, and `RustSdkFacadeError` in `crates/pod-net/src/client_stdb.rs`, so the repo now has one thin POD-owned rs-sdk wrapper that starts from `RustSdkAdapterSession` and owns runtime-mode selection, handoff ingest, snapshot execution, replay finalization, and the live smoke entrypoint without app-local host/session glue.
+- Re-exported the new facade from `crates/pod-net/src/lib.rs`, added deterministic coverage for emulated fixture-backed execution, generated-binding endpoint exposure plus JSON/TOON handoff decode, and facade-level live-smoke error mapping, and tightened the Rust SDK boundary docs plus verifier so the wrapper is part of the enforced repo-owned SDK contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`

@@ -45,6 +45,7 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Thin adapter host | `pod_net::{RustSdkAdapterHost, RustSdkAdapterRuntimeMode}` | Future rs-sdk integration should enter through this small host surface when it needs runtime-mode selection plus Rust/JSON/TOON handoff decoding without depending on app roots. |
 | Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan, RustSdkActionExecutorError}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions plus one host-level execution seam (`bind_state_snapshot_action_entity()` and `execute_action_plan()`) before any live SDK method bindings exist. |
 | Thin session facade | `pod_net::{RustSdkAdapterSession, RustSdkAdapterSessionError}` | The future POD-owned rs-sdk facade can now start from one repo-owned session surface that binds snapshot state, submits translated actions, and records replay rows without app-local orchestration glue. |
+| Thin POD-owned rs-sdk facade | `pod_net::{RustSdkFacade, RustSdkFacadeConfig, RustSdkFacadeError}` | This is the smallest repo-owned wrapper a future packaged rs-sdk can depend on directly when it wants runtime-mode selection, handoff ingest, action execution, replay finalization, and the live smoke entrypoint without exposing app-local host/session glue. |
 | Live generated-SDK smoke surface | `pod_net::{RustSdkAdapterLiveSmokeConfig, run_rust_sdk_adapter_live_smoke}` | When a real SpacetimeDB module is running, this proves the repo-owned session facade can spawn, connect, submit, and record over `GeneratedSdk` mode instead of only deterministic emulation. |
 | Repo-owned rollout/benchmark seam | `pod_net::{RustSdkRolloutRecorder, RustSdkBenchmarkReport, run_rust_sdk_adapter_benchmark_suite}` | SDK-driven episodes and adapter parity checks can now stay on the same replay/training/report contracts, and the benchmark suite now exercises real queue/send submission instead of only translation. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
@@ -233,10 +234,13 @@ As of the current Phase 8 hardening pass:
 - the host-level bind/execute seam now exists in `pod-net`, so translated
   action plans already submit through the shared queue/send path instead of a
   benchmark-only translation lane
+- the thin `RustSdkFacade` wrapper now exists in `pod-net`, so the future
+  packaged rs-sdk can start from one repo-owned config-bound surface instead
+  of stitching `RustSdkAdapterHost`, `RustSdkAdapterSession`, and the live
+  smoke helper together in app code
 - the live generated-SDK smoke harness now exists in `pod-net`, so a running
   module can prove `RustSdkAdapterSession` reaches real `spawn_entity`,
-  `connect_agent`, and `submit_action` rows before the thin POD-owned rs-sdk
-  wrapper lands
+  `connect_agent`, and `submit_action` rows while the facade stays thin
 - the thin `RustSdkAdapterSession` facade now exists in `pod-net`, so the
   future POD-owned rs-sdk wrapper can compose snapshot ingest, action
   submission, and replay recording without rebuilding that glue in app code

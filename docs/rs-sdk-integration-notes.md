@@ -186,6 +186,10 @@ Current repo-owned seam:
 - `RustSdkAdapterSession` now packages snapshot ingest, action execution, and
   rollout recording behind one repo-owned facade so the future POD-owned
   rs-sdk wrapper does not need to hand-orchestrate host plus recorder glue
+- `RustSdkFacade` now packages runtime-mode selection, handoff ingest,
+  snapshot execution, replay finalization, and the live smoke entrypoint
+  behind one repo-owned wrapper so a future packaged rs-sdk can start from a
+  single `pod-net` surface instead of stitching host/session helpers together
 
 ## `rs_benchmark_runner`
 
@@ -236,8 +240,10 @@ Current repo-owned seam:
    `build_rust_sdk_action_plan(...)`.
 5. Start the POD-owned rs-sdk facade from `RustSdkAdapterSession` instead of
    rebuilding host plus recorder orchestration in app code.
-6. Wire live generated-SDK smoke coverage on top of that session surface.
-7. Use rs-sdk as an external benchmark surface for agent evaluation.
+6. Expose that facade through one small repo-owned wrapper (`RustSdkFacade`)
+   so a packaged rs-sdk does not need direct host/session wiring.
+7. Keep live generated-SDK smoke coverage on top of that wrapper/session seam.
+8. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources
 

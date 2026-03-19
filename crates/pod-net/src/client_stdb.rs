@@ -1299,6 +1299,170 @@ impl From<RustSdkRolloutRecorderError> for RustSdkAdapterSessionError {
     }
 }
 
+/// Repo-owned configuration for the thin POD rs-sdk facade.
+#[derive(Debug, Clone)]
+pub struct RustSdkFacadeConfig {
+    pub client: SpacetimeDBClientConfig,
+    pub runtime_mode: RustSdkAdapterRuntimeMode,
+}
+
+impl Default for RustSdkFacadeConfig {
+    fn default() -> Self {
+        Self {
+            client: SpacetimeDBClientConfig::default(),
+            runtime_mode: RustSdkAdapterRuntimeMode::default(),
+        }
+    }
+}
+
+/// Thin POD-owned wrapper above [`RustSdkAdapterSession`].
+///
+/// This is the repo-owned surface a future packaged rs-sdk can depend on
+/// directly without rebuilding runtime-mode selection, handoff ingest, action
+/// execution, replay finalization, or the live smoke entrypoint in app code.
+pub struct RustSdkFacade {
+    session: RustSdkAdapterSession,
+}
+
+impl RustSdkFacade {
+    pub fn new(config: RustSdkFacadeConfig) -> Self {
+        Self {
+            session: RustSdkAdapterSession::new(config.client, config.runtime_mode),
+        }
+    }
+
+    pub fn runtime_mode(&self) -> RustSdkAdapterRuntimeMode {
+        self.session.host().runtime_mode()
+    }
+
+    pub fn generated_binding_endpoint(&self) -> Option<GeneratedBindingEndpoint> {
+        self.session.host().generated_binding_endpoint()
+    }
+
+    pub fn client(&self) -> &SpacetimeDBClient {
+        self.session.host().client()
+    }
+
+    pub fn client_mut(&mut self) -> &mut SpacetimeDBClient {
+        self.session.host_mut().client_mut()
+    }
+
+    pub fn connect(&mut self) -> Result<(), RustSdkFacadeError> {
+        self.session.connect().map_err(Into::into)
+    }
+
+    pub fn poll_updates(&mut self) -> Vec<ServerMessage> {
+        self.session.host_mut().poll_updates()
+    }
+
+    pub fn apply_handoff_artifact(
+        &mut self,
+        artifact: RustSdkHandoffArtifact,
+    ) -> Result<(), RustSdkFacadeError> {
+        self.session
+            .host_mut()
+            .apply_handoff_artifact(artifact)
+            .map_err(Into::into)
+    }
+
+    pub fn apply_handoff_fixture(&mut self) -> Result<(), RustSdkFacadeError> {
+        self.session
+            .host_mut()
+            .apply_handoff_fixture()
+            .map_err(Into::into)
+    }
+
+    pub fn apply_handoff_json_document(
+        &mut self,
+        document: impl AsRef<str>,
+    ) -> Result<(), RustSdkFacadeError> {
+        self.session
+            .host_mut()
+            .apply_handoff_json_document(document)
+            .map_err(Into::into)
+    }
+
+    pub fn apply_handoff_toon_document(
+        &mut self,
+        document: impl AsRef<str>,
+    ) -> Result<(), RustSdkFacadeError> {
+        self.session
+            .host_mut()
+            .apply_handoff_toon_document(document)
+            .map_err(Into::into)
+    }
+
+    pub fn ingest_state_snapshot(
+        &mut self,
+        snapshot: &RustSdkStateSnapshot,
+    ) -> Result<(), RustSdkFacadeError> {
+        self.session.ingest_state_snapshot(snapshot).map_err(Into::into)
+    }
+
+    pub fn execute_actions(
+        &mut self,
+        snapshot: RustSdkStateSnapshot,
+        prompt_sent: impl Into<String>,
+        actions: Vec<Action>,
+        tool_calls: Vec<pod_core::AgentToolCallTrace>,
+        latency_ms: u32,
+    ) -> Result<Vec<Action>, RustSdkFacadeError> {
+        self.session
+            .execute_actions(snapshot, prompt_sent, actions, tool_calls, latency_ms)
+            .map_err(Into::into)
+    }
+
+    pub fn record_rollout_step(
+        &mut self,
+        record: RustSdkRolloutRecord,
+    ) -> Result<(), RustSdkFacadeError> {
+        self.session.record_rollout_step(record).map_err(Into::into)
+    }
+
+    pub fn into_session(self) -> RustSdkAdapterSession {
+        self.session
+    }
+
+    pub fn finalize_replay(self, header: ReplayHeader) -> ReplayFile {
+        self.session.finalize_replay(header)
+    }
+
+    pub fn run_live_smoke(
+        config: &RustSdkAdapterLiveSmokeConfig,
+    ) -> Result<RustSdkAdapterLiveSmokeRun, RustSdkFacadeError> {
+        run_rust_sdk_adapter_live_smoke(config).map_err(Into::into)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkFacadeError {
+    Host(String),
+    Session(String),
+}
+
+impl fmt::Display for RustSdkFacadeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Host(message) => write!(f, "Rust SDK facade host error: {message}"),
+            Self::Session(message) => write!(f, "Rust SDK facade session error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RustSdkFacadeError {}
+
+impl From<StdbClientError> for RustSdkFacadeError {
+    fn from(error: StdbClientError) -> Self {
+        Self::Host(error.to_string())
+    }
+}
+
+impl From<RustSdkAdapterSessionError> for RustSdkFacadeError {
+    fn from(error: RustSdkAdapterSessionError) -> Self {
+        Self::Session(error.to_string())
+    }
+}
+
 fn upsert_rust_sdk_telemetry_window(
     telemetry_windows: &mut Vec<pod_core::TickTelemetryFrame>,
     window: &pod_core::TickTelemetryFrame,
@@ -5099,6 +5263,129 @@ mod tests {
         assert_eq!(training_samples[0].tick, 1);
         assert_eq!(training_samples[0].tool_call_latency_ms, 12);
         assert_eq!(training_samples[0].action_outcomes.executed, 1);
+    }
+
+    #[test]
+    fn test_rust_sdk_facade_executes_fixture_backed_emulated_step() {
+        let snapshot = build_rust_sdk_gather_snapshot();
+        let mut facade = RustSdkFacade::new(RustSdkFacadeConfig {
+            client: SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            runtime_mode: RustSdkAdapterRuntimeMode::Emulated,
+        });
+
+        facade.connect().expect("facade should connect");
+        let _ = facade.poll_updates();
+        facade
+            .apply_handoff_fixture()
+            .expect("facade should ingest the canonical handoff fixture");
+        assert!(facade.client().last_debug_document().is_some());
+
+        let executed = facade
+            .execute_actions(
+                snapshot,
+                "facade gather prompt",
+                vec![Action::GatherResource {
+                    target: EntityId(9101),
+                    skill: SkillKind::Mining,
+                }],
+                vec![AgentToolCallTrace::success(
+                    1,
+                    "facade_path_probe",
+                    "rs-sdk-facade",
+                    9,
+                    3,
+                    1,
+                )],
+                18,
+            )
+            .expect("facade should execute and record the shared rollout step");
+
+        assert!(matches!(
+            executed.as_slice(),
+            [Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining
+            }]
+        ));
+        assert_eq!(facade.runtime_mode(), RustSdkAdapterRuntimeMode::Emulated);
+
+        let replay = facade.finalize_replay(ReplayHeader {
+            name: "rust-sdk-facade".into(),
+            timestamp: 1_710_849_600,
+            world_seed: 23,
+            tick_count: 2,
+            agent_count: 1,
+            notes: "deterministic facade test".into(),
+        });
+        let training_samples = replay.training_samples();
+
+        assert_eq!(replay.header.name, "rust-sdk-facade");
+        assert_eq!(training_samples.len(), 1);
+        assert_eq!(training_samples[0].tick, 1);
+        assert_eq!(training_samples[0].tool_call_latency_ms, 12);
+    }
+
+    #[test]
+    fn test_rust_sdk_facade_exposes_generated_binding_endpoint_and_handoff_decode() {
+        let fixture = build_rust_sdk_handoff_fixture();
+        let expected_tick = fixture.observation.payload.tick;
+        let mut generated_binding_facade = RustSdkFacade::new(RustSdkFacadeConfig {
+            client: SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            runtime_mode: RustSdkAdapterRuntimeMode::GeneratedBinding,
+        });
+        let mut toon_facade = RustSdkFacade::new(RustSdkFacadeConfig {
+            client: SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            runtime_mode: RustSdkAdapterRuntimeMode::Emulated,
+        });
+
+        assert_eq!(
+            generated_binding_facade.runtime_mode(),
+            RustSdkAdapterRuntimeMode::GeneratedBinding
+        );
+        assert!(generated_binding_facade.generated_binding_endpoint().is_some());
+        generated_binding_facade
+            .apply_handoff_json_document(
+                serde_json::to_string(&fixture).expect("handoff fixture should encode to JSON"),
+            )
+            .expect("facade should decode handoff JSON");
+        toon_facade
+            .apply_handoff_toon_document(fixture.to_toon_document())
+            .expect("facade should decode handoff TOON");
+
+        assert_eq!(
+            generated_binding_facade
+                .client()
+                .remote_agent_status()
+                .last_observation_tick,
+            Some(expected_tick)
+        );
+        assert_eq!(
+            toon_facade.client().remote_agent_status().last_observation_tick,
+            Some(expected_tick)
+        );
+    }
+
+    #[test]
+    fn test_rust_sdk_facade_run_live_smoke_maps_host_failures() {
+        let err = RustSdkFacade::run_live_smoke(&RustSdkAdapterLiveSmokeConfig {
+            host: "http://127.0.0.1:1".into(),
+            db_name: "missing-world".into(),
+            timeout_ms: 25,
+            poll_interval_ms: 5,
+            ..Default::default()
+        })
+        .expect_err("closed localhost port should fail facade live smoke");
+
+        assert!(matches!(err, RustSdkFacadeError::Host(_)));
     }
 
     #[test]
