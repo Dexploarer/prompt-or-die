@@ -53,6 +53,9 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "apply_rust_sdk_handoff_artifact()",
       "RustSdkAdapterHost",
       "RustSdkAdapterRuntimeMode",
+      "RustSdkStateSnapshot",
+      "RustSdkActionPlan",
+      "build_rust_sdk_action_plan()",
       "## Adapter lanes",
       "rs_state_adapter",
       "rs_action_adapter",
@@ -102,6 +105,10 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
     requiredSnippets: [
       "pub enum RustSdkAdapterRuntimeMode",
       "pub struct RustSdkAdapterHost",
+      "pub struct RustSdkStateSnapshot",
+      "pub struct RustSdkActionPlan",
+      "pub fn build_rust_sdk_action_plan(",
+      "pub fn apply_state_snapshot(",
       "pub fn apply_handoff_json_document(",
       "pub fn apply_handoff_toon_document(",
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
@@ -111,7 +118,13 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
   },
   {
     path: "crates/pod-net/src/lib.rs",
-    requiredSnippets: ["RustSdkAdapterHost", "RustSdkAdapterRuntimeMode"],
+    requiredSnippets: [
+      "RustSdkAdapterHost",
+      "RustSdkAdapterRuntimeMode",
+      "RustSdkStateSnapshot",
+      "RustSdkActionPlan",
+      "build_rust_sdk_action_plan",
+    ],
   },
   {
     path: "scripts/pod_sdk.ts",

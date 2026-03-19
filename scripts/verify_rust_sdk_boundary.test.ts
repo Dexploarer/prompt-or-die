@@ -29,6 +29,9 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("## Readiness gates");
     expect(markdown).toContain("apply_rust_sdk_handoff_artifact()");
     expect(markdown).toContain("RustSdkAdapterHost");
+    expect(markdown).toContain("RustSdkStateSnapshot");
+    expect(markdown).toContain("RustSdkActionPlan");
+    expect(markdown).toContain("build_rust_sdk_action_plan()");
     expect(markdown).toContain("bun ./scripts/verify_rust_sdk_boundary.ts --check");
   });
 });

@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 8: Lifecycle, SDK, and Shipping Stabilization
 **Current Stage**: Rust SDK Boundary Hardening
-**Last Checkpoint**: 2026-03-19 (Rust SDK adapter host pass)
+**Last Checkpoint**: 2026-03-19 (Rust SDK state/action adapter pass)
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md), [docs/platform-stabilization.md](/Users/home/Desktop/prompt-or-die/docs/platform-stabilization.md)
 **Planning Note**: `IMPLEMENTATION_PHASES.md` is reset to an active unchecked checklist for this pass. `IMPLEMENTATION_PLAN.md` remains the historical log.
 
@@ -19,7 +19,7 @@
 - [x] Phase 7: Editor and Authoring Tooling (completed in this pass). Commands: `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, `cargo check -p pod-editor -p pod-scene -p pod-assets`.
 - [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization (completed in this pass). Commands: `cargo check --workspace`, `cargo test --workspace`, `git diff --check`.
 
-**Next Action**: Start the real `rs_state_adapter` / `rs_action_adapter` mapping module on top of `RustSdkAdapterHost`, beginning with explicit external-state-to-`Observation` translation and POD-action-to-rs-sdk call mapping docs/tests.
+**Next Action**: Build `rs_rollout_recorder` and `rs_benchmark_runner` on top of `RustSdkStateSnapshot`, `RustSdkActionPlan`, and `RustSdkAdapterHost`, starting with deterministic replay capture from applied state snapshots plus action-plan traces.
 
 ---
 

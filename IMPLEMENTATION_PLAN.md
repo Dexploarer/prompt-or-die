@@ -2422,3 +2422,13 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 236
+- Added `RustSdkStateSnapshot` plus `RustSdkAdapterHost::apply_state_snapshot(...)` in `crates/pod-net/src/client_stdb.rs`, so future Rust SDK hookups now have one repo-owned external-state translation seam that turns raw SDK state, dialog/shop/bank context, and handoff metadata into shared `Observation` / `RustSdkHandoffArtifact` values.
+- Added `RustSdkActionPlan`, `RustSdkActionExecutionMode`, `RustSdkActionAdapterError`, and `build_rust_sdk_action_plan(...)` in `crates/pod-net/src/client_stdb.rs`, so shared `pod_core::Action` values now lower into repo-owned immediate versus completion-aware SDK execution plans without changing the public action dialect.
+- Re-exported the new adapter surface from `crates/pod-net/src/lib.rs`, updated the Rust SDK boundary docs plus the rs-sdk integration notes, and tightened the verifier so the new state/action adapter seam is part of the enforced SDK boundary contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`

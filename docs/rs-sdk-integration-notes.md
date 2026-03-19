@@ -124,6 +124,9 @@ instead of moving authority into the external SDK.
 Responsibility:
 
 - convert `rs-sdk` state snapshots into POD-style observations
+- keep that translation in one repo-owned shape such as
+  `pod_net::RustSdkStateSnapshot` instead of letting app roots invent their own
+  handoff structs
 
 Expected outputs:
 
@@ -132,6 +135,15 @@ Expected outputs:
 - inventory/equipment summaries
 - combat state
 - dialog/shop/bank state where relevant
+
+Current repo-owned seam:
+
+- `RustSdkStateSnapshot::to_observation()` translates raw SDK state into
+  shared `Observation`
+- `RustSdkStateSnapshot::to_handoff_artifact()` packages the same data into
+  `RustSdkHandoffArtifact`
+- `RustSdkAdapterHost::apply_state_snapshot(...)` proves that snapshot can ride
+  the same public handoff ingress path as the Rust/JSON/TOON bundle tests
 
 ## `rs_action_adapter`
 
@@ -143,6 +155,14 @@ Important rule:
 
 - keep this as a separate translation layer
 - do not contaminate core POD actions with rs-sdk-specific verbs
+
+Current repo-owned seam:
+
+- `build_rust_sdk_action_plan(...)` lowers shared `pod_core::Action` values into
+  a repo-owned `RustSdkActionPlan`
+- the plan distinguishes immediate runtime calls from completion-aware helper
+  calls without changing `pod_core::Action`
+- world-authority-only actions such as `Spawn` are rejected explicitly
 
 ## `rs_rollout_recorder`
 
@@ -178,11 +198,13 @@ This should eventually compare:
 
 1. Finish POD reward/outcome attribution in `pod-core`.
 2. Finish replay-derived training/export contracts.
-3. Add an rs-sdk state/action mapping document or module.
-4. Start from `pod_net::RustSdkAdapterHost` as the small runner/host outside
-   the main client UI path, then layer rs-sdk-specific state/action mapping on
-   top of it.
-5. Use rs-sdk as an external benchmark surface for agent evaluation.
+3. Start from `pod_net::RustSdkAdapterHost` as the small runner/host outside
+   the main client UI path.
+4. Land the repo-owned state/action adapter seam through
+   `RustSdkStateSnapshot`, `RustSdkActionPlan`, and
+   `build_rust_sdk_action_plan(...)`.
+5. Wire rollout recording and benchmark execution on top of that adapter seam.
+6. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources
 

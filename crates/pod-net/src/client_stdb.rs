@@ -49,15 +49,24 @@ use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use pod_core::action::{AbilityTarget, Action, SpeakVolume as CoreSpeakVolume};
+use pod_core::action::{AbilityTarget, Action, CompanionCommand, SpeakVolume as CoreSpeakVolume};
+use pod_core::component::{
+    CombatLoadout, CombatStyle, CreatureIdentity, EncounterState, Inventory, SkillKind,
+    SkillProgress, Team,
+};
 use pod_core::event::{Event, GameEvent};
 use pod_core::id::{AgentId, EntityId};
+use pod_core::observation::{
+    AgentMessage, AudibleEvent, MessageChannel, Objective, Observation, Relationship, SelfState,
+    VisibleEntity,
+};
+use pod_core::replay::ReplayFile;
 use pod_core::AgentType as CoreAgentType;
 use pod_core::{
     build_rust_sdk_handoff_fixture, decode_toon_document, AgentRuntimeProfile,
     AppliedWorldStateSummary, RemoteAgentFallbackReason, RemoteAgentRuntimeStatus,
     RemoteAgentTransportContract, RemoteTopologyBundle, RustSdkHandoffArtifact,
-    WorldEvaluationSummary,
+    VersionedObservation, VersionedTickTelemetry, WorldEvaluationSummary,
 };
 
 use pod_stdb::client::{
@@ -433,8 +442,8 @@ impl RustSdkAdapterHost {
         &mut self,
         document: impl AsRef<str>,
     ) -> Result<(), StdbClientError> {
-        let artifact = serde_json::from_str::<RustSdkHandoffArtifact>(document.as_ref())
-            .map_err(|error| {
+        let artifact =
+            serde_json::from_str::<RustSdkHandoffArtifact>(document.as_ref()).map_err(|error| {
                 StdbClientError::Document(format!(
                     "failed to decode rust_sdk_handoff_artifact JSON: {error}"
                 ))
@@ -447,18 +456,497 @@ impl RustSdkAdapterHost {
         &mut self,
         document: impl AsRef<str>,
     ) -> Result<(), StdbClientError> {
-        let artifact =
-            decode_toon_document::<RustSdkHandoffArtifact>(
-                document.as_ref(),
-                "rust_sdk_handoff_artifact",
-            )
-            .map_err(|error| {
-                StdbClientError::Document(format!(
-                    "failed to decode rust_sdk_handoff_artifact TOON: {error}"
-                ))
-            })?;
+        let artifact = decode_toon_document::<RustSdkHandoffArtifact>(
+            document.as_ref(),
+            "rust_sdk_handoff_artifact",
+        )
+        .map_err(|error| {
+            StdbClientError::Document(format!(
+                "failed to decode rust_sdk_handoff_artifact TOON: {error}"
+            ))
+        })?;
         self.apply_handoff_artifact(artifact)
     }
+
+    /// Translate and apply a repo-owned Rust SDK state snapshot.
+    pub fn apply_state_snapshot(
+        &mut self,
+        snapshot: &RustSdkStateSnapshot,
+    ) -> Result<(), StdbClientError> {
+        self.apply_handoff_artifact(snapshot.to_handoff_artifact())
+    }
+}
+
+/// Repo-owned external-state snapshot for a future Rust SDK adapter.
+///
+/// This keeps SDK-facing capture separate from authoritative [`Observation`]
+/// while still translating deterministically into the shared runtime contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkStateSnapshot {
+    pub tick: u64,
+    pub elapsed_secs: f32,
+    pub runtime_profile: AgentRuntimeProfile,
+    pub self_state: RustSdkSelfStateSnapshot,
+    #[serde(default)]
+    pub visible_entities: Vec<RustSdkVisibleEntitySnapshot>,
+    #[serde(default)]
+    pub audible_events: Vec<AudibleEvent>,
+    #[serde(default)]
+    pub messages: Vec<AgentMessage>,
+    #[serde(default)]
+    pub available_actions: Vec<String>,
+    #[serde(default)]
+    pub objectives: Vec<Objective>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialog: Option<RustSdkDialogState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shop: Option<RustSdkShopState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank: Option<RustSdkBankState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_contract: Option<RemoteAgentTransportContract>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_topology: Option<RemoteTopologyBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_tick_telemetry: Option<VersionedTickTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayFile>,
+}
+
+impl RustSdkStateSnapshot {
+    pub fn to_observation(&self) -> Observation {
+        let mut messages = self.messages.clone();
+        messages.extend(self.context_messages());
+
+        let mut available_actions = self.available_actions.clone();
+        if self.dialog.is_some() {
+            push_unique_action_hint(&mut available_actions, "Dialog:Continue");
+            push_unique_action_hint(&mut available_actions, "Dialog:SelectOption");
+        }
+        if let Some(shop) = &self.shop {
+            if shop.can_buy {
+                push_unique_action_hint(&mut available_actions, "Shop:Buy");
+            }
+            if shop.can_sell {
+                push_unique_action_hint(&mut available_actions, "Shop:Sell");
+            }
+        }
+        if let Some(bank) = &self.bank {
+            if bank.can_deposit {
+                push_unique_action_hint(&mut available_actions, "Bank:Deposit");
+            }
+            if bank.can_withdraw {
+                push_unique_action_hint(&mut available_actions, "Bank:Withdraw");
+            }
+        }
+
+        Observation {
+            tick: self.tick,
+            elapsed_secs: self.elapsed_secs,
+            self_state: SelfState {
+                agent_id: self.self_state.agent_id,
+                entity_id: self.self_state.entity_id,
+                runtime_profile: self.runtime_profile,
+                position: self.self_state.position,
+                rotation: self.self_state.rotation,
+                velocity: self.self_state.velocity,
+                health: self.self_state.health,
+                max_health: self.self_state.max_health,
+                team: self.self_state.team,
+                cooldowns: Vec::new(),
+                combat_loadout: self.self_state.combat_loadout.clone(),
+                skills: self.self_state.skills.clone(),
+                inventory: self.self_state.inventory.clone(),
+                companion_roster: None,
+                encounter: self.self_state.encounter.clone(),
+            },
+            visible_entities: self
+                .visible_entities
+                .iter()
+                .map(|entity| VisibleEntity {
+                    entity_id: entity.entity_id,
+                    entity_type: entity.entity_type.clone(),
+                    position: entity.position,
+                    velocity: entity.velocity,
+                    rotation: entity.rotation,
+                    distance: self.self_state.position.distance(entity.position),
+                    relationship: entity.relationship,
+                    health_fraction: entity.health_fraction,
+                    combat_style: entity.combat_style,
+                    creature: entity.creature.clone(),
+                })
+                .collect(),
+            audible_events: self.audible_events.clone(),
+            messages,
+            available_actions,
+            objectives: self.objectives.clone(),
+        }
+    }
+
+    pub fn to_handoff_artifact(&self) -> RustSdkHandoffArtifact {
+        let mut artifact = RustSdkHandoffArtifact::from_versioned_observation(
+            VersionedObservation::new(self.runtime_profile, self.to_observation()),
+        );
+        artifact.transport_contract = self.transport_contract.clone();
+        artifact.remote_topology = self.remote_topology.clone();
+        artifact.latest_tick_telemetry = self.latest_tick_telemetry.clone();
+        artifact.replay = self.replay.clone();
+        artifact
+    }
+
+    fn context_messages(&self) -> Vec<AgentMessage> {
+        let mut messages = Vec::new();
+        let from = self.self_state.agent_id;
+
+        if let Some(dialog) = &self.dialog {
+            let options = if dialog.options.is_empty() {
+                "no options".to_string()
+            } else {
+                dialog.options.join(", ")
+            };
+            messages.push(AgentMessage {
+                from,
+                channel: MessageChannel::Direct,
+                content: format!(
+                    "dialog:{} prompt=\"{}\" options=[{}]",
+                    dialog.speaker, dialog.prompt, options
+                ),
+            });
+        }
+
+        if let Some(shop) = &self.shop {
+            messages.push(AgentMessage {
+                from,
+                channel: MessageChannel::Direct,
+                content: format!(
+                    "shop:{} offers={} can_buy={} can_sell={}",
+                    shop.shop_name, shop.offer_count, shop.can_buy, shop.can_sell
+                ),
+            });
+        }
+
+        if let Some(bank) = &self.bank {
+            messages.push(AgentMessage {
+                from,
+                channel: MessageChannel::Direct,
+                content: format!(
+                    "bank:{} tabs={} items={} deposit={} withdraw={}",
+                    bank.bank_name,
+                    bank.tab_count,
+                    bank.item_count,
+                    bank.can_deposit,
+                    bank.can_withdraw
+                ),
+            });
+        }
+
+        messages
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkSelfStateSnapshot {
+    pub agent_id: AgentId,
+    pub entity_id: EntityId,
+    pub position: Vec2,
+    pub rotation: f32,
+    pub velocity: Vec2,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_health: Option<f32>,
+    pub team: Team,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combat_loadout: Option<CombatLoadout>,
+    #[serde(default)]
+    pub skills: Vec<SkillProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Inventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encounter: Option<EncounterState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkVisibleEntitySnapshot {
+    pub entity_id: EntityId,
+    pub entity_type: String,
+    pub position: Vec2,
+    pub velocity: Vec2,
+    pub rotation: f32,
+    pub relationship: Relationship,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_fraction: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combat_style: Option<CombatStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creature: Option<CreatureIdentity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkDialogState {
+    pub speaker: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkShopState {
+    pub shop_name: String,
+    pub offer_count: u16,
+    pub can_buy: bool,
+    pub can_sell: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkBankState {
+    pub bank_name: String,
+    pub tab_count: u8,
+    pub item_count: u16,
+    pub can_deposit: bool,
+    pub can_withdraw: bool,
+}
+
+fn push_unique_action_hint(actions: &mut Vec<String>, hint: &str) {
+    if !actions.iter().any(|action| action == hint) {
+        actions.push(hint.to_string());
+    }
+}
+
+/// How the SDK adapter should execute a translated action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RustSdkActionExecutionMode {
+    /// Immediate low-level call on the SDK runtime.
+    #[default]
+    Immediate,
+    /// Completion-aware helper that may walk, wait, or retry internally.
+    CompletionAware,
+}
+
+/// Repo-owned action intent produced before a concrete SDK method call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RustSdkActionIntent {
+    MoveDirection {
+        direction: Vec2,
+    },
+    Stop,
+    Rotate {
+        angle: f32,
+    },
+    LookAtPosition {
+        target: Vec2,
+    },
+    AttackCurrentTarget,
+    AttackEntity {
+        entity_id: u64,
+    },
+    UseAbility {
+        slot: u8,
+        target: Option<AbilityTarget>,
+    },
+    CaptureCreature {
+        entity_id: u64,
+        tool_slot: Option<u8>,
+    },
+    SummonCompanion {
+        slot: u8,
+    },
+    CommandCompanion {
+        slot: u8,
+        command: CompanionCommand,
+        target_entity_id: Option<u64>,
+    },
+    InteractNearest,
+    InteractEntity {
+        entity_id: u64,
+    },
+    PickupEntity {
+        entity_id: u64,
+    },
+    DropInventorySlot {
+        slot: u8,
+    },
+    UseInventorySlot {
+        slot: u8,
+    },
+    GatherEntity {
+        entity_id: u64,
+        skill: SkillKind,
+    },
+    LootEntity {
+        entity_id: u64,
+    },
+    Speak {
+        message: String,
+        volume: CoreSpeakVolume,
+    },
+    Signal {
+        signal_type: String,
+        data: String,
+    },
+    SetAutoRetaliate {
+        enabled: bool,
+    },
+    Idle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkActionPlan {
+    pub execution_mode: RustSdkActionExecutionMode,
+    pub intent: RustSdkActionIntent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkActionAdapterError {
+    UnsupportedAction {
+        action: &'static str,
+        reason: String,
+    },
+}
+
+impl fmt::Display for RustSdkActionAdapterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedAction { action, reason } => {
+                write!(f, "unsupported Rust SDK action {action}: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RustSdkActionAdapterError {}
+
+/// Translate a shared POD action into a repo-owned Rust SDK action plan.
+pub fn build_rust_sdk_action_plan(
+    action: &Action,
+) -> Result<RustSdkActionPlan, RustSdkActionAdapterError> {
+    let plan = match action {
+        Action::Move { direction } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::MoveDirection {
+                direction: *direction,
+            },
+        },
+        Action::Stop => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::Stop,
+        },
+        Action::Rotate { angle } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::Rotate { angle: *angle },
+        },
+        Action::LookAt { target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::LookAtPosition { target: *target },
+        },
+        Action::Attack => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::AttackCurrentTarget,
+        },
+        Action::AttackTarget { target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::AttackEntity {
+                entity_id: target.0,
+            },
+        },
+        Action::UseAbility { slot, target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::UseAbility {
+                slot: *slot,
+                target: target.clone(),
+            },
+        },
+        Action::CaptureCreature { target, tool_slot } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::CaptureCreature {
+                entity_id: target.0,
+                tool_slot: *tool_slot,
+            },
+        },
+        Action::SummonCompanion { slot } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::SummonCompanion { slot: *slot },
+        },
+        Action::CommandCompanion {
+            slot,
+            command,
+            target,
+        } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::CommandCompanion {
+                slot: *slot,
+                command: *command,
+                target_entity_id: target.map(|entity| entity.0),
+            },
+        },
+        Action::Interact => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::CompletionAware,
+            intent: RustSdkActionIntent::InteractNearest,
+        },
+        Action::InteractWith { target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::CompletionAware,
+            intent: RustSdkActionIntent::InteractEntity {
+                entity_id: target.0,
+            },
+        },
+        Action::Pickup { target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::CompletionAware,
+            intent: RustSdkActionIntent::PickupEntity {
+                entity_id: target.0,
+            },
+        },
+        Action::Drop { slot } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::DropInventorySlot { slot: *slot },
+        },
+        Action::UseItem { slot } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::UseInventorySlot { slot: *slot },
+        },
+        Action::GatherResource { target, skill } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::CompletionAware,
+            intent: RustSdkActionIntent::GatherEntity {
+                entity_id: target.0,
+                skill: *skill,
+            },
+        },
+        Action::Loot { target } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::CompletionAware,
+            intent: RustSdkActionIntent::LootEntity {
+                entity_id: target.0,
+            },
+        },
+        Action::Speak { message, volume } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::Speak {
+                message: message.clone(),
+                volume: *volume,
+            },
+        },
+        Action::Signal { signal_type, data } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::Signal {
+                signal_type: signal_type.clone(),
+                data: data.clone(),
+            },
+        },
+        Action::SetAutoRetaliate { enabled } => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::SetAutoRetaliate { enabled: *enabled },
+        },
+        Action::Idle => RustSdkActionPlan {
+            execution_mode: RustSdkActionExecutionMode::Immediate,
+            intent: RustSdkActionIntent::Idle,
+        },
+        Action::Spawn { .. } => {
+            return Err(RustSdkActionAdapterError::UnsupportedAction {
+                action: "Spawn",
+                reason: "world-authority spawn requests stay outside the SDK adapter".into(),
+            });
+        }
+    };
+
+    Ok(plan)
 }
 
 /// One boolean benchmark check for authority-fed topology ingestion.
@@ -1405,7 +1893,10 @@ impl SpacetimeDBClient {
     ) -> Result<(), StdbClientError> {
         let observation_tick = artifact.observation.payload.tick;
         let transport_contract = artifact.transport_contract.clone();
-        let replay_document = artifact.replay.as_ref().map(|replay| replay.to_toon_document());
+        let replay_document = artifact
+            .replay
+            .as_ref()
+            .map(|replay| replay.to_toon_document());
 
         self.inner.apply_rust_sdk_handoff_artifact(artifact)?;
 
@@ -2342,11 +2833,13 @@ pub fn build_topology_feed_measurements_with_options(
 mod tests {
     use super::*;
     use pod_core::{
-        action::SpeakVolume as CoreSpeakVolume, build_rust_sdk_handoff_fixture, decode_toon_document,
-        AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent, AgentToolCallTrace,
-        FocusedEntityDebugSummary, RemoteTopologyBundle, ReplayFile, ReplayHeader,
-        ShardIncidentSummary, TickTelemetryFrame, VersionedTickTelemetry, WorldQuestBinding,
-        WorldRealityDefinition, WorldRealityRole, WorldTournamentDefinition,
+        action::SpeakVolume as CoreSpeakVolume, build_rust_sdk_handoff_fixture,
+        decode_toon_document, AgentTelemetryFrame, AgentTickRollup, AgentToolCallEvent,
+        AgentToolCallTrace, CombatStyle, EncounterKind, EncounterState, FocusedEntityDebugSummary,
+        Inventory, ItemStack, Objective, RemoteTopologyBundle, ReplayFile, ReplayHeader,
+        ShardIncidentSummary, SkillKind, SkillProgress, Team, TickTelemetryFrame,
+        VersionedTickTelemetry, WorldQuestBinding, WorldRealityDefinition, WorldRealityRole,
+        WorldTournamentDefinition,
     };
     use pod_stdb::client::CachedWorldState;
 
@@ -2365,6 +2858,113 @@ mod tests {
             .connect_remote_agent(1, AgentType::LlmAgent)
             .expect("remote llm agent connects");
         client
+    }
+
+    fn build_rust_sdk_state_snapshot_fixture() -> RustSdkStateSnapshot {
+        let fixture = build_rust_sdk_handoff_fixture();
+        let profile = fixture.observation.profile;
+        let self_agent = fixture.observation.payload.self_state.agent_id;
+
+        RustSdkStateSnapshot {
+            tick: 41,
+            elapsed_secs: 0.683,
+            runtime_profile: profile,
+            self_state: RustSdkSelfStateSnapshot {
+                agent_id: self_agent,
+                entity_id: EntityId(4001),
+                position: Vec2::new(320.0, 640.0),
+                rotation: 1.25,
+                velocity: Vec2::new(-0.5, 0.75),
+                health: Some(67.0),
+                max_health: Some(99.0),
+                team: Team::Team(2),
+                combat_loadout: Some(pod_core::CombatLoadout {
+                    style: CombatStyle::Ranged,
+                    attack_range: 9.0,
+                    attack_speed_ticks: 4,
+                    max_hit: 12.0,
+                    auto_retaliate: true,
+                    equipped_weapon: Some("maple-shortbow".into()),
+                    offhand_item: None,
+                    active_ability_bar: vec!["piercing-shot".into(), "binding-shot".into()],
+                }),
+                skills: vec![
+                    SkillProgress::new(SkillKind::Mining, 52, 145_200, 9_800),
+                    SkillProgress::new(SkillKind::Magic, 41, 49_900, 3_400),
+                ],
+                inventory: Some(Inventory {
+                    capacity: 28,
+                    carried_weight: 7.5,
+                    coins: 1_250,
+                    items: vec![ItemStack {
+                        item_id: "iron-pickaxe".into(),
+                        display_name: "Iron Pickaxe".into(),
+                        quantity: 1,
+                        stackable: false,
+                    }],
+                }),
+                encounter: Some(EncounterState {
+                    encounter_id: 44,
+                    kind: EncounterKind::OpenWorld,
+                    threat_level: 0.6,
+                    primary_target: Some(EntityId(5001)),
+                    active_turn_owner: None,
+                    capture_allowed: false,
+                    in_combat: true,
+                }),
+            },
+            visible_entities: vec![RustSdkVisibleEntitySnapshot {
+                entity_id: EntityId(5001),
+                entity_type: "iron_vein".into(),
+                position: Vec2::new(323.0, 644.0),
+                velocity: Vec2::ZERO,
+                rotation: 0.0,
+                relationship: Relationship::Neutral,
+                health_fraction: None,
+                combat_style: None,
+                creature: None,
+            }],
+            audible_events: vec![AudibleEvent {
+                event_type: "pickaxe_swing".into(),
+                direction: Vec2::new(0.7, 0.2),
+                distance: 4.5,
+                intensity: 0.5,
+            }],
+            messages: vec![AgentMessage {
+                from: self_agent,
+                content: "frontier miner ready".into(),
+                channel: MessageChannel::Team,
+            }],
+            available_actions: vec!["Move".into(), "GatherResource".into()],
+            objectives: vec![Objective {
+                id: "mine-iron".into(),
+                description: "Collect iron ore for the squad".into(),
+                progress: 0.4,
+                completed: false,
+            }],
+            dialog: Some(RustSdkDialogState {
+                speaker: "Trader".into(),
+                prompt: "Interested in tools?".into(),
+                options: vec!["Show wares".into(), "Not now".into()],
+            }),
+            shop: Some(RustSdkShopState {
+                shop_name: "Frontier Tools".into(),
+                offer_count: 12,
+                can_buy: true,
+                can_sell: false,
+            }),
+            bank: Some(RustSdkBankState {
+                bank_name: "Anchor Vault".into(),
+                tab_count: 3,
+                item_count: 86,
+                can_deposit: true,
+                can_withdraw: true,
+            }),
+            transport_contract: fixture.transport_contract.clone(),
+            remote_topology: fixture.remote_topology.clone(),
+            latest_tick_telemetry: fixture.latest_tick_telemetry.clone(),
+            replay: fixture.replay.clone(),
+        }
     }
 
     #[test]
@@ -2387,8 +2987,7 @@ mod tests {
                     .expect("artifact handoff should apply"),
                 "json" => host
                     .apply_handoff_json_document(
-                        serde_json::to_string(&fixture)
-                            .expect("fixture should serialize to JSON"),
+                        serde_json::to_string(&fixture).expect("fixture should serialize to JSON"),
                     )
                     .expect("json handoff should apply"),
                 "toon" => host
@@ -2421,7 +3020,9 @@ mod tests {
             let documents = host.client_mut().drain_debug_documents();
             let replay = documents
                 .iter()
-                .find_map(|document| decode_toon_document::<ReplayFile>(document, "replay_file").ok())
+                .find_map(|document| {
+                    decode_toon_document::<ReplayFile>(document, "replay_file").ok()
+                })
                 .expect("replay debug document should be retained");
             assert_eq!(replay.header.name, "rust-sdk-fixture");
         }
@@ -2445,7 +3046,8 @@ mod tests {
             StdbConnectionMode::Generated
         );
 
-        host.connect().expect("connect should stage generated runtime work");
+        host.connect()
+            .expect("connect should stage generated runtime work");
         let commands = endpoint.drain_commands();
         assert!(matches!(
             commands.as_slice(),
@@ -2507,6 +3109,169 @@ mod tests {
             .connect()
             .expect_err("closed localhost port should fail generated SDK connect");
         assert!(matches!(err, StdbClientError::Connection(_)));
+    }
+
+    #[test]
+    fn test_rust_sdk_state_snapshot_translates_context_into_observation_and_handoff() {
+        let snapshot = build_rust_sdk_state_snapshot_fixture();
+
+        let observation = snapshot.to_observation();
+        assert_eq!(observation.tick, 41);
+        assert_eq!(observation.self_state.entity_id, EntityId(4001));
+        assert_eq!(observation.self_state.team, Team::Team(2));
+        assert_eq!(
+            observation
+                .self_state
+                .inventory
+                .as_ref()
+                .map(|inventory| inventory.coins),
+            Some(1_250)
+        );
+        assert_eq!(observation.visible_entities.len(), 1);
+        assert!((observation.visible_entities[0].distance - 5.0).abs() < 0.001);
+        assert!(observation
+            .messages
+            .iter()
+            .any(|message| message.content.contains("dialog:Trader")));
+        assert!(observation
+            .messages
+            .iter()
+            .any(|message| message.content.contains("shop:Frontier Tools")));
+        assert!(observation
+            .messages
+            .iter()
+            .any(|message| message.content.contains("bank:Anchor Vault")));
+        assert!(observation
+            .available_actions
+            .iter()
+            .any(|action| action == "Dialog:SelectOption"));
+        assert!(observation
+            .available_actions
+            .iter()
+            .any(|action| action == "Shop:Buy"));
+        assert!(observation
+            .available_actions
+            .iter()
+            .any(|action| action == "Bank:Withdraw"));
+
+        let artifact = snapshot.to_handoff_artifact();
+        assert_eq!(artifact.observation.payload.tick, 41);
+        assert_eq!(artifact.profile().agent_type, CoreAgentType::LlmAgent);
+        assert_eq!(
+            artifact
+                .remote_topology
+                .as_ref()
+                .map(|topology| topology.scenario_id.as_str()),
+            Some("rust-sdk-fixture")
+        );
+        assert_eq!(
+            artifact
+                .replay
+                .as_ref()
+                .map(|replay| replay.header.name.as_str()),
+            Some("rust-sdk-fixture")
+        );
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_host_applies_state_snapshot_through_handoff_ingest() {
+        let snapshot = build_rust_sdk_state_snapshot_fixture();
+        let mut host = RustSdkAdapterHost::new(
+            SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::Emulated,
+        );
+
+        host.apply_state_snapshot(&snapshot)
+            .expect("state snapshot should apply through adapter host");
+
+        assert_eq!(host.client().remote_world_id(), Some("world-frontier-1"));
+        assert_eq!(
+            host.client()
+                .inner()
+                .latest_observation_tick(snapshot.self_state.entity_id.0),
+            Some(snapshot.tick)
+        );
+        let messages = host.poll_updates();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DebugDocument { document }
+                if document.contains("remote_topology_bundle")
+        )));
+        let replay = host
+            .client_mut()
+            .drain_debug_documents()
+            .into_iter()
+            .find_map(|document| decode_toon_document::<ReplayFile>(&document, "replay_file").ok())
+            .expect("replay debug document should be retained");
+        assert_eq!(replay.header.name, "rust-sdk-fixture");
+    }
+
+    #[test]
+    fn test_build_rust_sdk_action_plan_routes_execution_modes() {
+        let move_plan = build_rust_sdk_action_plan(&Action::Move {
+            direction: Vec2::new(1.0, 0.0),
+        })
+        .expect("move should translate");
+        assert_eq!(
+            move_plan.execution_mode,
+            RustSdkActionExecutionMode::Immediate
+        );
+        assert!(matches!(
+            move_plan.intent,
+            RustSdkActionIntent::MoveDirection { direction }
+                if direction == Vec2::new(1.0, 0.0)
+        ));
+
+        let gather_plan = build_rust_sdk_action_plan(&Action::GatherResource {
+            target: EntityId(77),
+            skill: SkillKind::Mining,
+        })
+        .expect("gather should translate");
+        assert_eq!(
+            gather_plan.execution_mode,
+            RustSdkActionExecutionMode::CompletionAware
+        );
+        assert!(matches!(
+            gather_plan.intent,
+            RustSdkActionIntent::GatherEntity {
+                entity_id: 77,
+                skill: SkillKind::Mining
+            }
+        ));
+
+        let speak_plan = build_rust_sdk_action_plan(&Action::Speak {
+            message: "hold west".into(),
+            volume: CoreSpeakVolume::Normal,
+        })
+        .expect("speak should translate");
+        assert_eq!(
+            speak_plan.execution_mode,
+            RustSdkActionExecutionMode::Immediate
+        );
+        assert!(matches!(
+            speak_plan.intent,
+            RustSdkActionIntent::Speak { ref message, .. } if message == "hold west"
+        ));
+    }
+
+    #[test]
+    fn test_build_rust_sdk_action_plan_rejects_spawn() {
+        let err = build_rust_sdk_action_plan(&Action::Spawn {
+            prefab: "ore-vein".into(),
+            position: Vec2::new(10.0, 20.0),
+        })
+        .expect_err("spawn should stay outside the SDK adapter");
+
+        assert!(matches!(
+            err,
+            RustSdkActionAdapterError::UnsupportedAction {
+                action: "Spawn",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2933,7 +3698,10 @@ mod tests {
             orchestration.phase,
             pod_core::TournamentOrchestrationPhase::Active
         );
-        assert_eq!(orchestration.leading_team_ids, vec!["iron-sigil".to_string()]);
+        assert_eq!(
+            orchestration.leading_team_ids,
+            vec!["iron-sigil".to_string()]
+        );
         assert_eq!(
             client
                 .remote_world_tournament_orchestration()

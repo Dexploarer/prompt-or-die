@@ -43,6 +43,7 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Generated SpacetimeDB runtime seam | `pod_stdb::StdbClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | This is the repo-owned bridge between deterministic command-runtime tests, the live generated bindings path, and the canonical observation/topology/telemetry handoff ingest used by a future Rust SDK adapter. |
 | Network-facing generated runtime seam | `pod_net::SpacetimeDBClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | Higher-level Rust SDK consumers should be able to choose the same generated binding or live SDK path through the public client wrapper while forwarding replay/debug documents over the existing public surfaces. |
 | Thin adapter host | `pod_net::{RustSdkAdapterHost, RustSdkAdapterRuntimeMode}` | Future rs-sdk integration should enter through this small host surface when it needs runtime-mode selection plus Rust/JSON/TOON handoff decoding without depending on app roots. |
+| Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions before any live SDK method bindings exist. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
 
 ## Adapter lanes
@@ -57,12 +58,18 @@ Responsibility:
 - map generated-runtime callbacks, export artifacts, or benchmark fixtures into
   `Observation`, `VersionedObservation`, `RustSdkHandoffArtifact`, and
   `RemoteTopologyBundle`
+- centralize that translation through `pod_net::RustSdkStateSnapshot` so SDK
+  state, dialog/shop/bank context, and handoff metadata do not become app-local
+  glue
 
 Rules:
 
 - preserve `RuntimeContractVersion`
 - preserve `AgentRuntimeProfile`
 - do not smuggle hidden SDK-local state around authoritative observations
+- preserve auxiliary context by turning dialog/shop/bank state into explicit
+  observation messages and action hints until the shared observation schema
+  grows dedicated fields
 
 ### `rs_action_adapter`
 
@@ -70,12 +77,17 @@ Responsibility:
 
 - map SDK-local planner or policy outputs into `Action` / `AgentAction` /
   `VersionedAgentAction`
+- expose the reverse lowering through `pod_net::RustSdkActionPlan` plus
+  `build_rust_sdk_action_plan()` so future SDK integrations can choose between
+  immediate and completion-aware execution without mutating `pod_core::Action`
 
 Rules:
 
 - translate into standard POD actions before validation
 - keep SDK-local affordances out of `pod-core`
 - let authority reject stale or invalid actions instead of trying to bypass it
+- reject world-authority-only actions such as `Spawn` instead of pretending the
+  SDK can bypass authority
 
 ### `rs_rollout_recorder`
 
@@ -118,7 +130,10 @@ The supported handoff is:
    generated SpacetimeDB bindings path.
 3. Prefer `RustSdkAdapterHost` when the integration needs one small public
    wrapper that owns runtime-mode selection and Rust/JSON/TOON handoff decode.
-4. Apply the resulting SDK-facing bundle through
+4. Prefer `RustSdkStateSnapshot` plus `RustSdkAdapterHost::apply_state_snapshot()`
+   when the integration is still translating raw SDK state into repo-owned
+   observations and handoff bundles.
+5. Apply the resulting SDK-facing bundle through
    `apply_rust_sdk_handoff_artifact()` so observations, topology, telemetry,
    and replay stay on the same repo-owned client ingress path instead of
    becoming adapter-local glue.
@@ -168,6 +183,9 @@ As of the current Phase 8 hardening pass:
   and `pod-net`
 - the thin `RustSdkAdapterHost` wrapper exists for runtime selection and
   handoff-document decode above those client seams
+- the repo-owned `RustSdkStateSnapshot` and `RustSdkActionPlan` surfaces exist
+  in `pod-net`, so future SDK hookups can translate external state/actions
+  before any live binding code is written
 - large agent-facing export surfaces exist for world, events, and multiverse
 - replay/training artifacts already derive from authoritative telemetry
 
