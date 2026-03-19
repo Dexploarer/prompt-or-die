@@ -70,7 +70,8 @@ pub use constraint::{
 pub use contract::{
     assign_roster_to_world_teams, build_remote_topology_bundle,
     build_remote_topology_parity_summary, build_tournament_control_plane_summary,
-    build_tournament_orchestration_summary, build_world_admission_summary,
+    build_rust_sdk_handoff_fixture, build_tournament_orchestration_summary,
+    build_world_admission_summary,
     build_world_control_plane_summary, build_world_quest_bindings, AgentCapabilities, AgentRole,
     AgentRuntimeProfile, AgentTeamDefinition, AgentTypeCountSummary, AppliedWorldStateSummary,
     ControllerEvaluationSummary, CrossWorldEffect, CrossWorldLinkDefinition, CrossWorldPropagation,

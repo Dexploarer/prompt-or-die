@@ -143,6 +143,7 @@ The SDK boundary should only be treated as ready when these checks stay green:
 cargo test -p pod-core contract -- --nocapture
 cargo test -p pod-stdb --no-default-features --features client
 cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture
+cargo run -p pod-core --example rust_sdk_handoff_fixture -- --format toon >/tmp/pod-sdk-handoff.toon
 bun ./scripts/pod.ts export world --format json >/tmp/pod-sdk-world.json
 bun ./scripts/pod.ts export events --format toon >/tmp/pod-sdk-events.toon
 bun ./scripts/pod.ts export multiverse --format json >/tmp/pod-sdk-multiverse.json

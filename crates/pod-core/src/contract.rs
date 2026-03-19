@@ -4,11 +4,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::AgentAction;
 use crate::agent::AgentType;
+use crate::component::Team;
 use crate::id::AgentId;
-use crate::observation::Observation;
+use crate::id::EntityId;
+use crate::observation::{
+    AgentMessage, AudibleEvent, MessageChannel, Objective, Observation, Relationship,
+    SelfState, VisibleEntity,
+};
 use crate::replay::ReplayFile;
 use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
 use crate::toon::encode_toon_document;
+use glam::Vec2;
 
 pub const RUNTIME_CONTRACT_VERSION_V1: u16 = 1;
 
@@ -2042,6 +2048,116 @@ impl RustSdkHandoffArtifact {
     }
 }
 
+pub fn build_rust_sdk_handoff_fixture() -> RustSdkHandoffArtifact {
+    let profile = AgentRuntimeProfile::for_agent_type(AgentType::LlmAgent);
+    let agent_id = AgentId(uuid::Uuid::from_u128(
+        0x504f445f52555354_53444b0000000001,
+    ));
+    let commander_id = AgentId(uuid::Uuid::from_u128(
+        0x504f445f52555354_53444b0000000002,
+    ));
+    let observation = Observation {
+        tick: 24,
+        elapsed_secs: 0.4,
+        self_state: SelfState {
+            agent_id,
+            entity_id: EntityId(1001),
+            runtime_profile: profile,
+            position: Vec2::new(128.0, 96.0),
+            rotation: 0.25,
+            velocity: Vec2::new(1.5, 0.0),
+            health: Some(82.0),
+            max_health: Some(100.0),
+            team: Team::Team(1),
+            ..Default::default()
+        },
+        visible_entities: vec![VisibleEntity {
+            entity_id: EntityId(2001),
+            entity_type: "rift_hound".into(),
+            position: Vec2::new(133.0, 98.0),
+            velocity: Vec2::ZERO,
+            rotation: 0.0,
+            distance: 5.4,
+            relationship: Relationship::Hostile,
+            health_fraction: Some(0.67),
+            ..Default::default()
+        }],
+        audible_events: vec![AudibleEvent {
+            event_type: "anchor_pulse".into(),
+            direction: Vec2::new(1.0, 0.2),
+            distance: 12.0,
+            intensity: 0.84,
+        }],
+        messages: vec![AgentMessage {
+            from: commander_id,
+            content: "Hold the frontier anchor and avoid overextending.".into(),
+            channel: MessageChannel::Team,
+        }],
+        available_actions: vec!["Move".into(), "Attack".into(), "Signal".into()],
+        objectives: vec![Objective {
+            id: "secure-anchor".into(),
+            description: "Hold the frontier anchor".into(),
+            progress: 0.65,
+            completed: false,
+        }],
+    };
+
+    let topology = RemoteTopologyBundle {
+        version: RuntimeContractVersion::V1,
+        scenario_id: "rust-sdk-fixture".into(),
+        profile_id: "fixture-v1".into(),
+        generated_at_unix_ms: 1_710_849_600_000,
+        tournament: WorldTournamentDefinition {
+            world_ids: vec!["world-frontier-1".into()],
+            team_ids: vec!["team-alpha".into()],
+            ..WorldTournamentDefinition::new("rust-sdk-fixture", "Rust SDK Fixture")
+        },
+        teams: vec![AgentTeamDefinition {
+            control_mode: TeamControlMode::HybridCommand,
+            objective_tags: vec!["secure-anchor".into()],
+            ..AgentTeamDefinition::new("team-alpha", "Alpha Team", "world-frontier-1")
+        }],
+        worlds: vec![WorldRealityDefinition {
+            active_team_ids: vec!["team-alpha".into()],
+            ..WorldRealityDefinition::new(
+                "world-frontier-1",
+                "Frontier Anchor",
+                "frontier-rules",
+            )
+        }],
+        links: vec![],
+        world_quest_bindings: vec![],
+        world_admissions: vec![],
+        world_control_planes: vec![],
+        tournament_control_plane: TournamentControlPlaneSummary::default(),
+        tournament_orchestration: TournamentOrchestrationSummary::default(),
+        quest_graphs: vec![],
+        applied_world_states: vec![],
+        evaluation: ScenarioEvaluationSummary {
+            controller_mix: vec![],
+            worlds: vec![],
+        },
+    };
+    let replay = ReplayFile {
+        header: crate::replay::ReplayHeader {
+            name: "rust-sdk-fixture".into(),
+            timestamp: 1_710_849_600,
+            world_seed: 7,
+            tick_count: 1,
+            agent_count: 1,
+            notes: "Deterministic SDK handoff fixture".into(),
+        },
+        traces: vec![vec![]],
+        telemetry_windows: vec![TickTelemetryFrame::empty(24)],
+    };
+
+    RustSdkHandoffArtifact::new(profile, observation)
+        .with_transport_contract(RemoteAgentTransportContract::spacetimedb_default(profile))
+        .with_remote_topology(topology)
+        .with_tick_telemetry(TickTelemetryFrame::empty(24))
+        .with_replay(replay)
+}
+
 impl ToolDefinition {
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("tool_definition", self)
@@ -2087,7 +2203,8 @@ mod tests {
     use super::{
         assign_roster_to_world_teams, build_remote_topology_bundle,
         build_remote_topology_parity_summary, build_tournament_control_plane_summary,
-        build_tournament_orchestration_summary, build_world_admission_summary,
+        build_rust_sdk_handoff_fixture, build_tournament_orchestration_summary,
+        build_world_admission_summary,
         build_world_control_plane_summary, build_world_quest_bindings, AgentCapabilities,
         AgentRole, AgentRuntimeProfile, AgentTeamDefinition, AgentTypeCountSummary,
         AppliedWorldStateSummary, ControllerEvaluationSummary, CrossWorldEffect,
@@ -2345,6 +2462,44 @@ mod tests {
         assert_eq!(value["payload"]["observation"]["payload"]["tick"], 0);
         assert_eq!(value["payload"]["latest_tick_telemetry"]["payload"]["tick"], 3);
         assert_eq!(value["payload"]["replay"]["header"]["name"], "sdk-handoff");
+    }
+
+    #[test]
+    fn rust_sdk_handoff_fixture_is_deterministic_and_sdk_ready() {
+        let fixture = build_rust_sdk_handoff_fixture();
+
+        assert_eq!(fixture.version, RuntimeContractVersion::V1);
+        assert_eq!(fixture.observation.payload.tick, 24);
+        assert_eq!(
+            fixture
+                .transport_contract
+                .as_ref()
+                .expect("transport contract")
+                .action_budget
+                .max_actions_per_tick,
+            u32::from(REMOTE_AGENT_MAX_ACTIONS_PER_TICK)
+        );
+        assert_eq!(
+            fixture
+                .remote_topology
+                .as_ref()
+                .expect("topology attached")
+                .scenario_id,
+            "rust-sdk-fixture"
+        );
+        assert_eq!(
+            fixture
+                .latest_tick_telemetry
+                .as_ref()
+                .expect("telemetry attached")
+                .payload
+                .tick,
+            24
+        );
+        assert_eq!(
+            fixture.replay.as_ref().expect("replay attached").header.name,
+            "rust-sdk-fixture"
+        );
     }
 
     #[test]

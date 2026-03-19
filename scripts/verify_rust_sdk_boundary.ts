@@ -61,12 +61,20 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
   {
     path: "crates/pod-core/src/lib.rs",
     requiredSnippets: [
+      "build_rust_sdk_handoff_fixture",
       "RustSdkHandoffArtifact",
       "VersionedAgentAction",
       "VersionedObservation",
       "VersionedTickTelemetry",
       "RemoteTopologyBundle",
       "ReplayTrainingSample",
+    ],
+  },
+  {
+    path: "crates/pod-core/examples/rust_sdk_handoff_fixture.rs",
+    requiredSnippets: [
+      "build_rust_sdk_handoff_fixture",
+      "Usage: cargo run -p pod-core --example rust_sdk_handoff_fixture -- [--format json|toon] [--output PATH]",
     ],
   },
   {
