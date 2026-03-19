@@ -74,10 +74,15 @@ use pod_stdb::client::{
     GeneratedRemoteTopologyDocumentRow, StdbClient, StdbClientConfig, StdbConnectionMode,
     StdbError, StdbEvent, SubmittedAction, Subscriptions,
 };
-use pod_stdb::module_bindings::{self, publish_remote_topology_document};
+use pod_stdb::module_bindings::{
+    self, action_submission_table::ActionSubmissionTableAccess as _,
+    connected_agent_table::ConnectedAgentTableAccess as _, entity_table::EntityTableAccess as _,
+    publish_remote_topology_document, spawn_entity,
+};
 use pod_stdb::types::{
     AbilityTargetKind, ActionKind, AgentType, SpeakVolume as StdbSpeakVolume, WorldEventKind,
 };
+use pod_stdb::{DbContext as _, Table as _};
 
 use crate::protocol::{ClientId, ReconnectToken, ServerMessage};
 use crate::snapshot::{
@@ -1359,6 +1364,58 @@ pub struct RustSdkBenchmarkRun {
 }
 
 const RUST_SDK_BENCHMARK_SCHEMA_VERSION: u32 = 1;
+const RUST_SDK_LIVE_SMOKE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RustSdkAdapterLiveSmokeConfig {
+    pub host: String,
+    pub db_name: String,
+    pub auth_token: Option<String>,
+    pub timeout_ms: u64,
+    pub poll_interval_ms: u64,
+}
+
+impl Default for RustSdkAdapterLiveSmokeConfig {
+    fn default() -> Self {
+        Self {
+            host: "http://localhost:3000".into(),
+            db_name: "prompt-or-die".into(),
+            auth_token: None,
+            timeout_ms: 5_000,
+            poll_interval_ms: 10,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RustSdkAdapterLiveSmokeReport {
+    pub schema_version: u32,
+    pub runtime_mode: RustSdkAdapterRuntimeMode,
+    pub host: String,
+    pub db_name: String,
+    pub spawned_entity_id: u64,
+    pub connected_agent_entity_id: Option<u64>,
+    pub connected_agent_display_name: Option<String>,
+    pub action_submission_entity_id: Option<u64>,
+    pub action_submission_kind: Option<String>,
+    pub observed_action_key: String,
+    pub reducer_submission_count: u64,
+    pub replay_training_sample_count: usize,
+    pub checks: Vec<RustSdkBenchmarkCheck>,
+}
+
+impl RustSdkAdapterLiveSmokeReport {
+    pub fn passed(&self) -> bool {
+        self.checks.iter().all(|check| check.passed)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RustSdkAdapterLiveSmokeRun {
+    pub report: RustSdkAdapterLiveSmokeReport,
+    pub replay: ReplayFile,
+    pub training_samples: Vec<ReplayTrainingSample>,
+}
 
 #[derive(Debug, Clone)]
 struct RustSdkBenchmarkCase {
@@ -1529,6 +1586,141 @@ pub fn run_rust_sdk_adapter_benchmark_suite(
             replay_tick_count: replay.header.tick_count,
             replay_training_sample_count: training_samples.len(),
             scenarios: scenario_reports,
+            checks,
+        },
+        replay,
+        training_samples,
+    })
+}
+
+/// Run a live generated-SDK smoke harness over the repo-owned
+/// [`RustSdkAdapterSession`] facade.
+pub fn run_rust_sdk_adapter_live_smoke(
+    config: &RustSdkAdapterLiveSmokeConfig,
+) -> Result<RustSdkAdapterLiveSmokeRun, StdbClientError> {
+    let (observer, observer_state) = connect_live_generated_sdk_smoke_observer(config)?;
+    let spawned_entity = spawn_live_generated_sdk_smoke_entity(&observer, &observer_state, config)?;
+
+    let mut session = RustSdkAdapterSession::new(
+        SpacetimeDBClientConfig {
+            host: config.host.clone(),
+            db_name: config.db_name.clone(),
+            auth_token: config.auth_token.clone(),
+            player_name: "rust-sdk-live-smoke".into(),
+            ..Default::default()
+        },
+        RustSdkAdapterRuntimeMode::GeneratedSdk,
+    );
+    session.connect().map_err(map_rust_sdk_adapter_session_error)?;
+    wait_for_live_generated_sdk_session_ready(&mut session, config)?;
+
+    let snapshot = build_rust_sdk_live_smoke_snapshot(spawned_entity.entity_id);
+    let reducers_before = session.host().client().inner().reducers_called();
+    let executed_actions = session
+        .execute_actions(
+            snapshot.clone(),
+            "rust-sdk live smoke",
+            vec![Action::Idle],
+            Vec::new(),
+            11,
+        )
+        .map_err(map_rust_sdk_adapter_session_error)?;
+    let reducer_submission_count = session
+        .host()
+        .client()
+        .inner()
+        .reducers_called()
+        .saturating_sub(reducers_before);
+    let (connected_agent, action_submission) = wait_for_live_generated_sdk_smoke_results(
+        &observer,
+        &observer_state,
+        &mut session,
+        config,
+        spawned_entity.entity_id,
+    )?;
+    let replay = session.finalize_replay(ReplayHeader {
+        name: "rust-sdk-live-smoke".into(),
+        timestamp: 1_710_849_600,
+        world_seed: 29,
+        tick_count: snapshot.tick + 1,
+        agent_count: 1,
+        notes: "Live generated-SDK smoke for the repo-owned Rust SDK adapter session".into(),
+    });
+    let training_samples = replay.training_samples();
+    let observed_action_key = executed_actions
+        .first()
+        .map(rust_sdk_action_semantic_key)
+        .unwrap_or("none")
+        .to_string();
+
+    let checks = vec![
+        RustSdkBenchmarkCheck {
+            metric: "runtime_mode".into(),
+            passed: true,
+            expected: "GeneratedSdk".into(),
+            observed: format!("{:?}", RustSdkAdapterRuntimeMode::GeneratedSdk),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "connected_agent_entity_match".into(),
+            passed: connected_agent.entity_id == spawned_entity.entity_id,
+            expected: spawned_entity.entity_id.to_string(),
+            observed: connected_agent.entity_id.to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "connected_agent_display_name_match".into(),
+            passed: connected_agent.display_name == "rust-sdk-live-smoke",
+            expected: "rust-sdk-live-smoke".into(),
+            observed: connected_agent.display_name.clone(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "connected_agent_type_match".into(),
+            passed: matches!(
+                connected_agent.agent_type,
+                module_bindings::AgentType::LlmAgent
+            ),
+            expected: "LlmAgent".into(),
+            observed: format!("{:?}", connected_agent.agent_type),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "action_submission_entity_match".into(),
+            passed: action_submission.entity_id == spawned_entity.entity_id,
+            expected: spawned_entity.entity_id.to_string(),
+            observed: action_submission.entity_id.to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "action_submission_kind_match".into(),
+            passed: matches!(action_submission.action_kind, module_bindings::ActionKind::Idle),
+            expected: "Idle".into(),
+            observed: format!("{:?}", action_submission.action_kind),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "reducer_submission_count".into(),
+            passed: reducer_submission_count == 2,
+            expected: "2".into(),
+            observed: reducer_submission_count.to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "replay_training_sample_count".into(),
+            passed: training_samples.len() == 1,
+            expected: "1".into(),
+            observed: training_samples.len().to_string(),
+        },
+    ];
+
+    Ok(RustSdkAdapterLiveSmokeRun {
+        report: RustSdkAdapterLiveSmokeReport {
+            schema_version: RUST_SDK_LIVE_SMOKE_SCHEMA_VERSION,
+            runtime_mode: RustSdkAdapterRuntimeMode::GeneratedSdk,
+            host: config.host.clone(),
+            db_name: config.db_name.clone(),
+            spawned_entity_id: spawned_entity.entity_id,
+            connected_agent_entity_id: Some(connected_agent.entity_id),
+            connected_agent_display_name: Some(connected_agent.display_name.clone()),
+            action_submission_entity_id: Some(action_submission.entity_id),
+            action_submission_kind: Some(format!("{:?}", action_submission.action_kind)),
+            observed_action_key,
+            reducer_submission_count,
+            replay_training_sample_count: training_samples.len(),
             checks,
         },
         replay,
@@ -1853,6 +2045,45 @@ fn build_rust_sdk_gather_snapshot() -> RustSdkStateSnapshot {
         ))),
         replay: None,
     }
+}
+
+fn build_rust_sdk_live_smoke_snapshot(entity_id: u64) -> RustSdkStateSnapshot {
+    let mut snapshot = build_rust_sdk_gather_snapshot();
+    snapshot.tick = 2;
+    snapshot.elapsed_secs = 0.3;
+    snapshot.self_state.entity_id = EntityId(entity_id);
+    snapshot.self_state.position = Vec2::new(128.0, 192.0);
+    snapshot.self_state.velocity = Vec2::ZERO;
+    snapshot.self_state.encounter = None;
+    snapshot.visible_entities.clear();
+    snapshot.audible_events.clear();
+    snapshot.messages = vec![AgentMessage {
+        from: snapshot.self_state.agent_id,
+        content: "live generated sdk smoke ready".into(),
+        channel: MessageChannel::Direct,
+    }];
+    snapshot.available_actions = vec!["Idle".into()];
+    snapshot.objectives = vec![Objective {
+        id: "smoke-live-generated-sdk".into(),
+        description: "Prove the repo-owned Rust SDK session facade reaches live reducers."
+            .into(),
+        progress: 0.0,
+        completed: false,
+    }];
+    snapshot.dialog = None;
+    snapshot.shop = None;
+    snapshot.bank = None;
+    snapshot.transport_contract = Some(RemoteAgentTransportContract::spacetimedb_default(
+        snapshot.runtime_profile,
+    ));
+    snapshot.remote_topology = None;
+    snapshot.replay = None;
+
+    let observation = snapshot.to_observation();
+    snapshot.latest_tick_telemetry = Some(VersionedTickTelemetry::new(
+        build_rust_sdk_tick_telemetry(&observation, &Action::Idle, &[]),
+    ));
+    snapshot
 }
 
 fn build_rust_sdk_tick_telemetry(
@@ -3862,6 +4093,375 @@ fn build_live_generated_topology_feed_world_path_report(
         if Instant::now() >= deadline {
             return Err(StdbClientError::Connection(
                 "timed out waiting for generated SDK runtime topology row".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LiveGeneratedSdkSmokeObserverState {
+    connected: bool,
+    subscription_applied: bool,
+    connect_error: Option<String>,
+    disconnect_reason: Option<String>,
+    subscription_error: Option<String>,
+    entity_rows: Vec<module_bindings::EntityRow>,
+    connected_agent_rows: Vec<module_bindings::ConnectedAgentRow>,
+    action_submission_rows: Vec<module_bindings::ActionSubmissionRow>,
+}
+
+fn map_rust_sdk_adapter_session_error(error: RustSdkAdapterSessionError) -> StdbClientError {
+    match error {
+        RustSdkAdapterSessionError::Client(message) => StdbClientError::Connection(message),
+        RustSdkAdapterSessionError::UnsupportedAction(message) => {
+            StdbClientError::InvalidState(message)
+        }
+        RustSdkAdapterSessionError::Rollout(message) => StdbClientError::InvalidState(message),
+    }
+}
+
+fn connect_live_generated_sdk_smoke_observer(
+    config: &RustSdkAdapterLiveSmokeConfig,
+) -> Result<
+    (
+        module_bindings::DbConnection,
+        Arc<Mutex<LiveGeneratedSdkSmokeObserverState>>,
+    ),
+    StdbClientError,
+> {
+    let state = Arc::new(Mutex::new(LiveGeneratedSdkSmokeObserverState::default()));
+    let connection = module_bindings::DbConnection::builder()
+        .with_uri(config.host.clone())
+        .with_database_name(config.db_name.clone())
+        .with_token(config.auth_token.clone())
+        .on_connect({
+            let state = Arc::clone(&state);
+            move |_connection, _identity, _token| {
+                state
+                    .lock()
+                    .expect("live rust sdk smoke observer state poisoned")
+                    .connected = true;
+            }
+        })
+        .on_connect_error({
+            let state = Arc::clone(&state);
+            move |_ctx, error| {
+                state
+                    .lock()
+                    .expect("live rust sdk smoke observer state poisoned")
+                    .connect_error = Some(error.to_string());
+            }
+        })
+        .on_disconnect({
+            let state = Arc::clone(&state);
+            move |_ctx, error| {
+                state
+                    .lock()
+                    .expect("live rust sdk smoke observer state poisoned")
+                    .disconnect_reason = Some(
+                    error
+                        .map(|error| error.to_string())
+                        .unwrap_or_else(|| "live rust sdk smoke observer disconnected".into()),
+                );
+            }
+        })
+        .build()
+        .map_err(|error| StdbClientError::Connection(error.to_string()))?;
+
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        connection
+            .frame_tick()
+            .map_err(|error| StdbClientError::Connection(error.to_string()))?;
+        {
+            let snapshot = state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .clone();
+            if snapshot.connected {
+                break;
+            }
+            if let Some(error) = snapshot.connect_error {
+                return Err(StdbClientError::Connection(error));
+            }
+            if let Some(reason) = snapshot.disconnect_reason {
+                return Err(StdbClientError::Connection(reason));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Connection(
+                "timed out waiting for live rust sdk smoke observer connection".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+
+    connection.db.entity().on_insert({
+        let state = Arc::clone(&state);
+        move |_ctx, row| {
+            state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .entity_rows
+                .push(row.clone());
+        }
+    });
+    connection.db.connected_agent().on_insert({
+        let state = Arc::clone(&state);
+        move |_ctx, row| {
+            state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .connected_agent_rows
+                .push(row.clone());
+        }
+    });
+    connection.db.action_submission().on_insert({
+        let state = Arc::clone(&state);
+        move |_ctx, row| {
+            state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .action_submission_rows
+                .push(row.clone());
+        }
+    });
+
+    connection
+        .subscription_builder()
+        .on_applied({
+            let state = Arc::clone(&state);
+            move |_ctx| {
+                state
+                    .lock()
+                    .expect("live rust sdk smoke observer state poisoned")
+                    .subscription_applied = true;
+            }
+        })
+        .on_error({
+            let state = Arc::clone(&state);
+            move |_ctx, error| {
+                state
+                    .lock()
+                    .expect("live rust sdk smoke observer state poisoned")
+                    .subscription_error = Some(error.to_string());
+            }
+        })
+        .subscribe(vec![
+            String::from("SELECT * FROM entity"),
+            String::from("SELECT * FROM connected_agent"),
+            String::from("SELECT * FROM action_submission"),
+        ]);
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        connection
+            .frame_tick()
+            .map_err(|error| StdbClientError::Connection(error.to_string()))?;
+        {
+            let snapshot = state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .clone();
+            if snapshot.subscription_applied {
+                break;
+            }
+            if let Some(error) = snapshot.subscription_error {
+                return Err(StdbClientError::Subscription(error));
+            }
+            if let Some(error) = snapshot.connect_error {
+                return Err(StdbClientError::Connection(error));
+            }
+            if let Some(reason) = snapshot.disconnect_reason {
+                return Err(StdbClientError::Connection(reason));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Subscription(
+                "timed out waiting for live rust sdk smoke observer subscription".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+
+    Ok((connection, state))
+}
+
+fn spawn_live_generated_sdk_smoke_entity(
+    observer: &module_bindings::DbConnection,
+    observer_state: &Arc<Mutex<LiveGeneratedSdkSmokeObserverState>>,
+    config: &RustSdkAdapterLiveSmokeConfig,
+) -> Result<module_bindings::EntityRow, StdbClientError> {
+    let baseline_ids = observer_state
+        .lock()
+        .expect("live rust sdk smoke observer state poisoned")
+        .entity_rows
+        .iter()
+        .map(|row| row.entity_id)
+        .collect::<HashSet<_>>();
+
+    observer
+        .reducers
+        .spawn_entity(128.0, 192.0, Some(module_bindings::AgentType::LlmAgent))
+        .map_err(|error| StdbClientError::Reducer(error.to_string()))?;
+
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        observer
+            .frame_tick()
+            .map_err(|error| StdbClientError::Reducer(error.to_string()))?;
+        {
+            let snapshot = observer_state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .clone();
+            if let Some(row) = snapshot.entity_rows.iter().find(|row| {
+                !baseline_ids.contains(&row.entity_id)
+                    && row.alive
+                    && matches!(row.agent_type, Some(module_bindings::AgentType::LlmAgent))
+            }) {
+                return Ok(row.clone());
+            }
+            if let Some(error) = snapshot.subscription_error {
+                return Err(StdbClientError::Subscription(error));
+            }
+            if let Some(reason) = snapshot.disconnect_reason {
+                return Err(StdbClientError::Connection(reason));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Reducer(
+                "timed out waiting for live rust sdk smoke spawn_entity row".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+}
+
+fn wait_for_live_generated_sdk_session_ready(
+    session: &mut RustSdkAdapterSession,
+    config: &RustSdkAdapterLiveSmokeConfig,
+) -> Result<(), StdbClientError> {
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let _ = session.host_mut().poll_updates();
+        if session.host().client().is_connected() {
+            return Ok(());
+        }
+
+        match session.host().client().inner().connection_state() {
+            ConnectionState::Error(message) => {
+                return Err(StdbClientError::Connection(message.clone()));
+            }
+            ConnectionState::Disconnected => {
+                return Err(StdbClientError::Connection(
+                    "rust sdk live smoke session disconnected before ready".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Connection(
+                "timed out waiting for rust sdk live smoke session connection".into(),
+            ));
+        }
+
+        sleep(poll_interval);
+    }
+}
+
+fn wait_for_live_generated_sdk_smoke_results(
+    observer: &module_bindings::DbConnection,
+    observer_state: &Arc<Mutex<LiveGeneratedSdkSmokeObserverState>>,
+    session: &mut RustSdkAdapterSession,
+    config: &RustSdkAdapterLiveSmokeConfig,
+    entity_id: u64,
+) -> Result<
+    (
+        module_bindings::ConnectedAgentRow,
+        module_bindings::ActionSubmissionRow,
+    ),
+    StdbClientError,
+> {
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        observer
+            .frame_tick()
+            .map_err(|error| StdbClientError::Reducer(error.to_string()))?;
+        let _ = session.host_mut().poll_updates();
+
+        {
+            let snapshot = observer_state
+                .lock()
+                .expect("live rust sdk smoke observer state poisoned")
+                .clone();
+            let connected_agent = snapshot
+                .connected_agent_rows
+                .iter()
+                .find(|row| row.entity_id == entity_id)
+                .cloned();
+            let action_submission = snapshot
+                .action_submission_rows
+                .iter()
+                .find(|row| {
+                    row.entity_id == entity_id
+                        && matches!(row.action_kind, module_bindings::ActionKind::Idle)
+                })
+                .cloned();
+
+            if let (Some(connected_agent), Some(action_submission)) =
+                (connected_agent, action_submission)
+            {
+                return Ok((connected_agent, action_submission));
+            }
+
+            if let Some(error) = snapshot.subscription_error {
+                return Err(StdbClientError::Subscription(error));
+            }
+            if let Some(error) = snapshot.connect_error {
+                return Err(StdbClientError::Connection(error));
+            }
+            if let Some(reason) = snapshot.disconnect_reason {
+                return Err(StdbClientError::Connection(reason));
+            }
+        }
+
+        match session.host().client().inner().connection_state() {
+            ConnectionState::Error(message) => {
+                return Err(StdbClientError::Connection(message.clone()));
+            }
+            ConnectionState::Disconnected => {
+                return Err(StdbClientError::Connection(
+                    "rust sdk live smoke session disconnected before rows arrived".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        if Instant::now() >= deadline {
+            return Err(StdbClientError::Reducer(
+                "timed out waiting for rust sdk live smoke connect/action rows".into(),
             ));
         }
 
@@ -6271,6 +6871,20 @@ mod tests {
         let err = client
             .connect()
             .expect_err("closed localhost port should fail the live generated runtime");
+        assert!(matches!(err, StdbClientError::Connection(_)));
+    }
+
+    #[test]
+    fn test_run_rust_sdk_adapter_live_smoke_propagates_connect_failures() {
+        let err = run_rust_sdk_adapter_live_smoke(&RustSdkAdapterLiveSmokeConfig {
+            host: "http://127.0.0.1:1".into(),
+            db_name: "prompt-or-die".into(),
+            auth_token: None,
+            timeout_ms: 100,
+            poll_interval_ms: 1,
+        })
+        .expect_err("closed localhost port should fail the live rust sdk smoke");
+
         assert!(matches!(err, StdbClientError::Connection(_)));
     }
 

@@ -89,7 +89,9 @@ use spacetimedb_sdk::{
 };
 
 use crate::module_bindings::{
-    self, remote_topology_document_table::RemoteTopologyDocumentTableAccess as _,
+    self, connect_agent as GeneratedConnectAgentReducer,
+    remote_topology_document_table::RemoteTopologyDocumentTableAccess as _,
+    submit_action as GeneratedSubmitActionReducer,
     DbConnection as GeneratedSdkDbConnection,
     RemoteTopologyDocumentRow as GeneratedSdkRemoteTopologyDocumentRow,
     SubscriptionHandle as GeneratedSdkSubscriptionHandle,
@@ -222,6 +224,19 @@ pub trait GeneratedRuntimeAdapter {
     fn subscribe(&mut self, queries: &[String]) -> Result<(), String>;
     /// Drain any transport/runtime events accumulated since the last frame.
     fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent>;
+    /// Optionally invoke the live generated `connect_agent` reducer.
+    fn call_connect_agent(
+        &mut self,
+        _entity_id: u64,
+        _agent_type: AgentType,
+        _display_name: String,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+    /// Optionally invoke the live generated `submit_action` reducer.
+    fn call_submit_action(&mut self, _action: &SubmittedAction) -> Result<bool, String> {
+        Ok(false)
+    }
 }
 
 /// Outbound command issued by [`StdbClient`] to a generated SpacetimeDB binding layer.
@@ -502,6 +517,62 @@ impl Default for GeneratedSdkRuntime {
     }
 }
 
+fn generated_agent_type(agent_type: AgentType) -> crate::module_bindings::AgentType {
+    match agent_type {
+        AgentType::Human => crate::module_bindings::AgentType::Human,
+        AgentType::LlmAgent => crate::module_bindings::AgentType::LlmAgent,
+        AgentType::NeuralAgent => crate::module_bindings::AgentType::NeuralAgent,
+        AgentType::ScriptedNpc => crate::module_bindings::AgentType::ScriptedNpc,
+        AgentType::System => crate::module_bindings::AgentType::System,
+    }
+}
+
+fn generated_action_kind(action_kind: ActionKind) -> crate::module_bindings::ActionKind {
+    match action_kind {
+        ActionKind::Move => crate::module_bindings::ActionKind::Move,
+        ActionKind::Stop => crate::module_bindings::ActionKind::Stop,
+        ActionKind::Rotate => crate::module_bindings::ActionKind::Rotate,
+        ActionKind::LookAt => crate::module_bindings::ActionKind::LookAt,
+        ActionKind::Attack => crate::module_bindings::ActionKind::Attack,
+        ActionKind::AttackTarget => crate::module_bindings::ActionKind::AttackTarget,
+        ActionKind::UseAbility => crate::module_bindings::ActionKind::UseAbility,
+        ActionKind::CaptureCreature => crate::module_bindings::ActionKind::CaptureCreature,
+        ActionKind::SummonCompanion => crate::module_bindings::ActionKind::SummonCompanion,
+        ActionKind::CommandCompanion => crate::module_bindings::ActionKind::CommandCompanion,
+        ActionKind::Interact => crate::module_bindings::ActionKind::Interact,
+        ActionKind::InteractWith => crate::module_bindings::ActionKind::InteractWith,
+        ActionKind::Pickup => crate::module_bindings::ActionKind::Pickup,
+        ActionKind::Drop => crate::module_bindings::ActionKind::Drop,
+        ActionKind::UseItem => crate::module_bindings::ActionKind::UseItem,
+        ActionKind::GatherResource => crate::module_bindings::ActionKind::GatherResource,
+        ActionKind::Loot => crate::module_bindings::ActionKind::Loot,
+        ActionKind::Speak => crate::module_bindings::ActionKind::Speak,
+        ActionKind::Signal => crate::module_bindings::ActionKind::Signal,
+        ActionKind::SetAutoRetaliate => crate::module_bindings::ActionKind::SetAutoRetaliate,
+        ActionKind::Idle => crate::module_bindings::ActionKind::Idle,
+        ActionKind::Spawn => crate::module_bindings::ActionKind::Spawn,
+    }
+}
+
+fn generated_ability_target_kind(
+    kind: AbilityTargetKind,
+) -> crate::module_bindings::AbilityTargetKind {
+    match kind {
+        AbilityTargetKind::Position => crate::module_bindings::AbilityTargetKind::Position,
+        AbilityTargetKind::Entity => crate::module_bindings::AbilityTargetKind::Entity,
+        AbilityTargetKind::Direction => crate::module_bindings::AbilityTargetKind::Direction,
+        AbilityTargetKind::None => crate::module_bindings::AbilityTargetKind::None,
+    }
+}
+
+fn generated_speak_volume(volume: SpeakVolume) -> crate::module_bindings::SpeakVolume {
+    match volume {
+        SpeakVolume::Whisper => crate::module_bindings::SpeakVolume::Whisper,
+        SpeakVolume::Normal => crate::module_bindings::SpeakVolume::Normal,
+        SpeakVolume::Shout => crate::module_bindings::SpeakVolume::Shout,
+    }
+}
+
 impl GeneratedRuntimeAdapter for GeneratedSdkRuntime {
     fn connect(&mut self, config: &StdbClientConfig) -> Result<(), String> {
         if self.connection.is_some() {
@@ -587,6 +658,58 @@ impl GeneratedRuntimeAdapter for GeneratedSdkRuntime {
         }
 
         self.handle.drain()
+    }
+
+    fn call_connect_agent(
+        &mut self,
+        entity_id: u64,
+        agent_type: AgentType,
+        display_name: String,
+    ) -> Result<bool, String> {
+        let connection = self
+            .connection
+            .as_ref()
+            .ok_or_else(|| "generated SDK runtime has no active connection".to_string())?;
+        connection
+            .reducers
+            .connect_agent(
+                entity_id,
+                generated_agent_type(agent_type),
+                display_name,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    fn call_submit_action(&mut self, action: &SubmittedAction) -> Result<bool, String> {
+        let connection = self
+            .connection
+            .as_ref()
+            .ok_or_else(|| "generated SDK runtime has no active connection".to_string())?;
+        connection
+            .reducers
+            .submit_action(
+                action.entity_id,
+                generated_action_kind(action.action_kind.clone()),
+                action.direction_x,
+                action.direction_y,
+                action.angle,
+                action.target_x,
+                action.target_y,
+                action.target_entity_id,
+                action.ability_slot,
+                action
+                    .ability_target_kind
+                    .clone()
+                    .map(generated_ability_target_kind),
+                action.message.clone(),
+                action.volume.clone().map(generated_speak_volume),
+                action.signal_type.clone(),
+                action.signal_data.clone(),
+                action.prefab.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(true)
     }
 }
 
@@ -1808,6 +1931,16 @@ impl StdbClient {
         log::info!(
             "[pod-stdb client] Calling connect_agent(entity={entity_id}, type={agent_type:?}, name='{display_name}')"
         );
+        if matches!(self.config.connection_mode, StdbConnectionMode::Generated) {
+            let runtime = self.generated_runtime.as_mut().ok_or_else(|| {
+                StdbError::ReducerError(
+                    "generated SpacetimeDB runtime is unavailable for connect_agent".into(),
+                )
+            })?;
+            runtime
+                .call_connect_agent(entity_id, agent_type, display_name)
+                .map_err(StdbError::ReducerError)?;
+        }
         self.record_reducer_success("connect_agent");
         Ok(())
     }
@@ -1979,7 +2112,22 @@ impl StdbClient {
             action.entity_id,
             action.action_kind
         );
-        self.apply_submitted_action(action)?;
+        let handled_by_runtime = if matches!(self.config.connection_mode, StdbConnectionMode::Generated)
+        {
+            let runtime = self.generated_runtime.as_mut().ok_or_else(|| {
+                StdbError::ReducerError(
+                    "generated SpacetimeDB runtime is unavailable for submit_action".into(),
+                )
+            })?;
+            runtime
+                .call_submit_action(action)
+                .map_err(StdbError::ReducerError)?
+        } else {
+            false
+        };
+        if !handled_by_runtime {
+            self.apply_submitted_action(action)?;
+        }
         self.record_reducer_success("submit_action");
         Ok(())
     }
@@ -3199,10 +3347,78 @@ impl std::fmt::Debug for StdbClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
     use pod_core::{
         build_rust_sdk_handoff_fixture, decode_toon_document, AgentTelemetryFrame,
         TickTelemetryFrame, VersionedTickTelemetry,
     };
+
+    #[derive(Debug, Clone, Default)]
+    struct GeneratedReducerProbeState {
+        connect_agent_calls: Vec<(u64, AgentType, String)>,
+        submit_action_calls: Vec<SubmittedAction>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct GeneratedReducerProbe {
+        handle: GeneratedRuntimeHandle,
+        state: Arc<Mutex<GeneratedReducerProbeState>>,
+    }
+
+    impl GeneratedReducerProbe {
+        fn connected() -> (Self, Arc<Mutex<GeneratedReducerProbeState>>) {
+            let handle = GeneratedRuntimeHandle::default();
+            handle.connected(vec![4; 16], "probe-token".to_string());
+            let state = Arc::new(Mutex::new(GeneratedReducerProbeState::default()));
+            (
+                Self {
+                    handle,
+                    state: Arc::clone(&state),
+                },
+                state,
+            )
+        }
+    }
+
+    impl GeneratedRuntimeAdapter for GeneratedReducerProbe {
+        fn connect(&mut self, _config: &StdbClientConfig) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn disconnect(&mut self) {}
+
+        fn subscribe(&mut self, _queries: &[String]) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn drain_events(&mut self) -> Vec<GeneratedRuntimeEvent> {
+            self.handle.drain()
+        }
+
+        fn call_connect_agent(
+            &mut self,
+            entity_id: u64,
+            agent_type: AgentType,
+            display_name: String,
+        ) -> Result<bool, String> {
+            self.state
+                .lock()
+                .expect("generated reducer probe state poisoned")
+                .connect_agent_calls
+                .push((entity_id, agent_type, display_name));
+            Ok(true)
+        }
+
+        fn call_submit_action(&mut self, action: &SubmittedAction) -> Result<bool, String> {
+            self.state
+                .lock()
+                .expect("generated reducer probe state poisoned")
+                .submit_action_calls
+                .push(action.clone());
+            Ok(true)
+        }
+    }
 
     #[test]
     fn test_client_new() {
@@ -3304,6 +3520,76 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event, StdbEvent::SubscriptionApplied)));
+    }
+
+    #[test]
+    fn test_generated_mode_connect_agent_uses_runtime_reducer_call() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            connection_mode: StdbConnectionMode::Generated,
+            ..StdbClientConfig::default()
+        });
+        let (runtime, state) = GeneratedReducerProbe::connected();
+        client.set_generated_runtime(Box::new(runtime));
+        client.connect().expect("generated probe should connect");
+        client.frame_tick();
+        client.upsert_entity(CachedEntity::from_entity(
+            77,
+            Some(AgentType::LlmAgent),
+            true,
+        ));
+
+        client
+            .call_connect_agent(77, AgentType::LlmAgent, "Probe".into())
+            .expect("connect_agent should delegate through the generated runtime");
+
+        let state = state
+            .lock()
+            .expect("generated reducer probe state poisoned")
+            .clone();
+        assert_eq!(
+            state.connect_agent_calls,
+            vec![(77, AgentType::LlmAgent, "Probe".into())]
+        );
+        assert_eq!(client.controlled_entity(), Some(77));
+        assert_eq!(client.reducers_called(), 1);
+    }
+
+    #[test]
+    fn test_generated_mode_submit_action_uses_runtime_reducer_call() {
+        let mut client = StdbClient::new(StdbClientConfig {
+            connection_mode: StdbConnectionMode::Generated,
+            ..StdbClientConfig::default()
+        });
+        let (runtime, state) = GeneratedReducerProbe::connected();
+        client.set_generated_runtime(Box::new(runtime));
+        client.connect().expect("generated probe should connect");
+        client.frame_tick();
+
+        let mut entity = CachedEntity::from_entity(91, Some(AgentType::LlmAgent), true);
+        entity.vel_x = Some(0.0);
+        entity.vel_y = Some(0.0);
+        client.upsert_entity(entity);
+
+        let action = SubmittedAction::move_dir(91, 1.0, 0.0);
+        client
+            .call_submit_action(&action)
+            .expect("submit_action should delegate through the generated runtime");
+
+        let state = state
+            .lock()
+            .expect("generated reducer probe state poisoned")
+            .clone();
+        assert_eq!(state.submit_action_calls.len(), 1);
+        assert_eq!(state.submit_action_calls[0].entity_id, action.entity_id);
+        assert_eq!(
+            state.submit_action_calls[0].action_kind,
+            action.action_kind
+        );
+        assert_eq!(state.submit_action_calls[0].direction_x, action.direction_x);
+        assert_eq!(state.submit_action_calls[0].direction_y, action.direction_y);
+        assert_eq!(client.entity(91).and_then(|entity| entity.vel_x), Some(0.0));
+        assert_eq!(client.entity(91).and_then(|entity| entity.vel_y), Some(0.0));
+        assert_eq!(client.reducers_called(), 1);
     }
 
     #[test]

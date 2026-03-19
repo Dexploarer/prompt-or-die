@@ -212,6 +212,11 @@ Current repo-owned seam:
 - `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
   now gives one command that emits a benchmark JSON report plus optional replay
   and training TOON artifacts
+- `run_rust_sdk_adapter_live_smoke()` and
+  `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks`
+  now give one repo-owned live harness that spawns a real entity, binds a
+  `RustSdkAdapterSession`, submits an action over `GeneratedSdk`, and waits for
+  live `connected_agent` / `action_submission` rows before declaring success
 
 ## What to avoid
 

@@ -124,3 +124,6 @@ pub mod client;
 /// `spacetime generate --lang rust --out-dir src/module_bindings --bin-path .cargo-target/wasm32-unknown-unknown/release/pod_stdb.wasm`
 #[cfg(feature = "client")]
 pub mod module_bindings;
+
+#[cfg(feature = "client")]
+pub use spacetimedb_sdk::{db_context::DbContext, table::Table};

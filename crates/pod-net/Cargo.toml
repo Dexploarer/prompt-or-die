@@ -47,3 +47,7 @@ required-features = ["spacetimedb"]
 [[example]]
 name = "rust_sdk_adapter_benchmark_suite"
 required-features = ["spacetimedb"]
+
+[[example]]
+name = "rust_sdk_adapter_live_smoke"
+required-features = ["spacetimedb"]

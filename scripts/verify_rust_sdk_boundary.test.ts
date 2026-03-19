@@ -37,8 +37,13 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("RustSdkActionExecutorError");
     expect(markdown).toContain("RustSdkAdapterSession");
     expect(markdown).toContain("RustSdkAdapterSessionError");
+    expect(markdown).toContain("RustSdkAdapterLiveSmokeConfig");
+    expect(markdown).toContain("run_rust_sdk_adapter_live_smoke()");
     expect(markdown).toContain("RustSdkRolloutRecorder");
     expect(markdown).toContain("run_rust_sdk_adapter_benchmark_suite()");
+    expect(markdown).toContain(
+      "cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks",
+    );
     expect(markdown).toContain("bun ./scripts/verify_rust_sdk_boundary.ts --check");
   });
 });

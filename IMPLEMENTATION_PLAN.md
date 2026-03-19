@@ -2465,3 +2465,15 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 240
+- Added live generated-SDK reducer dispatch in `crates/pod-stdb/src/client.rs`, so `call_connect_agent(...)` and `call_submit_action(...)` now route through the real generated bindings when `GeneratedSdkRuntime` is installed instead of always falling back to local cache mutation.
+- Added `RustSdkAdapterLiveSmokeConfig`, `RustSdkAdapterLiveSmokeReport`, `RustSdkAdapterLiveSmokeRun`, and `run_rust_sdk_adapter_live_smoke(...)` in `crates/pod-net/src/client_stdb.rs`, plus the `rust_sdk_adapter_live_smoke` example, so a running SpacetimeDB module can now prove the repo-owned `RustSdkAdapterSession` facade reaches live `spawn_entity`, `connect_agent`, and `submit_action` rows and still finalizes a shared replay/training artifact.
+- Re-exported the live smoke seam from `crates/pod-net/src/lib.rs`, re-exported the generated SDK `DbContext` / `Table` traits from `crates/pod-stdb/src/lib.rs`, added deterministic closed-port regressions, and tightened the Rust SDK boundary docs plus verifier so the live generated-SDK smoke path is part of the enforced repo-owned contract.
+- [x] Validation:
+  - `cargo test -p pod-stdb --no-default-features --features client -- --nocapture`
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`
