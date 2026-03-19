@@ -191,10 +191,13 @@ Current repo-owned seam:
   behind one repo-owned wrapper so a future packaged rs-sdk can start from a
   single `pod-net` surface instead of stitching host/session helpers together
 - `pod-sdk` now wraps that wrapper in package-native
-  `RustSdkClientConfig`, `RustSdkClientError`, `RustSdkLiveSmokeConfig`,
-  `RustSdkLiveSmokeReport`, and `RustSdkLiveSmokeRun` types, keeps
-  `RustSdkRuntimeMode` as the package-facing runtime selector, and exposes
-  package-level `run_rust_sdk_benchmark_suite()` /
+  `RustSdkClientConfig`, `RustSdkClientError`,
+  `RustSdkBenchmarkCheck` / `RustSdkBenchmarkScenarioReport` /
+  `RustSdkBenchmarkReport` / `RustSdkBenchmarkRun`, and
+  `RustSdkLiveSmokeConfig` / `RustSdkLiveSmokeReport` /
+  `RustSdkLiveSmokeRun` types, keeps `RustSdkRuntimeMode` as the
+  package-facing runtime selector, and exposes package-level
+  `run_rust_sdk_benchmark_suite()` /
   `run_rust_sdk_live_smoke()` helpers so the canonical smoke and benchmark
   commands no longer need to import `pod-net` directly
 

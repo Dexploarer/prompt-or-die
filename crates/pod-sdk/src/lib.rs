@@ -15,10 +15,8 @@ pub use pod_core::{
 };
 pub use pod_net::{
     RustSdkActionExecutionMode, RustSdkActionIntent, RustSdkActionPlan, RustSdkBankState,
-    RustSdkBenchmarkCheck, RustSdkBenchmarkReport, RustSdkBenchmarkRun,
-    RustSdkBenchmarkScenarioReport, RustSdkDialogState, RustSdkRolloutRecord, ServerMessage,
-    RustSdkSelfStateSnapshot, RustSdkShopState, RustSdkStateSnapshot,
-    RustSdkVisibleEntitySnapshot,
+    RustSdkDialogState, RustSdkRolloutRecord, ServerMessage, RustSdkSelfStateSnapshot,
+    RustSdkShopState, RustSdkStateSnapshot, RustSdkVisibleEntitySnapshot,
 };
 pub use pod_net::RustSdkAdapterRuntimeMode as RustSdkRuntimeMode;
 
@@ -54,6 +52,112 @@ impl From<RustSdkClientConfig> for RustSdkFacadeConfig {
                 ..Default::default()
             },
             runtime_mode: config.runtime_mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkCheck {
+    pub metric: String,
+    pub passed: bool,
+    pub expected: String,
+    pub observed: String,
+}
+
+impl From<pod_net::RustSdkBenchmarkCheck> for RustSdkBenchmarkCheck {
+    fn from(check: pod_net::RustSdkBenchmarkCheck) -> Self {
+        Self {
+            metric: check.metric,
+            passed: check.passed,
+            expected: check.expected,
+            observed: check.observed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkScenarioReport {
+    pub scenario_id: String,
+    pub description: String,
+    pub runtime_mode: RustSdkRuntimeMode,
+    pub expected_action_key: String,
+    pub observed_action_key: String,
+    pub expected_execution_mode: RustSdkActionExecutionMode,
+    pub observed_execution_mode: RustSdkActionExecutionMode,
+    pub action_matches: bool,
+    pub execution_mode_matches: bool,
+    pub available_action_matches: bool,
+    pub reducer_submission_count: u64,
+    pub reducer_submission_matches: bool,
+    pub tool_call_error_count: usize,
+    pub training_sample_count: usize,
+}
+
+impl From<pod_net::RustSdkBenchmarkScenarioReport> for RustSdkBenchmarkScenarioReport {
+    fn from(report: pod_net::RustSdkBenchmarkScenarioReport) -> Self {
+        Self {
+            scenario_id: report.scenario_id,
+            description: report.description,
+            runtime_mode: report.runtime_mode,
+            expected_action_key: report.expected_action_key,
+            observed_action_key: report.observed_action_key,
+            expected_execution_mode: report.expected_execution_mode,
+            observed_execution_mode: report.observed_execution_mode,
+            action_matches: report.action_matches,
+            execution_mode_matches: report.execution_mode_matches,
+            available_action_matches: report.available_action_matches,
+            reducer_submission_count: report.reducer_submission_count,
+            reducer_submission_matches: report.reducer_submission_matches,
+            tool_call_error_count: report.tool_call_error_count,
+            training_sample_count: report.training_sample_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkReport {
+    pub schema_version: u32,
+    pub generated_at_unix_ms: u128,
+    pub benchmark_id: String,
+    pub replay_tick_count: u64,
+    pub replay_training_sample_count: usize,
+    pub scenarios: Vec<RustSdkBenchmarkScenarioReport>,
+    pub checks: Vec<RustSdkBenchmarkCheck>,
+}
+
+impl RustSdkBenchmarkReport {
+    pub fn passed(&self) -> bool {
+        self.checks.iter().all(|check| check.passed)
+    }
+}
+
+impl From<pod_net::RustSdkBenchmarkReport> for RustSdkBenchmarkReport {
+    fn from(report: pod_net::RustSdkBenchmarkReport) -> Self {
+        Self {
+            schema_version: report.schema_version,
+            generated_at_unix_ms: report.generated_at_unix_ms,
+            benchmark_id: report.benchmark_id,
+            replay_tick_count: report.replay_tick_count,
+            replay_training_sample_count: report.replay_training_sample_count,
+            scenarios: report.scenarios.into_iter().map(Into::into).collect(),
+            checks: report.checks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RustSdkBenchmarkRun {
+    pub report: RustSdkBenchmarkReport,
+    pub replay: ReplayFile,
+    pub training_samples: Vec<ReplayTrainingSample>,
+}
+
+impl From<pod_net::RustSdkBenchmarkRun> for RustSdkBenchmarkRun {
+    fn from(run: pod_net::RustSdkBenchmarkRun) -> Self {
+        Self {
+            report: run.report.into(),
+            replay: run.replay,
+            training_samples: run.training_samples,
         }
     }
 }
@@ -129,7 +233,7 @@ impl From<pod_net::RustSdkAdapterLiveSmokeReport> for RustSdkLiveSmokeReport {
             observed_action_key: report.observed_action_key,
             reducer_submission_count: report.reducer_submission_count,
             replay_training_sample_count: report.replay_training_sample_count,
-            checks: report.checks,
+            checks: report.checks.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -272,7 +376,9 @@ impl RustSdkClient {
 
 /// Run the packaged deterministic Rust SDK benchmark suite.
 pub fn run_rust_sdk_benchmark_suite() -> Result<RustSdkBenchmarkRun, RustSdkClientError> {
-    pod_net::run_rust_sdk_adapter_benchmark_suite().map_err(Into::into)
+    pod_net::run_rust_sdk_adapter_benchmark_suite()
+        .map(Into::into)
+        .map_err(Into::into)
 }
 
 /// Run the packaged live generated-SDK smoke harness.
@@ -331,6 +437,41 @@ mod tests {
             observed_action_key: "idle".into(),
             reducer_submission_count: 2,
             replay_training_sample_count: 1,
+            checks: vec![RustSdkBenchmarkCheck {
+                metric: "sample".into(),
+                passed: true,
+                expected: "1".into(),
+                observed: "1".into(),
+            }],
+        };
+
+        assert!(report.passed());
+    }
+
+    #[test]
+    fn packaged_rust_sdk_benchmark_report_tracks_passing_checks() {
+        let report = RustSdkBenchmarkReport {
+            schema_version: 1,
+            generated_at_unix_ms: 123,
+            benchmark_id: "bench".into(),
+            replay_tick_count: 4,
+            replay_training_sample_count: 1,
+            scenarios: vec![RustSdkBenchmarkScenarioReport {
+                scenario_id: "sample".into(),
+                description: "sample".into(),
+                runtime_mode: RustSdkRuntimeMode::Emulated,
+                expected_action_key: "idle".into(),
+                observed_action_key: "idle".into(),
+                expected_execution_mode: RustSdkActionExecutionMode::Immediate,
+                observed_execution_mode: RustSdkActionExecutionMode::Immediate,
+                action_matches: true,
+                execution_mode_matches: true,
+                available_action_matches: true,
+                reducer_submission_count: 1,
+                reducer_submission_matches: true,
+                tool_call_error_count: 0,
+                training_sample_count: 1,
+            }],
             checks: vec![RustSdkBenchmarkCheck {
                 metric: "sample".into(),
                 passed: true,

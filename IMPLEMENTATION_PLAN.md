@@ -2517,3 +2517,18 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_platform_docs.test.ts`
   - `bun ./scripts/verify_platform_docs.ts --check`
   - `git diff --check`
+
+### Iteration 244
+- Replaced the remaining benchmark/report re-exports in `crates/pod-sdk/src/lib.rs` with package-owned `RustSdkBenchmarkCheck`, `RustSdkBenchmarkScenarioReport`, `RustSdkBenchmarkReport`, and `RustSdkBenchmarkRun` types, while preserving the same thin `pod-net` benchmark seam underneath and keeping the package command surface unchanged.
+- Updated the packaged benchmark helper to convert `run_rust_sdk_adapter_benchmark_suite()` output into those package-owned types, and kept the packaged live-smoke report conversion aligned so both package-facing report families are now serialized from `pod-sdk`-owned structs instead of `pod-net` re-exports.
+- Updated the Rust SDK boundary docs, integration notes, verifier, and session/progress tracking so the enforced package surface now includes package-owned benchmark/live-smoke report types and the next remaining packaging decision is whether action-plan/rollout record types should also move up into `pod-sdk`.
+- [x] Validation:
+  - `cargo test -p pod-sdk -- --nocapture`
+  - `cargo test -p pod-sdk --example rust_sdk_live_smoke -- --nocapture`
+  - `cargo check -p pod-sdk --example rust_sdk_benchmark_suite`
+  - `cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `bun test scripts/verify_platform_docs.test.ts`
+  - `bun ./scripts/verify_platform_docs.ts --check`
+  - `git diff --check`
