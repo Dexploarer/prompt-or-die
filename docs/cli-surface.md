@@ -83,6 +83,8 @@ TOON is reserved for `pod export ... --format toon`, where the payload is large 
 | pod-shell | `pod catalog shell` | yes | yes | yes | yes | `bun ./scripts/pod.ts shell` |
 | pod | - | yes | yes | yes | yes | `bun ./scripts/pod.ts list` |
 | verify-cli-surface | `pod catalog verify` | yes |  | yes | yes | `bun ./scripts/verify_cli_surface.ts --check` |
+| verify-platform-docs | `pod catalog verify-platform-docs` | yes |  | yes | yes | `bun ./scripts/verify_platform_docs.ts --check` |
+| verify-rust-sdk-boundary | `pod catalog verify-rust-sdk-boundary` | yes |  | yes | yes | `bun ./scripts/verify_rust_sdk_boundary.ts --check` |
 
 ## Command catalog
 
@@ -123,6 +125,8 @@ TOON is reserved for `pod export ... --format toon`, where the payload is large 
 | pod-shell | `pod catalog shell` | catalog | workspace-command | long-running | no | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Start the interactive terminal shell for discovering, inspecting, and executing Prompt or Die commands. | [docs/cli-surface.md](cli-surface.md) |
 | pod | - | catalog | bun-script | finite | no | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Canonical root CLI for discovering, inspecting, and executing supported Prompt or Die command surfaces. | [docs/cli-surface.md](cli-surface.md) |
 | verify-cli-surface | `pod catalog verify` | catalog | bun-script | finite | yes | yes | `.` | [scripts/verify_cli_surface.ts](../scripts/verify_cli_surface.ts) | `docs/cli-surface.md` | Validate that the CLI catalog covers every supported top-level command surface and that the generated docs are in sync. | [docs/cli-surface.md](cli-surface.md) |
+| verify-platform-docs | `pod catalog verify-platform-docs` | catalog | bun-script | finite | yes | yes | `.` | [scripts/verify_platform_docs.ts](../scripts/verify_platform_docs.ts) | - | Validate the Phase 8 planning route, benchmark requirement tiers, and platform-hardening docs for drift. | [docs/platform-stabilization.md](platform-stabilization.md), [docs/README.md](README.md) |
+| verify-rust-sdk-boundary | `pod catalog verify-rust-sdk-boundary` | catalog | bun-script | finite | yes | yes | `.` | [scripts/verify_rust_sdk_boundary.ts](../scripts/verify_rust_sdk_boundary.ts) | - | Validate the repo-owned Rust SDK boundary doc plus the stable runtime, export, and generated-binding seams it depends on. | [docs/rust-sdk-boundary.md](rust-sdk-boundary.md), [docs/platform-stabilization.md](platform-stabilization.md) |
 
 ## Dedicated server environment contract
 

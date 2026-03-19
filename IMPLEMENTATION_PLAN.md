@@ -2386,5 +2386,18 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
 
 **Next focus**: Replace local file-backed shard policy documents with signed claims or a process-external authz provider so browser/editor consumers do not depend on local JSON policy distribution.
 
+### Iteration 232
+- [x] Added `docs/platform-stabilization.md` so Phase 8 now has one focused hardening doc that names the active planning route, benchmark requirement tiers, public contract surfaces, and the current shipping/authz/SDK boundaries instead of leaving those decisions implied across multiple files.
+- [x] Added `scripts/verify_platform_docs.ts` plus `scripts/verify_platform_docs.test.ts`, then linked the new hardening contract through `README.md`, `docs/README.md`, `docs/architecture.md`, `docs/plugin-model.md`, `docs/benchmark-suite.md`, and `SESSION.md`, so planning-doc drift and benchmark-tier ambiguity now fail deterministically instead of relying on memory.
+- [x] Marked the remaining Phase 8 checklist/exit criteria complete in `IMPLEMENTATION_PHASES.md` once the docs and verifier agreed on the same active-checklist versus historical-log split and the same moat-gate versus local-tooling classification.
+- [x] Validation:
+  - `bun test scripts/verify_platform_docs.test.ts scripts/verify_cli_surface.test.ts`
+  - `bun ./scripts/verify_platform_docs.ts --check`
+  - `git diff --check`
+
 **Audit backlog surfaced during the 2026-03-13 roadmap scrub**:
 - [x] Repaired the browser render-route perf gate so `bun run measure:render-routes:check` now passes on the current shipped asset set, and `apps/pod-web/package.json` now runs showcase and worker smoke as isolated Playwright invocations to avoid the dead web-server handoff that previously masked the gate repair.
+### Iteration 233
+- Added `docs/rust-sdk-boundary.md` as the repo-owned contract for the future POD Rust SDK facade, naming the stable crate seams, versioned runtime envelopes, generated-runtime handoff, adapter lanes, non-goals, and readiness gates.
+- Added `scripts/verify_rust_sdk_boundary.ts` plus `scripts/verify_rust_sdk_boundary.test.ts`, so README/docs/platform policy, `pod-core` versioned exports, generated-runtime install seams, and export targets now have a deterministic drift check.
+- Wired the new SDK readiness gate through `scripts/cli_surface.ts`, refreshed the docs index and platform-stabilization policy, and updated `SESSION.md` so Rust SDK hardening is part of the normal catalog/doc workflow instead of an informal note.

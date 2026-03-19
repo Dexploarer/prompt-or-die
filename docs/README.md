@@ -30,6 +30,14 @@ If you are new to the repo, read these in order:
   extension seams.
 - [Plugin Model](./plugin-model.md)
   The current extension contract and which surfaces are safe to build against.
+- [Platform Stabilization](./platform-stabilization.md)
+  The current Phase 8 hardening route: planning-doc ownership, benchmark
+  requirement tiers, public contract surfaces, and shipping/authz/SDK
+  boundaries.
+- [Rust SDK Boundary](./rust-sdk-boundary.md)
+  The repo-owned contract for future Rust SDK hookup: stable crate seams,
+  versioned wire artifacts, generated-runtime handoff, adapter lanes, and
+  readiness gates.
 - [Asset Pipeline](./asset-pipeline.md)
   The staged-import, runtime-bundle, and browser asset contract.
 
@@ -45,11 +53,17 @@ If you are new to the repo, read these in order:
 - [RS-SDK Integration Notes](./rs-sdk-integration-notes.md)
   External proving-ground notes. Reference only, not the active implementation
   path.
+- [Rust SDK Boundary](./rust-sdk-boundary.md)
+  The POD-owned boundary to preserve before publishing a reusable Rust SDK
+  facade.
 
 ### Creator and benchmark workflows
 
 - [Reference Bootstrap](./reference-bootstrap.md)
   The canonical first-world path.
+- [Platform Stabilization](./platform-stabilization.md)
+  The source of truth for which proof surfaces are real platform requirements
+  and which ones are local tooling.
 - [Bootstrap Showcase Research](./bootstrap-showcase-research.md)
   Why the flagship browser showcase should look and feel the way it does.
 - [Benchmark Suite](./benchmark-suite.md)
@@ -95,20 +109,36 @@ If you are new to the repo, read these in order:
 
 1. [Plugin Model](./plugin-model.md)
 2. [Architecture Overview](./architecture.md)
-3. [Asset Pipeline](./asset-pipeline.md)
+3. [Platform Stabilization](./platform-stabilization.md)
+4. [Asset Pipeline](./asset-pipeline.md)
 
 ### I want to run proof surfaces or historical comparisons
 
 1. [Benchmark Suite](./benchmark-suite.md)
 2. [Benchmark Snapshot History](./benchmark-snapshots/README.md)
-3. [Moat Gates](./moat-gates.md)
-4. [Competitive Matrix](./competitive-matrix.md)
+3. [Platform Stabilization](./platform-stabilization.md)
+4. [Moat Gates](./moat-gates.md)
+5. [Competitive Matrix](./competitive-matrix.md)
+
+### Planning and roadmap state
+
+- Active unchecked checklist: [IMPLEMENTATION_PHASES.md](../IMPLEMENTATION_PHASES.md)
+- Historical implementation log: [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
+- Current session tracker: [SESSION.md](../SESSION.md)
 
 ### I want to automate against the platform
 
 1. [CLI Surface](./cli-surface.md)
 2. [Benchmark Suite](./benchmark-suite.md)
 3. [Agent Integration Contract](./agent-integration-contract.md)
+4. [Rust SDK Boundary](./rust-sdk-boundary.md)
+
+### I want to hook up the future Rust SDK
+
+1. [Rust SDK Boundary](./rust-sdk-boundary.md)
+2. [Platform Stabilization](./platform-stabilization.md)
+3. [Agent Integration Contract](./agent-integration-contract.md)
+4. [RS-SDK Integration Notes](./rs-sdk-integration-notes.md)
 
 ### I want an attached terminal workflow
 
@@ -126,6 +156,12 @@ If you are new to the repo, read these in order:
   stable ID plus `--json` examples for automation.
 - If a public contract changes, update the contract doc and the grounded audit
   doc together.
+- If planning-route ownership, benchmark requirement tiers, or Phase 8 hardening
+  policy changes, update `docs/platform-stabilization.md`, the affected entry
+  docs, and rerun `bun ./scripts/verify_platform_docs.ts --check`.
+- If the repo-owned Rust SDK boundary changes, update
+  `docs/rust-sdk-boundary.md` and rerun
+  `bun ./scripts/verify_rust_sdk_boundary.ts --check`.
 - If a document is generated, keep the generator as the source of truth and say
   so explicitly in the file.
 - Prefer adding a focused deep doc over burying long workflow details in the

@@ -52,6 +52,8 @@ describe("verify cli surface", () => {
     expect(markdown).toContain("--html-output");
     expect(markdown).toContain("--charts-dir");
     expect(markdown).toContain("catalog verify");
+    expect(markdown).toContain("catalog verify-platform-docs");
+    expect(markdown).toContain("catalog verify-rust-sdk-boundary");
     expect(markdown).toContain("pod-shell");
     expect(markdown).toContain("stdio-json");
     expect(markdown).toContain("newline-delimited");
@@ -62,5 +64,7 @@ describe("verify cli surface", () => {
     expect(markdown).toContain("## Dedicated server environment contract");
     expect(markdown).toContain("POD_TICK_RATE");
     expect(markdown).toContain("bun ./scripts/verify_cli_surface.ts --json");
+    expect(markdown).toContain("bun ./scripts/verify_platform_docs.ts --check");
+    expect(markdown).toContain("bun ./scripts/verify_rust_sdk_boundary.ts --check");
   });
 });

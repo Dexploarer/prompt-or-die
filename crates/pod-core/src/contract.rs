@@ -6,6 +6,7 @@ use crate::action::AgentAction;
 use crate::agent::AgentType;
 use crate::id::AgentId;
 use crate::observation::Observation;
+use crate::replay::ReplayFile;
 use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
 use crate::toon::encode_toon_document;
 
@@ -1973,6 +1974,74 @@ impl VersionedTickTelemetry {
     }
 }
 
+/// Repo-owned handoff bundle for future Rust SDK adapters.
+///
+/// This keeps the SDK-facing seam anchored to versioned runtime artifacts plus
+/// authoritative topology, telemetry, and replay surfaces instead of app-local
+/// glue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkHandoffArtifact {
+    pub version: RuntimeContractVersion,
+    pub observation: VersionedObservation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_contract: Option<RemoteAgentTransportContract>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_topology: Option<RemoteTopologyBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_tick_telemetry: Option<VersionedTickTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayFile>,
+}
+
+impl RustSdkHandoffArtifact {
+    pub fn new(profile: AgentRuntimeProfile, observation: Observation) -> Self {
+        Self::from_versioned_observation(VersionedObservation::new(profile, observation))
+    }
+
+    pub fn from_versioned_observation(observation: VersionedObservation) -> Self {
+        Self {
+            version: observation.version,
+            observation,
+            transport_contract: None,
+            remote_topology: None,
+            latest_tick_telemetry: None,
+            replay: None,
+        }
+    }
+
+    pub fn profile(&self) -> AgentRuntimeProfile {
+        self.observation.profile
+    }
+
+    pub fn wrap_action(&self, payload: AgentAction) -> VersionedAgentAction {
+        VersionedAgentAction::new(self.profile(), payload)
+    }
+
+    pub fn with_transport_contract(mut self, contract: RemoteAgentTransportContract) -> Self {
+        self.transport_contract = Some(contract);
+        self
+    }
+
+    pub fn with_remote_topology(mut self, topology: RemoteTopologyBundle) -> Self {
+        self.remote_topology = Some(topology);
+        self
+    }
+
+    pub fn with_tick_telemetry(mut self, telemetry: TickTelemetryFrame) -> Self {
+        self.latest_tick_telemetry = Some(VersionedTickTelemetry::new(telemetry));
+        self
+    }
+
+    pub fn with_replay(mut self, replay: ReplayFile) -> Self {
+        self.replay = Some(replay);
+        self
+    }
+
+    pub fn to_toon_document(&self) -> String {
+        encode_toon_document("rust_sdk_handoff_artifact", self)
+    }
+}
+
 impl ToolDefinition {
     pub fn to_toon_document(&self) -> String {
         encode_toon_document("tool_definition", self)
@@ -2011,6 +2080,7 @@ mod tests {
     use crate::agent::AgentType;
     use crate::id::AgentId;
     use crate::observation::Observation;
+    use crate::replay::{ReplayFile, ReplayHeader};
     use crate::telemetry::{TickTelemetryFrame, ToolCallStatus};
     use crate::toon::decode_toon_value;
 
@@ -2026,7 +2096,8 @@ mod tests {
         ObjectiveShiftSummary, QuestLineStateSummary, QuestStageApplicationSummary,
         QuestStageDefinition, QuestStateGraph, RegionEncounterTable,
         RemoteAgentFallbackMode, RemoteAgentObservationBudget, RemoteAgentTransportContract,
-        RemoteTopologyBundle, RuntimeContractVersion, ScenarioEvaluationSummary, TeamControlMode,
+        RemoteTopologyBundle, RuntimeContractVersion, RustSdkHandoffArtifact,
+        ScenarioEvaluationSummary, TeamControlMode,
         TeamDeathMarkSummary, TeamDeltaSummary, TeamRewardLedgerSummary, ToolBudget, ToolCatalog,
         ToolDefinition, ToolInvocationRequest, ToolInvocationResult, ToolPolicy,
         TournamentControlPlaneSummary, TournamentEliminationMode, TournamentOrchestrationPhase,
@@ -2186,6 +2257,94 @@ mod tests {
             decode_toon_value(&telemetry_document).expect("telemetry document should decode");
         assert_eq!(telemetry_value["document_type"], "versioned_tick_telemetry");
         assert_eq!(telemetry_value["payload"]["payload"]["tick"], 9);
+    }
+
+    #[test]
+    fn rust_sdk_handoff_artifact_packages_authoritative_runtime_surfaces() {
+        let profile = AgentRuntimeProfile {
+            role: AgentRole::Player,
+            agent_type: AgentType::LlmAgent,
+            capabilities: AgentCapabilities::player_default(),
+        };
+        let observation = Observation::default();
+        let topology = RemoteTopologyBundle {
+            version: RuntimeContractVersion::V1,
+            scenario_id: "sdk-fixture".into(),
+            profile_id: "ci-smoke".into(),
+            generated_at_unix_ms: 42,
+            tournament: WorldTournamentDefinition::new("sdk-fixture", "SDK Fixture"),
+            teams: vec![],
+            worlds: vec![],
+            links: vec![],
+            world_quest_bindings: vec![],
+            world_admissions: vec![],
+            world_control_planes: vec![],
+            tournament_control_plane: TournamentControlPlaneSummary::default(),
+            tournament_orchestration: TournamentOrchestrationSummary::default(),
+            quest_graphs: vec![],
+            applied_world_states: vec![],
+            evaluation: ScenarioEvaluationSummary {
+                controller_mix: vec![],
+                worlds: vec![],
+            },
+        };
+        let replay = ReplayFile {
+            header: ReplayHeader {
+                name: "sdk-handoff".into(),
+                timestamp: 42,
+                world_seed: 7,
+                tick_count: 1,
+                agent_count: 1,
+                notes: "fixture".into(),
+            },
+            traces: vec![vec![]],
+            telemetry_windows: vec![TickTelemetryFrame::empty(3)],
+        };
+
+        let artifact = RustSdkHandoffArtifact::new(profile, observation.clone())
+            .with_transport_contract(RemoteAgentTransportContract::spacetimedb_default(profile))
+            .with_remote_topology(topology)
+            .with_tick_telemetry(TickTelemetryFrame::empty(3))
+            .with_replay(replay);
+
+        assert_eq!(artifact.version, RuntimeContractVersion::V1);
+        assert_eq!(artifact.profile(), profile);
+        assert_eq!(artifact.observation.payload.tick, observation.tick);
+        assert!(artifact.transport_contract.is_some());
+        assert!(artifact.remote_topology.is_some());
+        assert_eq!(
+            artifact
+                .latest_tick_telemetry
+                .as_ref()
+                .expect("telemetry attached")
+                .payload
+                .tick,
+            3
+        );
+        assert_eq!(
+            artifact
+                .replay
+                .as_ref()
+                .expect("replay attached")
+                .header
+                .name,
+            "sdk-handoff"
+        );
+
+        let wrapped = artifact.wrap_action(AgentAction {
+            agent_id: AgentId::new(),
+            tick: 9,
+            action: Action::Idle,
+        });
+        assert_eq!(wrapped.profile, profile);
+        assert_eq!(wrapped.payload.tick, 9);
+
+        let document = artifact.to_toon_document();
+        let value = decode_toon_value(&document).expect("handoff document should decode");
+        assert_eq!(value["document_type"], "rust_sdk_handoff_artifact");
+        assert_eq!(value["payload"]["observation"]["payload"]["tick"], 0);
+        assert_eq!(value["payload"]["latest_tick_telemetry"]["payload"]["tick"], 3);
+        assert_eq!(value["payload"]["replay"]["header"]["name"], "sdk-handoff");
     }
 
     #[test]

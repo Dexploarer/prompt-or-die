@@ -1,9 +1,9 @@
 # Session State
 
 **Current Phase**: Phase 8: Lifecycle, SDK, and Shipping Stabilization
-**Current Stage**: Full Re-Verification Pass Completed
-**Last Checkpoint**: 2026-03-18 (Re-verification pass complete)
-**Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md)
+**Current Stage**: Rust SDK Boundary Hardening
+**Last Checkpoint**: 2026-03-19 (Rust SDK boundary contract pass)
+**Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md), [docs/platform-stabilization.md](/Users/home/Desktop/prompt-or-die/docs/platform-stabilization.md)
 **Planning Note**: `IMPLEMENTATION_PHASES.md` is reset to an active unchecked checklist for this pass. `IMPLEMENTATION_PLAN.md` remains the historical log.
 
 ---
@@ -19,7 +19,7 @@
 - [x] Phase 7: Editor and Authoring Tooling (completed in this pass). Commands: `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, `cargo check -p pod-editor -p pod-scene -p pod-assets`.
 - [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization (completed in this pass). Commands: `cargo check --workspace`, `cargo test --workspace`, `git diff --check`.
 
-**Next Action**: Transition to focused feature work. If you want a strict delivery-ready checkpoint, run a commit now after confirming current git working set.
+**Next Action**: Use `bun test scripts/verify_platform_docs.test.ts scripts/verify_rust_sdk_boundary.test.ts && bun ./scripts/verify_platform_docs.ts --check && bun ./scripts/verify_rust_sdk_boundary.ts --check` whenever the planning route, SDK boundary, or hardening-policy docs change.
 
 ---
 

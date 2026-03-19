@@ -12,6 +12,7 @@ AI-agent-native worlds.
 >
 > Related docs: [Documentation Hub](./README.md) ·
 > [Reference Bootstrap](./reference-bootstrap.md) ·
+> [Platform Stabilization](./platform-stabilization.md) ·
 > [Benchmark Snapshot History](./benchmark-snapshots/README.md)
 
 ## Metrics that matter
@@ -27,6 +28,17 @@ AI-agent-native worlds.
 | Remote topology feed parity | Proves `pod-net` resolves the same world/quest/effect/evaluation state from both authority rows and generated-mode topology ingress | `pod-net` topology feed benchmark | Automated |
 | Creator time-to-first-agent-world | Measures creator adoption friction | Reference bootstrap flow | Scripted |
 | Cost per 100/1000 active agents | Measures operational competitiveness | Acceptance scale target plus host-cost normalization | Semi-automated |
+
+## Benchmark requirement tiers
+
+The repo treats moat/report commands in two tiers:
+
+| Tier | Meaning |
+| --- | --- |
+| Platform requirement gate | A proof surface that directly protects deterministic authority, parity, transport durability, or retained moat evidence. |
+| Local tooling / proof surface | A useful benchmark or publication helper that supports analysis, export strategy, or operator ergonomics without being the moat by itself. |
+
+The current classification lives in [Platform Stabilization](./platform-stabilization.md). Use that document when deciding whether a new benchmark belongs in merge-critical workflow or in optional local proof tooling.
 
 ## Commands
 

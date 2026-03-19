@@ -11,6 +11,7 @@ integrators can extend the platform without inventing incompatible patterns.
 >
 > Related docs: [Documentation Hub](./README.md) ·
 > [Architecture Overview](./architecture.md) ·
+> [Platform Stabilization](./platform-stabilization.md) ·
 > [Asset Pipeline](./asset-pipeline.md)
 
 ## Current status

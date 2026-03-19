@@ -7,6 +7,7 @@ This document describes the current Prompt or Die platform architecture as it ex
 >
 > Related docs: [Documentation Hub](./README.md) ·
 > [Plugin Model](./plugin-model.md) ·
+> [Platform Stabilization](./platform-stabilization.md) ·
 > [Agent Integration Contract](./agent-integration-contract.md)
 
 ## Design goals

@@ -17,6 +17,7 @@ surfaces while the platform hardens.
 - [Reference Bootstrap](docs/reference-bootstrap.md)
 - [Architecture Overview](docs/architecture.md)
 - [Benchmark Suite](docs/benchmark-suite.md)
+- [Rust SDK Boundary](docs/rust-sdk-boundary.md)
 
 ## Quick start
 
@@ -157,10 +158,19 @@ docs/
 - [Asset Pipeline](docs/asset-pipeline.md)
 - [Reference Bootstrap](docs/reference-bootstrap.md)
 - [Benchmark Suite](docs/benchmark-suite.md)
+- [Platform Stabilization](docs/platform-stabilization.md)
+- [Rust SDK Boundary](docs/rust-sdk-boundary.md)
 - [Benchmark Snapshot History](docs/benchmark-snapshots/README.md)
 - [Competitive Matrix](docs/competitive-matrix.md)
 - [Moat Gates](docs/moat-gates.md)
 - [Bootstrap Showcase Research](docs/bootstrap-showcase-research.md)
+
+## Planning route
+
+- Active execution checklist: [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
+- Historical implementation log: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
+- Current session tracker: [SESSION.md](SESSION.md)
+- Delivery recap: [progress.md](progress.md)
 
 ## Current status
 
@@ -168,7 +178,11 @@ The repo already has the deterministic core, browser client, headless
 multi-world runner, shared topology contract, controller parity harness, and
 weekly shard-target benchmark workflow in place. The next major layers are
 public platform hardening, import/shipping polish, and a formal plugin/app
-lifecycle.
+lifecycle. The current hardening contract for benchmark tiers, planning-doc
+ownership, shipping profiles, authz policy scope, and SDK boundaries lives in
+[docs/platform-stabilization.md](docs/platform-stabilization.md). The repo-owned
+Rust SDK hookup boundary now lives in
+[docs/rust-sdk-boundary.md](docs/rust-sdk-boundary.md).
 
 ## Release history
 

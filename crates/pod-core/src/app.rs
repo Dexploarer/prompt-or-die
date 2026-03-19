@@ -10,8 +10,9 @@ use crate::component::{
     Transform3D, Velocity,
 };
 use crate::contract::{
-    ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest, ToolInvocationResult,
-    ToolPolicy, VersionedAgentAction, VersionedObservation, VersionedTickTelemetry,
+    RustSdkHandoffArtifact, ToolBudget, ToolCatalog, ToolDefinition, ToolInvocationRequest,
+    ToolInvocationResult, ToolPolicy, VersionedAgentAction, VersionedObservation,
+    VersionedTickTelemetry,
 };
 use crate::observation::Observation;
 use crate::telemetry::{TelemetryArchive, TelemetryConfig, TickTelemetryFrame};
@@ -356,6 +357,8 @@ impl App {
             .register_contract::<VersionedAgentAction>("VersionedAgentAction");
         self.types
             .register_contract::<VersionedTickTelemetry>("VersionedTickTelemetry");
+        self.types
+            .register_contract::<RustSdkHandoffArtifact>("RustSdkHandoffArtifact");
         self.types
             .register_resource::<TelemetryArchive>("TelemetryArchive");
         self.types

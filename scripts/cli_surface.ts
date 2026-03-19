@@ -1339,6 +1339,64 @@ export const CLI_SURFACE: CliSurfaceEntry[] = [
       mutatesState: false,
     }),
   }),
+  createEntry({
+    id: "verify-platform-docs",
+    name: "Verify Platform Docs",
+    aliases: ["catalog verify-platform-docs"],
+    audiences: ["developer", "agent", "agent-developer"],
+    area: "catalog",
+    kind: "bun-script",
+    entrypoint: "scripts/verify_platform_docs.ts",
+    summary:
+      "Validate the Phase 8 planning route, benchmark requirement tiers, and platform-hardening docs for drift.",
+    machineReadable: true,
+    outputArtifacts: [],
+    docs: ["docs/platform-stabilization.md", "docs/README.md"],
+    env: [],
+    notes: [
+      "Use `--json` for agent consumption when you need the machine-readable validation report.",
+    ],
+    coverage: ["bun-script:scripts/verify_platform_docs.ts"],
+    execution: createExecution({
+      program: "bun",
+      args: ["./scripts/verify_platform_docs.ts", "--check"],
+      lifecycle: "finite",
+      passthrough: true,
+    }),
+    capabilities: createCapabilities({
+      supportsPassthrough: true,
+      mutatesState: false,
+    }),
+  }),
+  createEntry({
+    id: "verify-rust-sdk-boundary",
+    name: "Verify Rust SDK Boundary",
+    aliases: ["catalog verify-rust-sdk-boundary"],
+    audiences: ["developer", "agent", "agent-developer"],
+    area: "catalog",
+    kind: "bun-script",
+    entrypoint: "scripts/verify_rust_sdk_boundary.ts",
+    summary:
+      "Validate the repo-owned Rust SDK boundary doc plus the stable runtime, export, and generated-binding seams it depends on.",
+    machineReadable: true,
+    outputArtifacts: [],
+    docs: ["docs/rust-sdk-boundary.md", "docs/platform-stabilization.md"],
+    env: [],
+    notes: [
+      "Use `--json` for agent consumption when you need the machine-readable readiness report.",
+    ],
+    coverage: ["bun-script:scripts/verify_rust_sdk_boundary.ts"],
+    execution: createExecution({
+      program: "bun",
+      args: ["./scripts/verify_rust_sdk_boundary.ts", "--check"],
+      lifecycle: "finite",
+      passthrough: true,
+    }),
+    capabilities: createCapabilities({
+      supportsPassthrough: true,
+      mutatesState: false,
+    }),
+  }),
 ];
 
 export const SERVER_ENVIRONMENT: ServerEnvironmentVariable[] = [
