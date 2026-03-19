@@ -43,7 +43,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -60,13 +60,14 @@ use pod_core::observation::{
     AgentMessage, AudibleEvent, MessageChannel, Objective, Observation, Relationship, SelfState,
     VisibleEntity,
 };
-use pod_core::replay::ReplayFile;
+use pod_core::replay::{ReplayFile, ReplayHeader, ReplayRecorder, ReplayTrainingSample};
 use pod_core::AgentType as CoreAgentType;
 use pod_core::{
-    build_rust_sdk_handoff_fixture, decode_toon_document, AgentRuntimeProfile,
-    AppliedWorldStateSummary, RemoteAgentFallbackReason, RemoteAgentRuntimeStatus,
-    RemoteAgentTransportContract, RemoteTopologyBundle, RustSdkHandoffArtifact,
-    VersionedObservation, VersionedTickTelemetry, WorldEvaluationSummary,
+    build_rust_sdk_handoff_fixture, decode_toon_document, ActionLifecycleStage, ActionSource,
+    AgentRuntimeProfile, AgentTelemetryFrame, AppliedWorldStateSummary,
+    RemoteAgentFallbackReason, RemoteAgentRuntimeStatus, RemoteAgentTransportContract,
+    RemoteTopologyBundle, RustSdkHandoffArtifact, VersionedObservation,
+    VersionedTickTelemetry, WorldEvaluationSummary,
 };
 
 use pod_stdb::client::{
@@ -947,6 +948,722 @@ pub fn build_rust_sdk_action_plan(
     };
 
     Ok(plan)
+}
+
+/// One repo-owned record captured from an SDK-backed controller step before it
+/// is finalized into the shared replay/training surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkRolloutRecord {
+    pub snapshot: RustSdkStateSnapshot,
+    pub prompt_sent: String,
+    pub raw_response: String,
+    pub action_plans: Vec<RustSdkActionPlan>,
+    pub actions_taken: Vec<Action>,
+    pub tool_calls: Vec<pod_core::AgentToolCallTrace>,
+    pub latency_ms: u32,
+}
+
+impl RustSdkRolloutRecord {
+    pub fn from_actions(
+        snapshot: RustSdkStateSnapshot,
+        prompt_sent: impl Into<String>,
+        actions_taken: Vec<Action>,
+        tool_calls: Vec<pod_core::AgentToolCallTrace>,
+        latency_ms: u32,
+    ) -> Result<Self, RustSdkRolloutRecorderError> {
+        let action_plans = actions_taken
+            .iter()
+            .map(build_rust_sdk_action_plan)
+            .collect::<Result<Vec<_>, _>>()?;
+        let raw_response = serde_json::to_string(&action_plans)
+            .map_err(|error| RustSdkRolloutRecorderError::SerializeActionPlans(error.to_string()))?;
+
+        Ok(Self {
+            snapshot,
+            prompt_sent: prompt_sent.into(),
+            raw_response,
+            action_plans,
+            actions_taken,
+            tool_calls,
+            latency_ms,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkRolloutRecorderError {
+    DuplicateDecision { tick: u64, agent_id: AgentId },
+    UnsupportedAction(RustSdkActionAdapterError),
+    SerializeActionPlans(String),
+}
+
+impl fmt::Display for RustSdkRolloutRecorderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateDecision { tick, agent_id } => {
+                write!(
+                    f,
+                    "duplicate Rust SDK rollout decision for tick {tick} and agent {agent_id}"
+                )
+            }
+            Self::UnsupportedAction(error) => error.fmt(f),
+            Self::SerializeActionPlans(message) => {
+                write!(f, "failed to serialize Rust SDK action plans: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RustSdkRolloutRecorderError {}
+
+impl From<RustSdkActionAdapterError> for RustSdkRolloutRecorderError {
+    fn from(error: RustSdkActionAdapterError) -> Self {
+        Self::UnsupportedAction(error)
+    }
+}
+
+/// Thin recorder that keeps external SDK episodes on the shared replay/training
+/// surface instead of an adapter-local episode format.
+pub struct RustSdkRolloutRecorder {
+    replay: ReplayRecorder,
+    telemetry_windows: Vec<pod_core::TickTelemetryFrame>,
+    seen_decisions: HashSet<(u64, AgentId)>,
+}
+
+impl RustSdkRolloutRecorder {
+    pub fn new() -> Self {
+        Self {
+            replay: ReplayRecorder::new(),
+            telemetry_windows: Vec::new(),
+            seen_decisions: HashSet::new(),
+        }
+    }
+
+    pub fn record(&mut self, record: RustSdkRolloutRecord) -> Result<(), RustSdkRolloutRecorderError> {
+        let tick = record.snapshot.tick;
+        let agent_id = record.snapshot.self_state.agent_id;
+
+        if !self.seen_decisions.insert((tick, agent_id)) {
+            return Err(RustSdkRolloutRecorderError::DuplicateDecision { tick, agent_id });
+        }
+
+        let observation = record.snapshot.to_observation();
+        self.replay.record_decision(
+            tick,
+            agent_id,
+            &observation,
+            record.prompt_sent,
+            record.raw_response,
+            record.actions_taken,
+            record.tool_calls,
+            record.latency_ms,
+        );
+
+        if let Some(telemetry) = &record.snapshot.latest_tick_telemetry {
+            upsert_rust_sdk_telemetry_window(&mut self.telemetry_windows, &telemetry.payload);
+        }
+
+        Ok(())
+    }
+
+    pub fn finalize(mut self, header: ReplayHeader) -> ReplayFile {
+        self.telemetry_windows.sort_by_key(|window| window.tick);
+        self.replay
+            .finalize_with_telemetry(header, self.telemetry_windows)
+    }
+}
+
+impl Default for RustSdkRolloutRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn upsert_rust_sdk_telemetry_window(
+    telemetry_windows: &mut Vec<pod_core::TickTelemetryFrame>,
+    window: &pod_core::TickTelemetryFrame,
+) {
+    if let Some(existing) = telemetry_windows
+        .iter_mut()
+        .find(|existing| existing.tick == window.tick)
+    {
+        *existing = window.clone();
+    } else {
+        telemetry_windows.push(window.clone());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkCheck {
+    pub metric: String,
+    pub passed: bool,
+    pub expected: String,
+    pub observed: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkScenarioReport {
+    pub scenario_id: String,
+    pub description: String,
+    pub expected_action_key: String,
+    pub observed_action_key: String,
+    pub expected_execution_mode: RustSdkActionExecutionMode,
+    pub observed_execution_mode: RustSdkActionExecutionMode,
+    pub action_matches: bool,
+    pub execution_mode_matches: bool,
+    pub available_action_matches: bool,
+    pub tool_call_error_count: usize,
+    pub training_sample_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RustSdkBenchmarkReport {
+    pub schema_version: u32,
+    pub generated_at_unix_ms: u128,
+    pub benchmark_id: String,
+    pub replay_tick_count: u64,
+    pub replay_training_sample_count: usize,
+    pub scenarios: Vec<RustSdkBenchmarkScenarioReport>,
+    pub checks: Vec<RustSdkBenchmarkCheck>,
+}
+
+impl RustSdkBenchmarkReport {
+    pub fn passed(&self) -> bool {
+        self.checks.iter().all(|check| check.passed)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RustSdkBenchmarkRun {
+    pub report: RustSdkBenchmarkReport,
+    pub replay: ReplayFile,
+    pub training_samples: Vec<ReplayTrainingSample>,
+}
+
+const RUST_SDK_BENCHMARK_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone)]
+struct RustSdkBenchmarkCase {
+    scenario_id: &'static str,
+    description: &'static str,
+    snapshot: RustSdkStateSnapshot,
+    action: Action,
+    tool_calls: Vec<pod_core::AgentToolCallTrace>,
+    latency_ms: u32,
+    expected_action_key: &'static str,
+    expected_execution_mode: RustSdkActionExecutionMode,
+}
+
+/// Run deterministic adapter-side benchmark cases against the repo-owned Rust
+/// SDK state/action seams.
+pub fn run_rust_sdk_adapter_benchmark_suite(
+) -> Result<RustSdkBenchmarkRun, RustSdkRolloutRecorderError> {
+    let cases = curated_rust_sdk_benchmark_cases();
+    let mut recorder = RustSdkRolloutRecorder::new();
+    let mut scenario_reports = Vec::new();
+    let mut max_tick = 0u64;
+
+    for case in &cases {
+        max_tick = max_tick.max(case.snapshot.tick);
+        let action_plan = build_rust_sdk_action_plan(&case.action)?;
+        let record = RustSdkRolloutRecord::from_actions(
+            case.snapshot.clone(),
+            format!("rust-sdk benchmark scenario:{}", case.scenario_id),
+            vec![case.action.clone()],
+            case.tool_calls.clone(),
+            case.latency_ms,
+        )?;
+        recorder.record(record)?;
+
+        let expected_variant = rust_sdk_action_variant_name(&case.action);
+        let training_sample_count = case
+            .snapshot
+            .latest_tick_telemetry
+            .as_ref()
+            .map(|telemetry| telemetry.payload.agents.len())
+            .unwrap_or(0);
+        scenario_reports.push(RustSdkBenchmarkScenarioReport {
+            scenario_id: case.scenario_id.to_string(),
+            description: case.description.to_string(),
+            expected_action_key: case.expected_action_key.to_string(),
+            observed_action_key: rust_sdk_action_semantic_key(&case.action).to_string(),
+            expected_execution_mode: case.expected_execution_mode,
+            observed_execution_mode: action_plan.execution_mode,
+            action_matches: rust_sdk_action_semantic_key(&case.action) == case.expected_action_key,
+            execution_mode_matches: action_plan.execution_mode == case.expected_execution_mode,
+            available_action_matches: case
+                .snapshot
+                .available_actions
+                .iter()
+                .any(|available| available == expected_variant),
+            tool_call_error_count: case
+                .tool_calls
+                .iter()
+                .filter(|trace| {
+                    !matches!(
+                        trace.status,
+                        pod_core::ToolCallStatus::Requested | pod_core::ToolCallStatus::Succeeded
+                    )
+                })
+                .count(),
+            training_sample_count,
+        });
+    }
+
+    let replay = recorder.finalize(ReplayHeader {
+        name: "rust-sdk-adapter-benchmark".into(),
+        timestamp: 1_710_849_600,
+        world_seed: 13,
+        tick_count: max_tick + 1,
+        agent_count: 1,
+        notes: "Deterministic benchmark for the repo-owned Rust SDK adapter seams".into(),
+    });
+    let training_samples = replay.training_samples();
+    let generated_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let checks = vec![
+        RustSdkBenchmarkCheck {
+            metric: "scenario_count".into(),
+            passed: scenario_reports.len() == cases.len(),
+            expected: cases.len().to_string(),
+            observed: scenario_reports.len().to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "action_match_count".into(),
+            passed: scenario_reports.iter().all(|scenario| scenario.action_matches),
+            expected: cases.len().to_string(),
+            observed: scenario_reports
+                .iter()
+                .filter(|scenario| scenario.action_matches)
+                .count()
+                .to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "execution_mode_match_count".into(),
+            passed: scenario_reports
+                .iter()
+                .all(|scenario| scenario.execution_mode_matches),
+            expected: cases.len().to_string(),
+            observed: scenario_reports
+                .iter()
+                .filter(|scenario| scenario.execution_mode_matches)
+                .count()
+                .to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "available_action_match_count".into(),
+            passed: scenario_reports
+                .iter()
+                .all(|scenario| scenario.available_action_matches),
+            expected: cases.len().to_string(),
+            observed: scenario_reports
+                .iter()
+                .filter(|scenario| scenario.available_action_matches)
+                .count()
+                .to_string(),
+        },
+        RustSdkBenchmarkCheck {
+            metric: "training_sample_count".into(),
+            passed: training_samples.len() == cases.len(),
+            expected: cases.len().to_string(),
+            observed: training_samples.len().to_string(),
+        },
+    ];
+
+    Ok(RustSdkBenchmarkRun {
+        report: RustSdkBenchmarkReport {
+            schema_version: RUST_SDK_BENCHMARK_SCHEMA_VERSION,
+            generated_at_unix_ms,
+            benchmark_id: "rust-sdk-adapter-seams".into(),
+            replay_tick_count: replay.header.tick_count,
+            replay_training_sample_count: training_samples.len(),
+            scenarios: scenario_reports,
+            checks,
+        },
+        replay,
+        training_samples,
+    })
+}
+
+fn curated_rust_sdk_benchmark_cases() -> Vec<RustSdkBenchmarkCase> {
+    let attack_snapshot = build_rust_sdk_attack_snapshot();
+    let gather_snapshot = build_rust_sdk_gather_snapshot();
+
+    vec![
+        RustSdkBenchmarkCase {
+            scenario_id: "frontier_anchor_attack",
+            description: "Remote combat state should lower to an immediate attack plan.",
+            snapshot: attack_snapshot,
+            action: Action::AttackTarget {
+                target: EntityId(9001),
+            },
+            tool_calls: Vec::new(),
+            latency_ms: 7,
+            expected_action_key: "attack",
+            expected_execution_mode: RustSdkActionExecutionMode::Immediate,
+        },
+        RustSdkBenchmarkCase {
+            scenario_id: "frontier_iron_gather",
+            description: "Resource-node state should lower to a completion-aware gather plan.",
+            snapshot: gather_snapshot,
+            action: Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining,
+            },
+            tool_calls: vec![pod_core::AgentToolCallTrace::success(
+                1,
+                "path_probe",
+                "rs-sdk-benchmark",
+                12,
+                4,
+                3,
+            )],
+            latency_ms: 19,
+            expected_action_key: "gather_resource",
+            expected_execution_mode: RustSdkActionExecutionMode::CompletionAware,
+        },
+    ]
+}
+
+fn build_rust_sdk_attack_snapshot() -> RustSdkStateSnapshot {
+    let fixture = build_rust_sdk_handoff_fixture();
+    let mut observation = fixture.observation.payload.clone();
+    observation.tick = 0;
+    observation.available_actions = vec!["Attack".into(), "Move".into()];
+    observation.visible_entities = vec![VisibleEntity {
+        entity_id: EntityId(9001),
+        entity_type: "rift_hound".into(),
+        position: Vec2::new(134.0, 98.0),
+        velocity: Vec2::ZERO,
+        rotation: 0.0,
+        distance: 6.0,
+        relationship: Relationship::Hostile,
+        health_fraction: Some(0.42),
+        combat_style: Some(CombatStyle::Melee),
+        creature: None,
+    }];
+    observation.objectives = vec![Objective {
+        id: "hold-anchor".into(),
+        description: "Hold the frontier anchor".into(),
+        progress: 0.7,
+        completed: false,
+    }];
+
+    let snapshot = RustSdkStateSnapshot {
+        tick: observation.tick,
+        elapsed_secs: observation.elapsed_secs,
+        runtime_profile: fixture.observation.profile,
+        self_state: RustSdkSelfStateSnapshot {
+            agent_id: observation.self_state.agent_id,
+            entity_id: observation.self_state.entity_id,
+            position: observation.self_state.position,
+            rotation: observation.self_state.rotation,
+            velocity: observation.self_state.velocity,
+            health: observation.self_state.health,
+            max_health: observation.self_state.max_health,
+            team: observation.self_state.team,
+            combat_loadout: observation.self_state.combat_loadout.clone(),
+            skills: observation.self_state.skills.clone(),
+            inventory: observation.self_state.inventory.clone(),
+            encounter: Some(EncounterState {
+                encounter_id: 71,
+                kind: pod_core::EncounterKind::OpenWorld,
+                threat_level: 0.9,
+                primary_target: Some(EntityId(9001)),
+                active_turn_owner: Some(observation.self_state.entity_id),
+                capture_allowed: false,
+                in_combat: true,
+            }),
+        },
+        visible_entities: observation
+            .visible_entities
+            .iter()
+            .map(rust_sdk_visible_entity_from_observation)
+            .collect(),
+        audible_events: observation.audible_events.clone(),
+        messages: observation.messages.clone(),
+        available_actions: observation.available_actions.clone(),
+        objectives: observation.objectives.clone(),
+        dialog: None,
+        shop: None,
+        bank: None,
+        transport_contract: fixture.transport_contract.clone(),
+        remote_topology: fixture.remote_topology.clone(),
+        latest_tick_telemetry: Some(VersionedTickTelemetry::new(
+            build_rust_sdk_tick_telemetry(
+                &observation,
+                &Action::AttackTarget {
+                    target: EntityId(9001),
+                },
+                &[],
+            ),
+        )),
+        replay: None,
+    };
+
+    snapshot
+}
+
+fn build_rust_sdk_gather_snapshot() -> RustSdkStateSnapshot {
+    let profile = AgentRuntimeProfile::for_agent_type(CoreAgentType::LlmAgent);
+    let agent_id = AgentId(Uuid::from_u128(0x504f445f52555354_53444b0000000011));
+    let observation = Observation {
+        tick: 1,
+        elapsed_secs: 0.2,
+        self_state: SelfState {
+            agent_id,
+            entity_id: EntityId(4001),
+            runtime_profile: profile,
+            position: Vec2::new(320.0, 640.0),
+            rotation: 1.25,
+            velocity: Vec2::new(-0.5, 0.75),
+            health: Some(67.0),
+            max_health: Some(99.0),
+            team: Team::Team(2),
+            combat_loadout: Some(CombatLoadout {
+                style: CombatStyle::Ranged,
+                attack_range: 9.0,
+                attack_speed_ticks: 4,
+                max_hit: 12.0,
+                auto_retaliate: true,
+                equipped_weapon: Some("maple-shortbow".into()),
+                offhand_item: None,
+                active_ability_bar: vec!["piercing-shot".into(), "binding-shot".into()],
+            }),
+            skills: vec![
+                SkillProgress::new(SkillKind::Mining, 52, 145_200, 9_800),
+                SkillProgress::new(SkillKind::Magic, 41, 49_900, 3_400),
+            ],
+            inventory: Some(Inventory {
+                capacity: 28,
+                carried_weight: 7.5,
+                coins: 1_250,
+                items: vec![pod_core::ItemStack {
+                    item_id: "iron-pickaxe".into(),
+                    display_name: "Iron Pickaxe".into(),
+                    quantity: 1,
+                    stackable: false,
+                }],
+            }),
+            companion_roster: None,
+            encounter: Some(EncounterState {
+                encounter_id: 44,
+                kind: pod_core::EncounterKind::OpenWorld,
+                threat_level: 0.2,
+                primary_target: Some(EntityId(9101)),
+                active_turn_owner: None,
+                capture_allowed: false,
+                in_combat: false,
+            }),
+            cooldowns: Vec::new(),
+        },
+        visible_entities: vec![VisibleEntity {
+            entity_id: EntityId(9101),
+            entity_type: "iron_vein".into(),
+            position: Vec2::new(323.0, 644.0),
+            velocity: Vec2::ZERO,
+            rotation: 0.0,
+            distance: 5.0,
+            relationship: Relationship::Neutral,
+            health_fraction: None,
+            combat_style: None,
+            creature: None,
+        }],
+        audible_events: vec![AudibleEvent {
+            event_type: "pickaxe_swing".into(),
+            direction: Vec2::new(0.7, 0.2),
+            distance: 4.5,
+            intensity: 0.5,
+        }],
+        messages: vec![AgentMessage {
+            from: agent_id,
+            content: "frontier miner ready".into(),
+            channel: MessageChannel::Team,
+        }],
+        available_actions: vec!["Move".into(), "GatherResource".into()],
+        objectives: vec![Objective {
+            id: "mine-iron".into(),
+            description: "Collect iron ore for the squad".into(),
+            progress: 0.4,
+            completed: false,
+        }],
+    };
+
+    RustSdkStateSnapshot {
+        tick: observation.tick,
+        elapsed_secs: observation.elapsed_secs,
+        runtime_profile: profile,
+        self_state: RustSdkSelfStateSnapshot {
+            agent_id,
+            entity_id: observation.self_state.entity_id,
+            position: observation.self_state.position,
+            rotation: observation.self_state.rotation,
+            velocity: observation.self_state.velocity,
+            health: observation.self_state.health,
+            max_health: observation.self_state.max_health,
+            team: observation.self_state.team,
+            combat_loadout: observation.self_state.combat_loadout.clone(),
+            skills: observation.self_state.skills.clone(),
+            inventory: observation.self_state.inventory.clone(),
+            encounter: observation.self_state.encounter.clone(),
+        },
+        visible_entities: observation
+            .visible_entities
+            .iter()
+            .map(rust_sdk_visible_entity_from_observation)
+            .collect(),
+        audible_events: observation.audible_events.clone(),
+        messages: observation.messages.clone(),
+        available_actions: observation.available_actions.clone(),
+        objectives: observation.objectives.clone(),
+        dialog: Some(RustSdkDialogState {
+            speaker: "Trader".into(),
+            prompt: "Interested in tools?".into(),
+            options: vec!["Show wares".into(), "Not now".into()],
+        }),
+        shop: Some(RustSdkShopState {
+            shop_name: "Frontier Tools".into(),
+            offer_count: 12,
+            can_buy: true,
+            can_sell: false,
+        }),
+        bank: Some(RustSdkBankState {
+            bank_name: "Anchor Vault".into(),
+            tab_count: 3,
+            item_count: 86,
+            can_deposit: true,
+            can_withdraw: true,
+        }),
+        transport_contract: None,
+        remote_topology: None,
+        latest_tick_telemetry: Some(VersionedTickTelemetry::new(
+            build_rust_sdk_tick_telemetry(
+                &observation,
+                &Action::GatherResource {
+                    target: EntityId(9101),
+                    skill: SkillKind::Mining,
+                },
+                &[pod_core::AgentToolCallTrace::success(
+                    1,
+                    "path_probe",
+                    "rs-sdk-benchmark",
+                    12,
+                    4,
+                    3,
+                )],
+            ),
+        )),
+        replay: None,
+    }
+}
+
+fn build_rust_sdk_tick_telemetry(
+    observation: &Observation,
+    action: &Action,
+    tool_calls: &[pod_core::AgentToolCallTrace],
+) -> pod_core::TickTelemetryFrame {
+    let mut agent_frame = AgentTelemetryFrame::new(
+        observation.tick,
+        observation.self_state.agent_id,
+        Some(observation.self_state.entity_id),
+        observation.self_state.runtime_profile,
+        observation.visible_entities.len(),
+        observation.audible_events.len(),
+        observation.messages.len(),
+        observation.available_actions.len(),
+        observation.objectives.len(),
+        observation.self_state.encounter.clone(),
+        None,
+    );
+    agent_frame.record_action(
+        ActionSource::ExternalSubmission,
+        ActionLifecycleStage::Submitted,
+        action.clone(),
+        None,
+    );
+    agent_frame.record_action(
+        ActionSource::ExternalSubmission,
+        ActionLifecycleStage::Executed,
+        action.clone(),
+        None,
+    );
+    for tool_call in tool_calls {
+        agent_frame.record_tool_call(tool_call.clone());
+    }
+
+    pod_core::TickTelemetryFrame {
+        tick: observation.tick,
+        agents: vec![agent_frame],
+    }
+}
+
+fn rust_sdk_visible_entity_from_observation(
+    entity: &VisibleEntity,
+) -> RustSdkVisibleEntitySnapshot {
+    RustSdkVisibleEntitySnapshot {
+        entity_id: entity.entity_id,
+        entity_type: entity.entity_type.clone(),
+        position: entity.position,
+        velocity: entity.velocity,
+        rotation: entity.rotation,
+        relationship: entity.relationship,
+        health_fraction: entity.health_fraction,
+        combat_style: entity.combat_style,
+        creature: entity.creature.clone(),
+    }
+}
+
+fn rust_sdk_action_variant_name(action: &Action) -> &'static str {
+    match action {
+        Action::Move { .. } => "Move",
+        Action::Stop => "Stop",
+        Action::Rotate { .. } => "Rotate",
+        Action::LookAt { .. } => "LookAt",
+        Action::Attack | Action::AttackTarget { .. } => "Attack",
+        Action::UseAbility { .. } => "UseAbility",
+        Action::CaptureCreature { .. } => "CaptureCreature",
+        Action::SummonCompanion { .. } => "SummonCompanion",
+        Action::CommandCompanion { .. } => "CommandCompanion",
+        Action::Interact | Action::InteractWith { .. } => "Interact",
+        Action::Pickup { .. } => "Pickup",
+        Action::Drop { .. } => "Drop",
+        Action::UseItem { .. } => "UseItem",
+        Action::GatherResource { .. } => "GatherResource",
+        Action::Loot { .. } => "Loot",
+        Action::Speak { .. } => "Speak",
+        Action::Signal { .. } => "Signal",
+        Action::SetAutoRetaliate { .. } => "SetAutoRetaliate",
+        Action::Idle => "Idle",
+        Action::Spawn { .. } => "Spawn",
+    }
+}
+
+fn rust_sdk_action_semantic_key(action: &Action) -> &'static str {
+    match action {
+        Action::Move { .. } => "move",
+        Action::Stop => "stop",
+        Action::Rotate { .. } => "rotate",
+        Action::LookAt { .. } => "look_at",
+        Action::Attack | Action::AttackTarget { .. } => "attack",
+        Action::UseAbility { .. } => "use_ability",
+        Action::CaptureCreature { .. } => "capture",
+        Action::SummonCompanion { .. } => "summon",
+        Action::CommandCompanion { .. } => "command_companion",
+        Action::Interact | Action::InteractWith { .. } => "interact",
+        Action::Pickup { .. } => "pickup",
+        Action::Drop { .. } => "drop",
+        Action::UseItem { .. } => "use_item",
+        Action::GatherResource { .. } => "gather_resource",
+        Action::Loot { .. } => "loot",
+        Action::Speak { .. } => "speak",
+        Action::Signal { .. } => "signal",
+        Action::SetAutoRetaliate { .. } => "set_auto_retaliate",
+        Action::Idle => "idle",
+        Action::Spawn { .. } => "spawn",
+    }
 }
 
 /// One boolean benchmark check for authority-fed topology ingestion.
@@ -3272,6 +3989,84 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn test_rust_sdk_rollout_recorder_finalizes_shared_replay_and_training_samples() {
+        let mut recorder = RustSdkRolloutRecorder::new();
+        let attack_record = RustSdkRolloutRecord::from_actions(
+            build_rust_sdk_attack_snapshot(),
+            "attack benchmark",
+            vec![Action::AttackTarget {
+                target: EntityId(9001),
+            }],
+            Vec::new(),
+            7,
+        )
+        .expect("attack record should build");
+        recorder
+            .record(attack_record)
+            .expect("attack record should store");
+
+        let gather_record = RustSdkRolloutRecord::from_actions(
+            build_rust_sdk_gather_snapshot(),
+            "gather benchmark",
+            vec![Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining,
+            }],
+            vec![pod_core::AgentToolCallTrace::success(
+                1,
+                "path_probe",
+                "rs-sdk-benchmark",
+                12,
+                4,
+                3,
+            )],
+            19,
+        )
+        .expect("gather record should build");
+        recorder
+            .record(gather_record)
+            .expect("gather record should store");
+
+        let replay = recorder.finalize(ReplayHeader {
+            name: "rust-sdk-rollout".into(),
+            timestamp: 1_710_849_600,
+            world_seed: 5,
+            tick_count: 2,
+            agent_count: 1,
+            notes: "deterministic test rollout".into(),
+        });
+        let training_samples = replay.training_samples();
+
+        assert_eq!(replay.header.name, "rust-sdk-rollout");
+        assert_eq!(replay.header.tick_count, 2);
+        assert_eq!(replay.traces.len(), 2);
+        assert_eq!(replay.telemetry_windows.len(), 2);
+        assert_eq!(training_samples.len(), 2);
+        assert_eq!(training_samples[0].tick, 0);
+        assert_eq!(training_samples[1].tick, 1);
+        assert_eq!(training_samples[1].tool_call_latency_ms, 12);
+        assert_eq!(training_samples[1].action_outcomes.executed, 1);
+    }
+
+    #[test]
+    fn test_run_rust_sdk_adapter_benchmark_suite_reports_passing_checks() {
+        let run = run_rust_sdk_adapter_benchmark_suite()
+            .expect("benchmark suite should run on curated fixtures");
+
+        assert!(run.report.passed(), "benchmark checks should pass");
+        assert_eq!(run.report.benchmark_id, "rust-sdk-adapter-seams");
+        assert_eq!(run.report.scenarios.len(), 2);
+        assert_eq!(run.report.replay_training_sample_count, 2);
+        assert_eq!(run.training_samples.len(), 2);
+        assert_eq!(run.replay.header.name, "rust-sdk-adapter-benchmark");
+        assert!(run
+            .report
+            .scenarios
+            .iter()
+            .all(|scenario| scenario.action_matches && scenario.execution_mode_matches));
     }
 
     #[test]

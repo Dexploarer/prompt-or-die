@@ -172,6 +172,14 @@ Responsibility:
 
 This is the key to making the integration useful for neural and hybrid agent work.
 
+Current repo-owned seam:
+
+- `RustSdkRolloutRecord` captures one SDK-facing step as state snapshot,
+  translated action plans, shared POD actions, tool calls, and latency
+- `RustSdkRolloutRecorder` finalizes those steps into the shared `ReplayFile`
+  surface with embedded telemetry windows, so `ReplayTrainingSample` rows stay
+  derived from the same authoritative format used elsewhere in POD
+
 ## `rs_benchmark_runner`
 
 Responsibility:
@@ -186,6 +194,14 @@ This should eventually compare:
 - recovery behavior
 - tool reliance
 - reward/outcome quality
+
+Current repo-owned seam:
+
+- `run_rust_sdk_adapter_benchmark_suite()` runs deterministic curated cases over
+  `RustSdkStateSnapshot`, `RustSdkActionPlan`, and `RustSdkRolloutRecorder`
+- `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
+  now gives one command that emits a benchmark JSON report plus optional replay
+  and training TOON artifacts
 
 ## What to avoid
 

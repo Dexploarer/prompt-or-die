@@ -44,6 +44,7 @@ These are the current repo-owned seams a future Rust SDK can build against.
 | Network-facing generated runtime seam | `pod_net::SpacetimeDBClient::{install_generated_binding_runtime, install_generated_sdk_runtime, apply_rust_sdk_handoff_artifact}` | Higher-level Rust SDK consumers should be able to choose the same generated binding or live SDK path through the public client wrapper while forwarding replay/debug documents over the existing public surfaces. |
 | Thin adapter host | `pod_net::{RustSdkAdapterHost, RustSdkAdapterRuntimeMode}` | Future rs-sdk integration should enter through this small host surface when it needs runtime-mode selection plus Rust/JSON/TOON handoff decoding without depending on app roots. |
 | Repo-owned state/action adapter seam | `pod_net::{RustSdkStateSnapshot, RustSdkActionPlan, build_rust_sdk_action_plan}` | The SDK now has one repo-owned translation surface for external state snapshots and planner-selected actions before any live SDK method bindings exist. |
+| Repo-owned rollout/benchmark seam | `pod_net::{RustSdkRolloutRecorder, RustSdkBenchmarkReport, run_rust_sdk_adapter_benchmark_suite}` | SDK-driven episodes and adapter parity checks can now stay on the same replay/training/report contracts instead of inventing adapter-local episode formats. |
 | Large agent-facing export surfaces | `pod export world|events|multiverse --format json|toon` | The future SDK can bootstrap context, event batches, and topology proofs from these stable exported datasets instead of scraping app-local state. |
 
 ## Adapter lanes
@@ -102,6 +103,9 @@ Rules:
 - keep the replay/training shape shared with local scripted, LLM, hybrid, and
   neural controllers
 - prefer `pod export events|world|multiverse` for large context products
+- prefer `pod_net::RustSdkRolloutRecorder` so SDK-side episodes finalize into a
+  standard `ReplayFile` plus `ReplayTrainingSample` rows instead of adapter-only
+  event logs
 
 ### `rs_benchmark_runner`
 
@@ -116,6 +120,10 @@ Rules:
   contract
 - keep shell/control-plane messages JSON
 - use TOON only for large tabular or semi-tabular world data products
+- prefer `run_rust_sdk_adapter_benchmark_suite()` and
+  `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks`
+  as the deterministic adapter seam smoke/benchmark surface before wiring live
+  SDK calls
 
 ## Generated-runtime handoff
 
@@ -163,6 +171,8 @@ The SDK boundary should only be treated as ready when these checks stay green:
 cargo test -p pod-core contract -- --nocapture
 cargo test -p pod-stdb --no-default-features --features client
 cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture
+cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite
+cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks
 cargo run -p pod-core --example rust_sdk_handoff_fixture -- --format toon >/tmp/pod-sdk-handoff.toon
 bun ./scripts/pod.ts export world --format json >/tmp/pod-sdk-world.json
 bun ./scripts/pod.ts export events --format toon >/tmp/pod-sdk-events.toon
@@ -186,6 +196,10 @@ As of the current Phase 8 hardening pass:
 - the repo-owned `RustSdkStateSnapshot` and `RustSdkActionPlan` surfaces exist
   in `pod-net`, so future SDK hookups can translate external state/actions
   before any live binding code is written
+- the repo-owned `RustSdkRolloutRecorder` and
+  `run_rust_sdk_adapter_benchmark_suite()` surfaces exist in `pod-net`, so
+  adapter-driven episodes already land on shared replay/training/report
+  contracts before live SDK calls are wired
 - large agent-facing export surfaces exist for world, events, and multiverse
 - replay/training artifacts already derive from authoritative telemetry
 

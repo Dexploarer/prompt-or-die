@@ -56,6 +56,9 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "RustSdkStateSnapshot",
       "RustSdkActionPlan",
       "build_rust_sdk_action_plan()",
+      "RustSdkRolloutRecorder",
+      "run_rust_sdk_adapter_benchmark_suite()",
+      "cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks",
       "## Adapter lanes",
       "rs_state_adapter",
       "rs_action_adapter",
@@ -75,6 +78,10 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "RemoteTopologyBundle",
       "ReplayTrainingSample",
     ],
+  },
+  {
+    path: "crates/pod-net/Cargo.toml",
+    requiredSnippets: ['name = "rust_sdk_adapter_benchmark_suite"', 'required-features = ["spacetimedb"]'],
   },
   {
     path: "crates/pod-core/examples/rust_sdk_handoff_fixture.rs",
@@ -108,12 +115,22 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "pub struct RustSdkStateSnapshot",
       "pub struct RustSdkActionPlan",
       "pub fn build_rust_sdk_action_plan(",
+      "pub struct RustSdkRolloutRecord",
+      "pub struct RustSdkRolloutRecorder",
+      "pub fn run_rust_sdk_adapter_benchmark_suite(",
       "pub fn apply_state_snapshot(",
       "pub fn apply_handoff_json_document(",
       "pub fn apply_handoff_toon_document(",
       "pub fn install_generated_binding_runtime(&mut self) -> GeneratedBindingEndpoint",
       "pub fn install_generated_sdk_runtime(&mut self)",
       "pub fn apply_rust_sdk_handoff_artifact(",
+    ],
+  },
+  {
+    path: "crates/pod-net/examples/rust_sdk_adapter_benchmark_suite.rs",
+    requiredSnippets: [
+      "run_rust_sdk_adapter_benchmark_suite",
+      "Usage: cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]",
     ],
   },
   {
@@ -124,6 +141,8 @@ const EXPECTATIONS: RustSdkBoundaryExpectation[] = [
       "RustSdkStateSnapshot",
       "RustSdkActionPlan",
       "build_rust_sdk_action_plan",
+      "RustSdkRolloutRecorder",
+      "run_rust_sdk_adapter_benchmark_suite",
     ],
   },
   {

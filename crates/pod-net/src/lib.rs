@@ -98,11 +98,15 @@ pub use client_web::{ClientError, WebClient};
 #[cfg(feature = "spacetimedb")]
 pub use client_stdb::{
     build_rust_sdk_action_plan, build_topology_feed_measurements,
-    build_topology_feed_measurements_with_options, LiveGeneratedSdkTopologyFeedConfig,
-    RustSdkActionAdapterError, RustSdkActionExecutionMode, RustSdkActionIntent, RustSdkActionPlan,
-    RustSdkAdapterHost, RustSdkAdapterRuntimeMode, RustSdkBankState, RustSdkDialogState,
-    RustSdkSelfStateSnapshot, RustSdkShopState, RustSdkStateSnapshot, RustSdkVisibleEntitySnapshot,
-    SpacetimeDBClient, SpacetimeDBClientConfig, StdbClientError, TopologyFeedCheck,
+    build_topology_feed_measurements_with_options, run_rust_sdk_adapter_benchmark_suite,
+    LiveGeneratedSdkTopologyFeedConfig, RustSdkActionAdapterError,
+    RustSdkActionExecutionMode, RustSdkActionIntent, RustSdkActionPlan, RustSdkAdapterHost,
+    RustSdkAdapterRuntimeMode, RustSdkBankState, RustSdkBenchmarkCheck,
+    RustSdkBenchmarkReport, RustSdkBenchmarkRun, RustSdkBenchmarkScenarioReport,
+    RustSdkDialogState, RustSdkRolloutRecord, RustSdkRolloutRecorder,
+    RustSdkRolloutRecorderError, RustSdkSelfStateSnapshot, RustSdkShopState,
+    RustSdkStateSnapshot, RustSdkVisibleEntitySnapshot, SpacetimeDBClient,
+    SpacetimeDBClientConfig, StdbClientError, TopologyFeedCheck,
     TopologyFeedGeneratedRuntimeMode, TopologyFeedMeasurementsOptions,
     TopologyFeedMeasurementsReport, TopologyFeedWorldPathReport, TopologyFeedWorldReport,
 };

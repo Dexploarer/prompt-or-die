@@ -2432,3 +2432,15 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 237
+- Added `RustSdkRolloutRecord`, `RustSdkRolloutRecorder`, and `run_rust_sdk_adapter_benchmark_suite()` in `crates/pod-net/src/client_stdb.rs`, so SDK-facing episodes now finalize into shared `ReplayFile` / `ReplayTrainingSample` artifacts and deterministic adapter benchmark reports instead of adapter-local episode formats.
+- Added `crates/pod-net/examples/rust_sdk_adapter_benchmark_suite.rs` plus the `Cargo.toml` example registration, so the rollout/benchmark seam now has a real command surface that emits JSON plus optional replay/training TOON artifacts.
+- Re-exported the rollout/benchmark seam from `crates/pod-net/src/lib.rs`, updated the Rust SDK boundary docs plus the rs-sdk integration notes, and tightened the verifier so the recorder and benchmark runner are now part of the enforced SDK boundary contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite`
+  - `cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- --fail-on-checks --output /tmp/pod-rust-sdk-benchmark.json --replay-output /tmp/pod-rust-sdk-benchmark.toon --training-output /tmp/pod-rust-sdk-training.toon`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`
