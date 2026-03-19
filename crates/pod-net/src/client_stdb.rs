@@ -1169,6 +1169,131 @@ impl Default for RustSdkRolloutRecorder {
     }
 }
 
+/// Repo-owned session facade for rs-sdk integrations that need one surface for
+/// snapshot ingest, action execution, and replay recording.
+pub struct RustSdkAdapterSession {
+    host: RustSdkAdapterHost,
+    recorder: RustSdkRolloutRecorder,
+}
+
+impl RustSdkAdapterSession {
+    pub fn new(config: SpacetimeDBClientConfig, runtime_mode: RustSdkAdapterRuntimeMode) -> Self {
+        Self {
+            host: RustSdkAdapterHost::new(config, runtime_mode),
+            recorder: RustSdkRolloutRecorder::new(),
+        }
+    }
+
+    pub fn host(&self) -> &RustSdkAdapterHost {
+        &self.host
+    }
+
+    pub fn host_mut(&mut self) -> &mut RustSdkAdapterHost {
+        &mut self.host
+    }
+
+    pub fn connect(&mut self) -> Result<(), RustSdkAdapterSessionError> {
+        self.host.connect().map_err(Into::into)
+    }
+
+    pub fn ingest_state_snapshot(
+        &mut self,
+        snapshot: &RustSdkStateSnapshot,
+    ) -> Result<(), RustSdkAdapterSessionError> {
+        self.host.bind_state_snapshot_action_entity(snapshot)?;
+        self.host.apply_state_snapshot(snapshot)?;
+        Ok(())
+    }
+
+    pub fn execute_actions(
+        &mut self,
+        snapshot: RustSdkStateSnapshot,
+        prompt_sent: impl Into<String>,
+        actions: Vec<Action>,
+        tool_calls: Vec<pod_core::AgentToolCallTrace>,
+        latency_ms: u32,
+    ) -> Result<Vec<Action>, RustSdkAdapterSessionError> {
+        self.ingest_state_snapshot(&snapshot)?;
+
+        let mut executed_actions = Vec::with_capacity(actions.len());
+        for action in &actions {
+            let plan = build_rust_sdk_action_plan(action)?;
+            executed_actions.push(self.host.execute_action_plan(&plan)?);
+        }
+
+        let record = RustSdkRolloutRecord::from_actions(
+            snapshot,
+            prompt_sent.into(),
+            executed_actions.clone(),
+            tool_calls,
+            latency_ms,
+        )?;
+        self.recorder.record(record)?;
+
+        Ok(executed_actions)
+    }
+
+    pub fn record_rollout_step(
+        &mut self,
+        record: RustSdkRolloutRecord,
+    ) -> Result<(), RustSdkAdapterSessionError> {
+        self.recorder.record(record).map_err(Into::into)
+    }
+
+    pub fn into_host_and_recorder(self) -> (RustSdkAdapterHost, RustSdkRolloutRecorder) {
+        (self.host, self.recorder)
+    }
+
+    pub fn finalize_replay(self, header: ReplayHeader) -> ReplayFile {
+        self.recorder.finalize(header)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkAdapterSessionError {
+    Client(String),
+    UnsupportedAction(String),
+    Rollout(String),
+}
+
+impl fmt::Display for RustSdkAdapterSessionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Client(message) => write!(f, "Rust SDK session client error: {message}"),
+            Self::UnsupportedAction(message) => {
+                write!(f, "Rust SDK session action translation error: {message}")
+            }
+            Self::Rollout(message) => write!(f, "Rust SDK session rollout error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RustSdkAdapterSessionError {}
+
+impl From<StdbClientError> for RustSdkAdapterSessionError {
+    fn from(error: StdbClientError) -> Self {
+        Self::Client(error.to_string())
+    }
+}
+
+impl From<RustSdkActionAdapterError> for RustSdkAdapterSessionError {
+    fn from(error: RustSdkActionAdapterError) -> Self {
+        Self::UnsupportedAction(error.to_string())
+    }
+}
+
+impl From<RustSdkActionExecutorError> for RustSdkAdapterSessionError {
+    fn from(error: RustSdkActionExecutorError) -> Self {
+        Self::Client(error.to_string())
+    }
+}
+
+impl From<RustSdkRolloutRecorderError> for RustSdkAdapterSessionError {
+    fn from(error: RustSdkRolloutRecorderError) -> Self {
+        Self::Rollout(error.to_string())
+    }
+}
+
 fn upsert_rust_sdk_telemetry_window(
     telemetry_windows: &mut Vec<pod_core::TickTelemetryFrame>,
     window: &pod_core::TickTelemetryFrame,
@@ -4316,6 +4441,64 @@ mod tests {
         ));
         assert_eq!(host.client().inner().reducers_called(), reducers_before + 1);
         assert_eq!(host.client().remote_agent_status().pending_action_count, 0);
+    }
+
+    #[test]
+    fn test_rust_sdk_adapter_session_executes_and_records_emulated_step() {
+        let snapshot = build_rust_sdk_gather_snapshot();
+        let mut session = RustSdkAdapterSession::new(
+            SpacetimeDBClientConfig {
+                db_name: "world-frontier-1".into(),
+                ..Default::default()
+            },
+            RustSdkAdapterRuntimeMode::Emulated,
+        );
+
+        session.connect().expect("session should connect");
+        let _ = session.host_mut().poll_updates();
+        let executed = session
+            .execute_actions(
+                snapshot,
+                "session gather prompt",
+                vec![Action::GatherResource {
+                    target: EntityId(9101),
+                    skill: SkillKind::Mining,
+                }],
+                vec![AgentToolCallTrace::success(
+                    1,
+                    "path_probe",
+                    "rs-sdk-session",
+                    14,
+                    5,
+                    2,
+                )],
+                21,
+            )
+            .expect("session should execute and record the rollout step");
+
+        assert!(matches!(
+            executed.as_slice(),
+            [Action::GatherResource {
+                target: EntityId(9101),
+                skill: SkillKind::Mining
+            }]
+        ));
+
+        let replay = session.finalize_replay(ReplayHeader {
+            name: "rust-sdk-session".into(),
+            timestamp: 1_710_849_600,
+            world_seed: 17,
+            tick_count: 2,
+            agent_count: 1,
+            notes: "deterministic session test".into(),
+        });
+        let training_samples = replay.training_samples();
+
+        assert_eq!(replay.header.name, "rust-sdk-session");
+        assert_eq!(training_samples.len(), 1);
+        assert_eq!(training_samples[0].tick, 1);
+        assert_eq!(training_samples[0].tool_call_latency_ms, 12);
+        assert_eq!(training_samples[0].action_outcomes.executed, 1);
     }
 
     #[test]

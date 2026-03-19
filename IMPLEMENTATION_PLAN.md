@@ -2456,3 +2456,12 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_rust_sdk_boundary.test.ts`
   - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
   - `git diff --check`
+
+### Iteration 239
+- Added `RustSdkAdapterSession` plus `RustSdkAdapterSessionError` in `crates/pod-net/src/client_stdb.rs`, so the future POD-owned rs-sdk wrapper now has one repo-owned facade that composes snapshot ingest, action execution, and replay recording instead of hand-wiring `RustSdkAdapterHost` plus `RustSdkRolloutRecorder`.
+- Re-exported that session facade from `crates/pod-net/src/lib.rs`, added deterministic emulated-session coverage in `client_stdb` tests, and tightened the Rust SDK boundary docs plus verifier so the facade is now part of the enforced repo-owned SDK contract.
+- [x] Validation:
+  - `cargo test -p pod-net --features spacetimedb client_stdb -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `git diff --check`

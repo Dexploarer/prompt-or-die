@@ -183,6 +183,9 @@ Current repo-owned seam:
 - `RustSdkRolloutRecorder` finalizes those steps into the shared `ReplayFile`
   surface with embedded telemetry windows, so `ReplayTrainingSample` rows stay
   derived from the same authoritative format used elsewhere in POD
+- `RustSdkAdapterSession` now packages snapshot ingest, action execution, and
+  rollout recording behind one repo-owned facade so the future POD-owned
+  rs-sdk wrapper does not need to hand-orchestrate host plus recorder glue
 
 ## `rs_benchmark_runner`
 
@@ -226,9 +229,10 @@ Current repo-owned seam:
 4. Land the repo-owned state/action adapter seam through
    `RustSdkStateSnapshot`, `RustSdkActionPlan`, and
    `build_rust_sdk_action_plan(...)`.
-5. Wire rollout recording and execution-backed benchmark submission on top of
-   that adapter seam.
-6. Use rs-sdk as an external benchmark surface for agent evaluation.
+5. Start the POD-owned rs-sdk facade from `RustSdkAdapterSession` instead of
+   rebuilding host plus recorder orchestration in app code.
+6. Wire live generated-SDK smoke coverage on top of that session surface.
+7. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources
 
