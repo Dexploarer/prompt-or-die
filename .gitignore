@@ -2,3 +2,4 @@
 /target/
 /artifacts/
 /apps/pod-web/test-results/
+/node_modules/

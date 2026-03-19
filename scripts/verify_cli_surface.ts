@@ -51,6 +51,16 @@ function logValidationProblems(validation: CliSurfaceValidation) {
   if (validation.duplicateIds.length > 0) {
     console.error(`Duplicate command ids: ${validation.duplicateIds.join(", ")}`);
   }
+  if (validation.duplicateAliases.length > 0) {
+    console.error(
+      `Duplicate command aliases: ${validation.duplicateAliases.join(", ")}`,
+    );
+  }
+  if (validation.invalidAliasEntries.length > 0) {
+    console.error(
+      `Invalid command aliases: ${validation.invalidAliasEntries.join(", ")}`,
+    );
+  }
   if (validation.missingEntrypoints.length > 0) {
     console.error(
       `Missing entrypoints: ${validation.missingEntrypoints.join(", ")}`,
@@ -71,6 +81,26 @@ function logValidationProblems(validation: CliSurfaceValidation) {
         `- ${surface.key}: \`${surface.command}\` (${surface.entrypoint})`,
       );
     }
+  }
+  if (validation.invalidExecutionEntries.length > 0) {
+    console.error(
+      `Invalid execution entries: ${validation.invalidExecutionEntries.join(", ")}`,
+    );
+  }
+  if (validation.invalidCapabilityEntries.length > 0) {
+    console.error(
+      `Invalid capability entries: ${validation.invalidCapabilityEntries.join(", ")}`,
+    );
+  }
+  if (validation.invalidPassthroughEntries.length > 0) {
+    console.error(
+      `Invalid passthrough entries: ${validation.invalidPassthroughEntries.join(", ")}`,
+    );
+  }
+  if (validation.invalidInteractiveEntries.length > 0) {
+    console.error(
+      `Invalid interactive entries: ${validation.invalidInteractiveEntries.join(", ")}`,
+    );
   }
   if (!validation.docInSync) {
     console.error(
@@ -93,10 +123,16 @@ function main() {
           validation: {
             ok: validation.ok,
             duplicateIds: validation.duplicateIds,
+            duplicateAliases: validation.duplicateAliases,
+            invalidAliasEntries: validation.invalidAliasEntries,
             missingEntrypoints: validation.missingEntrypoints,
             missingDocs: validation.missingDocs,
             unknownCoverageKeys: validation.unknownCoverageKeys,
             uncoveredDiscoveredSurfaces: validation.uncoveredDiscoveredSurfaces,
+            invalidExecutionEntries: validation.invalidExecutionEntries,
+            invalidCapabilityEntries: validation.invalidCapabilityEntries,
+            invalidPassthroughEntries: validation.invalidPassthroughEntries,
+            invalidInteractiveEntries: validation.invalidInteractiveEntries,
             docPath: validation.docPath,
             docInSync: validation.docInSync,
           },

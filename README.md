@@ -24,37 +24,70 @@ Discover the supported platform command surface from one entrypoint:
 
 ```bash
 bun ./scripts/pod.ts list
-bun ./scripts/pod.ts show pod-server
+bun ./scripts/pod.ts shell
+bun ./scripts/pod.ts runtime server --dry-run
+bun ./scripts/pod.ts web dev
+bun ./scripts/pod.ts show pod-server --json
 ```
+
+For attached terminal workflows, use `bun ./scripts/pod.ts shell`. For
+interactive machine sessions, use newline-delimited JSON request/event objects
+through `bun ./scripts/pod.ts shell --agent`.
+
+```bash
+printf '{"type":"builtin","requestId":"1","name":"context"}\n{"type":"builtin","requestId":"2","name":"exit"}\n' | bun ./scripts/pod.ts shell --agent
+```
+
+For an attached terminal workflow, use the interactive shell:
+
+```bash
+bun ./scripts/pod.ts shell
+bun ./scripts/pod.ts shell --agent
+bun ./scripts/pod.ts export events --format toon
+bun ./scripts/pod.ts export world --format json
+```
+
+`pod shell` is the human-friendly attached terminal experience. `pod shell --agent`
+is the machine-friendly interactive shell mode for long-lived autonomous agent
+sessions. One-shot automation should keep using `list/show/env/command/run --json`.
+TOON is reserved for the large LLM-facing export surfaces under
+`pod export world|events|multiverse --format toon`.
 
 ### Build and run the main surfaces
 
 ```bash
-cargo build --workspace
-cargo run --bin prompt-or-die
-cargo run --bin pod-server
+bun ./scripts/pod.ts workspace build
+bun ./scripts/pod.ts runtime desktop
+bun ./scripts/pod.ts runtime server
 
 cd apps/pod-web
 bun install
-bun run dev
+cd ../..
+
+bun ./scripts/pod.ts web dev
 ```
+
+If you want to stay inside one terminal and inspect supported commands as you
+go, use `bun ./scripts/pod.ts shell`. For machine-driven interactive sessions,
+use `bun ./scripts/pod.ts shell --agent`.
 
 ### Run the main proof surfaces
 
 ```bash
-cargo run --bin pod-headless -- --profile ci-smoke
-cargo run --bin pod-headless -- --profile ci-smoke --dataset-output /tmp/pod-headless-dataset.json --topology-output /tmp/pod-headless-topology.json
-cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks
-cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks
-
-cargo test --workspace
-cargo check --workspace
+bun ./scripts/pod.ts runtime headless -- --profile ci-smoke
+bun ./scripts/pod.ts runtime headless -- --profile ci-smoke --dataset-output /tmp/pod-headless-dataset.json --topology-output /tmp/pod-headless-topology.json
+bun ./scripts/pod.ts benchmark controller-parity
+bun ./scripts/pod.ts benchmark toon-exports -- --fail-on-checks
+bun ./scripts/benchmark_toon_exports.ts --profile extensive --output artifacts/toon-export-benchmark-extensive.json --html-output artifacts/toon-export-benchmark-extensive.html --markdown-output artifacts/toon-export-benchmark-extensive.md --charts-dir artifacts/toon-export-benchmark-extensive-charts --fail-on-checks
+bun ./scripts/pod.ts benchmark topology-feed -- --topology-input /tmp/pod-headless-topology.json --fail-on-checks
+bun ./scripts/pod.ts workspace test
+bun ./scripts/pod.ts workspace check
 ```
 
 ### Publish the weekly shard-target snapshot
 
 ```bash
-bun ./scripts/run_shard_target_snapshot.ts --label 2026-W11
+bun ./scripts/pod.ts history run-shard-target-snapshot -- --label 2026-W11
 ```
 
 For retained history, snapshot comparison, and benchmark interpretation, see
@@ -64,7 +97,7 @@ For retained history, snapshot comparison, and benchmark interpretation, see
 ### Stage an asset
 
 ```bash
-cargo run -p pod-assets --example stage_import -- --output-root artifacts/staged-assets path/to/asset.glb
+bun ./scripts/pod.ts assets stage-import -- --output-root artifacts/staged-assets path/to/asset.glb
 ```
 
 For bundle specs, `--materialize-runtime`, KTX2/meshopt variants, runtime

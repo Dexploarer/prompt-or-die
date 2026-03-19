@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "prompt-or-die-tooling",
+      "dependencies": {
+        "@toon-format/toon": "^2.1.0",
+        "gpt-tokenizer": "^3.4.0",
+      },
+    },
+  },
+  "packages": {
+    "@toon-format/toon": ["@toon-format/toon@2.1.0", "", {}, "sha512-JwWptdF5eOA0HaQxbKAzkpQtR4wSWTEfDlEy/y3/4okmOAX1qwnpLZMmtEWr+ncAhTTY1raCKH0kteHhSXnQqg=="],
+
+    "gpt-tokenizer": ["gpt-tokenizer@3.4.0", "", {}, "sha512-wxFLnhIXTDjYebd9A9pGl3e31ZpSypbpIJSOswbgop5jLte/AsZVDvjlbEuVFlsqZixVKqbcoNmRlFDf6pz/UQ=="],
+  }
+}

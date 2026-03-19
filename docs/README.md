@@ -20,7 +20,11 @@ If you are new to the repo, read these in order:
 
 - [CLI Surface](./cli-surface.md)
   The canonical command catalog for developers, users, agents, and
-  agent-assisted development workflows.
+  agent-assisted development workflows. Humans should prefer `pod <area> <alias>`
+  and `pod shell` for attached terminal sessions; automation should prefer
+  stable IDs plus `--json`, interactive agents should use
+  `pod shell --agent` as the newline-delimited JSON machine shell, and
+  LLM-facing world data should flow through `pod export ... --format toon`.
 - [Architecture Overview](./architecture.md)
   What the platform looks like today: crate boundaries, authority model, and
   extension seams.
@@ -106,12 +110,20 @@ If you are new to the repo, read these in order:
 2. [Benchmark Suite](./benchmark-suite.md)
 3. [Agent Integration Contract](./agent-integration-contract.md)
 
+### I want an attached terminal workflow
+
+1. [`pod shell`](../scripts/pod.ts)
+2. [`pod shell --agent`](../scripts/pod.ts)
+3. [CLI Surface](./cli-surface.md)
+
 ## Documentation rules for contributors
 
 - If a command changes, update the owning deep doc and the relevant entry point
   (`README.md` or this hub) in the same change.
 - If a supported top-level CLI surface changes, update `scripts/cli_surface.ts`
   and rerun `bun ./scripts/verify_cli_surface.ts --write` in the same change.
+- When documenting POD CLI usage, prefer alias-first examples for humans and
+  stable ID plus `--json` examples for automation.
 - If a public contract changes, update the contract doc and the grounded audit
   doc together.
 - If a document is generated, keep the generator as the source of truth and say

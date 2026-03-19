@@ -13,85 +13,116 @@ This is the canonical Prompt or Die CLI catalog for developers, users, agents, a
 
 ## Canonical root CLI
 
-Use the root `pod` CLI when you want one deterministic entrypoint instead of remembering scattered cargo and Bun commands.
+Use the root `pod` CLI as the human front door. Use stable IDs with `show`, `env`, `command`, `run`, and `--json` for automation.
 
 ```bash
-bun ./scripts/pod.ts list
-bun ./scripts/pod.ts list --audience agent --json
-bun ./scripts/pod.ts show pod-server
-bun ./scripts/pod.ts env pod-server
-bun ./scripts/pod.ts run bootstrap-reference-world
+bun ./scripts/pod.ts workspace check
+bun ./scripts/pod.ts shell
+printf '{"type":"builtin","requestId":"1","name":"context"}\n{"type":"builtin","requestId":"2","name":"exit"}\n' | bun ./scripts/pod.ts shell --agent
+bun ./scripts/pod.ts runtime server --dry-run
+bun ./scripts/pod.ts web dev
+bun ./scripts/pod.ts export events --format toon
+bun ./scripts/pod.ts export multiverse --format json
+bun ./scripts/pod.ts assets stage-import -- --output-root artifacts/staged-assets path/to/asset.glb
+bun ./scripts/pod.ts show pod-server --json
+bun ./scripts/pod.ts env pod-server --effective --json
+bun ./scripts/pod.ts run pod-headless -- --profile ci-smoke
 ```
+
+## Interactive Shell
+
+Use `bun ./scripts/pod.ts shell` for attached human sessions. Use `bun ./scripts/pod.ts shell --agent` for structured newline-delimited JSON sessions.
+
+- Transport: `stdio-json`
+- Encoding: `json`
+- Framing: `newline-delimited`
+- Protocol version: `3`
+- Request types: `builtin`, `command`, `hook`
+- Builtins: `help`, `context`, `exit`
+- Hookable events: `process.started`, `process.exited`, `session.stdin.closed`
+- Events: `session.started`, `session.stdin.closed`, `command.accepted`, `command.result`, `process.started`, `process.stdout`, `process.stderr`, `process.exited`, `hook.triggered`, `error`, `session.ended`
+
+TOON is reserved for `pod export ... --format toon`, where the payload is large and LLM-facing rather than control-plane RPC.
 
 ## Audience matrix
 
-| ID | Developer | User | Agent | Agent-developer | Command |
-| --- | --- | --- | --- | --- | --- |
-| workspace-build | yes |  |  | yes | `cargo build --workspace` |
-| workspace-check | yes |  |  | yes | `cargo check --workspace` |
-| workspace-test | yes |  |  | yes | `cargo test --workspace` |
-| workspace-clippy | yes |  |  | yes | `cargo clippy --workspace -- -D warnings` |
-| prompt-or-die | yes | yes |  |  | `cargo run --bin prompt-or-die` |
-| pod-server | yes | yes |  | yes | `cargo run --bin pod-server` |
-| pod-headless | yes |  | yes | yes | `cargo run --bin pod-headless -- --profile ci-smoke --output artifacts/pod-headless-report.json --dataset-output artifacts/pod-headless-dataset.json --topology-output artifacts/pod-headless-topology.json` |
-| controller-parity-benchmark | yes |  | yes | yes | `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks --output artifacts/controller-parity.json` |
-| stage-import | yes |  | yes | yes | `cargo run -p pod-assets --example stage_import -- --json --output-root artifacts/staged-assets path/to/asset.glb` |
-| moat-benchmark-suite | yes |  | yes | yes | `cargo run -p pod-core --example moat_benchmark_suite --release -- --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-core.json` |
-| transport-benchmark-suite | yes |  | yes | yes | `cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks --output artifacts/transport-benchmark.json` |
-| topology-feed-benchmark-suite | yes |  | yes | yes | `cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input artifacts/pod-headless-topology.json --fail-on-checks --output artifacts/topology-feed-benchmark.json` |
-| pod-web-dev | yes | yes |  |  | `bun run dev` |
-| pod-web-build | yes |  |  | yes | `bun run build` |
-| pod-web-preview | yes | yes |  |  | `bun run preview` |
-| pod-web-sync-assets | yes |  |  | yes | `bun run sync:assets` |
-| pod-web-verify-assets | yes |  | yes | yes | `bun run verify:assets` |
-| pod-web-measure-render-routes | yes |  | yes | yes | `bun run measure:render-routes` |
-| pod-web-measure-render-routes-check | yes |  | yes | yes | `bun run measure:render-routes:check` |
-| pod-web-typecheck | yes |  |  | yes | `bun run typecheck` |
-| pod-web-test | yes |  |  | yes | `bun run test` |
-| pod-web-test-smoke | yes |  |  | yes | `bun run test:smoke` |
-| bootstrap-reference-world | yes | yes | yes | yes | `bun ./scripts/bootstrap_reference_world.ts --hold` |
-| run-moat-benchmarks | yes |  | yes | yes | `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-benchmarks.json` |
-| run-shard-target-snapshot | yes |  | yes | yes | `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-Www --output artifacts/moat-benchmarks-shard-local.json` |
-| compare-moat-snapshots | yes |  | yes | yes | `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W10-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions` |
-| publish-moat-snapshots | yes |  | yes | yes | `bun ./scripts/publish_moat_snapshots.ts --input artifacts/moat-benchmarks-shard-local.json --label YYYY-Www --output docs/benchmark-snapshots/YYYY-Www-shard-target.json` |
-| index-benchmark-snapshots | yes |  | yes | yes | `bun ./scripts/index_benchmark_snapshots.ts` |
-| pod | yes | yes | yes | yes | `bun ./scripts/pod.ts list` |
-| verify-cli-surface | yes |  | yes | yes | `bun ./scripts/verify_cli_surface.ts --check` |
+| ID | Canonical alias | Developer | User | Agent | Agent-developer | Command |
+| --- | --- | --- | --- | --- | --- | --- |
+| workspace-build | `pod workspace build` | yes |  |  | yes | `cargo build --workspace` |
+| workspace-check | `pod workspace check` | yes |  |  | yes | `cargo check --workspace` |
+| workspace-test | `pod workspace test` | yes |  |  | yes | `cargo test --workspace` |
+| workspace-clippy | `pod workspace lint` | yes |  |  | yes | `cargo clippy --workspace -- -D warnings` |
+| prompt-or-die | `pod runtime desktop` | yes | yes |  |  | `cargo run --bin prompt-or-die` |
+| pod-server | `pod runtime server` | yes | yes |  | yes | `cargo run --bin pod-server` |
+| pod-headless | `pod runtime headless` | yes |  | yes | yes | `cargo run --bin pod-headless -- --profile ci-smoke --output artifacts/pod-headless-report.json --dataset-output artifacts/pod-headless-dataset.json --topology-output artifacts/pod-headless-topology.json` |
+| controller-parity-benchmark | `pod benchmark controller-parity` | yes |  | yes | yes | `cargo run -q -p pod-agents --example controller_parity_benchmark -- --fail-on-checks --output artifacts/controller-parity.json` |
+| stage-import | `pod assets stage-import` | yes |  | yes | yes | `cargo run -p pod-assets --example stage_import -- --json --output-root artifacts/staged-assets path/to/asset.glb` |
+| moat-benchmark-suite | `pod benchmark moat` | yes |  | yes | yes | `cargo run -p pod-core --example moat_benchmark_suite --release -- --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-core.json` |
+| transport-benchmark-suite | `pod benchmark transport` | yes |  | yes | yes | `cargo run -p pod-net --example transport_benchmark_suite -- --profile shard-target --fail-on-checks --output artifacts/transport-benchmark.json` |
+| topology-feed-benchmark-suite | `pod benchmark topology-feed` | yes |  | yes | yes | `cargo run -p pod-net --features spacetimedb --example topology_feed_benchmark_suite -- --topology-input artifacts/pod-headless-topology.json --fail-on-checks --output artifacts/topology-feed-benchmark.json` |
+| pod-web-dev | `pod web dev` | yes | yes |  |  | `bun run dev` |
+| pod-web-build | `pod web build` | yes |  |  | yes | `bun run build` |
+| pod-web-preview | `pod web preview` | yes | yes |  |  | `bun run preview` |
+| pod-web-sync-assets | `pod assets sync-web` | yes |  |  | yes | `bun run sync:assets` |
+| pod-web-verify-assets | `pod assets verify-web` | yes |  | yes | yes | `bun run verify:assets` |
+| pod-web-measure-render-routes | `pod web measure-render-routes` | yes |  | yes | yes | `bun run measure:render-routes` |
+| pod-web-measure-render-routes-check | `pod web measure-render-routes-check` | yes |  | yes | yes | `bun run measure:render-routes:check` |
+| pod-web-typecheck | `pod web typecheck` | yes |  |  | yes | `bun run typecheck` |
+| pod-web-test | `pod web test` | yes |  |  | yes | `bun run test` |
+| pod-web-test-smoke | `pod web smoke` | yes |  |  | yes | `bun run test:smoke` |
+| bootstrap-reference-world | `pod assets bootstrap-reference-world` | yes | yes | yes | yes | `bun ./scripts/bootstrap_reference_world.ts --hold` |
+| pod-export-world | `pod export world` | yes | yes | yes | yes | `bun ./scripts/pod.ts export world --format json` |
+| pod-export-events | `pod export events` | yes | yes | yes | yes | `bun ./scripts/pod.ts export events --format toon` |
+| pod-export-multiverse | `pod export multiverse` | yes | yes | yes | yes | `bun ./scripts/pod.ts export multiverse --format json` |
+| run-moat-benchmarks | `pod benchmark run-moat-benchmarks` | yes |  | yes | yes | `bun ./scripts/run_moat_benchmarks.ts --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-benchmarks.json` |
+| toon-export-benchmark | `pod benchmark toon-exports` | yes |  | yes | yes | `bun ./scripts/benchmark_toon_exports.ts --profile default --output artifacts/toon-export-benchmark.json --html-output artifacts/toon-export-benchmark.html --markdown-output artifacts/toon-export-benchmark.md --charts-dir artifacts/toon-export-benchmark-charts --fail-on-checks` |
+| run-shard-target-snapshot | `pod history run-shard-target-snapshot` | yes |  | yes | yes | `bun ./scripts/run_shard_target_snapshot.ts --label YYYY-Www --output artifacts/moat-benchmarks-shard-local.json` |
+| compare-moat-snapshots | `pod history compare-moat-snapshots` | yes |  | yes | yes | `bun ./scripts/compare_moat_snapshots.ts --baseline docs/benchmark-snapshots/2026-W10-shard-target.json --candidate docs/benchmark-snapshots/2026-W11-shard-target.json --output artifacts/benchmark-snapshot-comparison.json --fail-on-regressions` |
+| publish-moat-snapshots | `pod history publish-moat-snapshots` | yes |  | yes | yes | `bun ./scripts/publish_moat_snapshots.ts --input artifacts/moat-benchmarks-shard-local.json --label YYYY-Www --output docs/benchmark-snapshots/YYYY-Www-shard-target.json` |
+| index-benchmark-snapshots | `pod history index-benchmark-snapshots` | yes |  | yes | yes | `bun ./scripts/index_benchmark_snapshots.ts` |
+| pod-shell | `pod catalog shell` | yes | yes | yes | yes | `bun ./scripts/pod.ts shell` |
+| pod | - | yes | yes | yes | yes | `bun ./scripts/pod.ts list` |
+| verify-cli-surface | `pod catalog verify` | yes |  | yes | yes | `bun ./scripts/verify_cli_surface.ts --check` |
 
 ## Command catalog
 
-| ID | Area | Kind | Machine-readable | CWD | Entrypoint | Outputs | Summary | References |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| workspace-build | workspace | workspace-command | no | `.` | - | - | Build every Rust package in the workspace. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
-| workspace-check | workspace | workspace-command | no | `.` | - | - | Run the fast Rust workspace compile gate used by CI and local review loops. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
-| workspace-test | workspace | workspace-command | no | `.` | - | - | Run the full Rust workspace test suite. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
-| workspace-clippy | workspace | workspace-command | no | `.` | - | - | Run the workspace lint gate with warnings treated as failures. | [AGENTS.md](../AGENTS.md) |
-| prompt-or-die | runtime | cargo-bin | no | `.` | [apps/pod-desktop/src/main.rs](../apps/pod-desktop/src/main.rs) | - | Launch the native desktop runtime entrypoint. | [README.md](../README.md) |
-| pod-server | runtime | cargo-bin | no | `.` | [apps/pod-server/src/main.rs](../apps/pod-server/src/main.rs) | - | Launch the dedicated authoritative server composition root. | [README.md](../README.md) |
-| pod-headless | runtime | cargo-bin | yes | `.` | [apps/pod-headless/src/main.rs](../apps/pod-headless/src/main.rs) | `artifacts/pod-headless-report.json`, `artifacts/pod-headless-dataset.json`, `artifacts/pod-headless-topology.json` | Run the authoritative headless tournament and export report, dataset, and topology artifacts. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| controller-parity-benchmark | benchmark | cargo-example | yes | `.` | [crates/pod-agents/examples/controller_parity_benchmark.rs](../crates/pod-agents/examples/controller_parity_benchmark.rs) | `artifacts/controller-parity.json` | Measure controller parity across runtime implementations and optionally fail on unmet checks. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| stage-import | assets | cargo-example | yes | `.` | [crates/pod-assets/examples/stage_import.rs](../crates/pod-assets/examples/stage_import.rs) | `artifacts/staged-assets` | Stage one or more authored assets into the content-addressed import pipeline and optionally emit JSON. | [README.md](../README.md), [docs/asset-pipeline.md](asset-pipeline.md), [apps/pod-web/README.md](../apps/pod-web/README.md) |
-| moat-benchmark-suite | benchmark | cargo-example | yes | `.` | [crates/pod-core/examples/moat_benchmark_suite.rs](../crates/pod-core/examples/moat_benchmark_suite.rs) | `artifacts/moat-core.json` | Run the core moat benchmark suite for cost and throughput posture. | [docs/benchmark-suite.md](benchmark-suite.md) |
-| transport-benchmark-suite | benchmark | cargo-example | yes | `.` | [crates/pod-net/examples/transport_benchmark_suite.rs](../crates/pod-net/examples/transport_benchmark_suite.rs) | `artifacts/transport-benchmark.json` | Measure snapshot, recovery, delta, and queue-pressure transport behavior. | [docs/benchmark-suite.md](benchmark-suite.md) |
-| topology-feed-benchmark-suite | benchmark | cargo-example | yes | `.` | [crates/pod-net/examples/topology_feed_benchmark_suite.rs](../crates/pod-net/examples/topology_feed_benchmark_suite.rs) | `artifacts/topology-feed-benchmark.json` | Validate authority-row and generated-runtime topology parity from a shared topology artifact. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-dev | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client development server. | [README.md](../README.md), [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/reference-bootstrap.md](reference-bootstrap.md) |
-| pod-web-build | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/dist` | Build the browser client for production or preview. | [apps/pod-web/README.md](../apps/pod-web/README.md) |
-| pod-web-preview | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Serve the built browser bundle locally for previewing. | [apps/pod-web/README.md](../apps/pod-web/README.md) |
-| pod-web-sync-assets | assets | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/source-assets`, `apps/pod-web/artifacts/staged-assets`, `apps/pod-web/public/assets` | Generate the sample authored asset lane and materialize the runtime bundle into the browser app. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/asset-pipeline.md](asset-pipeline.md) |
-| pod-web-verify-assets | assets | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Re-run the generated asset pipeline and fail if committed browser assets drift. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/asset-pipeline.md](asset-pipeline.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-measure-render-routes | web | bun-package-script | yes | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/render-route-measurements.json` | Capture render-route measurements for the main-thread and worker browser paths. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-measure-render-routes-check | web | bun-package-script | yes | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/render-route-measurements.json` | Capture render-route measurements and fail when the configured browser gates regress. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-typecheck | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client TypeScript compile gate without emitting files. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-test | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client Bun unit test suite. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| pod-web-test-smoke | web | bun-package-script | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the Playwright browser smoke tests covering showcase and worker-input paths. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| bootstrap-reference-world | runtime | bun-script | yes | `.` | [scripts/bootstrap_reference_world.ts](../scripts/bootstrap_reference_world.ts) | - | Launch or measure the canonical first-world bootstrap flow for the browser client. | [docs/reference-bootstrap.md](reference-bootstrap.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| run-moat-benchmarks | benchmark | bun-script | yes | `.` | [scripts/run_moat_benchmarks.ts](../scripts/run_moat_benchmarks.ts) | `artifacts/moat-benchmarks.json` | Run the combined benchmark workflow across core, transport, topology, browser, and creator-time surfaces. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/reference-bootstrap.md](reference-bootstrap.md) |
-| run-shard-target-snapshot | history | bun-script | yes | `.` | [scripts/run_shard_target_snapshot.ts](../scripts/run_shard_target_snapshot.ts) | `artifacts/moat-benchmarks-shard-local.json`, `docs/benchmark-snapshots/YYYY-Www-shard-target.json` | Capture the weekly shard-target benchmark snapshot, publish retained artifacts, and optionally compare to baseline history. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
-| compare-moat-snapshots | history | bun-script | yes | `.` | [scripts/compare_moat_snapshots.ts](../scripts/compare_moat_snapshots.ts) | `artifacts/benchmark-snapshot-comparison.json` | Diff two retained shard-target snapshots and surface regressions or improvements as structured JSON. | [docs/benchmark-suite.md](benchmark-suite.md) |
-| publish-moat-snapshots | history | bun-script | yes | `.` | [scripts/publish_moat_snapshots.ts](../scripts/publish_moat_snapshots.ts) | `docs/benchmark-snapshots/YYYY-Www-shard-target.json` | Normalize a live moat benchmark report into the retained benchmark snapshot format. | [docs/benchmark-suite.md](benchmark-suite.md) |
-| index-benchmark-snapshots | history | bun-script | yes | `.` | [scripts/index_benchmark_snapshots.ts](../scripts/index_benchmark_snapshots.ts) | `docs/benchmark-snapshots/index.json`, `docs/benchmark-snapshots/README.md` | Regenerate the retained benchmark snapshot JSON index and Markdown history view. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/benchmark-snapshots/README.md](benchmark-snapshots/README.md) |
-| pod | catalog | bun-script | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Canonical root CLI for discovering, inspecting, and executing supported Prompt or Die command surfaces. | [docs/cli-surface.md](cli-surface.md) |
-| verify-cli-surface | catalog | bun-script | yes | `.` | [scripts/verify_cli_surface.ts](../scripts/verify_cli_surface.ts) | `docs/cli-surface.md` | Validate that the CLI catalog covers every supported top-level command surface and that the generated docs are in sync. | [docs/cli-surface.md](cli-surface.md) |
+| ID | Aliases | Area | Kind | Lifecycle | Passthrough | Machine-readable | CWD | Entrypoint | Outputs | Summary | References |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| workspace-build | `pod workspace build` | workspace | workspace-command | finite | no | no | `.` | - | - | Build every Rust package in the workspace. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
+| workspace-check | `pod workspace check` | workspace | workspace-command | finite | no | no | `.` | - | - | Run the fast Rust workspace compile gate used by CI and local review loops. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
+| workspace-test | `pod workspace test` | workspace | workspace-command | finite | no | no | `.` | - | - | Run the full Rust workspace test suite. | [README.md](../README.md), [AGENTS.md](../AGENTS.md) |
+| workspace-clippy | `pod workspace lint` | workspace | workspace-command | finite | no | no | `.` | - | - | Run the workspace lint gate with warnings treated as failures. | [AGENTS.md](../AGENTS.md) |
+| prompt-or-die | `pod runtime desktop` | runtime | cargo-bin | long-running | no | no | `.` | [apps/pod-desktop/src/main.rs](../apps/pod-desktop/src/main.rs) | - | Launch the native desktop runtime entrypoint. | [README.md](../README.md) |
+| pod-server | `pod runtime server` | runtime | cargo-bin | long-running | no | no | `.` | [apps/pod-server/src/main.rs](../apps/pod-server/src/main.rs) | - | Launch the dedicated authoritative server composition root. | [README.md](../README.md) |
+| pod-headless | `pod runtime headless` | runtime | cargo-bin | finite | yes | yes | `.` | [apps/pod-headless/src/main.rs](../apps/pod-headless/src/main.rs) | `artifacts/pod-headless-report.json`, `artifacts/pod-headless-dataset.json`, `artifacts/pod-headless-topology.json` | Run the authoritative headless tournament and export report, dataset, and topology artifacts. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| controller-parity-benchmark | `pod benchmark controller-parity` | benchmark | cargo-example | finite | yes | yes | `.` | [crates/pod-agents/examples/controller_parity_benchmark.rs](../crates/pod-agents/examples/controller_parity_benchmark.rs) | `artifacts/controller-parity.json` | Measure controller parity across runtime implementations and optionally fail on unmet checks. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| stage-import | `pod assets stage-import` | assets | cargo-example | finite | yes | yes | `.` | [crates/pod-assets/examples/stage_import.rs](../crates/pod-assets/examples/stage_import.rs) | `artifacts/staged-assets` | Stage one or more authored assets into the content-addressed import pipeline and optionally emit JSON. | [README.md](../README.md), [docs/asset-pipeline.md](asset-pipeline.md), [apps/pod-web/README.md](../apps/pod-web/README.md) |
+| moat-benchmark-suite | `pod benchmark moat` | benchmark | cargo-example | finite | yes | yes | `.` | [crates/pod-core/examples/moat_benchmark_suite.rs](../crates/pod-core/examples/moat_benchmark_suite.rs) | `artifacts/moat-core.json` | Run the core moat benchmark suite for cost and throughput posture. | [docs/benchmark-suite.md](benchmark-suite.md) |
+| transport-benchmark-suite | `pod benchmark transport` | benchmark | cargo-example | finite | yes | yes | `.` | [crates/pod-net/examples/transport_benchmark_suite.rs](../crates/pod-net/examples/transport_benchmark_suite.rs) | `artifacts/transport-benchmark.json` | Measure snapshot, recovery, delta, and queue-pressure transport behavior. | [docs/benchmark-suite.md](benchmark-suite.md) |
+| topology-feed-benchmark-suite | `pod benchmark topology-feed` | benchmark | cargo-example | finite | yes | yes | `.` | [crates/pod-net/examples/topology_feed_benchmark_suite.rs](../crates/pod-net/examples/topology_feed_benchmark_suite.rs) | `artifacts/topology-feed-benchmark.json` | Validate authority-row and generated-runtime topology parity from a shared topology artifact. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-dev | `pod web dev` | web | bun-package-script | long-running | yes | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client development server. | [README.md](../README.md), [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/reference-bootstrap.md](reference-bootstrap.md) |
+| pod-web-build | `pod web build` | web | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/dist` | Build the browser client for production or preview. | [apps/pod-web/README.md](../apps/pod-web/README.md) |
+| pod-web-preview | `pod web preview` | web | bun-package-script | long-running | yes | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Serve the built browser bundle locally for previewing. | [apps/pod-web/README.md](../apps/pod-web/README.md) |
+| pod-web-sync-assets | `pod assets sync-web` | assets | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/source-assets`, `apps/pod-web/artifacts/staged-assets`, `apps/pod-web/public/assets` | Generate the sample authored asset lane and materialize the runtime bundle into the browser app. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/asset-pipeline.md](asset-pipeline.md) |
+| pod-web-verify-assets | `pod assets verify-web` | assets | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Re-run the generated asset pipeline and fail if committed browser assets drift. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/asset-pipeline.md](asset-pipeline.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-measure-render-routes | `pod web measure-render-routes` | web | bun-package-script | finite | no | yes | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/render-route-measurements.json` | Capture render-route measurements for the main-thread and worker browser paths. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-measure-render-routes-check | `pod web measure-render-routes-check` | web | bun-package-script | finite | no | yes | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | `apps/pod-web/artifacts/render-route-measurements.json` | Capture render-route measurements and fail when the configured browser gates regress. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-typecheck | `pod web typecheck` | web | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client TypeScript compile gate without emitting files. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-test | `pod web test` | web | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the browser client Bun unit test suite. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-web-test-smoke | `pod web smoke` | web | bun-package-script | finite | no | no | `apps/pod-web` | [apps/pod-web/package.json](../apps/pod-web/package.json) | - | Run the Playwright browser smoke tests covering showcase and worker-input paths. | [apps/pod-web/README.md](../apps/pod-web/README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| bootstrap-reference-world | `pod assets bootstrap-reference-world` | runtime | bun-script | long-running | yes | yes | `.` | [scripts/bootstrap_reference_world.ts](../scripts/bootstrap_reference_world.ts) | - | Launch or measure the canonical first-world bootstrap flow for the browser client. | [docs/reference-bootstrap.md](reference-bootstrap.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-export-world | `pod export world` | export | workspace-command | finite | yes | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Export the canonical agent-facing world snapshot as JSON or TOON. | [README.md](../README.md), [docs/README.md](README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-export-events | `pod export events` | export | workspace-command | finite | yes | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Export the stable tick/event batch as JSON or TOON for replay-aware agent workflows. | [README.md](../README.md), [docs/README.md](README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| pod-export-multiverse | `pod export multiverse` | export | workspace-command | finite | yes | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Export the deep multiverse/branch index as JSON or TOON for topology proofs and agent audits. | [README.md](../README.md), [docs/README.md](README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| run-moat-benchmarks | `pod benchmark run-moat-benchmarks` | benchmark | bun-script | finite | yes | yes | `.` | [scripts/run_moat_benchmarks.ts](../scripts/run_moat_benchmarks.ts) | `artifacts/moat-benchmarks.json` | Run the combined benchmark workflow across core, transport, topology, browser, and creator-time surfaces. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/reference-bootstrap.md](reference-bootstrap.md) |
+| toon-export-benchmark | `pod benchmark toon-exports` | benchmark | bun-script | finite | yes | yes | `.` | [scripts/benchmark_toon_exports.ts](../scripts/benchmark_toon_exports.ts) | `artifacts/toon-export-benchmark.json`, `artifacts/toon-export-benchmark.html`, `artifacts/toon-export-benchmark.md`, `artifacts/toon-export-benchmark-charts` | Benchmark JSON and TOON against real world, event, log, and multiverse datasets, then emit charts and a standalone results page. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/cli-surface.md](cli-surface.md) |
+| run-shard-target-snapshot | `pod history run-shard-target-snapshot` | history | bun-script | finite | yes | yes | `.` | [scripts/run_shard_target_snapshot.ts](../scripts/run_shard_target_snapshot.ts) | `artifacts/moat-benchmarks-shard-local.json`, `docs/benchmark-snapshots/YYYY-Www-shard-target.json` | Capture the weekly shard-target benchmark snapshot, publish retained artifacts, and optionally compare to baseline history. | [README.md](../README.md), [docs/benchmark-suite.md](benchmark-suite.md) |
+| compare-moat-snapshots | `pod history compare-moat-snapshots` | history | bun-script | finite | yes | yes | `.` | [scripts/compare_moat_snapshots.ts](../scripts/compare_moat_snapshots.ts) | `artifacts/benchmark-snapshot-comparison.json` | Diff two retained shard-target snapshots and surface regressions or improvements as structured JSON. | [docs/benchmark-suite.md](benchmark-suite.md) |
+| publish-moat-snapshots | `pod history publish-moat-snapshots` | history | bun-script | finite | yes | yes | `.` | [scripts/publish_moat_snapshots.ts](../scripts/publish_moat_snapshots.ts) | `docs/benchmark-snapshots/YYYY-Www-shard-target.json` | Normalize a live moat benchmark report into the retained benchmark snapshot format. | [docs/benchmark-suite.md](benchmark-suite.md) |
+| index-benchmark-snapshots | `pod history index-benchmark-snapshots` | history | bun-script | finite | no | yes | `.` | [scripts/index_benchmark_snapshots.ts](../scripts/index_benchmark_snapshots.ts) | `docs/benchmark-snapshots/index.json`, `docs/benchmark-snapshots/README.md` | Regenerate the retained benchmark snapshot JSON index and Markdown history view. | [docs/benchmark-suite.md](benchmark-suite.md), [docs/benchmark-snapshots/README.md](benchmark-snapshots/README.md) |
+| pod-shell | `pod catalog shell` | catalog | workspace-command | long-running | no | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Start the interactive terminal shell for discovering, inspecting, and executing Prompt or Die commands. | [docs/cli-surface.md](cli-surface.md) |
+| pod | - | catalog | bun-script | finite | no | yes | `.` | [scripts/pod.ts](../scripts/pod.ts) | - | Canonical root CLI for discovering, inspecting, and executing supported Prompt or Die command surfaces. | [docs/cli-surface.md](cli-surface.md) |
+| verify-cli-surface | `pod catalog verify` | catalog | bun-script | finite | yes | yes | `.` | [scripts/verify_cli_surface.ts](../scripts/verify_cli_surface.ts) | `docs/cli-surface.md` | Validate that the CLI catalog covers every supported top-level command surface and that the generated docs are in sync. | [docs/cli-surface.md](cli-surface.md) |
 
 ## Dedicated server environment contract
 
@@ -115,7 +146,7 @@ These variables define the current `pod-server` runtime surface because the dedi
 
 ## Validation workflow
 
-- `bun ./scripts/verify_cli_surface.ts --check` verifies catalog coverage and Markdown drift.
+- `bun ./scripts/verify_cli_surface.ts --check` verifies catalog coverage, aliases, structured execution metadata, and Markdown drift.
 - `bun ./scripts/verify_cli_surface.ts --write` regenerates this document from the source manifest.
 - `bun ./scripts/verify_cli_surface.ts --json` prints the full machine-readable catalog and validation report.
 

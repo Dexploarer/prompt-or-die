@@ -1,0 +1,9 @@
+{
+  "name": "prompt-or-die-tooling",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@toon-format/toon": "^2.1.0",
+    "gpt-tokenizer": "^3.4.0"
+  }
+}

@@ -118,10 +118,27 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install root Bun dependencies
+        run: bun install --frozen-lockfile
+
       - name: Verify CLI surface catalog
         run: |
-          bun test scripts/pod.test.ts scripts/verify_cli_surface.test.ts
+          bun test scripts/pod.test.ts scripts/verify_cli_surface.test.ts ./scripts/benchmark_toon_exports.test.ts
           bun ./scripts/verify_cli_surface.ts --check
+          bun ./scripts/pod.ts list --json >/dev/null
+          bun ./scripts/pod.ts show pod-server --json >/dev/null
+          bun ./scripts/pod.ts env pod-server --effective --json >/dev/null
+          bun ./scripts/pod.ts command pod-web-dev --json >/dev/null
+          bun ./scripts/pod.ts export world --format json >/dev/null
+          bun ./scripts/pod.ts export events --format toon >/dev/null
+          bun ./scripts/pod.ts export multiverse --format json >/dev/null
+          bun ./scripts/pod.ts run pod-server --dry-run --json >/dev/null
+          bun ./scripts/pod.ts workspace check --dry-run --json >/dev/null
+          printf '{"type":"builtin","requestId":"1","name":"context"}\n{"type":"builtin","requestId":"2","name":"exit"}\n' | bun ./scripts/pod.ts shell --agent >/dev/null
+          printf '{"type":"command","requestId":"1","argv":["list","--area","runtime"]}\n{"type":"builtin","requestId":"2","name":"exit"}\n' | bun ./scripts/pod.ts shell --agent >/dev/null
+          bun ./scripts/benchmark_toon_exports.ts --iterations 250 --rounds 3 --output artifacts/toon-export-benchmark-ci.json --fail-on-checks
+          printf 'context\nquit\n' | bun ./scripts/pod.ts shell --quiet >/dev/null 2>/dev/null
+          printf 'list --area runtime\nquit\n' | bun ./scripts/pod.ts shell --quiet >/dev/null 2>/dev/null
 
       - name: Install pod-web dependencies
         working-directory: apps/pod-web
@@ -134,4 +151,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: moat-benchmarks-ci
-          path: artifacts/moat-benchmarks-ci.json
+          path: |
+            artifacts/moat-benchmarks-ci.json
+            artifacts/toon-export-benchmark-ci.json

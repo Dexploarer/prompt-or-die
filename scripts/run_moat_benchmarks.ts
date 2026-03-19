@@ -4,6 +4,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import {
+  buildToonExportBenchmarkReport,
+  type ToonExportBenchmarkReport,
+} from "./benchmark_toon_exports";
+
 type Options = {
   profile: "ci-smoke" | "shard-target";
   output: string;
@@ -196,6 +201,7 @@ type CombinedReport = {
   transportMeasurements: TransportMeasurementsReport;
   headlessTopology: HeadlessTopologyMeasurementsReport;
   topologyFeedMeasurements: TopologyFeedMeasurementsReport;
+  toonExportBenchmark: ToonExportBenchmarkReport;
   browserNativeParity: BrowserParityReport | null;
   browserRouteMeasurements: BrowserRouteMeasurementsReport | null;
   creatorTimeToFirstAgentWorld: CreatorTimeReport;
@@ -684,14 +690,34 @@ async function main() {
       }
     }
 
+    const toonExportBenchmark =
+      await buildToonExportBenchmarkReport(repoRoot, {
+        profile: options.profile === "ci-smoke" ? "ci-smoke" : "default",
+        iterations: options.profile === "ci-smoke" ? 250 : 2000,
+        rounds: options.profile === "ci-smoke" ? 3 : 9,
+      });
+    if (!toonExportBenchmark.allChecksPassed) {
+      const failedChecks = toonExportBenchmark.checks
+        .filter((check) => !check.passed)
+        .map(
+          (check) =>
+            `${check.metric} expected ${check.expected} observed ${check.observed}`,
+        )
+        .join("\n");
+      throw new Error(
+        `toon export benchmark checks failed:\n${failedChecks}`,
+      );
+    }
+
     const report: CombinedReport = {
-      schemaVersion: 4,
+      schemaVersion: 6,
       generatedAtUnixMs: Date.now(),
       profile: options.profile,
       core,
       transportMeasurements,
       headlessTopology,
       topologyFeedMeasurements,
+      toonExportBenchmark,
       browserNativeParity,
       browserRouteMeasurements,
       creatorTimeToFirstAgentWorld: buildCreatorReport(repoRoot, options),

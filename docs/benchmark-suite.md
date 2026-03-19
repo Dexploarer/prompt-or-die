@@ -72,6 +72,20 @@ cd /Users/home/Desktop/prompt-or-die
 bun ./scripts/run_moat_benchmarks.ts --profile shard-target --monthly-host-cost-usd 300 --output artifacts/moat-benchmarks.json
 ```
 
+TOON export proof benchmark:
+
+```bash
+cd /Users/home/Desktop/prompt-or-die
+bun ./scripts/benchmark_toon_exports.ts --profile extensive --output artifacts/toon-export-benchmark-extensive.json --html-output artifacts/toon-export-benchmark-extensive.html --markdown-output artifacts/toon-export-benchmark-extensive.md --charts-dir artifacts/toon-export-benchmark-extensive-charts --fail-on-checks
+```
+
+The extensive run publishes a benchmark bundle:
+
+- `artifacts/toon-export-benchmark-extensive.json`
+- `artifacts/toon-export-benchmark-extensive.html`
+- `artifacts/toon-export-benchmark-extensive.md`
+- `artifacts/toon-export-benchmark-extensive-charts/*.svg`
+
 Historical snapshot comparison:
 
 ```bash
@@ -228,6 +242,45 @@ The moat runner now fails immediately if any of those parity checks regress,
 which means multi-world quest/effect progress is benchmarked through the same
 artifact path as core, transport, and browser surfaces instead of being
 inspectable only through raw headless report JSON.
+
+### TOON export benchmark
+
+Produced by `scripts/benchmark_toon_exports.ts` and folded into the combined
+moat artifact by `scripts/run_moat_benchmarks.ts` as `toonExportBenchmark`.
+
+It records:
+
+- dataset-oriented comparisons for:
+  - pretty JSON
+  - compact JSON
+  - TOON with comma delimiters
+  - TOON with tab delimiters
+- byte, token, encode-latency, and decode-latency measurements on five shapes:
+  - uniform tick/event batches
+  - Toonscape-style wide donor event batches
+  - semi-uniform operational logs
+  - nested world snapshots
+  - deep multiverse metadata trees
+- strict TOON validation failures for row-width mismatches and truncation
+- streaming decode coverage through `decodeStreamSync(...)`
+- dataset-specific recommendations that decide where TOON actually wins
+
+This benchmark follows the same useful pattern visible in Toonscape:
+
+- compare TOON against a real compact-JSON baseline
+- use a stable uniform nullable row schema for event batches
+- keep a Toonscape donor track so the suite captures the 70%+ win shape that
+  wide, null-heavy telemetry can achieve
+- prove world/event exports separately from deep config-style metadata
+
+The repo now keeps the contract split explicit:
+
+- `pod shell --agent` stays newline-delimited JSON for control-plane requests,
+  replies, hooks, and lifecycle events
+- `pod export events --format toon` and `pod export world --format toon` are
+  the TOON-first paths because those payloads actually beat compact JSON
+- `pod export multiverse` remains JSON-first because the deep branch metadata
+  tree does not compress cleanly enough to justify TOON as the default
 
 ### Remote topology feed parity report
 
