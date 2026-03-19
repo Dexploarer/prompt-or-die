@@ -190,9 +190,11 @@ Current repo-owned seam:
   snapshot execution, replay finalization, and the live smoke entrypoint
   behind one repo-owned wrapper so a future packaged rs-sdk can start from a
   single `pod-net` surface instead of stitching host/session helpers together
-- `pod-sdk` now re-exports that wrapper as `RustSdkClient` /
-  `RustSdkClientConfig`, aliases the runtime mode as `RustSdkRuntimeMode`, and
-  exposes package-level `run_rust_sdk_benchmark_suite()` /
+- `pod-sdk` now wraps that wrapper in package-native
+  `RustSdkClientConfig`, `RustSdkClientError`, `RustSdkLiveSmokeConfig`,
+  `RustSdkLiveSmokeReport`, and `RustSdkLiveSmokeRun` types, keeps
+  `RustSdkRuntimeMode` as the package-facing runtime selector, and exposes
+  package-level `run_rust_sdk_benchmark_suite()` /
   `run_rust_sdk_live_smoke()` helpers so the canonical smoke and benchmark
   commands no longer need to import `pod-net` directly
 
@@ -232,6 +234,9 @@ Current repo-owned seam:
   `cargo run -p pod-sdk --example rust_sdk_live_smoke -- --host http://127.0.0.1:3100 --db-name deadman-prime --fail-on-checks`
   now package those entrypoints above the thin facade so consumers can start
   from the workspace SDK crate instead of the lower-level `pod-net` helpers
+- the `pod-net` rust-sdk examples intentionally remain seam-level
+  compatibility/debug shims, and now point users at the `pod-sdk` commands as
+  the canonical package-facing entrypoints
 
 ## What to avoid
 
@@ -255,8 +260,10 @@ Current repo-owned seam:
    so a packaged rs-sdk does not need direct host/session wiring.
 7. Expose that wrapper through the packaged `pod-sdk` crate so smoke and
    benchmark entrypoints stop importing `pod-net` directly.
-8. Keep live generated-SDK smoke coverage on top of that package/wrapper seam.
-9. Use rs-sdk as an external benchmark surface for agent evaluation.
+8. Keep the lower-level `pod-net` rust-sdk examples only as
+   compatibility/debug shims beneath the packaged crate.
+9. Keep live generated-SDK smoke coverage on top of that package/wrapper seam.
+10. Use rs-sdk as an external benchmark surface for agent evaluation.
 
 ## Sources
 

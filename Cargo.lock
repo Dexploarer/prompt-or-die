@@ -4197,6 +4197,7 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "pod-core",
  "pod-net",
+ "serde",
  "serde_json",
 ]
 

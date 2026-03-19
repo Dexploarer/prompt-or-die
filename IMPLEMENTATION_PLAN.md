@@ -2501,3 +2501,19 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_platform_docs.test.ts`
   - `bun ./scripts/verify_platform_docs.ts --check`
   - `git diff --check`
+
+### Iteration 243
+- Replaced the remaining alias-based `pod-sdk` wrapper in `crates/pod-sdk/src/lib.rs` with package-native `RustSdkClientConfig`, `RustSdkClientError`, `RustSdkLiveSmokeConfig`, `RustSdkLiveSmokeReport`, and `RustSdkLiveSmokeRun` types while keeping `RustSdkRuntimeMode` as the package-facing runtime selector and preserving the same thin `pod-net` facade underneath.
+- Marked `crates/pod-net/examples/rust_sdk_adapter_benchmark_suite.rs` and `crates/pod-net/examples/rust_sdk_adapter_live_smoke.rs` as seam-level compatibility examples that now point users at the packaged `pod-sdk` commands instead of presenting the lower-level adapter examples as the canonical entrypoints.
+- Updated `docs/rust-sdk-boundary.md`, `docs/rs-sdk-integration-notes.md`, and `scripts/verify_rust_sdk_boundary.*` so the enforced Rust SDK boundary now expects the package-native `pod-sdk` surface and the documented compatibility-shim role for the remaining `pod-net` examples.
+- [x] Validation:
+  - `cargo test -p pod-sdk -- --nocapture`
+  - `cargo test -p pod-sdk --example rust_sdk_live_smoke -- --nocapture`
+  - `cargo check -p pod-sdk --example rust_sdk_benchmark_suite`
+  - `cargo check -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite`
+  - `cargo test -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- --nocapture`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `bun test scripts/verify_platform_docs.test.ts`
+  - `bun ./scripts/verify_platform_docs.ts --check`
+  - `git diff --check`

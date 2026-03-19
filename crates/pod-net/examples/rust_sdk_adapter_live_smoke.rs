@@ -135,7 +135,7 @@ fn parse_args() -> Result<Options, Box<dyn std::error::Error>> {
 
 fn print_help() {
     eprintln!(
-        "Usage: cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- [--host URL] [--db-name NAME] [--auth-token TOKEN] [--timeout-ms MS] [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]"
+        "Compatibility seam example. Prefer: cargo run -p pod-sdk --example rust_sdk_live_smoke -- [--host URL] [--db-name NAME] [--auth-token TOKEN] [--timeout-ms MS] [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]\nUsage: cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_live_smoke -- [--host URL] [--db-name NAME] [--auth-token TOKEN] [--timeout-ms MS] [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]"
     );
 }
 

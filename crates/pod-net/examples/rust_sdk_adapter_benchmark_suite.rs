@@ -66,6 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn print_help() {
     eprintln!(
-        "Usage: cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]"
+        "Compatibility seam example. Prefer: cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]\nUsage: cargo run -p pod-net --features spacetimedb --example rust_sdk_adapter_benchmark_suite -- [--output PATH] [--replay-output PATH] [--training-output PATH] [--fail-on-checks]"
     );
 }
