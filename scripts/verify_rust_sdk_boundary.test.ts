@@ -41,7 +41,7 @@ describe("verify rust sdk boundary", () => {
     expect(markdown).toContain("RustSdkFacadeConfig");
     expect(markdown).toContain("RustSdkFacadeError");
     expect(markdown).toContain(
-      "pod_sdk::{RustSdkClient, RustSdkClientConfig, RustSdkClientError, RustSdkRuntimeMode, RustSdkBenchmarkCheck, RustSdkBenchmarkScenarioReport, RustSdkBenchmarkReport, RustSdkBenchmarkRun, RustSdkLiveSmokeConfig, RustSdkLiveSmokeReport, RustSdkLiveSmokeRun, run_rust_sdk_benchmark_suite, run_rust_sdk_live_smoke}",
+      "pod_sdk::{RustSdkClient, RustSdkClientConfig, RustSdkClientError, RustSdkRuntimeMode, RustSdkActionPlan, RustSdkActionPlanError, build_rust_sdk_action_plan, RustSdkRolloutRecord, RustSdkRolloutRecordError, RustSdkBenchmarkCheck, RustSdkBenchmarkScenarioReport, RustSdkBenchmarkReport, RustSdkBenchmarkRun, RustSdkLiveSmokeConfig, RustSdkLiveSmokeReport, RustSdkLiveSmokeRun, run_rust_sdk_benchmark_suite, run_rust_sdk_live_smoke}",
     );
     expect(markdown).toContain("RustSdkAdapterLiveSmokeConfig");
     expect(markdown).toContain("run_rust_sdk_adapter_live_smoke()");

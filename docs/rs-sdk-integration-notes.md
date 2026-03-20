@@ -192,6 +192,9 @@ Current repo-owned seam:
   single `pod-net` surface instead of stitching host/session helpers together
 - `pod-sdk` now wraps that wrapper in package-native
   `RustSdkClientConfig`, `RustSdkClientError`,
+  `RustSdkActionPlan` / `RustSdkActionPlanError` /
+  `build_rust_sdk_action_plan(...)`, `RustSdkRolloutRecord` /
+  `RustSdkRolloutRecordError`,
   `RustSdkBenchmarkCheck` / `RustSdkBenchmarkScenarioReport` /
   `RustSdkBenchmarkReport` / `RustSdkBenchmarkRun`, and
   `RustSdkLiveSmokeConfig` / `RustSdkLiveSmokeReport` /

@@ -2,7 +2,7 @@
 
 **Current Phase**: Phase 8: Lifecycle, SDK, and Shipping Stabilization
 **Current Stage**: Rust SDK Boundary Hardening
-**Last Checkpoint**: 2026-03-19 (Rust SDK package-native benchmark pass)
+**Last Checkpoint**: 2026-03-20 (Rust SDK package-native rollout pass)
 **Planning Docs**: [IMPLEMENTATION_PHASES.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PHASES.md), [IMPLEMENTATION_PLAN.md](/Users/home/Desktop/prompt-or-die/IMPLEMENTATION_PLAN.md), [progress.md](/Users/home/Desktop/prompt-or-die/progress.md), [docs/platform-stabilization.md](/Users/home/Desktop/prompt-or-die/docs/platform-stabilization.md)
 **Planning Note**: `IMPLEMENTATION_PHASES.md` is reset to an active unchecked checklist for this pass. `IMPLEMENTATION_PLAN.md` remains the historical log.
 
@@ -19,7 +19,7 @@
 - [x] Phase 7: Editor and Authoring Tooling (completed in this pass). Commands: `cargo test -p pod-editor -- --nocapture`, `cargo check -p pod-editor`, `cargo check -p pod-editor -p pod-scene -p pod-assets`.
 - [x] Phase 8: Lifecycle, SDK, and Shipping Stabilization (completed in this pass). Commands: `cargo check --workspace`, `cargo test --workspace`, `git diff --check`.
 
-**Next Action**: Decide whether `RustSdkActionPlan` and `RustSdkRolloutRecord` should remain intentionally low-level `pod-net` seams or also gain package-native `pod-sdk` wrappers, then either wrap them or document them as deliberately non-canonical package exports.
+**Next Action**: Decide whether `RustSdkStateSnapshot` plus dialog/shop/bank context structs should remain intentionally low-level `pod-net` seams or also gain package-native `pod-sdk` wrappers, then either wrap them or document them as deliberately non-canonical package exports.
 
 ---
 

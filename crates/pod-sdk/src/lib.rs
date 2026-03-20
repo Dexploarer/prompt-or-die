@@ -14,9 +14,9 @@ pub use pod_core::{
     ReplayTrainingSample, RustSdkHandoffArtifact,
 };
 pub use pod_net::{
-    RustSdkActionExecutionMode, RustSdkActionIntent, RustSdkActionPlan, RustSdkBankState,
-    RustSdkDialogState, RustSdkRolloutRecord, ServerMessage, RustSdkSelfStateSnapshot,
-    RustSdkShopState, RustSdkStateSnapshot, RustSdkVisibleEntitySnapshot,
+    RustSdkActionExecutionMode, RustSdkActionIntent, RustSdkBankState, RustSdkDialogState,
+    ServerMessage, RustSdkSelfStateSnapshot, RustSdkShopState, RustSdkStateSnapshot,
+    RustSdkVisibleEntitySnapshot,
 };
 pub use pod_net::RustSdkAdapterRuntimeMode as RustSdkRuntimeMode;
 
@@ -52,6 +52,159 @@ impl From<RustSdkClientConfig> for RustSdkFacadeConfig {
                 ..Default::default()
             },
             runtime_mode: config.runtime_mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkActionPlan {
+    pub execution_mode: RustSdkActionExecutionMode,
+    pub intent: RustSdkActionIntent,
+}
+
+impl From<pod_net::RustSdkActionPlan> for RustSdkActionPlan {
+    fn from(plan: pod_net::RustSdkActionPlan) -> Self {
+        Self {
+            execution_mode: plan.execution_mode,
+            intent: plan.intent,
+        }
+    }
+}
+
+impl From<RustSdkActionPlan> for pod_net::RustSdkActionPlan {
+    fn from(plan: RustSdkActionPlan) -> Self {
+        Self {
+            execution_mode: plan.execution_mode,
+            intent: plan.intent,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkActionPlanError {
+    UnsupportedAction {
+        action: &'static str,
+        reason: String,
+    },
+}
+
+impl fmt::Display for RustSdkActionPlanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedAction { action, reason } => {
+                write!(f, "unsupported Rust SDK action {action}: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RustSdkActionPlanError {}
+
+impl From<pod_net::RustSdkActionAdapterError> for RustSdkActionPlanError {
+    fn from(error: pod_net::RustSdkActionAdapterError) -> Self {
+        match error {
+            pod_net::RustSdkActionAdapterError::UnsupportedAction { action, reason } => {
+                Self::UnsupportedAction { action, reason }
+            }
+        }
+    }
+}
+
+pub fn build_rust_sdk_action_plan(
+    action: &Action,
+) -> Result<RustSdkActionPlan, RustSdkActionPlanError> {
+    pod_net::build_rust_sdk_action_plan(action)
+        .map(Into::into)
+        .map_err(Into::into)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustSdkRolloutRecordError {
+    UnsupportedAction(RustSdkActionPlanError),
+    SerializeActionPlans(String),
+}
+
+impl fmt::Display for RustSdkRolloutRecordError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedAction(error) => error.fmt(f),
+            Self::SerializeActionPlans(message) => {
+                write!(f, "failed to serialize Rust SDK action plans: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RustSdkRolloutRecordError {}
+
+impl From<RustSdkActionPlanError> for RustSdkRolloutRecordError {
+    fn from(error: RustSdkActionPlanError) -> Self {
+        Self::UnsupportedAction(error)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustSdkRolloutRecord {
+    pub snapshot: RustSdkStateSnapshot,
+    pub prompt_sent: String,
+    pub raw_response: String,
+    pub action_plans: Vec<RustSdkActionPlan>,
+    pub actions_taken: Vec<Action>,
+    pub tool_calls: Vec<AgentToolCallTrace>,
+    pub latency_ms: u32,
+}
+
+impl RustSdkRolloutRecord {
+    pub fn from_actions(
+        snapshot: RustSdkStateSnapshot,
+        prompt_sent: impl Into<String>,
+        actions_taken: Vec<Action>,
+        tool_calls: Vec<AgentToolCallTrace>,
+        latency_ms: u32,
+    ) -> Result<Self, RustSdkRolloutRecordError> {
+        let action_plans = actions_taken
+            .iter()
+            .map(build_rust_sdk_action_plan)
+            .collect::<Result<Vec<_>, _>>()?;
+        let raw_response = serde_json::to_string(&action_plans)
+            .map_err(|error| RustSdkRolloutRecordError::SerializeActionPlans(error.to_string()))?;
+
+        Ok(Self {
+            snapshot,
+            prompt_sent: prompt_sent.into(),
+            raw_response,
+            action_plans,
+            actions_taken,
+            tool_calls,
+            latency_ms,
+        })
+    }
+}
+
+impl From<pod_net::RustSdkRolloutRecord> for RustSdkRolloutRecord {
+    fn from(record: pod_net::RustSdkRolloutRecord) -> Self {
+        Self {
+            snapshot: record.snapshot,
+            prompt_sent: record.prompt_sent,
+            raw_response: record.raw_response,
+            action_plans: record.action_plans.into_iter().map(Into::into).collect(),
+            actions_taken: record.actions_taken,
+            tool_calls: record.tool_calls,
+            latency_ms: record.latency_ms,
+        }
+    }
+}
+
+impl From<RustSdkRolloutRecord> for pod_net::RustSdkRolloutRecord {
+    fn from(record: RustSdkRolloutRecord) -> Self {
+        Self {
+            snapshot: record.snapshot,
+            prompt_sent: record.prompt_sent,
+            raw_response: record.raw_response,
+            action_plans: record.action_plans.into_iter().map(Into::into).collect(),
+            actions_taken: record.actions_taken,
+            tool_calls: record.tool_calls,
+            latency_ms: record.latency_ms,
         }
     }
 }
@@ -360,7 +513,9 @@ impl RustSdkClient {
         &mut self,
         record: RustSdkRolloutRecord,
     ) -> Result<(), RustSdkClientError> {
-        self.inner.record_rollout_step(record).map_err(Into::into)
+        self.inner
+            .record_rollout_step(record.into())
+            .map_err(Into::into)
     }
 
     pub fn finalize_replay(self, header: ReplayHeader) -> ReplayFile {
@@ -481,5 +636,22 @@ mod tests {
         };
 
         assert!(report.passed());
+    }
+
+    #[test]
+    fn packaged_rust_sdk_action_plan_builder_wraps_repo_owned_plan() {
+        let plan = build_rust_sdk_action_plan(&Action::AttackTarget {
+            target: pod_core::EntityId(7),
+        })
+        .expect("attack target should lower");
+
+        assert_eq!(plan.execution_mode, RustSdkActionExecutionMode::Immediate);
+        assert!(
+            matches!(
+                plan.intent,
+                RustSdkActionIntent::AttackEntity { entity_id: 7 }
+            ),
+            "attack target should lower into an entity attack intent"
+        );
     }
 }

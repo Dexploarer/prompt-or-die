@@ -2532,3 +2532,18 @@ execution checklist now lives in `IMPLEMENTATION_PHASES.md`.
   - `bun test scripts/verify_platform_docs.test.ts`
   - `bun ./scripts/verify_platform_docs.ts --check`
   - `git diff --check`
+
+### Iteration 245
+- Replaced the remaining action-plan and rollout-record re-exports in `crates/pod-sdk/src/lib.rs` with package-owned `RustSdkActionPlan`, `RustSdkActionPlanError`, `build_rust_sdk_action_plan(...)`, `RustSdkRolloutRecord`, and `RustSdkRolloutRecordError` types while preserving the same thin `pod-net` write-path seam underneath.
+- Updated `RustSdkClient::record_rollout_step(...)` to accept the package-owned rollout record and convert it into the lower-level `pod-net` record internally, so package consumers no longer need `pod-net` write-path structs just to record SDK-facing replay steps.
+- Updated the Rust SDK boundary docs, integration notes, verifier, and session/progress tracking so the enforced package surface now includes package-owned action-plan and rollout-record types, and the next remaining packaging decision is whether the state snapshot/context structs should also move up into `pod-sdk`.
+- [x] Validation:
+  - `cargo test -p pod-sdk -- --nocapture`
+  - `cargo test -p pod-sdk --example rust_sdk_live_smoke -- --nocapture`
+  - `cargo check -p pod-sdk --example rust_sdk_benchmark_suite`
+  - `cargo run -p pod-sdk --example rust_sdk_benchmark_suite -- --fail-on-checks`
+  - `bun test scripts/verify_rust_sdk_boundary.test.ts`
+  - `bun ./scripts/verify_rust_sdk_boundary.ts --check`
+  - `bun test scripts/verify_platform_docs.test.ts`
+  - `bun ./scripts/verify_platform_docs.ts --check`
+  - `git diff --check`
